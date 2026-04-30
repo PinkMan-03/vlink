@@ -1,0 +1,794 @@
+/*
+ * Copyright (C) 2026 by Thun Lu. All rights reserved.
+ * Author: Thun Lu <thun.lu@zohomail.cn>
+ * Repo:   https://github.com/thun-res/vlink
+ *  _    __   __      _           __
+ * | |  / /  / /     (_) ____    / /__
+ * | | / /  / /     / / / __ \  / //_/
+ * | |/ /  / /___  / / / / / / / ,<
+ * |___/  /_____/ /_/ /_/ /_/ /_/|_|
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * @file format.h
+ * @brief Lightweight header-only @c {} placeholder formatter with no dynamic allocation.
+ *
+ * @details
+ * This namespace provides a minimal subset of std::format-compatible formatting for use
+ * inside the VLink logger hot path where @c <format> may be unavailable (C++17) or too
+ * heavyweight.  All formatting writes through a stack-allocated writer or a user-supplied
+ * output iterator and never touches the heap.
+ *
+ * Supported argument types:
+ *
+ * | C++ type                        | Format token  | Example output      |
+ * | ------------------------------- | ------------- | ------------------- |
+ * | int / short / signed char       | @c {}         | @c 42               |
+ * | unsigned / unsigned short / ... | @c {}         | @c 42               |
+ * | long / long long                | @c {}         | @c 123456789        |
+ * | unsigned long / long long       | @c {}         | @c 123456789        |
+ * | bool                            | @c {}         | @c true / @c false  |
+ * | char                            | @c {}         | @c A                |
+ * | float / double                  | @c {}         | @c 3.14             |
+ * | const char* / char*             | @c {}         | @c hello            |
+ * | std::string / std::string_view  | @c {}         | @c hello            |
+ * | T* (any pointer)                | @c {}         | @c 0x7ffe1234       |
+ * | enum (any)                      | @c {}         | underlying int      |
+ *
+ * Placeholder syntax:
+ * - @c {} -- consume arguments in order.
+ * - @c {0}, @c {1}, ... -- explicit positional indexing.
+ * - @c {{ / @c }} -- literal brace.
+ *
+ * Public API:
+ * - @c format_to_n(out, n, fmt, args...) -- writes at most @p n chars into a @c char* buffer.
+ * - @c format_to(out[N], fmt, args...) -- writes into a fixed array.
+ * - @c format_to(iterator, fmt, args...) -- writes to an output iterator.
+ *
+ * @note
+ * - Float and double are formatted via @c snprintf with @c "%g".  There is no
+ *   precision specifier in the placeholder syntax.
+ * - Custom types (those not listed above) trigger a @c static_assert at compile time.
+ * - Truncated @c format_to_n results set the @c truncated flag in the returned struct.
+ *
+ * @par Example
+ * @code
+ * char buf[128];
+ * auto result = vlink::format::format_to_n(buf, sizeof(buf) - 1, "x={} y={}", 3, 4.5);
+ * buf[result.size] = '\0';
+ * // buf == "x=3 y=4.5"
+ * @endcode
+ */
+
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+#include "./macros.h"
+
+// NOLINTBEGIN
+
+namespace vlink {
+
+/**
+ * @namespace vlink::format
+ * @brief Lightweight header-only @c {} placeholder formatter.
+ */
+namespace format {
+
+namespace detail {
+
+template <typename T>
+using RemoveCvref = typename std::remove_cv_t<std::remove_reference_t<T>>;
+
+template <typename T, typename = void>
+struct IsOutputIteratorImpl : std::false_type {};
+
+template <typename T>
+struct IsOutputIteratorImpl<T, std::enable_if_t<std::is_assignable_v<decltype(*std::declval<T&>()++), char>>>
+    : std::true_type {};
+
+template <>
+struct IsOutputIteratorImpl<char*> : std::true_type {};
+
+// 数组全部排除
+template <typename T, size_t N>
+struct IsOutputIteratorImpl<T[N]> : std::false_type {};
+
+template <typename T>
+inline constexpr bool kIsOutputIterator = IsOutputIteratorImpl<T>::value;
+
+enum class Type : uint8_t {
+  kNone,
+  kInt,
+  kUint,
+  kLongLong,
+  kUlongLong,
+  kBool,
+  kChar,
+  kFloat,
+  kDouble,
+  kString,
+  kCstring,
+  kPointer
+};
+
+template <typename T>
+struct TypeConstant : std::integral_constant<Type, Type::kNone> {};
+
+template <>
+struct TypeConstant<signed char> : std::integral_constant<Type, Type::kInt> {};
+
+template <>
+struct TypeConstant<unsigned char> : std::integral_constant<Type, Type::kUint> {};
+
+template <>
+struct TypeConstant<short> : std::integral_constant<Type, Type::kInt> {};
+
+template <>
+struct TypeConstant<unsigned short> : std::integral_constant<Type, Type::kUint> {};
+
+template <>
+struct TypeConstant<int> : std::integral_constant<Type, Type::kInt> {};
+
+template <>
+struct TypeConstant<unsigned> : std::integral_constant<Type, Type::kUint> {};
+
+template <>
+struct TypeConstant<long> : std::integral_constant<Type, Type::kLongLong> {};
+
+template <>
+struct TypeConstant<unsigned long> : std::integral_constant<Type, Type::kUlongLong> {};
+
+template <>
+struct TypeConstant<long long> : std::integral_constant<Type, Type::kLongLong> {};
+
+template <>
+struct TypeConstant<unsigned long long> : std::integral_constant<Type, Type::kUlongLong> {};
+
+template <>
+struct TypeConstant<bool> : std::integral_constant<Type, Type::kBool> {};
+
+template <>
+struct TypeConstant<char> : std::integral_constant<Type, Type::kChar> {};
+
+template <>
+struct TypeConstant<float> : std::integral_constant<Type, Type::kFloat> {};
+
+template <>
+struct TypeConstant<double> : std::integral_constant<Type, Type::kDouble> {};
+
+template <>
+struct TypeConstant<const char*> : std::integral_constant<Type, Type::kCstring> {};
+
+template <>
+struct TypeConstant<char*> : std::integral_constant<Type, Type::kCstring> {};
+
+template <>
+struct TypeConstant<std::string_view> : std::integral_constant<Type, Type::kString> {};
+
+template <>
+struct TypeConstant<std::string> : std::integral_constant<Type, Type::kString> {};
+
+template <size_t N>
+struct TypeConstant<char[N]> : std::integral_constant<Type, Type::kCstring> {};
+
+template <size_t N>
+struct TypeConstant<const char[N]> : std::integral_constant<Type, Type::kCstring> {};
+
+template <typename T>
+struct TypeConstant<T*> : std::integral_constant<Type, Type::kPointer> {};
+
+template <typename UIntT>
+inline int count_digits(UIntT n) {
+  int count = 1;
+
+  while (n >= 10) {
+    n /= 10;
+    ++count;
+  }
+
+  return count;
+}
+
+template <typename CharT, typename UIntT>
+inline CharT* write_int_digits(CharT* buf, UIntT value, int num_digits) {
+  CharT* end = buf + num_digits;
+
+  while (value >= 10) {
+    unsigned digit = static_cast<unsigned>(value % 10);
+    *--end = static_cast<CharT>('0' + digit);
+    value /= 10;
+  }
+
+  *--end = static_cast<CharT>('0' + value);
+
+  return buf + num_digits;
+}
+
+class StringWriter {
+ public:
+  inline StringWriter(char* buf, size_t size) noexcept : begin_(buf), ptr_(buf), end_(buf + size) {}
+
+  inline char* out() const noexcept { return ptr_; }
+
+  inline size_t written() const noexcept { return static_cast<size_t>(ptr_ - begin_); }
+
+  inline size_t total_size() const noexcept { return total_size_; }
+
+  inline void write(char c) {
+    ++total_size_;
+
+    if (ptr_ < end_) {
+      *ptr_++ = c;
+    }
+  }
+
+  inline void write(const char* s, size_t count) {
+    total_size_ += count;
+
+    size_t avail = static_cast<size_t>(end_ - ptr_);
+    size_t n = (count <= avail) ? count : avail;
+
+    if (n > 0) {
+      std::memcpy(ptr_, s, n);
+      ptr_ += n;
+    }
+  }
+
+  inline void write(std::string_view sv) { write(sv.data(), sv.size()); }
+
+ private:
+  char* begin_{nullptr};
+  char* ptr_{nullptr};
+  char* end_{nullptr};
+  size_t total_size_{0};
+};
+
+template <typename OutputItT>
+class IteratorWriter {
+ public:
+  inline explicit IteratorWriter(OutputItT out) : out_(out) {}
+
+  inline OutputItT out() const noexcept { return out_; }
+
+  inline size_t size() const noexcept { return count_; }
+
+  inline void write(char c) {
+    *out_++ = c;
+    ++count_;
+  }
+
+  inline void write(const char* s, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+      *out_++ = s[i];
+    }
+
+    count_ += count;
+  }
+
+  inline void write(std::string_view sv) { write(sv.data(), sv.size()); }
+
+ private:
+  OutputItT out_;
+  size_t count_{0};
+};
+
+template <typename CharT>
+class Value {
+ public:
+  union {
+    int int_value;
+    unsigned uint_value;
+    long long long_long_value;
+    unsigned long long ulong_long_value;
+    bool bool_value;
+    CharT char_value;
+    float float_value;
+    double double_value;
+    const CharT* string_value;
+    std::string_view string_view_value;
+    const void* pointer_value;
+  };
+
+  constexpr Value() : int_value(0) {}
+
+  constexpr Value(signed char val) : int_value(static_cast<int>(val)) {}
+
+  constexpr Value(unsigned char val) : uint_value(static_cast<unsigned>(val)) {}
+
+  constexpr Value(short val) : int_value(static_cast<int>(val)) {}
+
+  constexpr Value(unsigned short val) : uint_value(static_cast<unsigned>(val)) {}
+
+  constexpr Value(int val) : int_value(val) {}
+
+  constexpr Value(unsigned val) : uint_value(val) {}
+
+  constexpr Value(long val) : long_long_value(val) {}
+
+  constexpr Value(unsigned long val) : ulong_long_value(val) {}
+
+  constexpr Value(long long val) : long_long_value(val) {}
+
+  constexpr Value(unsigned long long val) : ulong_long_value(val) {}
+
+  constexpr Value(bool val) : bool_value(val) {}
+
+  constexpr Value(CharT val) : char_value(val) {}
+
+  constexpr Value(float val) : float_value(val) {}
+
+  constexpr Value(double val) : double_value(val) {}
+
+  constexpr Value(const CharT* val) : string_value(val) {}
+
+  constexpr Value(CharT* val) : string_value(val) {}
+
+  constexpr Value(std::string_view val) : string_view_value(val) {}
+
+  constexpr Value(const std::string& val) : string_view_value(val) {}
+
+  template <size_t N>
+  constexpr Value(const CharT (&val)[N]) : string_value(val) {}
+
+  template <size_t N>
+  constexpr Value(CharT (&val)[N]) : string_value(val) {}
+
+  template <typename T>
+  constexpr Value(T* val) : pointer_value(static_cast<const void*>(val)) {}
+};
+
+template <typename CharT>
+class FormatArg {
+ public:
+  constexpr FormatArg() {}
+
+  template <typename T>
+  constexpr FormatArg(const T& val) {
+    if constexpr (std::is_enum_v<T>) {
+      using U = std::underlying_type_t<T>;
+      value_ = Value<CharT>(static_cast<U>(val));
+      type_ = TypeConstant<U>::value;
+    } else if constexpr (TypeConstant<RemoveCvref<T>>::value != Type::kNone) {
+      value_ = Value<CharT>(val);
+      type_ = TypeConstant<RemoveCvref<T>>::value;
+    } else {
+      static_assert(!sizeof(T),
+                    "[vlink::format] unsupported type for format_to/MLOG, "
+                    "convert to string first");
+    }
+  }
+
+  constexpr Type type() const { return type_; }
+  constexpr const Value<CharT>& value() const { return value_; }
+
+ private:
+  Value<CharT> value_;
+  Type type_{Type::kNone};
+};
+
+template <typename CharT, typename... ArgsT>
+struct FormatArgStore {
+  static constexpr size_t kNumArgs = sizeof...(ArgsT);
+  FormatArg<CharT> args[kNumArgs > 0 ? kNumArgs : 1];
+
+  template <typename... T>
+  constexpr FormatArgStore(const T&... values) : args{FormatArg<CharT>(values)...} {}
+};
+
+template <typename CharT>
+class BasicFormatArgs {
+ public:
+  constexpr BasicFormatArgs() : args_(nullptr), size_(0) {}
+
+  template <typename... ArgsT>
+  constexpr BasicFormatArgs(const FormatArgStore<CharT, ArgsT...>& store)
+      : args_(store.args), size_(sizeof...(ArgsT)) {}
+
+  constexpr FormatArg<CharT> get(size_t id) const { return id < size_ ? args_[id] : FormatArg<CharT>(); }
+
+  constexpr size_t size() const { return size_; }
+
+ private:
+  const FormatArg<CharT>* args_;
+  size_t size_;
+};
+
+using FormatArgs = BasicFormatArgs<char>;
+
+template <typename CharT, typename WriterT>
+class FormatWriter {
+ public:
+  inline explicit FormatWriter(WriterT writer) : writer_(writer) {}
+
+  void format(std::string_view fmt, BasicFormatArgs<CharT> args) {
+    size_t arg_id = 0;
+    const char* p = fmt.data();
+    const char* end = p + fmt.size();
+
+    while (p != end) {
+      char c = *p++;
+
+      if (c == '}') {
+        if (p != end && *p == '}') {
+          writer_.write('}');
+          ++p;
+        } else {
+          writer_.write('}');
+        }
+
+        continue;
+      }
+
+      if (c != '{') {
+        writer_.write(c);
+        continue;
+      }
+
+      if (p == end) {
+        writer_.write('{');
+        break;
+      }
+
+      if (*p == '{') {
+        writer_.write('{');
+        ++p;
+        continue;
+      }
+
+      if (*p == '}') {
+        if (arg_id < args.size()) {
+          write_arg(args.get(arg_id++));
+        }
+
+        ++p;
+
+        continue;
+      }
+
+      size_t index = arg_id;
+      bool has_explicit_index = false;
+
+      if (*p >= '0' && *p <= '9') {
+        index = 0;
+        has_explicit_index = true;
+
+        while (p != end && *p >= '0' && *p <= '9') {
+          index = index * 10 + static_cast<size_t>(*p++ - '0');
+        }
+      }
+
+      while (p != end && *p != '}') {
+        ++p;
+      }
+
+      if (p != end) {
+        if (index < args.size()) {
+          write_arg(args.get(index));
+        }
+
+        if (!has_explicit_index) {
+          ++arg_id;
+        }
+
+        ++p;
+      }
+    }
+  }
+
+  inline auto out() const { return writer_.out(); }
+
+  template <typename W = WriterT>
+  inline auto total_size() const -> decltype(std::declval<W>().total_size()) {
+    return writer_.total_size();
+  }
+
+  inline size_t size() const { return writer_.size(); }
+
+ private:
+  void write_int(int value) {
+    if (value < 0) {
+      writer_.write('-');
+      write_uint(static_cast<unsigned>(-(value + 1)) + 1);
+    } else {
+      write_uint(static_cast<unsigned>(value));
+    }
+  }
+
+  void write_uint(unsigned value) {
+    char buf[10];
+    int num_digits = count_digits(value);
+    write_int_digits(buf, value, num_digits);
+    writer_.write(buf, static_cast<size_t>(num_digits));
+  }
+
+  void write_long_long(long long value) {
+    if (value < 0) {
+      writer_.write('-');
+      write_ulong_long(static_cast<unsigned long long>(-(value + 1)) + 1);
+    } else {
+      write_ulong_long(static_cast<unsigned long long>(value));
+    }
+  }
+
+  void write_ulong_long(unsigned long long value) {
+    char buf[20];
+    int num_digits = count_digits(value);
+    write_int_digits(buf, value, num_digits);
+    writer_.write(buf, static_cast<size_t>(num_digits));
+  }
+
+  void write_bool(bool value) {
+    if (value) {
+      writer_.write("true", 4);
+    } else {
+      writer_.write("false", 5);
+    }
+  }
+
+  void write_char(char value) { writer_.write(value); }
+
+  void write_string(const char* str) {
+    if VLIKELY (str) {
+      writer_.write(str, std::strlen(str));
+    } else {
+      writer_.write("(null)", 6);
+    }
+  }
+
+  void write_string_view(std::string_view sv) { writer_.write(sv); }
+
+  void write_pointer(const void* ptr) {
+    static constexpr const char kHexDigits[] = "0123456789abcdef";
+    static_assert(sizeof(uintptr_t) <= 8, "pointer size > 64bit not supported");
+
+    char buf[16];
+    int i = 16;
+    auto value = reinterpret_cast<uintptr_t>(ptr);
+
+    writer_.write("0x", 2);
+
+    do {
+      buf[--i] = kHexDigits[value & 0xF];
+      value >>= 4;
+    } while (value != 0);
+
+    writer_.write(buf + i, static_cast<size_t>(16 - i));
+  }
+
+  void write_float(float value) {
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%g", static_cast<double>(value));
+
+    if (len > 0 && len < static_cast<int>(sizeof(buf))) {
+      writer_.write(buf, static_cast<size_t>(len));
+    }
+  }
+
+  void write_double(double value) {
+    char buf[32];
+    int len = snprintf(buf, sizeof(buf), "%g", value);
+
+    if (len > 0 && len < static_cast<int>(sizeof(buf))) {
+      writer_.write(buf, static_cast<size_t>(len));
+    }
+  }
+
+  void write_arg(const FormatArg<CharT>& arg) {
+    switch (arg.type()) {
+      case Type::kInt:
+        write_int(arg.value().int_value);
+        break;
+      case Type::kUint:
+        write_uint(arg.value().uint_value);
+        break;
+      case Type::kLongLong:
+        write_long_long(arg.value().long_long_value);
+        break;
+      case Type::kUlongLong:
+        write_ulong_long(arg.value().ulong_long_value);
+        break;
+      case Type::kBool:
+        write_bool(arg.value().bool_value);
+        break;
+      case Type::kChar:
+        write_char(arg.value().char_value);
+        break;
+      case Type::kFloat:
+        write_float(arg.value().float_value);
+        break;
+      case Type::kDouble:
+        write_double(arg.value().double_value);
+        break;
+      case Type::kCstring:
+        write_string(arg.value().string_value);
+        break;
+      case Type::kString:
+        write_string_view(arg.value().string_view_value);
+        break;
+      case Type::kPointer:
+        write_pointer(arg.value().pointer_value);
+        break;
+      default:
+        break;
+    }
+  }
+
+  WriterT writer_;
+};
+
+}  // namespace detail
+
+/**
+ * @struct FString
+ * @brief Compile-time format string wrapper that carries type information about arguments.
+ *
+ * @details
+ * Acts as a thin @c std::string_view wrapper tagged with the argument type list.
+ * This enables type-safe format_to_n / format_to calls without dynamic dispatch.
+ *
+ * @tparam T  Argument types (unused at runtime but encode the expected argument list).
+ */
+template <typename... T>
+struct FString {
+  std::string_view str;
+  using t = FString;
+
+  template <size_t N>
+  constexpr FString(const char (&s)[N]) : str(s, N - 1) {}
+
+  template <typename StrT, std::enable_if_t<std::is_convertible_v<const StrT&, std::string_view>, int> = 0>
+  constexpr FString(const StrT& s) : str(s) {}
+
+  inline operator std::string_view() const { return str; }
+  std::string_view get() const { return str; }
+};
+
+/**
+ * @brief Alias for @c FString used as the type of format-string parameters.
+ *
+ * @details
+ * @c format_string<ArgsT...> is the type of the format argument in @c format_to_n
+ * and @c format_to.  Constructed implicitly from string literals.
+ *
+ * @tparam T  Expected argument types (for documentation; not enforced at runtime).
+ */
+template <typename... T>
+using format_string = typename FString<T...>::t;
+
+/**
+ * @brief Creates a type-erased argument store from a variadic argument list.
+ *
+ * @tparam ArgsT  Argument types.
+ * @param args    Arguments to capture.
+ * @return @c FormatArgStore containing the erased argument values.
+ */
+template <typename... ArgsT>
+inline detail::FormatArgStore<char, detail::RemoveCvref<ArgsT>...> make_format_args(const ArgsT&... args) {
+  return {args...};
+}
+
+/**
+ * @struct FormatToNResult
+ * @brief Result type for @c format_to_n, carrying the output pointer, written size and truncation flag.
+ *
+ * @tparam OutputItT  Output iterator or pointer type.
+ */
+template <typename OutputItT>
+struct FormatToNResult {
+  OutputItT out;          ///< Pointer/iterator one past the last written character.
+  size_t size{0};         ///< Total number of characters that would have been written (may exceed n).
+  bool truncated{false};  ///< @c true if the output was truncated because @c size > n.
+};
+
+/**
+ * @brief Formats arguments into a @c char* buffer, writing at most @p n characters.
+ *
+ * @details
+ * Placeholders (@c {}) in @p fmt are replaced in order by the corresponding argument from
+ * @p args.  If more characters would be produced than @p n, output is truncated and the
+ * returned @c truncated flag is set.  The caller must null-terminate the output if needed.
+ *
+ * @tparam ArgsT  Argument types (deduced).
+ * @param out     Destination buffer.  Must have capacity of at least @p n bytes.
+ * @param n       Maximum number of characters to write (not counting a null terminator).
+ * @param fmt     Format string with @c {} placeholders.
+ * @param args    Format arguments.
+ * @return @c FormatToNResult with the end pointer, total size and truncation flag.
+ */
+template <typename... ArgsT>
+inline FormatToNResult<char*> format_to_n(char* out, size_t n, format_string<ArgsT...> fmt, const ArgsT&... args) {
+  detail::FormatArgStore<char, detail::RemoveCvref<ArgsT>...> arg_store{args...};
+
+  detail::FormatArgs fargs(arg_store);
+  detail::StringWriter sw(out, n);
+  detail::FormatWriter<char, detail::StringWriter> writer(sw);
+  writer.format(fmt.get(), fargs);
+
+  size_t total = writer.total_size();
+  return {writer.out(), total, total > n};
+}
+
+/**
+ * @struct FormatToResult
+ * @brief Result type for the fixed-array overload of @c format_to.
+ */
+struct FormatToResult {
+  char* out;       ///< Pointer one past the last written character.
+  size_t size;     ///< Total characters that would have been written.
+  bool truncated;  ///< @c true if output was truncated.
+};
+
+/**
+ * @brief Formats arguments into a fixed-size char array.
+ *
+ * @details
+ * The array size @p N is deduced automatically.  Equivalent to
+ * @c format_to_n(out, N, fmt, args...).
+ *
+ * @tparam N      Array size (deduced).
+ * @tparam ArgsT  Argument types.
+ * @param out     Destination char array.
+ * @param fmt     Format string.
+ * @param args    Format arguments.
+ * @return @c FormatToResult with end pointer, total size and truncation flag.
+ */
+template <size_t N, typename... ArgsT>
+inline FormatToResult format_to(char (&out)[N], format_string<ArgsT...> fmt, const ArgsT&... args) {
+  auto result = ::vlink::format::format_to_n(out, N, fmt, args...);
+  return {result.out, result.size, result.truncated};
+}
+
+/**
+ * @brief Formats arguments to an output iterator.
+ *
+ * @details
+ * Writes each character via @c *out++ = c.  The iterator must model the
+ * @c OutputIterator concept (assignable and dereferenceable).
+ *
+ * @tparam OutputItT  Output iterator type.
+ * @tparam ArgsT      Argument types.
+ * @param out         Destination output iterator.
+ * @param fmt         Format string with @c {} placeholders.
+ * @param args        Format arguments.
+ * @return The iterator one past the last written character.
+ */
+template <typename OutputItT, typename... ArgsT,
+          std::enable_if_t<detail::kIsOutputIterator<detail::RemoveCvref<OutputItT>> &&
+                               !std::is_array_v<std::remove_reference_t<OutputItT>>,
+                           int> = 0>
+inline detail::RemoveCvref<OutputItT> format_to(OutputItT&& out, format_string<ArgsT...> fmt, const ArgsT&... args) {
+  using ItT = detail::RemoveCvref<OutputItT>;
+  auto arg_store = ::vlink::format::make_format_args(args...);
+  detail::FormatArgs fargs(arg_store);
+  detail::IteratorWriter<ItT> iter_writer(out);
+  detail::FormatWriter<char, detail::IteratorWriter<ItT>> writer(iter_writer);
+  writer.format(fmt.get(), fargs);
+  return writer.out();
+}
+
+}  // namespace format
+
+}  // namespace vlink
+
+// NOLINTEND

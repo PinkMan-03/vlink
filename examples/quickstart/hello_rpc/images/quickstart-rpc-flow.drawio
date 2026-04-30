@@ -1,0 +1,159 @@
+<mxfile host="app.diagrams.net" modified="2026-04-23T00:00:00.000Z" agent="Claude" version="24.0.0" type="device">
+  <diagram id="rpc-flow" name="Method Model Dataflow">
+    <mxGraphModel dx="1180" dy="720" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1180" pageHeight="720" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Method Model (Client / Server)  -  Request / Response Flow" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
+          <mxGeometry x="30" y="24" width="1120" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="N : 1   -   many Clients invoke a single Server (5 invocation modes)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+          <mxGeometry x="30" y="60" width="1120" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="clBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#a5d6a7;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#e8f5e9;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="340" height="540" as="geometry" />
+        </mxCell>
+        <mxCell id="clBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="340" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="clT" value="Client Side" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=16;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="40" y="116" width="340" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="clR" value="Client&amp;lt;CalcRequest, CalcResponse&amp;gt;" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#2e7d32;" vertex="1" parent="1">
+          <mxGeometry x="40" y="144" width="340" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="clDiv" value="" style="endArrow=none;html=1;strokeWidth=1;strokeColor=#c8e6c9;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="70" y="174" as="sourcePoint" />
+            <mxPoint x="350" y="174" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="c1" value="invoke(req) / async_invoke(req)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="190" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="serialize request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#1b5e20;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="260" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" value="receive &amp;amp; deserialize response" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#1b5e20;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="430" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="c4" value="return resp  /  callback  /  future" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="500" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="cA12" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#388e3c;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="c1" target="c2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cA34" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#388e3c;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="c3" target="c4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="clNNote" value="N clients can call the same Server" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="600" width="340" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="trBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#bdbdbd;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#fafafa;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="420" y="170" width="340" height="370" as="geometry" />
+        </mxCell>
+        <mxCell id="trBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#616161;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="420" y="170" width="340" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="trT" value="Transport" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=16;fontStyle=1;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="420" y="186" width="340" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="trR" value="request &amp;amp; response routing" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=1;fontColor=#616161;" vertex="1" parent="1">
+          <mxGeometry x="420" y="214" width="340" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="trDiv" value="" style="endArrow=none;html=1;strokeWidth=1;strokeColor=#e0e0e0;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="450" y="244" as="sourcePoint" />
+            <mxPoint x="730" y="244" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="trReq" value="request route" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="460" y="270" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="trResp" value="response route" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="460" y="440" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="trReqL" value="Req" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=18;fontStyle=1;fontColor=#388e3c;" vertex="1" parent="1">
+          <mxGeometry x="460" y="330" width="260" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="trRespL" value="Resp" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=18;fontStyle=1;fontColor=#388e3c;" vertex="1" parent="1">
+          <mxGeometry x="460" y="400" width="260" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="trMid1" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#388e3c;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="500" y="360" as="sourcePoint" />
+            <mxPoint x="680" y="360" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="trMid2" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#388e3c;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="680" y="395" as="sourcePoint" />
+            <mxPoint x="500" y="395" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="srvBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#a5d6a7;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#e8f5e9;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="800" y="100" width="340" height="540" as="geometry" />
+        </mxCell>
+        <mxCell id="srvBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="800" y="100" width="340" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="srvT" value="Server Side" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=16;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="800" y="116" width="340" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="srvR" value="Server&amp;lt;CalcRequest, CalcResponse&amp;gt;" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#2e7d32;" vertex="1" parent="1">
+          <mxGeometry x="800" y="144" width="340" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="srvDiv" value="" style="endArrow=none;html=1;strokeWidth=1;strokeColor=#c8e6c9;" edge="1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="830" y="174" as="sourcePoint" />
+            <mxPoint x="1110" y="174" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="s1" value="deserialize request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#1b5e20;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="220" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="s2" value="callback(req, resp)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.5;fontSize=13;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="310" width="260" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="s3" value="serialize response" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#1b5e20;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="410" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="sA12" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#388e3c;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="s1" target="s2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="sA23" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#388e3c;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="s2" target="s3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="srvOne" value="exactly 1 Server owns the URL" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+          <mxGeometry x="800" y="600" width="340" height="24" as="geometry" />
+        </mxCell>
+
+        <mxCell id="xReqOut" value="request" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#388e3c;fontSize=11;fontStyle=1;fontColor=#1b5e20;exitX=1;exitY=0.5;entryX=0;entryY=0.5;labelBackgroundColor=#ffffff;rounded=1;" edge="1" parent="1" source="c2" target="trReq">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xReqIn" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#388e3c;exitX=1;exitY=0.5;entryX=0;entryY=0.5;rounded=1;" edge="1" parent="1" source="trReq" target="s1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xRespOut" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#388e3c;exitX=0;exitY=0.5;entryX=1;entryY=0.5;rounded=1;" edge="1" parent="1" source="s3" target="trResp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xRespIn" value="response" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#388e3c;fontSize=11;fontStyle=1;fontColor=#1b5e20;exitX=0;exitY=0.5;entryX=1;entryY=0.5;labelBackgroundColor=#ffffff;rounded=1;" edge="1" parent="1" source="trResp" target="c3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bottomNote" value="Invocation modes:  invoke  -  async_invoke (future)  -  async_invoke (callback)  -  invoke_no_reply  -  broadcast" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#388e3c;strokeWidth=1.5;fontSize=12;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="140" y="670" width="900" height="32" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

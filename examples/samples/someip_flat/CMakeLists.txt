@@ -1,0 +1,31 @@
+#
+# Copyright (C) 2026 by Thun Lu. All rights reserved.
+#
+
+cmake_minimum_required(VERSION 3.15...3.31)
+
+project(sample_someip_flat LANGUAGES CXX)
+
+include(GNUInstallDirs)
+
+if(NOT Flatbuffers_FOUND)
+  find_package(Flatbuffers CONFIG QUIET)
+endif()
+if(NOT TARGET vlink::vlink)
+  find_package(vlink QUIET COMPONENTS someip)
+endif()
+if(NOT TARGET vlink::vlink)
+  message(FATAL_ERROR "Can not find_package for vlink.")
+endif()
+if(NOT TARGET vlink::someip OR NOT Flatbuffers_FOUND)
+  message(STATUS "Skip ${PROJECT_NAME}.")
+  return()
+endif()
+
+vlink_generate_cpp(TARGET someip_flat_gen FBS someip_flat.fbs)
+
+add_executable(${PROJECT_NAME} someip_flat.cc)
+
+target_link_libraries(${PROJECT_NAME} someip_flat_gen vlink::someip)
+
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

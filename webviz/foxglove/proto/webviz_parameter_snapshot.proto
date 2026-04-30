@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package vlink.webviz.foxglove.pb;
+
+enum ParameterType {
+  PARAMETER_TYPE_UNSPECIFIED = 0;
+  PARAMETER_TYPE_BYTE_ARRAY = 1;
+  PARAMETER_TYPE_FLOAT64 = 2;
+  PARAMETER_TYPE_FLOAT64_ARRAY = 3;
+}
+
+message ParameterEntry {
+  string name = 1;
+  bool has_value = 2;
+  ParameterType type = 3;
+  string json_value = 4;
+}
+
+message ParameterSnapshot {
+  repeated ParameterEntry parameters = 1;
+}

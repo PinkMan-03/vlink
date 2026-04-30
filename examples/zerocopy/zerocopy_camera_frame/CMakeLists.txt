@@ -1,0 +1,26 @@
+#
+# Copyright (C) 2026 by Thun Lu. All rights reserved.
+#
+
+cmake_minimum_required(VERSION 3.15...3.31)
+
+project(example_zerocopy_camera_frame LANGUAGES CXX)
+
+include(GNUInstallDirs)
+
+if(NOT TARGET vlink::vlink)
+  find_package(vlink QUIET)
+endif()
+if(NOT TARGET vlink::vlink)
+  message(FATAL_ERROR "Can not find_package for vlink.")
+endif()
+
+# Producer executable: creates and publishes camera frames
+add_executable(example_camera_producer producer.cc)
+target_link_libraries(example_camera_producer vlink::all)
+install(TARGETS example_camera_producer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# Consumer executable: receives and validates camera frames
+add_executable(example_camera_consumer consumer.cc)
+target_link_libraries(example_camera_consumer vlink::all)
+install(TARGETS example_camera_consumer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

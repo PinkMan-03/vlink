@@ -1,0 +1,586 @@
+#!/usr/bin/env bash
+
+shopt -s extglob
+
+WORK_DIR=$(cd $(dirname ${BASH_SOURCE:-$0}) && pwd)
+PLATFORM_OS=$(uname -o)
+PLATFORM_ARCH=$(uname -m)
+
+([ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]) && echo -e "Usage: \n  build.sh {project dir}" && exit 0
+
+if [ "$PLATFORM_OS" = "Darwin" ] || [ "$PLATFORM_ARCH" = "x86_64" ];then
+    [ -z $QT_DIR ] && echo -e "QT_DIR env is empty!" && exit 1
+fi
+
+command -v conan &> /dev/null || pip install conan --user
+
+[ $? -ne 0 ] && exit 2
+
+conan profile detect &> /dev/null
+
+if [ "$PLATFORM_OS" = "Darwin" ];then
+    if [ "$2" = "x86_64" ];then
+        sed -i '' 's/armv8/x86_64/g' "$HOME/.conan2/profiles/default"
+    elif [ "$2" = "arm64" ];then
+        sed -i '' 's/x86_64/armv8/g' "$HOME/.conan2/profiles/default"
+    fi
+    echo ""
+else
+    sed -i 's/gnu14/gnu17/g' "$HOME/.conan2/profiles/default"
+    echo ""
+fi
+
+echo ""
+echo "********************************************"
+echo "*** conan install..."
+echo "********************************************"
+echo ""
+
+SRC_DIR=$1
+BUILD_DIR=$1/build
+
+INSTALL_DIR=$BUILD_DIR/install
+
+if [ "$PLATFORM_OS" = "Darwin" ];then
+    PACKUP_DIR=$BUILD_DIR/packup/darwin/vlink
+else
+    PACKUP_DIR=$BUILD_DIR/packup/linux/vlink
+fi
+
+[ -d $BUILD_DIR ] && rm -rf $BUILD_DIR
+
+conan install $1 --output-folder=$BUILD_DIR --build=missing --profile default --profile $WORK_DIR/conan_profile
+
+[ $? -ne 0 ] && exit 2
+
+echo ""
+echo "********************************************"
+echo "*** cmake build..."
+echo "********************************************"
+echo ""
+
+cmake -E make_directory $BUILD_DIR/output/lib
+cmake -E make_directory $BUILD_DIR/output/bin
+
+if [ ! -z $OSG_DIR ];then
+    if [ ! -z $QT_DIR ];then
+        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_PREFIX_PATH=$QT_DIR \
+            -DENABLE_EXAMPLES=ON \
+            -DENABLE_VIEWER=ON \
+            -DENABLE_VIEWER_FFMPEG=ON \
+            -DENABLE_VIEWER_OSG=ON \
+            -DENABLE_WEBVIZ=ON \
+            -DENABLE_WEBVIZ_FOXGLOVE=ON \
+            -DENABLE_WEBVIZ_RERUN=OFF
+    else
+        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DENABLE_EXAMPLES=ON \
+            -DENABLE_VIEWER=ON \
+            -DENABLE_VIEWER_FFMPEG=ON \
+            -DENABLE_VIEWER_OSG=ON \
+            -DENABLE_WEBVIZ=ON \
+            -DENABLE_WEBVIZ_FOXGLOVE=ON \
+            -DENABLE_WEBVIZ_RERUN=OFF
+    fi
+else
+    if [ ! -z $QT_DIR ];then
+        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DCMAKE_PREFIX_PATH=$QT_DIR \
+            -DENABLE_EXAMPLES=ON \
+            -DENABLE_VIEWER=ON \
+            -DENABLE_VIEWER_FFMPEG=ON \
+            -DENABLE_VIEWER_OSG=OFF \
+            -DENABLE_WEBVIZ=ON \
+            -DENABLE_WEBVIZ_FOXGLOVE=ON \
+            -DENABLE_WEBVIZ_RERUN=OFF
+    elif [ "$PLATFORM_ARCH" = "x86_64" ];then
+        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DENABLE_EXAMPLES=ON \
+            -DENABLE_VIEWER=ON \
+            -DENABLE_VIEWER_FFMPEG=ON \
+            -DENABLE_VIEWER_OSG=OFF \
+            -DENABLE_WEBVIZ=ON \
+            -DENABLE_WEBVIZ_FOXGLOVE=ON \
+            -DENABLE_WEBVIZ_RERUN=OFF
+    else
+        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
+            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+            -DENABLE_EXAMPLES=ON \
+            -DENABLE_VIEWER=ON \
+            -DENABLE_VIEWER_FFMPEG=ON \
+            -DENABLE_VIEWER_OSG=ON \
+            -DENABLE_WEBVIZ=ON \
+            -DENABLE_WEBVIZ_FOXGLOVE=ON \
+            -DENABLE_WEBVIZ_RERUN=OFF
+    fi
+fi
+
+[ $? -ne 0 ] && exit 2
+
+cmake --build $BUILD_DIR --config Release -j$(nproc)
+
+[ $? -ne 0 ] && exit 2
+
+strip $BUILD_DIR/output/bin/vlink-*
+strip $BUILD_DIR/output/lib/libvlink-*
+
+cmake --install $BUILD_DIR
+
+[ $? -ne 0 ] && exit 2
+
+echo ""
+echo "********************************************"
+echo "*** copy runtime files..."
+echo "********************************************"
+echo ""
+
+rm -rf "$PACKUP_DIR"
+mkdir -p "$PACKUP_DIR/bin" "$PACKUP_DIR/lib/cmake" "$PACKUP_DIR/include" "$PACKUP_DIR/etc" "$PACKUP_DIR/desktop"
+
+for f in "$INSTALL_DIR"/bin/vlink-*;do
+    [ -f "$f" ] && cp -f "$f" "$PACKUP_DIR/bin/"
+done
+for f in "$INSTALL_DIR"/bin/*;do
+    [ -L "$f" ] || continue
+    target=$(readlink "$f")
+    case "$target" in vlink-*) cp -a "$f" "$PACKUP_DIR/bin/" ;; esac
+done
+
+for f in "$INSTALL_DIR"/lib/libvlink*;do
+    case "$f" in *.a) continue;; esac
+    [ -f "$f" ] || [ -L "$f" ] && cp -a "$f" "$PACKUP_DIR/lib/"
+done
+
+for d in "$INSTALL_DIR"/lib/cmake/vlink*;do
+    [ -d "$d" ] && cp -rf "$d" "$PACKUP_DIR/lib/cmake/"
+done
+
+[ -d "$INSTALL_DIR/include/vlink" ] && cp -rf "$INSTALL_DIR/include/vlink" "$PACKUP_DIR/include/"
+[ -f "$INSTALL_DIR/etc/vlink-options.txt" ] && cp -f "$INSTALL_DIR/etc/vlink-options.txt" "$PACKUP_DIR/etc/"
+[ -d "$INSTALL_DIR/etc/vlink-proxy" ] && cp -rf "$INSTALL_DIR/etc/vlink-proxy" "$PACKUP_DIR/etc/"
+[ -d "$INSTALL_DIR/etc/vlink-foxglove" ] && cp -rf "$INSTALL_DIR/etc/vlink-foxglove" "$PACKUP_DIR/etc/"
+[ -d "$INSTALL_DIR/etc/vlink-rerun" ] && cp -rf "$INSTALL_DIR/etc/vlink-rerun" "$PACKUP_DIR/etc/"
+
+cmake -E copy $SRC_DIR/version.txt    $PACKUP_DIR/
+cmake -E copy $SRC_DIR/LICENSE        $PACKUP_DIR/
+cmake -E copy $SRC_DIR/CHANGELOG.md   $PACKUP_DIR/
+
+if [ "$PLATFORM_OS" = "Darwin" ];then
+
+    cmake -E copy $BUILD_DIR/output/lib/libavcodec.+([0-9]).dylib                                   $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libavformat.+(+([0-9])).dylib                               $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libavutil.+([0-9]).dylib                                    $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libswscale.+([0-9]).dylib                                   $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libcrypto.+([0-9]).dylib                                    $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libprotobuf.+([0-9]).dylib                                  $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libflatbuffers.+([0-9]).dylib                               $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libssl.+([0-9]).dylib                                       $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libsqlite3*                                                 $PACKUP_DIR/lib/ 2>/dev/null || true
+
+    if [ -f $BUILD_DIR/output/bin/iox-roudi ];then
+        cmake -E copy $BUILD_DIR/output/bin/iox-roudi                                               $PACKUP_DIR/bin/
+    elif [ -f $BUILD_DIR/iox-roudi ];then
+        cmake -E copy $BUILD_DIR/iox-roudi                                                          $PACKUP_DIR/bin/
+    fi
+
+    if [ ! -z $QT_DIR ];then
+        QT_VERSION=$($QT_DIR/bin/qmake -query QT_VERSION)
+        echo "QT_VERSION=${QT_VERSION}"
+
+        echo ""
+        echo "********************************************"
+        echo "*** copy qt files..."
+        echo "********************************************"
+        echo ""
+
+        cmake -E make_directory $PACKUP_DIR/lib/platforms/
+        cmake -E make_directory $PACKUP_DIR/lib/imageformats/
+        cmake -E make_directory $PACKUP_DIR/lib/sqldrivers/
+
+        if [[ ${QT_VERSION} = 5.* ]] || [[ $QT_VERSION = 6.* ]];then
+            for _fw in QtCore QtGui QtWidgets QtOpenGL QtOpenGLWidgets QtNetwork QtSql QtDbus;do
+                cmake -E make_directory $PACKUP_DIR/lib/${_fw}.framework/Versions/A
+                [ -f $QT_DIR/lib/${_fw}.framework/Versions/A/${_fw} ] && \
+                cmake -E copy $QT_DIR/lib/${_fw}.framework/Versions/A/${_fw}                        $PACKUP_DIR/lib/${_fw}.framework/Versions/A/
+            done
+            cmake -E copy $QT_DIR/plugins/platforms/libqcocoa.dylib                                 $PACKUP_DIR/lib/platforms/
+            for _fmt in libqgif libqico libqjpeg libqsvg;do
+                [ -f $QT_DIR/plugins/imageformats/${_fmt}.dylib ] && \
+                cmake -E copy $QT_DIR/plugins/imageformats/${_fmt}.dylib                            $PACKUP_DIR/lib/imageformats/
+            done
+            cmake -E copy $QT_DIR/plugins/sqldrivers/libqsqlite.dylib                               $PACKUP_DIR/lib/sqldrivers/
+        else
+            echo "QT_VERSION error, QT_VERSION=$QT_VERSION"
+            exit 3
+        fi
+    fi
+
+    OSG_VERSION=3.6.5
+    OSG_PREFIX1=3.3.1
+    OSG_PREFIX2=21
+    OSG_PREFIX3=161
+
+    if [ ! -z $OSG_DIR ];then
+        echo "OSG_VERSION=${OSG_VERSION}"
+
+        echo ""
+        echo "********************************************"
+        echo "*** copy osg files..."
+        echo "********************************************"
+        echo ""
+
+        cmake -E make_directory $PACKUP_DIR/lib/osgPlugins-${OSG_VERSION}/
+        cmake -E copy $OSG_DIR/lib/libOpenThreads.${OSG_PREFIX1}.dylib                              $PACKUP_DIR/lib/libOpenThreads.${OSG_PREFIX2}.dylib
+        for _osg in libosg libosgDB libosgGA libosgManipulator libosgUtil libosgText libosgViewer;do
+            cmake -E copy $OSG_DIR/lib/${_osg}.${OSG_PREFIX3}.dylib                                 $PACKUP_DIR/lib/
+        done
+        for _plugin in osgdb_obj osgdb_osg osgdb_serializers_osg;do
+            cmake -E copy $OSG_DIR/lib/osgPlugins-${OSG_VERSION}/${_plugin}.so                      $PACKUP_DIR/lib/osgPlugins-${OSG_VERSION}/
+        done
+    fi
+
+    for f in run_viewer.sh run_player.sh run_analyzer.sh setup_runtime.sh vlink-cmd.sh;do
+        [ -f $WORK_DIR/darwin/$f ] && cmake -E copy $WORK_DIR/darwin/$f $PACKUP_DIR/bin/
+    done
+    [ -f $WORK_DIR/darwin/install.sh ] && cmake -E copy $WORK_DIR/darwin/install.sh $PACKUP_DIR/
+    [ -f $WORK_DIR/darwin/uninstall.sh ] && cmake -E copy $WORK_DIR/darwin/uninstall.sh $PACKUP_DIR/
+    cmake -E copy $WORK_DIR/darwin/qt.conf $PACKUP_DIR/bin/
+    for f in $(find $WORK_DIR/darwin -maxdepth 1 \( -name '*.png' -o -name '*.svg' \));do
+        cmake -E copy $f $PACKUP_DIR/desktop/
+    done
+    chmod +x $PACKUP_DIR/bin/*.sh $PACKUP_DIR/*.sh 2>/dev/null
+
+    echo ""
+    echo "********************************************"
+    echo "*** fix rpath for macOS binaries..."
+    echo "********************************************"
+    echo ""
+    for f in "$PACKUP_DIR"/bin/vlink-*;do
+        [ -f "$f" ] || continue
+        file "$f" | grep -q Mach-O || continue
+        if otool -l "$f" 2>/dev/null | grep -q LC_RPATH; then continue; fi
+        install_name_tool -add_rpath @executable_path/../lib "$f" && \
+        echo "Added rpath to: $(basename "$f")"
+    done
+
+    current_arch=$2
+    [ "$current_arch" = "" ] && current_arch=$(uname -m)
+    if [ "$current_arch" = "arm64" ]; then
+        remove_arch="x86_64"
+    elif [ "$current_arch" = "x86_64" ]; then
+        remove_arch="arm64"
+    else
+        echo "Unsupported architecture: $current_arch"
+        exit 1
+    fi
+    find $PACKUP_DIR/ -type f | while read -r file;do
+        if lipo -info "$file" 2>/dev/null | grep -q "$remove_arch";then
+            temp_file="${file}.tmp"
+            lipo "$file" -remove "$remove_arch" -output "$temp_file" 2>/dev/null && \
+            mv "$temp_file" "$file" && \
+            codesign --force -s - "$file" && \
+            echo "Removed $remove_arch and re-signed: $file"
+        fi
+    done
+
+    rm -rf "$PACKUP_DIR/../VLink Player.app"
+    MACOS_PACKUP_DIR="$PACKUP_DIR/../VLink Player.app/Contents/"
+    mkdir -p "$MACOS_PACKUP_DIR/MacOS/"
+    mkdir -p "$MACOS_PACKUP_DIR/Resources/"
+    cp -rf $PACKUP_DIR/* "$MACOS_PACKUP_DIR/MacOS/"
+    cp -rf $PACKUP_DIR/desktop/vlink-player.png "$MACOS_PACKUP_DIR/Resources/"
+    cat > "$MACOS_PACKUP_DIR/Info.plist" <<EOL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>VLink Player</string>
+    <key>CFBundleExecutable</key>
+    <string>bin/run_player.sh</string>
+    <key>CFBundleIconFile</key>
+    <string>vlink-player.png</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.vlink.player</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.13</string>
+</dict>
+</plist>
+EOL
+    ln -sf bin/vlink-proxy     "$MACOS_PACKUP_DIR/MacOS/proxy"
+    ln -sf bin/vlink-info      "$MACOS_PACKUP_DIR/MacOS/info"
+    ln -sf bin/vlink-monitor   "$MACOS_PACKUP_DIR/MacOS/monitor"
+    ln -sf bin/vlink-bag       "$MACOS_PACKUP_DIR/MacOS/bag"
+    ln -sf bin/vlink-list      "$MACOS_PACKUP_DIR/MacOS/list"
+    ln -sf bin/vlink-eproto    "$MACOS_PACKUP_DIR/MacOS/eproto"
+    ln -sf bin/vlink-efbs      "$MACOS_PACKUP_DIR/MacOS/efbs"
+    ln -sf bin/vlink-dump      "$MACOS_PACKUP_DIR/MacOS/dump"
+    ln -sf bin/vlink-check     "$MACOS_PACKUP_DIR/MacOS/check"
+    ln -sf bin/vlink-bench     "$MACOS_PACKUP_DIR/MacOS/bench"
+    ln -sf bin/vlink-foxglove  "$MACOS_PACKUP_DIR/MacOS/webviz_foxglove"
+    ln -sf bin/vlink-bag2mcap  "$MACOS_PACKUP_DIR/MacOS/bag2mcap"
+    ln -sf bin/run_viewer.sh   "$MACOS_PACKUP_DIR/MacOS/viewer"
+    ln -sf bin/run_player.sh   "$MACOS_PACKUP_DIR/MacOS/player"
+    ln -sf bin/run_analyzer.sh "$MACOS_PACKUP_DIR/MacOS/analyzer"
+
+    ln -sf bin/vlink-foxglove  "$MACOS_PACKUP_DIR/MacOS/webviz"
+    echo ""
+else
+    ln -sf vlink-foxglove      "$PACKUP_DIR/bin/webviz"
+    cmake -E copy $BUILD_DIR/output/lib/libavcodec.so.+(+([0-9]))                                   $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libavformat.so.+(+([0-9]))                                  $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libavutil.so.+(+([0-9]))                                    $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libswscale.so.+(+([0-9]))                                   $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libcrypto.so.+(+([0-9]))                                    $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libprotobuf.so.+(+([0-9]))                                  $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libflatbuffers.so.+(+([0-9]))                               $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libssl.so.+(+([0-9]))                                       $PACKUP_DIR/lib/ 2>/dev/null || true
+    cmake -E copy $BUILD_DIR/output/lib/libsqlite3*                                                 $PACKUP_DIR/lib/ 2>/dev/null || true
+
+    if [ -f $BUILD_DIR/output/bin/iox-roudi ];then
+        cmake -E copy $BUILD_DIR/output/bin/iox-roudi                                               $PACKUP_DIR/bin/
+    elif [ -f $BUILD_DIR/iox-roudi ];then
+        cmake -E copy $BUILD_DIR/iox-roudi                                                          $PACKUP_DIR/bin/
+    fi
+
+    if [ ! -z $QT_DIR ];then
+        QT_VERSION=$($QT_DIR/bin/qmake -query QT_VERSION)
+        echo "QT_VERSION=${QT_VERSION}"
+
+        echo ""
+        echo "********************************************"
+        echo "*** copy qt files..."
+        echo "********************************************"
+        echo ""
+
+        for _dir in platforms platformthemes platforminputcontexts imageformats sqldrivers \
+                     xcbglintegrations wayland-decoration-client wayland-graphics-integration-client \
+                     wayland-shell-integration;do
+            cmake -E make_directory $PACKUP_DIR/lib/$_dir/
+        done
+
+        if [[ ${QT_VERSION} = 5.* ]];then
+            for _lib in Core Gui Widgets DBus Sql OpenGL Dbus XcbQpa WaylandClient WaylandCompositor \
+                        WaylandEglClientHwIntegration WaylandEglCompositorHwIntegration Network Svg;do
+                cmake -E copy $QT_DIR/lib/libQt5${_lib}.so.+([0-9])                                 $PACKUP_DIR/lib/ 2>/dev/null || true
+            done
+            cmake -E copy $QT_DIR/lib/libicudata.so.*+([0-9])                                       $PACKUP_DIR/lib/ 2>/dev/null || true
+            cmake -E copy $QT_DIR/lib/libicui18n.so.*+([0-9])                                       $PACKUP_DIR/lib/ 2>/dev/null || true
+            cmake -E copy $QT_DIR/lib/libicuuc.so.+([0-9])                                          $PACKUP_DIR/lib/ 2>/dev/null || true
+        elif [[ $QT_VERSION = 6.* ]];then
+            for _lib in Core Gui Widgets DBus Sql OpenGL Dbus OpenGLWidgets XcbQpa WaylandClient \
+                        WaylandCompositor WaylandEglClientHwIntegration WaylandEglCompositorHwIntegration \
+                        Network Svg;do
+                cmake -E copy $QT_DIR/lib/libQt6${_lib}.so.+([0-9])                                 $PACKUP_DIR/lib/ 2>/dev/null || true
+            done
+            cmake -E copy $QT_DIR/lib/libicudata.so.+([0-9])                                        $PACKUP_DIR/lib/ 2>/dev/null || true
+            cmake -E copy $QT_DIR/lib/libicui18n.so.+([0-9])                                        $PACKUP_DIR/lib/ 2>/dev/null || true
+            cmake -E copy $QT_DIR/lib/libicuuc.so.+([0-9])                                          $PACKUP_DIR/lib/ 2>/dev/null || true
+        else
+            echo "QT_VERSION error, QT_VERSION=$QT_VERSION"
+            exit 3
+        fi
+
+        for _dir in platforms platformthemes platforminputcontexts imageformats sqldrivers \
+                     xcbglintegrations wayland-decoration-client wayland-graphics-integration-client \
+                     wayland-shell-integration;do
+            [ -d "$QT_DIR/plugins/$_dir" ] && cmake -E copy $QT_DIR/plugins/$_dir/* $PACKUP_DIR/lib/$_dir/ 2>/dev/null || true
+        done
+    fi
+
+    OSG_VERSION=3.6.5
+    OSG_PREFIX1=3.3.1
+    OSG_PREFIX2=21
+    OSG_PREFIX3=161
+
+    if [ ! -z $OSG_DIR ];then
+        echo "OSG_VERSION=${OSG_VERSION}"
+
+        echo ""
+        echo "********************************************"
+        echo "*** copy osg files..."
+        echo "********************************************"
+        echo ""
+
+        cmake -E make_directory $PACKUP_DIR/lib/osgPlugins-${OSG_VERSION}/
+        cmake -E copy $OSG_DIR/lib/libOpenThreads.so.${OSG_PREFIX1}                                 $PACKUP_DIR/lib/libOpenThreads.so.${OSG_PREFIX2}
+        for _osg in libosg libosgDB libosgGA libosgManipulator libosgUtil libosgText libosgViewer;do
+            cmake -E copy $OSG_DIR/lib/${_osg}.so.${OSG_PREFIX3}                                    $PACKUP_DIR/lib/
+        done
+        for _plugin in osgdb_freetype osgdb_obj osgdb_osg osgdb_serializers_osg;do
+            cmake -E copy $OSG_DIR/lib/osgPlugins-${OSG_VERSION}/${_plugin}.so                      $PACKUP_DIR/lib/osgPlugins-${OSG_VERSION}/
+        done
+    fi
+
+    for f in run_viewer.sh run_player.sh run_analyzer.sh setup_runtime.sh vlink-cmd.sh;do
+        [ -f $WORK_DIR/linux/common/$f ] && cmake -E copy $WORK_DIR/linux/common/$f $PACKUP_DIR/bin/
+    done
+    [ -f $WORK_DIR/linux/common/install.sh ] && cmake -E copy $WORK_DIR/linux/common/install.sh $PACKUP_DIR/
+    [ -f $WORK_DIR/linux/common/uninstall.sh ] && cmake -E copy $WORK_DIR/linux/common/uninstall.sh $PACKUP_DIR/
+    cmake -E copy $WORK_DIR/linux/common/qt.conf $PACKUP_DIR/bin/
+    chmod +x $PACKUP_DIR/bin/*.sh $PACKUP_DIR/*.sh 2>/dev/null
+    for f in $(find $WORK_DIR/linux/common -maxdepth 1 \( -name '*.desktop' -o -name '*.png' -o -name '*.svg' -o -name '*.xml' \));do
+        cmake -E copy $f $PACKUP_DIR/desktop/
+    done
+    cmake -E copy_directory $WORK_DIR/linux/$PLATFORM_ARCH $PACKUP_DIR/lib/
+fi
+echo ""
+echo "********************************************"
+echo "*** creating portable archive..."
+echo "********************************************"
+echo ""
+
+VERSION=$(cat "$SRC_DIR/version.txt" | tr -d '[:space:]')
+ARCH=${2:-$PLATFORM_ARCH}
+if [ "$PLATFORM_OS" = "Darwin" ];then
+    PLATFORM_TAG="macos-${ARCH}"
+    ARCHIVE_DIR=$BUILD_DIR/packup/darwin
+else
+    PLATFORM_TAG="linux-${ARCH}"
+    ARCHIVE_DIR=$BUILD_DIR/packup/linux
+fi
+
+ARCHIVE_NAME="vlink-${VERSION}-${PLATFORM_TAG}.tgz"
+ARCHIVE_PATH="$ARCHIVE_DIR/${ARCHIVE_NAME}"
+
+tar -czf "$ARCHIVE_PATH" -C "$(dirname "$PACKUP_DIR")" "$(basename "$PACKUP_DIR")"
+
+echo "Portable archive: $ARCHIVE_PATH ($(du -sh "$ARCHIVE_PATH" | cut -f1))"
+
+echo ""
+echo "********************************************"
+echo "*** creating installer package..."
+echo "********************************************"
+echo ""
+
+BINARYCREATOR=""
+
+if [ ! -z "$QTIFW_DIR" ];then
+    BINARYCREATOR="$QTIFW_DIR/bin/binarycreator"
+elif command -v binarycreator &> /dev/null;then
+    BINARYCREATOR="binarycreator"
+else
+    for dir in \
+        "$HOME/Qt/Tools/QtInstallerFramework"/*/bin \
+        "/opt/Qt/Tools/QtInstallerFramework"/*/bin \
+        "/usr/local/Qt/Tools/QtInstallerFramework"/*/bin \
+    ;do
+        if [ -x "$dir/binarycreator" ];then
+            BINARYCREATOR="$dir/binarycreator"
+            break
+        fi
+    done
+fi
+
+if [ -z "$BINARYCREATOR" ];then
+    echo "Warning: binarycreator not found, skipping installer creation."
+    echo "Install Qt Installer Framework and set QTIFW_DIR or add binarycreator to PATH."
+    echo ""
+    echo "Packup directory: $PACKUP_DIR"
+    echo "Done."
+    exit 0
+fi
+
+if [ ! -f "$WORK_DIR/installer/config/config.xml" ];then
+    echo "Warning: Installer templates not found, skipping installer creation."
+    echo "Packup directory: $PACKUP_DIR"
+    echo "Done."
+    exit 0
+fi
+
+echo "Using binarycreator: $BINARYCREATOR"
+
+VERSION=$(cat "$SRC_DIR/version.txt" | tr -d '[:space:]')
+DATE=$(date +%Y-%m-%d)
+
+INSTALLER_DIR=$BUILD_DIR/installer
+INSTALLER_CONFIG=$INSTALLER_DIR/config
+INSTALLER_PKG=$INSTALLER_DIR/packages/com.vlink
+INSTALLER_META=$INSTALLER_PKG/meta
+INSTALLER_DATA=$INSTALLER_PKG/data
+
+rm -rf "$INSTALLER_DIR"
+mkdir -p "$INSTALLER_CONFIG"
+mkdir -p "$INSTALLER_META"
+mkdir -p "$INSTALLER_DATA"
+
+cp -rf "$WORK_DIR/installer/config/"* "$INSTALLER_CONFIG/"
+
+DEFAULT_TARGET_DIR="@HomeDir@/vlink"
+
+sed -e "s|@VERSION@|$VERSION|g" \
+    -e "s|@DEFAULT_TARGET_DIR@|$DEFAULT_TARGET_DIR|g" \
+    "$WORK_DIR/installer/config/config.xml" > "$INSTALLER_CONFIG/config.xml"
+
+sed -e "s|@VERSION@|$VERSION|g" \
+    -e "s|@DATE@|$DATE|g" \
+    "$WORK_DIR/installer/packages/com.vlink/meta/package.xml" > "$INSTALLER_META/package.xml"
+
+cp -f "$WORK_DIR/installer/packages/com.vlink/meta/installscript.qs" "$INSTALLER_META/"
+cp -f "$SRC_DIR/LICENSE" "$INSTALLER_META/"
+
+echo "Copying packup files to installer data directory..."
+cp -rf "$PACKUP_DIR"/* "$INSTALLER_DATA/"
+
+ARCH=${2:-$PLATFORM_ARCH}
+if [ "$PLATFORM_OS" = "Darwin" ];then
+    PLATFORM_TAG="macos-${ARCH}"
+    OUTPUT_DIR=$BUILD_DIR/packup/darwin
+else
+    PLATFORM_TAG="linux-${ARCH}"
+    OUTPUT_DIR=$BUILD_DIR/packup/linux
+fi
+
+OUTPUT_NAME="vlink-${VERSION}-${PLATFORM_TAG}"
+OUTPUT_PATH="$OUTPUT_DIR/${OUTPUT_NAME}"
+
+echo "Creating installer: ${OUTPUT_PATH}"
+echo ""
+
+"$BINARYCREATOR" \
+    --offline-only \
+    -c "$INSTALLER_CONFIG/config.xml" \
+    -p "$INSTALLER_DIR/packages" \
+    "$OUTPUT_PATH"
+
+if [ $? -ne 0 ];then
+    echo "Warning: binarycreator failed!"
+    echo "Packup directory: $PACKUP_DIR"
+else
+    if [ -d "${OUTPUT_PATH}.app" ];then
+        ACTUAL_OUTPUT="${OUTPUT_PATH}.app"
+    elif [ -f "${OUTPUT_PATH}" ];then
+        ACTUAL_OUTPUT="${OUTPUT_PATH}"
+    else
+        ACTUAL_OUTPUT="${OUTPUT_PATH}"
+    fi
+    echo ""
+    echo "********************************************"
+    echo "*** Installer created: $ACTUAL_OUTPUT"
+    echo "*** Size: $(du -sh "$ACTUAL_OUTPUT" | cut -f1)"
+    echo "********************************************"
+fi
+
+echo ""
+echo "Done."
+
+exit 0

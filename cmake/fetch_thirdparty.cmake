@@ -1,0 +1,229 @@
+#
+# Copyright (C) 2026 by Thun Lu. All rights reserved.
+#
+
+include(${CMAKE_CURRENT_LIST_DIR}/CPM.cmake)
+if(DEFINED CPM_MODULE_PATH)
+  list(APPEND CMAKE_MODULE_PATH ${CPM_MODULE_PATH})
+else()
+  list(APPEND CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/CPM_modules)
+endif()
+if(UNIX)
+  set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+endif()
+if(ENABLE_CPM_WHOLE_BUILD)
+  cpmaddpackage(
+    NAME
+    sqlite3
+    URL
+    "https://github.com/sjinks/sqlite3-cmake/archive/refs/tags/v3.45.3.zip"
+    PATCHES
+    "${CMAKE_SOURCE_DIR}/tools/patch/sqlite3-cmake.patch"
+    OPTIONS
+    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+    "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS OFF"
+    "sqlite3_BUILD_SHARED_LIBS OFF"
+  )
+  cpmaddpackage(
+    NAME
+    protobuf
+    URL
+    "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip"
+    OPTIONS
+    "CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF"
+    "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS ON"
+    "protobuf_BUILD_TESTS OFF"
+    "protobuf_BUILD_PROTOC_BINARIES ON"
+  )
+  cpmaddpackage(
+    NAME
+    flatbuffers
+    URL
+    "https://github.com/google/flatbuffers/archive/refs/tags/v25.9.23.zip"
+    OPTIONS
+    "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS ON"
+    "FLATBUFFERS_BUILD_SHAREDLIB ON"
+    "FLATBUFFERS_BUILD_TESTS OFF"
+    "FLATBUFFERS_BUILD_FLATC ON"
+    "FLATBUFFERS_STATIC_FLATC ON"
+  )
+  if(flatbuffers_ADDED
+     AND TARGET flatbuffers_shared
+     AND NOT TARGET flatbuffers::flatbuffers
+  )
+    get_target_property(FLATBUFFERS_INCLUDE_DIR flatbuffers INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(flatbuffers_shared INTERFACE $<BUILD_INTERFACE:${FLATBUFFERS_INCLUDE_DIR}>)
+    add_library(flatbuffers::flatbuffers ALIAS flatbuffers_shared)
+  endif()
+  cpmaddpackage(
+    NAME
+    openssl
+    GITHUB_REPOSITORY
+    viaduck/openssl-cmake
+    GIT_TAG
+    v3
+    OPTIONS
+    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+    "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS OFF"
+    "OPENSSL_USE_STATIC_LIBS ON"
+  )
+  if(openssl_ADDED)
+    if(TARGET crypto AND NOT TARGET OpenSSL::Crypto)
+      add_library(OpenSSL::Crypto ALIAS crypto)
+    endif()
+    if(TARGET ssl AND NOT TARGET OpenSSL::SSL)
+      add_library(OpenSSL::SSL ALIAS ssl)
+    endif()
+    find_package(OpenSSL QUIET)
+    set(OPENSSL_FOUND TRUE)
+  endif()
+endif()
+cpmaddpackage(
+  NAME
+  zstd
+  URL
+  "https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.zip"
+  SOURCE_SUBDIR
+  "build/cmake"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+  "ZSTD_BUILD_PROGRAMS OFF"
+  "ZSTD_BUILD_SHARED OFF"
+  "ZSTD_BUILD_STATIC ON"
+)
+if(zstd_ADDED
+   AND TARGET libzstd_static
+   AND NOT TARGET zstd::libzstd
+   AND NOT TARGET zstd::libzstd_static
+)
+  add_library(zstd::libzstd_static ALIAS libzstd_static)
+  add_library(zstd::libzstd ALIAS libzstd_static)
+endif()
+cpmaddpackage(
+  NAME
+  tinyxml2
+  URL
+  "https://github.com/leethomason/tinyxml2/archive/refs/tags/10.1.0.zip"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+)
+if(tinyxml2_ADDED)
+  set(TINYXML2_INCLUDE_DIR ${tinyxml2_SOURCE_DIR})
+  set(TINYXML2_LIBRARY tinyxml2)
+endif()
+set(Asio_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/thirdparty/asio/include)
+cpmaddpackage(
+  NAME
+  cpptoml
+  URL
+  "https://github.com/skystrife/cpptoml/archive/refs/tags/v0.1.1.zip"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+  "CPPTOML_BUILD_EXAMPLES OFF"
+  "CMAKE_POLICY_VERSION_MINIMUM 3.14"
+)
+cpmaddpackage(
+  NAME
+  foonathan_memory
+  URL
+  "https://github.com/foonathan/memory/archive/refs/tags/v0.7-4.zip"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+  "FOONATHAN_MEMORY_BUILD_EXAMPLES OFF"
+  "FOONATHAN_MEMORY_BUILD_TESTS OFF"
+  "FOONATHAN_MEMORY_BUILD_TOOLS OFF"
+  "FOONATHAN_MEMORY_CHECK_ALLOCATION_SIZE OFF"
+)
+cpmaddpackage(
+  NAME
+  fastcdr
+  URL
+  "https://github.com/eProsima/Fast-CDR/archive/refs/tags/v1.1.1.zip"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+)
+cpmaddpackage(
+  NAME
+  fastdds
+  URL
+  "https://github.com/eProsima/Fast-DDS/archive/refs/tags/v2.10.7.zip"
+  PATCHES
+  "${CMAKE_SOURCE_DIR}/tools/patch/fastdds_2.10.x.patch"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+  "EPROSIMA_BUILD OFF"
+  "THIRDPARTY_UPDATE OFF"
+)
+cpmaddpackage(
+  NAME
+  cyclonedds
+  URL
+  "https://github.com/eclipse-cyclonedds/cyclonedds/archive/refs/tags/0.10.5.zip"
+  PATCHES
+  "${CMAKE_SOURCE_DIR}/tools/patch/cyclonedds_0.10.x.patch"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+  "BUILD_IDLC OFF"
+  "BUILD_DDSPERF OFF"
+  "ENABLE_SECURITY OFF"
+  "ENABLE_SSL OFF"
+  "CYCLONEDDS_DISABLE_SSL ON"
+)
+if(cyclonedds_ADDED AND TARGET ddsc)
+  set(ddsi_INCLUDE_DIR "${cyclonedds_SOURCE_DIR}/src/core/ddsi/include")
+endif()
+cpmaddpackage(
+  NAME
+  iceoryx
+  URL
+  "https://github.com/eclipse-iceoryx/iceoryx/archive/refs/tags/v2.0.6.zip"
+  PATCHES
+  "${CMAKE_SOURCE_DIR}/tools/patch/iceoryx_2.0.x.patch"
+  SOURCE_SUBDIR
+  "iceoryx_meta"
+  OPTIONS
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_POSITION_INDEPENDENT_CODE ON"
+  "BUILD_SHARED_LIBS OFF"
+  "BINDING_C OFF"
+  "INTROSPECTION OFF"
+  "BUILD_DOC OFF"
+  "CCACHE OFF"
+)
+if(iceoryx_ADDED
+   AND TARGET iceoryx_posh
+   AND NOT TARGET iceoryx_posh::iceoryx_posh
+)
+  add_library(iceoryx_posh::iceoryx_posh ALIAS iceoryx_posh)
+endif()
+if(iceoryx_ADDED
+   AND TARGET iceoryx_posh_config
+   AND NOT TARGET iceoryx_posh::iceoryx_posh_config
+)
+  add_library(iceoryx_posh::iceoryx_posh_config ALIAS iceoryx_posh_config)
+endif()
+if(iceoryx_ADDED
+   AND TARGET iceoryx_posh_roudi
+   AND NOT TARGET iceoryx_posh::iceoryx_posh_roudi
+)
+  add_library(iceoryx_posh::iceoryx_posh_roudi ALIAS iceoryx_posh_roudi)
+endif()
+unset(CMAKE_PROJECT_INCLUDE_BEFORE)
