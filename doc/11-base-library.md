@@ -271,8 +271,10 @@ std::string hex = vlink::Bytes::convert_to_hex_str(buf.data(), buf.size());
 auto reversed = vlink::Bytes::reverse_order(buf);
 
 // 内存池（统一走 vlink::MemoryPool，详见 11.4）
-vlink::Bytes::init_memory_pool();   // 应用启动时调用一次
-// 注意：MemoryPool 与进程生命周期等同，没有对应的 release_memory_pool()
+vlink::Bytes::init_memory_pool();        // 应用启动时调用一次
+vlink::Bytes::release_memory_pool();     // 周期性 trim：仅释放完全空闲的 chunk，
+                                         // 含 live block 的 chunk 保留，
+                                         // 可与并发 Bytes API 调用安全交错
 ```
 
 ---
@@ -348,6 +350,11 @@ class MemoryPool final {
   [[nodiscard]] std::vector<TierStats> get_stats() const noexcept;
   [[nodiscard]] OversizedStats get_oversized_stats() const noexcept;
   void reset_stats() noexcept;
+
+  // 释放完全空闲的 chunk；保留任何还含 live block 的 chunk 以及它们的
+  // free 节点。可与并发 allocate/deallocate 安全交错。
+  void clear() noexcept;
+  void trim()  noexcept;   // alias of clear()，语义更直观（"trim 掉空闲缓存"）
 };
 
 }  // namespace vlink
@@ -386,9 +393,11 @@ MLOG_I("oversized: count={} bytes={}", over.alloc_count, over.alloc_bytes);
 
 - 所有 public 方法 `noexcept`，可从多线程并发调用。锁粒度是 per-tier，因此不
   同 size class 之间不互相竞争。
-- `global_instance()` 是 Meyers' singleton，进程生命周期内持续存在，**没有**
-  对应的 `release` API。如需释放上游 chunk，只能通过销毁本地 `MemoryPool`
-  实例完成（注意销毁前必须确保所有 block 已归还）。
+- `global_instance()` 是 Meyers' singleton，进程生命周期内持续存在；想要在运行
+  期释放上游 chunk，对全局池调用 `clear()`（或 `Bytes::release_memory_pool()`）
+  即可——它**仅**释放完全空闲的 chunk，含 live block 的 chunk 与对应 free 节
+  点保留，可与并发 `allocate` / `deallocate` 安全交错。析构期的全量释放仍只能
+  通过销毁本地 `MemoryPool` 实例完成（销毁前必须确保所有 block 已归还）。
 - `deallocate` 必须传入与 `allocate` 相同的 `bytes`，否则会路由到错误 tier，
   破坏该 tier 的 free-list。
 

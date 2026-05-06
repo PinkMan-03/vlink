@@ -105,6 +105,8 @@ void Bytes::bytes_free(uint8_t* ptr, size_t size) noexcept { MemoryPool::global_
 
 void Bytes::init_memory_pool() noexcept { (void)MemoryPool::global_instance(true); }
 
+void Bytes::release_memory_pool() noexcept { MemoryPool::global_instance().clear(); }
+
 Bytes Bytes::create(size_t size, uint8_t offset) noexcept {
 #if defined(__arm__) || defined(__x86__) || defined(__i386__)
 #ifndef __ANDROID__

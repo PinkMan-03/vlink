@@ -155,6 +155,14 @@ int main() {
     page_pool.reset_stats();
     VLOG_I("  After reset_stats():");
     print_tier_stats(page_pool);
+
+    // clear() drops only chunks that are fully free; chunks still backing
+    // a live block are kept (none here -- every page was returned above).
+    // Safe to call concurrently with allocate / deallocate; lifetime
+    // counters and the geometric growth state are preserved.
+    page_pool.clear();
+    VLOG_I("  After clear() -- fully-free chunks released, live blocks kept:");
+    print_tier_stats(page_pool);
   }
 
   // ---------------------------------------------------------------

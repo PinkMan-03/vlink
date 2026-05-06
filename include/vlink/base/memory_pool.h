@@ -27,47 +27,46 @@
  *
  * @details
  * @c MemoryPool partitions allocation requests across a fixed pyramid of size
- * tiers.  Each tier maintains a singly-linked free list of fixed-size blocks
- * plus a vector of upstream chunks (each chunk holds a number of consecutive
- * blocks).  Small high-frequency allocations land in tiers with many blocks
- * per chunk; larger and rarer allocations land in tiers with few blocks per
- * chunk.  Allocations larger than the biggest tier (or with caller alignment
- * above @c alignof(std::max_align_t)) bypass the pool and go straight to
- * @c ::operator @c new / @c ::operator @c delete.
+ * tiers.  Each tier owns a singly-linked free list of fixed-size blocks plus a
+ * vector of upstream chunks; chunk capacity grows geometrically up to the
+ * configured @c blocks_per_chunk.  Requests larger than the biggest tier (or
+ * with caller alignment above @c alignof(std::max_align_t)) bypass the pool
+ * and go straight to @c ::operator @c new / @c ::operator @c delete.
  *
- * The implementation is fully self-contained -- no dependency on
- * @c \<memory_resource\> or any third-party allocator.  Chunk growth is
- * geometric: the first chunk in each tier holds a small number of blocks,
- * subsequent chunks double in size, capped at the configured
- * @c blocks_per_chunk.  This keeps idle tiers cheap while letting hot tiers
- * amortise upstream allocations.
+ * Tier configuration:
  *
- * @c default_tiers() returns the 8-tier pyramid for the current
- * @c VLINK_MEMORY_LEVEL, taken from a hand-tuned 6-row lookup table:
+ * | Source                              | When used                                              |
+ * | ----------------------------------- | ------------------------------------------------------ |
+ * | Caller-supplied tier vector         | @c MemoryPool ctor with non-empty, well-formed tiers   |
+ * | @c default_tiers() (level 1..6)     | @c global_instance(true) or as ctor fallback           |
+ * | Built-in level-3 balanced pyramid   | Empty / malformed input; never read at runtime         |
  *
- * The @c blocks_per_chunk values are spelled out per level (1..6) so the
- * memory footprint is explicit and predictable; nothing is computed at
- * runtime.  Anything bigger than the 8 MiB tier (e.g. 4K RGBA frames) is
- * served by @c ::operator @c new / @c delete via the oversized passthrough
- * path -- correctness preserved, just no pooling for that size.
+ * Cleanup primitives:
+ *
+ * | Method            | What it releases                                | Concurrent traffic? |
+ * | ----------------- | ----------------------------------------------- | ------------------- |
+ * | @c clear / trim   | Only fully-free chunks; live blocks preserved   | Safe                |
+ * | @c ~MemoryPool    | Every chunk, unconditionally                    | Caller must quiesce |
+ *
+ * @note
+ * - All public methods are @c noexcept and safe to call from multiple threads.
+ *   Lock granularity is per-tier, so traffic across different size classes
+ *   does not contend.
+ * - @c deallocate must be called with exactly the @c bytes value passed to
+ *   @c allocate.  Mismatched sizes route the block to the wrong tier and
+ *   corrupt that tier's free list.
+ * - @c allocate returns @c nullptr on upstream OOM and never throws.  The
+ *   constructor's only exception path is @c std::bad_alloc from internal
+ *   vector growth.
  *
  * @par Example
  * @code
- * auto& pool = vlink::MemoryPool::global_instance();   // shared singleton
- * void* p = pool.allocate(512);                        // 1 KiB tier
- * pool.deallocate(p, 512);                             // bytes MUST match
- * @endcode
+ * auto& pool = vlink::MemoryPool::global_instance();
+ * void* p = pool.allocate(512);                  // 1 KiB tier
+ * pool.deallocate(p, 512);                       // bytes MUST match
  *
- * @note
- * - All public methods are noexcept and safe to call concurrently from
- *   multiple threads.  Lock contention is per-tier, so traffic across
- *   different size classes does not contend.
- * - @c deallocate must be called with the same @c bytes value that was
- *   passed to @c allocate.  Passing a mismatched size routes the block to a
- *   different tier and corrupts that tier's free list.
- * - @c allocate returns @c nullptr on upstream OOM; it never throws.
- * - The constructor never throws either: malformed tier configurations are
- *   logged and silently fall back to the level-3 default pyramid.
+ * pool.trim();                                   // periodic memory reclaim
+ * @endcode
  */
 
 #pragma once
@@ -83,27 +82,27 @@ namespace vlink {
 
 /**
  * @class MemoryPool
- * @brief Size-tiered memory pool with per-tier @c blocks_per_chunk and statistics.
+ * @brief Size-tiered memory pool with per-tier free list and statistics.
+ *
+ * @details
+ * Thread-safe; per-tier spin lock serialises @c allocate, @c deallocate and
+ * @c clear within a single tier.  Different tiers do not contend.
  */
 class VLINK_EXPORT MemoryPool final {
  public:
   /**
-   * @brief Default block alignment used for every pooled allocation.
+   * @brief Default block alignment for every pooled allocation.
    *
    * @details
-   * Equal to @c alignof(std::max_align_t) -- the alignment guaranteed by
-   * @c ::operator @c new without explicit @c std::align_val_t.  Every block
-   * returned by @c allocate() that lands on the pool path is aligned to this
-   * boundary.  Requests with @p alignment greater than @c kBlockAlignment
-   * bypass the pool and call @c ::operator @c new(bytes, std::align_val_t{...})
-   * directly so the caller-requested alignment is still honoured.
-   *
-   * Typical value on x86_64 / aarch64 Linux: 16 bytes.
+   * Equal to @c alignof(std::max_align_t).  Requests with a stricter
+   * alignment bypass the pool and call @c ::operator @c new with
+   * @c std::align_val_t directly.  Typical value on x86_64 / aarch64 Linux:
+   * 16 bytes.
    */
   static constexpr size_t kBlockAlignment = alignof(std::max_align_t);
 
   /**
-   * @brief Configuration for a single tier.
+   * @brief Configuration of a single tier.
    */
   struct Tier final {
     size_t max_size{0};          ///< Inclusive upper bound (in bytes) for this tier.
@@ -111,7 +110,11 @@ class VLINK_EXPORT MemoryPool final {
   };
 
   /**
-   * @brief Runtime statistics for a single tier.
+   * @brief Per-tier runtime statistics snapshot.
+   *
+   * @details
+   * Counters use relaxed atomics; @c in_use_blocks and the lifetime upstream
+   * fields are best-effort under concurrent traffic, not globally atomic.
    */
   struct TierStats final {
     size_t max_size{0};                ///< Tier's @c max_size from the configuration.
@@ -119,15 +122,20 @@ class VLINK_EXPORT MemoryPool final {
     size_t block_size{0};              ///< Effective block size after alignment rounding.
     uint64_t hit_count{0};             ///< Allocations dispatched to this tier (resettable).
     uint64_t deallocate_count{0};      ///< Deallocations dispatched to this tier (resettable).
-    uint64_t in_use_blocks{0};         ///< Best-effort snapshot of @c hit_count - @c deallocate_count.
-    uint64_t chunk_count{0};           ///< Number of upstream chunks currently owned by this tier.
-    uint64_t upstream_alloc_count{0};  ///< Lifetime upstream chunk allocations (NOT reset by @c reset_stats).
-    uint64_t upstream_alloc_bytes{0};  ///< Lifetime upstream chunk bytes (NOT reset by @c reset_stats).
+    uint64_t in_use_blocks{0};         ///< Best-effort @c hit_count - @c deallocate_count.
+    uint64_t chunk_count{0};           ///< Currently owned chunks; @c clear decrements by released count.
+    uint64_t upstream_alloc_count{0};  ///< Lifetime successful @c ::operator @c new calls (incl.
+                                       ///< race-discarded and push_back-failed chunks); only OOM
+                                       ///< is excluded.  Never reset.
+    uint64_t upstream_alloc_bytes{0};  ///< Lifetime bytes returned by those calls.  Never reset.
   };
 
   /**
-   * @brief Aggregate statistics for the oversized-passthrough path
-   *        (size > biggest tier or alignment > @c alignof(std::max_align_t)).
+   * @brief Aggregate statistics for the oversized-passthrough path.
+   *
+   * @details
+   * Tracks allocations that bypass the tier free lists (size > biggest tier
+   * or alignment > @c kBlockAlignment).
    */
   struct OversizedStats final {
     uint64_t alloc_count{0};    ///< Oversized allocations forwarded to the system allocator.
@@ -139,26 +147,18 @@ class VLINK_EXPORT MemoryPool final {
    * @brief Returns the process-wide shared @c MemoryPool instance.
    *
    * @details
-   * Lazily constructs the singleton on the first call (Meyers' singleton --
-   * thread-safe construction under C++11+).  Use this accessor when a
-   * component needs the same pool everyone else uses (e.g. @c Bytes), so
-   * all subsystems share a single resident chunk pool.
+   * Lazily constructs a Meyers' singleton (thread-safe under C++11+).  Only
+   * the very first call decides the configuration; subsequent calls return
+   * the same instance and ignore @p use_env_level.
    *
-   * @warning Only the very first call decides the configuration.  Every
-   *          subsequent call returns the same instance and ignores
-   *          @p use_env_level.  If you need env-driven tuning, ensure your
-   *          bootstrap code (e.g. @c Bytes::init_memory_pool) is the first
-   *          caller in the process.  When the first call passes @c false,
-   *          the pool falls back to the level-3 default pyramid regardless
-   *          of any later @c true argument.
+   * @warning If env-driven tuning is required, ensure your bootstrap code
+   *          (e.g. @c Bytes::init_memory_pool) is the first caller.  When the
+   *          first call passes @c false, the pool falls back to the level-3
+   *          default pyramid for the program's lifetime.
    *
-   * @param use_env_level  If @c true, the pool is constructed from
-   *                       @c default_tiers() and therefore honours
-   *                       @c VLINK_MEMORY_LEVEL.  If @c false (default),
-   *                       the pool is constructed with no caller-supplied
-   *                       tiers, which falls back to the level-3 balanced
-   *                       pyramid independent of the environment.
-   *
+   * @param use_env_level  @c true: build from @c default_tiers() (honours
+   *                       @c VLINK_MEMORY_LEVEL).  @c false (default): use
+   *                       the built-in level-3 pyramid.
    * @return Reference to the global pool, valid for the program's lifetime.
    */
   static MemoryPool& global_instance(bool use_env_level = false);
@@ -167,12 +167,11 @@ class VLINK_EXPORT MemoryPool final {
    * @brief Returns the 8-tier default pyramid for the current @c VLINK_MEMORY_LEVEL.
    *
    * @details
-   * Each level maps to a hand-coded row of {max_size, blocks_per_chunk}
-   * pairs -- nothing is computed at runtime.  When @c VLINK_MEMORY_LEVEL is
-   * unset the function uses level 3 (balanced).  Non-numeric or
-   * out-of-range values are clamped to [1, 6] and a warning is logged.
+   * Each level (1..6) maps to a hand-coded row of {max_size, blocks_per_chunk}
+   * pairs -- nothing is computed at runtime.  Non-numeric or out-of-range
+   * env values are clamped to [1, 6] with a warning.
    *
-   * @return An 8-tier configuration ready to pass to the @c MemoryPool constructor.
+   * @return An 8-tier configuration ready to pass to the constructor.
    */
   [[nodiscard]] static std::vector<Tier> default_tiers();
 
@@ -180,50 +179,42 @@ class VLINK_EXPORT MemoryPool final {
    * @brief Constructs a tiered pool with the given tier configuration.
    *
    * @details
-   * On invalid or empty input (non-monotonic ordering, duplicate
-   * @c max_size, zero @c max_size, zero @c blocks_per_chunk, or
-   * @c max_size below the minimum required block size) the constructor
-   * logs an error and silently falls back to the built-in level-3
-   * (balanced) pyramid.  Construction never throws.
+   * Empty or malformed input (non-monotonic ordering, duplicate
+   * @c max_size, zero @c max_size, zero @c blocks_per_chunk, or @c max_size
+   * below the minimum required block size) logs an error and silently falls
+   * back to the level-3 default pyramid.  Validation never throws;
+   * @c std::bad_alloc may still propagate from the internal vector growths.
    *
-   * @param tiers  Tier descriptors, optionally sorted strictly by ascending
-   *               @c max_size with every field > 0.  When empty or
-   *               malformed the level-3 default pyramid is used.
+   * @param tiers  Tier descriptors, strictly ascending by @c max_size with
+   *               every field > 0.  Defaults to empty (uses level-3 fallback).
    */
   explicit MemoryPool(const std::vector<Tier>& tiers = {});
 
   /**
-   * @brief Releases every upstream chunk owned by the pool.
+   * @brief Releases every chunk owned by the pool, unconditionally.
    *
-   * @details
-   * Walks each tier, drops its free list, and pairs every aligned
-   * @c ::operator @c new from chunk allocation with the matching sized
-   * aligned @c ::operator @c delete.  Outstanding blocks held by callers
-   * are invalidated -- use the pool's lifetime to ensure no live blocks
-   * remain at destruction.
+   * @warning The caller must guarantee no outstanding pooled block is in use
+   *          and no other thread is calling @c allocate / @c deallocate /
+   *          @c clear / @c trim on this instance.  Use @c clear() instead
+   *          for a non-destructive trim.
    */
   ~MemoryPool();
 
   /**
-   * @brief Allocates @p bytes of memory.
+   * @brief Allocates @p bytes of memory from the appropriate tier.
    *
    * @details
    * Routes to the first tier whose @c max_size is >= @p bytes.  Requests
-   * larger than the biggest tier, or with @p alignment greater than
-   * @c alignof(std::max_align_t), bypass the pool and use the system
-   * allocator directly.  This function never throws.
-   *
-   * Edge cases:
-   * - @p bytes == 0 routes to the smallest tier and returns a unique
-   *   non-null pointer (or @c nullptr on OOM).  The same @c bytes value
-   *   must be passed to @c deallocate.
-   * - @p alignment must be a power of two; non-power-of-two values are
-   *   forwarded to @c ::operator @c new with @c std::align_val_t and
-   *   trigger UB per [new.delete.general].
+   * larger than the biggest tier, or with @p alignment > @c kBlockAlignment,
+   * bypass the pool and use @c ::operator @c new with @c std::align_val_t.
+   * @p bytes == 0 routes to the smallest tier and returns a unique non-null
+   * pointer (@p bytes still must be passed to @c deallocate).  This function
+   * never throws.
    *
    * @param bytes      Requested size.
-   * @param alignment  Alignment in bytes (must be a power of two).
-   *                   Defaults to @c kBlockAlignment.
+   * @param alignment  Required alignment (power of two).  Defaults to
+   *                   @c kBlockAlignment; non-power-of-two is UB per
+   *                   [new.delete.general].
    * @return Pointer to allocated memory, or @c nullptr if upstream
    *         allocation failed.
    */
@@ -232,29 +223,35 @@ class VLINK_EXPORT MemoryPool final {
   /**
    * @brief Deallocates a pointer previously returned by @c allocate().
    *
-   * @param p          Pointer returned by @c allocate.
-   * @param bytes      Original size passed to @c allocate.  MUST match exactly.
+   * @param p          Pointer returned by @c allocate.  @c nullptr is a no-op.
+   * @param bytes      Original size passed to @c allocate -- MUST match.
    * @param alignment  Original alignment passed to @c allocate.
    */
   void deallocate(void* p, size_t bytes, size_t alignment = kBlockAlignment) noexcept;
 
   /**
    * @brief Returns the number of configured tiers.
+   *
+   * @return Tier count (1..8 for valid configurations).
    */
   [[nodiscard]] size_t get_tier_count() const noexcept;
 
   /**
    * @brief Returns a snapshot of per-tier statistics.
+   *
+   * @return Vector of @c TierStats, one entry per configured tier.
    */
   [[nodiscard]] std::vector<TierStats> get_stats() const noexcept;
 
   /**
    * @brief Returns a snapshot of the oversized-passthrough statistics.
    *
-   * @note Counters are loaded with relaxed ordering and are NOT a globally
-   *       atomic snapshot: under heavy concurrent traffic
-   *       @c dealloc_count may transiently appear larger than
-   *       @c alloc_count.  Treat the values as samples, not invariants.
+   * @details
+   * Counters are loaded with relaxed ordering and are not a globally atomic
+   * snapshot; under heavy concurrent traffic @c dealloc_count may transiently
+   * exceed @c alloc_count.
+   *
+   * @return Aggregated counts and bytes for the oversized path.
    */
   [[nodiscard]] OversizedStats get_oversized_stats() const noexcept;
 
@@ -262,14 +259,49 @@ class VLINK_EXPORT MemoryPool final {
    * @brief Resets per-call statistics counters to zero.
    *
    * @details
-   * Clears @c hit_count and @c deallocate_count on every tier and the
-   * three @c oversized_* counters.  Physical pool state -- @c chunk_count,
-   * @c upstream_alloc_count, @c upstream_alloc_bytes -- is preserved
-   * because it describes how much memory the pool has actually committed,
-   * not a per-call rate.  Use this between benchmark phases, not as a
-   * memory-release primitive.
+   * Clears @c hit_count and @c deallocate_count on every tier and the three
+   * @c oversized_* counters.  Physical / lifetime state (@c chunk_count,
+   * @c upstream_alloc_count, @c upstream_alloc_bytes) is preserved because it
+   * describes memory the pool has actually committed -- not a per-call rate.
+   * Use between benchmark phases, not as a memory-release primitive.
    */
   void reset_stats() noexcept;
+
+  /**
+   * @brief Releases only fully-free chunks; preserves any chunk that still
+   *        backs a live allocation.
+   *
+   * @details
+   * For each tier, walks the free list and partitions free nodes by their
+   * owning chunk.  A chunk whose free-node count equals its block capacity
+   * holds zero live allocations and is released; chunks containing one or
+   * more live blocks (held by callers, not on the free list) stay intact and
+   * keep their free nodes available for reuse.  @c chunk_count is decremented
+   * by the number of released chunks.
+   *
+   * Per-call counters, lifetime upstream counters, @c next_chunk_blocks, and
+   * oversized state are all preserved.  Per-tier work is
+   * @c O(N_freelist * N_chunks) under the spin lock; treat as a maintenance
+   * call, not a hot-path primitive.
+   *
+   * @note
+   * Safe to call concurrently with @c allocate / @c deallocate -- live blocks
+   * held by other threads are never invalidated.  Under extreme memory
+   * pressure individual tiers may be silently skipped; the pool stays valid
+   * and a later call may succeed.
+   */
+  void clear() noexcept;
+
+  /**
+   * @brief Alias of @c clear() with a name that reads more naturally for
+   *        periodic-trim use cases.
+   *
+   * @details
+   * Behaviour, thread-safety, and complexity are identical to @c clear() --
+   * a forwarding wrapper provided so that "trim cached memory" intent does
+   * not have to use a name that historically suggested a destructive reset.
+   */
+  void trim() noexcept;
 
  private:
   size_t find_tier(size_t bytes) const noexcept;

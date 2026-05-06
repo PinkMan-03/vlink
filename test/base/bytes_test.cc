@@ -970,6 +970,36 @@ TEST_SUITE("base-Bytes") {
     CHECK(b.size() == 16u);
     REQUIRE(b.data() != nullptr);
   }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("release_memory_pool keeps live Bytes valid and pool usable") {
+    Bytes::init_memory_pool();
+
+    Bytes pinned = Bytes::create(2048u);
+    REQUIRE(pinned.data() != nullptr);
+    std::memset(pinned.data(), 0xA5, pinned.size());
+
+    {
+      Bytes scratch_a = Bytes::create(2048u);
+      Bytes scratch_b = Bytes::create(64u * 1024u);
+      REQUIRE(scratch_a.data() != nullptr);
+      REQUIRE(scratch_b.data() != nullptr);
+    }
+
+    Bytes::release_memory_pool();
+
+    for (size_t i = 0; i < pinned.size(); ++i) {
+      CHECK(static_cast<uint8_t*>(pinned.data())[i] == 0xA5);
+    }
+    std::memset(pinned.data(), 0x5A, pinned.size());
+    for (size_t i = 0; i < pinned.size(); ++i) {
+      CHECK(static_cast<uint8_t*>(pinned.data())[i] == 0x5A);
+    }
+
+    Bytes after = Bytes::create(2048u);
+    REQUIRE(after.data() != nullptr);
+    std::memset(after.data(), 0xCC, after.size());
+  }
 }
 
 // NOLINTEND

@@ -612,7 +612,9 @@ auto* recovered = bytes_ptr.to_ptr<MyStruct>();
 // 从 VLINK_MEMORY_LEVEL（1..6，默认 3）读取分级配置。
 vlink::Bytes::init_memory_pool();
 
-// 注意：MemoryPool 与进程同生共死，无需也无对应的 release_memory_pool()。
+// 周期性 trim：仅释放完全空闲的 chunk，含 live block 的 chunk 保留；
+// 可与并发 Bytes API 调用安全交错。析构期全量释放仍随进程结束。
+vlink::Bytes::release_memory_pool();
 ```
 
 `Bytes` 的堆分配统一走 `vlink::MemoryPool`（参见 [11.4 节](11-base-library.md#114-内存池-memorypool)）。

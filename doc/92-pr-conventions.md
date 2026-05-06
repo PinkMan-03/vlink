@@ -745,7 +745,7 @@ void old_function();
 ### 11.3 资源使用
 
 - 不允许任何无上界的容器（`std::vector` 不 `reserve()`、任意深度递归、无 TTL 的 cache）
-- 全局状态要么是进程级单例（如 `MemoryPool::global_instance()`，无 release），要么提供显式释放接口；不允许介于两者之间的"半途而废"全局对象
+- 全局状态要么是进程级单例（生命周期与进程同生共死，可选提供 trim 入口，例如 `MemoryPool::global_instance().clear()` 仅释放空闲 chunk），要么提供显式销毁接口；不允许介于两者之间的"半途而废"全局对象
 
 ---
 

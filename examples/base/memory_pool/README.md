@@ -62,6 +62,8 @@ class MemoryPool final {
   [[nodiscard]] std::vector<TierStats> get_stats() const noexcept;
   [[nodiscard]] OversizedStats get_oversized_stats() const noexcept;
   void reset_stats() noexcept;
+  void clear() noexcept;
+  void trim() noexcept;   // alias of clear() — 语义更直观的别名
 };
 }  // namespace vlink
 ```
@@ -70,7 +72,11 @@ class MemoryPool final {
 
 - `deallocate(p, bytes, alignment)` 必须传入与 `allocate` **完全相同**的 `bytes`，否则会路由到错误 tier 损坏其 free-list。
 - `allocate` 永不抛异常；upstream OOM 时返回 `nullptr`。
-- 全局单例与进程同生共死，没有 `release` API。如要主动释放内存，构造一个本地 `MemoryPool` 并在所有 block 归还后让其析构。
+- `TierStats::upstream_alloc_count` / `upstream_alloc_bytes` 反映 **真实向 OS 申请的次数 / 字节**（成功保留入池的 chunk + 因并发竞态丢弃的 chunk + 因 `chunks.push_back` 失败丢弃的 chunk 都会计入；只有 `::operator new` 返回 `nullptr` 的 OOM 不计入）。`reset_stats()` 与 `clear()` 都不会清零这两个 lifetime 计数器。
+- **进程向 OS 的总申请量**（次数 / 字节）= `Σ tier.upstream_alloc_count` + `OversizedStats::alloc_count` / `Σ tier.upstream_alloc_bytes` + `OversizedStats::alloc_bytes`；tier 与 oversized 是分离的两路计数，需要两边相加。
+- `clear()` 仅释放**完全空闲**的 chunk —— 任何还含有 live block 的 chunk 会被保留，对应的 free 节点也保留在 free-list 上以便后续复用；`chunk_count` 按实际释放数量递减，lifetime 累计计数与 `next_chunk_blocks` 几何增长状态都保留。该方法在 per-tier spin lock 下执行，可以与 `allocate`/`deallocate` 并发调用而不会让 live block 失效；但 partition 阶段是 `O(N_freelist * N_chunks)`，**热路径并发场景下会显著拉锁**，请按"维护操作"使用而非高频原语。
+- 析构函数（`~MemoryPool`）则**无条件**释放所有 chunk —— 这是 lifecycle end，需要调用方保证此时没有任何 live block，也没有其它线程仍在并发 `allocate`/`deallocate`/`clear`，否则 UB。
+- 全局单例与进程同生共死。如需主动释放：对全局池调用 `clear()`（安全释放空闲 chunk，并发友好），或构造本地 `MemoryPool` 并在所有 block 归还后让其析构。
 
 ## 演示流程
 

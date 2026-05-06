@@ -61,7 +61,7 @@ static void free_frame_image_buffer(AVFrame* frame) {
 }
 #endif
 
-struct VideoDecoder::Impl {
+struct FFmpegDecoder::Impl {
 #ifdef VLINK_ENABLE_VIEWER_FFMPEG
   const AVCodec* codec{nullptr};
   AVCodecParserContext* parser_ctx{nullptr};

@@ -69,8 +69,8 @@
 
 #pragma once
 
-#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <thread>
 
@@ -194,12 +194,11 @@ class SpinLockGuard final {
 inline void SpinLock::lock() noexcept {
   constexpr static uint32_t kMaxSpinCount = 50000U;
 
+  constexpr static uint16_t kMaxBackoff = 1024U;
+
   uint32_t total_spin = 0;
   uint16_t spin_count = 0;
   uint16_t backoff = 1;
-
-  // LCOV_EXCL_START
-  // GCOVR_EXCL_START
 
   for (;;) {
     if (!flag_.exchange(true, std::memory_order_acquire)) {
@@ -211,20 +210,23 @@ inline void SpinLock::lock() noexcept {
 
       if (++spin_count >= backoff) {
         if VUNLIKELY (total_spin > kMaxSpinCount) {
+          // LCOV_EXCL_START
+          // GCOVR_EXCL_START
           VLOG_E("SpinLock: exceeded max spin count.");
           std::this_thread::sleep_for(std::chrono::microseconds(10));
+          // GCOVR_EXCL_STOP
+          // LCOV_EXCL_STOP
         } else {
           Utils::yield_cpu();
         }
 
-        backoff = std::min<uint16_t>(backoff * 2U, 1024U);
+        if (backoff < kMaxBackoff) {
+          backoff = static_cast<uint16_t>(backoff * 2U);
+        }
         spin_count = 0;
       }
     }
   }
-
-  // GCOVR_EXCL_STOP
-  // LCOV_EXCL_STOP
 }
 
 inline bool SpinLock::try_lock() noexcept {

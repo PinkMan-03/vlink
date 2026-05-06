@@ -124,6 +124,30 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   static void init_memory_pool() noexcept;
 
   /**
+   * @brief Releases every fully-free upstream chunk cached by the global
+   *        @c Bytes memory pool.
+   *
+   * @details
+   * Forwards to @c MemoryPool::global_instance().clear().  Drops only those
+   * cached chunks that have zero live allocations -- chunks containing any
+   * @c Bytes buffer still in use stay intact, so the call is safe to invoke
+   * without first reaping every @c Bytes instance.  Lifetime counters
+   * (@c upstream_alloc_count / @c upstream_alloc_bytes) and the geometric
+   * growth state (@c next_chunk_blocks) are preserved.
+   *
+   * @note
+   * Under @c MemoryPool's per-tier locking, this method is safe to call
+   * concurrently with other @c Bytes operations (@c create / @c reserve /
+   * destruction).  The cleanup pass holds each tier's lock for
+   * @c O(N_freelist * N_chunks) work, so callers running it during heavy
+   * traffic will see contention on hot tiers -- treat it as a maintenance
+   * call (e.g. periodic memory trim, idle-time pruning), not a hot-path
+   * primitive.  Calling it never invalidates a still-live @c Bytes
+   * instance.
+   */
+  static void release_memory_pool() noexcept;
+
+  /**
    * @brief Allocates a raw byte buffer from the memory pool (or heap if pool is unavailable).
    *
    * @param size  Number of bytes to allocate.

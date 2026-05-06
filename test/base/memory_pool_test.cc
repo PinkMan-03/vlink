@@ -357,6 +357,288 @@ TEST_SUITE("base-MemoryPool - stats") {
 }
 
 // ---------------------------------------------------------------------------
+// TEST SUITE: clear
+// ---------------------------------------------------------------------------
+
+TEST_SUITE("base-MemoryPool - clear") {
+  TEST_CASE("clear with no live blocks releases every chunk") {
+    MemoryPool pool({{64, 4}});
+
+    std::vector<void*> blocks;
+    for (int i = 0; i < 7; ++i) {
+      blocks.push_back(pool.allocate(64));
+    }
+    for (void* p : blocks) pool.deallocate(p, 64);
+
+    auto before = pool.get_stats();
+    REQUIRE(before[0].chunk_count > 0u);
+    const uint64_t lifetime_allocs_before = before[0].upstream_alloc_count;
+    const uint64_t lifetime_bytes_before = before[0].upstream_alloc_bytes;
+
+    pool.clear();
+
+    auto after = pool.get_stats();
+    CHECK(after[0].chunk_count == 0u);
+    CHECK(after[0].hit_count == before[0].hit_count);
+    CHECK(after[0].deallocate_count == before[0].deallocate_count);
+    CHECK(after[0].upstream_alloc_count == lifetime_allocs_before);
+    CHECK(after[0].upstream_alloc_bytes == lifetime_bytes_before);
+
+    // Pool is still usable: next allocation triggers a fresh chunk allocation
+    // because all previous chunks were released.  next_chunk_blocks is NOT
+    // reset, so the new chunk picks up at the geometric step the pool had
+    // already reached (capped at blocks_per_chunk).
+    void* q = pool.allocate(64);
+    REQUIRE(q != nullptr);
+
+    auto reused = pool.get_stats();
+    CHECK(reused[0].chunk_count == 1u);
+    CHECK(reused[0].upstream_alloc_count == lifetime_allocs_before + 1u);
+
+    pool.deallocate(q, 64);
+  }
+
+  TEST_CASE("clear preserves chunks that still back a live allocation") {
+    MemoryPool pool({{64, 4}});
+
+    // First fill several chunks, then return all but one block.
+    std::vector<void*> blocks;
+    for (int i = 0; i < 7; ++i) {
+      blocks.push_back(pool.allocate(64));
+    }
+
+    void* live = blocks.back();
+    blocks.pop_back();
+    for (void* p : blocks) pool.deallocate(p, 64);
+
+    const auto before = pool.get_stats();
+    REQUIRE(before[0].chunk_count >= 1u);
+    REQUIRE(before[0].in_use_blocks == 1u);
+    const uint64_t chunks_before = before[0].chunk_count;
+
+    pool.clear();
+
+    const auto after = pool.get_stats();
+    // Exactly one chunk -- the one backing 'live' -- must remain.
+    CHECK(after[0].chunk_count >= 1u);
+    CHECK(after[0].chunk_count < chunks_before);
+    CHECK(after[0].in_use_blocks == 1u);
+    CHECK(after[0].hit_count == before[0].hit_count);
+    CHECK(after[0].deallocate_count == before[0].deallocate_count);
+    // Lifetime upstream counters never decrease.
+    CHECK(after[0].upstream_alloc_count == before[0].upstream_alloc_count);
+
+    // The live pointer must still be writable -- its backing chunk was kept.
+    std::memset(live, 0xEE, 64);
+    pool.deallocate(live, 64);
+  }
+
+  TEST_CASE("clear leaves the surviving chunk's free nodes reusable") {
+    MemoryPool pool({{64, 4}});
+
+    // Two blocks from the same first chunk (kInitialBlocksPerChunk == 1
+    // gives a 1-block chunk first, then a 2-block chunk; pin one block in
+    // the 2-block chunk and free the other so that chunk has 1 live + 1 free).
+    void* a = pool.allocate(64);
+    void* b = pool.allocate(64);
+    void* c = pool.allocate(64);
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(c != nullptr);
+
+    pool.deallocate(a, 64);  // free the 1-block chunk's only block (chunk fully free)
+    pool.deallocate(c, 64);  // free one of the 2-block chunk's blocks (chunk partially free)
+    // 'b' is still live in the 2-block chunk.
+
+    const auto before = pool.get_stats();
+    REQUIRE(before[0].chunk_count >= 2u);
+    REQUIRE(before[0].in_use_blocks == 1u);
+
+    pool.clear();
+
+    const auto after = pool.get_stats();
+    // The fully-free 1-block chunk is released; the 2-block chunk stays.
+    CHECK(after[0].chunk_count < before[0].chunk_count);
+    CHECK(after[0].chunk_count >= 1u);
+    CHECK(after[0].in_use_blocks == 1u);
+
+    // The surviving chunk's free node must remain reusable.  We expect the
+    // next allocate to NOT trigger a new chunk allocation, because the
+    // surviving chunk still has a free slot.
+    const uint64_t upstream_before = after[0].upstream_alloc_count;
+    void* d = pool.allocate(64);
+    REQUIRE(d != nullptr);
+
+    const auto reused = pool.get_stats();
+    CHECK(reused[0].upstream_alloc_count == upstream_before);
+
+    pool.deallocate(b, 64);
+    pool.deallocate(d, 64);
+  }
+
+  TEST_CASE("clear leaves oversized stats untouched") {
+    MemoryPool pool({{64, 4}});
+
+    constexpr size_t kBig = 4096;
+    void* p = pool.allocate(kBig);
+    pool.deallocate(p, kBig);
+
+    auto before = pool.get_oversized_stats();
+    REQUIRE(before.alloc_count == 1u);
+    REQUIRE(before.dealloc_count == 1u);
+
+    pool.clear();
+
+    auto after = pool.get_oversized_stats();
+    CHECK(after.alloc_count == before.alloc_count);
+    CHECK(after.alloc_bytes == before.alloc_bytes);
+    CHECK(after.dealloc_count == before.dealloc_count);
+  }
+
+  TEST_CASE("clear on an empty pool is a no-op") {
+    MemoryPool pool({{64, 4}});
+    pool.clear();
+    pool.clear();
+
+    auto stats = pool.get_stats();
+    CHECK(stats[0].chunk_count == 0u);
+    CHECK(stats[0].upstream_alloc_count == 0u);
+  }
+
+  TEST_CASE("clear with all blocks live keeps every chunk") {
+    MemoryPool pool({{64, 4}});
+
+    std::vector<void*> blocks;
+    for (int i = 0; i < 7; ++i) {
+      blocks.push_back(pool.allocate(64));
+    }
+
+    const auto before = pool.get_stats();
+    REQUIRE(before[0].in_use_blocks == 7u);
+    const uint64_t chunks_before = before[0].chunk_count;
+
+    pool.clear();
+
+    const auto after = pool.get_stats();
+    // Nothing released -- every chunk still holds at least one live block.
+    CHECK(after[0].chunk_count == chunks_before);
+    CHECK(after[0].in_use_blocks == 7u);
+
+    // All seven pointers must still be safe to dereference and deallocate.
+    for (void* p : blocks) {
+      std::memset(p, 0xCC, 64);
+      pool.deallocate(p, 64);
+    }
+  }
+
+  TEST_CASE("clear with chunks count > stack buffer (heap spill path)") {
+    // kStackSlots in clear() is 64; force >64 chunks via tight blocks_per_chunk.
+    MemoryPool pool({{64, 1}});
+
+    constexpr int kAllocations = 200;
+    std::vector<void*> blocks;
+    blocks.reserve(kAllocations);
+    for (int i = 0; i < kAllocations; ++i) {
+      void* p = pool.allocate(64);
+      REQUIRE(p != nullptr);
+      blocks.push_back(p);
+    }
+
+    const auto before = pool.get_stats();
+    REQUIRE(before[0].chunk_count > 64u);
+    REQUIRE(before[0].in_use_blocks == static_cast<uint64_t>(kAllocations));
+
+    // Free half: alternate keep / release so live and dead chunks interleave.
+    for (size_t i = 0; i < blocks.size(); i += 2) {
+      pool.deallocate(blocks[i], 64);
+    }
+
+    pool.clear();
+
+    const auto after = pool.get_stats();
+    // Released chunks are exactly the ones whose single block was freed.
+    CHECK(after[0].chunk_count <= before[0].chunk_count);
+    CHECK(after[0].chunk_count >= static_cast<uint64_t>(kAllocations) / 2u);
+    CHECK(after[0].in_use_blocks == static_cast<uint64_t>(kAllocations) / 2u);
+
+    for (size_t i = 1; i < blocks.size(); i += 2) {
+      std::memset(blocks[i], 0x77, 64);
+      pool.deallocate(blocks[i], 64);
+    }
+  }
+
+  TEST_CASE("clear racing with concurrent allocate/deallocate keeps live blocks valid") {
+    MemoryPool pool(MemoryPool::default_tiers());
+
+    constexpr int kWorkers = 4;
+    constexpr int kIterations = 2000;
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> error{false};
+
+    auto worker = [&](int seed) {
+      std::mt19937 rng(static_cast<uint32_t>(seed * 1234567u + 1u));
+      std::uniform_int_distribution<size_t> size_dist(1, 4 * 1024);
+      std::vector<std::pair<void*, size_t>> live;
+      live.reserve(64);
+
+      for (int i = 0; i < kIterations && !stop.load(std::memory_order_relaxed); ++i) {
+        const size_t bytes = size_dist(rng);
+        void* p = pool.allocate(bytes);
+        if (p == nullptr) {
+          error.store(true);
+          return;
+        }
+        std::memset(p, static_cast<int>(seed & 0xFF), bytes);
+        live.emplace_back(p, bytes);
+        if (live.size() > 32 || (rng() & 1u)) {
+          auto [ptr, sz] = live.back();
+          live.pop_back();
+          // Verify our pattern survived any concurrent clear() before freeing.
+          for (size_t j = 0; j < sz; ++j) {
+            if (static_cast<uint8_t*>(ptr)[j] != static_cast<uint8_t>(seed & 0xFF)) {
+              error.store(true);
+              break;
+            }
+          }
+          pool.deallocate(ptr, sz);
+        }
+      }
+
+      for (auto& [ptr, sz] : live) {
+        pool.deallocate(ptr, sz);
+      }
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(kWorkers);
+    for (int i = 0; i < kWorkers; ++i) {
+      threads.emplace_back(worker, i + 1);
+    }
+
+    // Periodically clear() while workers are running.
+    for (int round = 0; round < 50; ++round) {
+      std::this_thread::sleep_for(std::chrono::microseconds(200));
+      pool.clear();
+    }
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : threads) t.join();
+
+    CHECK_FALSE(error.load());
+
+    auto stats = pool.get_stats();
+    uint64_t hits = 0;
+    uint64_t deallocs = 0;
+    for (const auto& s : stats) {
+      hits += s.hit_count;
+      deallocs += s.deallocate_count;
+    }
+    CHECK(hits == deallocs);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // TEST SUITE: geometric chunk growth
 // ---------------------------------------------------------------------------
 
@@ -508,7 +790,11 @@ TEST_SUITE("base-MemoryPool - concurrency") {
     auto stats = pool.get_stats();
 
     CHECK(stats[0].upstream_alloc_count <= static_cast<uint64_t>(kThreads));
-    CHECK(stats[0].chunk_count == stats[0].upstream_alloc_count);
+    // upstream_alloc_count counts every successful ::operator new (including
+    // chunks discarded by the concurrent-grow race), whereas chunk_count is
+    // the current owned chunks.  In a race the former can exceed the latter.
+    CHECK(stats[0].chunk_count <= stats[0].upstream_alloc_count);
+    CHECK(stats[0].chunk_count >= 1u);
     CHECK(stats[0].upstream_alloc_bytes >= 64u);
 
     for (void* p : blocks) {
