@@ -35,16 +35,7 @@
 #include <version>
 
 #include "./base/logger.h"
-
-#if defined(__cpp_lib_memory_resource) && defined(__linux__)
-#define VLINK_BYTES_USE_MEMORY_POOL 1
-#else
-#define VLINK_BYTES_USE_MEMORY_POOL 0
-#endif
-
-#if VLINK_BYTES_USE_MEMORY_POOL
-#include <memory_resource>
-#endif
+#include "./base/memory_pool.h"
 
 #define VLINK_BYTES_MEM_RESET 0
 
@@ -105,47 +96,14 @@ static auto& bytes_compress_cache() noexcept {
   return compress_cache;
 }
 
-#if VLINK_BYTES_USE_MEMORY_POOL
-static auto& bytes_heap_pool() noexcept {
-  static std::pmr::synchronized_pool_resource memory_pool;
-
-  return memory_pool;
-}
-#endif
-
 // Bytes
 uint8_t* Bytes::bytes_malloc(size_t size) noexcept {
-#if VLINK_BYTES_USE_MEMORY_POOL
-  try {
-    return static_cast<uint8_t*>(bytes_heap_pool().allocate(size));
-  } catch (const std::bad_alloc&) {
-    return nullptr;
-  }
-#else
-  return static_cast<uint8_t*>(std::malloc(size));
-#endif
+  return static_cast<uint8_t*>(MemoryPool::global_instance().allocate(size));
 }
 
-void Bytes::bytes_free(uint8_t* ptr, size_t size) noexcept {
-#if VLINK_BYTES_USE_MEMORY_POOL
-  bytes_heap_pool().deallocate(ptr, size);
-#else
-  (void)size;
-  std::free(ptr);
-#endif
-}
+void Bytes::bytes_free(uint8_t* ptr, size_t size) noexcept { MemoryPool::global_instance().deallocate(ptr, size); }
 
-void Bytes::init_memory_pool() noexcept {
-#if VLINK_BYTES_USE_MEMORY_POOL
-  bytes_heap_pool();
-#endif
-}
-
-void Bytes::release_memory_pool() noexcept {
-#if VLINK_BYTES_USE_MEMORY_POOL
-  bytes_heap_pool().release();
-#endif
-}
+void Bytes::init_memory_pool() noexcept { (void)MemoryPool::global_instance(true); }
 
 Bytes Bytes::create(size_t size, uint8_t offset) noexcept {
 #if defined(__arm__) || defined(__x86__) || defined(__i386__)

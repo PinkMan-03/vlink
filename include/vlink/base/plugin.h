@@ -268,7 +268,8 @@ class VLINK_EXPORT Plugin final {
   static bool destroy(std::shared_ptr<PluginEntry> plugin_entry, Handle handle,
                       const std::string& function_name = VLINK_MACRO_STRING_GET(VLINK_PLUGIN_DESTROY_FUNC_NAME));
 
-  std::unique_ptr<struct PluginImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(Plugin)
 };

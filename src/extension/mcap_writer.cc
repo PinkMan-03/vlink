@@ -52,8 +52,8 @@
 
 namespace vlink {
 
-// McapWriterImpl
-struct McapWriterImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// McapWriter::Impl
+struct McapWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   // UrlMsgInfo
   struct UrlMsgInfo final {
     int index{0};
@@ -135,7 +135,7 @@ struct McapWriterImpl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
 
 // McapWriter
 McapWriter::McapWriter(const std::string& path, const Config& config)
-    : BagWriter(path, config), impl_{std::make_unique<McapWriterImpl>()} {
+    : BagWriter(path, config), impl_{std::make_unique<Impl>()} {
   set_name("McapWriter");
 
   impl_->url_map.reserve(128);
@@ -678,7 +678,7 @@ void McapWriter::close() {
 
   mcap::Status status;
 
-  std::vector<McapWriterImpl::UrlMsgInfo> msg_info_list;
+  std::vector<Impl::UrlMsgInfo> msg_info_list;
   msg_info_list.reserve(impl_->url_map.size());
 
   {
@@ -798,13 +798,13 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
   }
 
   // insert url
-  auto total_url_iter_ret = impl_->total_url_map.try_emplace(url, McapWriterImpl::UrlMsgInfo());
+  auto total_url_iter_ret = impl_->total_url_map.try_emplace(url, Impl::UrlMsgInfo());
 
-  auto url_iter_ret = impl_->url_map.try_emplace(url, McapWriterImpl::UrlMsgInfo());
+  auto url_iter_ret = impl_->url_map.try_emplace(url, Impl::UrlMsgInfo());
 
-  McapWriterImpl::UrlMsgInfo& total_url_msg_info = total_url_iter_ret.first->second;
+  Impl::UrlMsgInfo& total_url_msg_info = total_url_iter_ret.first->second;
 
-  McapWriterImpl::UrlMsgInfo& url_msg_info = url_iter_ret.first->second;
+  Impl::UrlMsgInfo& url_msg_info = url_iter_ret.first->second;
   auto resolved_schema_type = SchemaData::resolve_type(schema_type, ser_type);
   std::string next_ser_type = total_url_msg_info.ser_type;
   SchemaType next_schema_type = total_url_msg_info.schema_type;

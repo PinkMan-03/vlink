@@ -45,8 +45,8 @@ namespace vlink {
 
 [[maybe_unused]] static std::atomic<uint32_t> global_graph_task_count = 0;
 
-// GraphTaskImpl
-struct GraphTaskImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// GraphTask::Impl
+struct GraphTask::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) std::atomic<size_t> pending_index{0};
   alignas(64) std::atomic<bool> is_ready{false};
   alignas(64) std::atomic<bool> is_enable{false};
@@ -281,7 +281,7 @@ std::vector<std::weak_ptr<GraphTask>> GraphTask::get_succeed_task_list() const {
 
 bool GraphTask::is_condition_task() const { return impl_->is_condition_task; }
 
-GraphTask::GraphTask(Callback&& callback, int condition_number) : impl_(std::make_unique<GraphTaskImpl>()) {
+GraphTask::GraphTask(Callback&& callback, int condition_number) : impl_(std::make_unique<Impl>()) {
   impl_->name = "Task_" + std::to_string(global_graph_task_count.fetch_add(1));
   impl_->condition_number = condition_number;
   impl_->is_condition_task = false;
@@ -289,14 +289,14 @@ GraphTask::GraphTask(Callback&& callback, int condition_number) : impl_(std::mak
 }
 
 GraphTask::GraphTask(const std::string& name, Callback&& callback, int condition_number)
-    : impl_(std::make_unique<GraphTaskImpl>()) {
+    : impl_(std::make_unique<Impl>()) {
   impl_->name = name;
   impl_->condition_number = condition_number;
   impl_->is_condition_task = false;
   impl_->callback = std::move(callback);
 }
 
-GraphTask::GraphTask(ConditionCallback&& callback, int condition_number) : impl_(std::make_unique<GraphTaskImpl>()) {
+GraphTask::GraphTask(ConditionCallback&& callback, int condition_number) : impl_(std::make_unique<Impl>()) {
   impl_->name = "Task_" + std::to_string(global_graph_task_count.fetch_add(1));
   impl_->condition_number = condition_number;
   impl_->is_condition_task = true;
@@ -304,7 +304,7 @@ GraphTask::GraphTask(ConditionCallback&& callback, int condition_number) : impl_
 }
 
 GraphTask::GraphTask(const std::string& name, ConditionCallback&& callback, int condition_number)
-    : impl_(std::make_unique<GraphTaskImpl>()) {
+    : impl_(std::make_unique<Impl>()) {
   impl_->name = name;
   impl_->condition_number = condition_number;
   impl_->is_condition_task = true;

@@ -41,7 +41,7 @@ extern "C" {
 
 [[maybe_unused]] static constexpr size_t kMaxTaskSize = 100000U;
 
-struct VideoDecoderImpl {
+struct VideoDecoder::Impl {
 #ifdef VLINK_ENABLE_VIEWER_FFMPEG
   const AVCodec* codec{nullptr};
   AVCodecParserContext* parser_ctx{nullptr};
@@ -73,7 +73,7 @@ struct VideoDecoderImpl {
   std::mutex mtx;
 };
 
-FFmpegDecoder::FFmpegDecoder(const Config& config) : impl_(std::make_unique<VideoDecoderImpl>()) {
+FFmpegDecoder::FFmpegDecoder(const Config& config) : impl_(std::make_unique<Impl>()) {
   impl_->config = config;
 
   if (impl_->config.in_type == InType::kUnknown) {

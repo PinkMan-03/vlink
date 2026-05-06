@@ -84,8 +84,8 @@ using TimeSub = SecuritySubscriber<pb::proxy::Time>;
 using InfoSub = SecuritySubscriber<pb::proxy::InfoList>;
 using ControlPub = SecurityPublisher<pb::proxy::Control>;
 
-// ProxyAPIImpl
-struct ProxyAPIImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// ProxyAPI::Impl
+struct ProxyAPI::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<uint32_t> control_error_count{0};
   std::atomic<ProxyAPI::Mode> mode{ProxyAPI::kOffline};
   std::atomic<ProxyAPI::Error> error{ProxyAPI::kNoError};
@@ -143,7 +143,7 @@ struct ProxyAPIImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
 };
 
 // ProxyAPI
-ProxyAPI::ProxyAPI(const Config& config) : impl_(std::make_unique<ProxyAPIImpl>()) {
+ProxyAPI::ProxyAPI(const Config& config) : impl_(std::make_unique<Impl>()) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
   set_name("ProxyAPI");

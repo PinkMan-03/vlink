@@ -54,8 +54,8 @@ struct ThreadPoolGlobal final {
   ThreadPoolGlobal() = default;
 };
 
-// ThreadPoolImpl
-struct ThreadPoolImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// ThreadPool::Impl
+struct ThreadPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   using NormalQueue = std::queue<ThreadPool::Callback>;
   using LockfreeQueue = MpmcQueue<ThreadPool::Callback>;
 
@@ -75,14 +75,14 @@ struct ThreadPoolImpl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
 };
 
 // ThreadPool
-ThreadPool::ThreadPool(size_t thread_count) : impl_(std::make_unique<ThreadPoolImpl>()) {
+ThreadPool::ThreadPool(size_t thread_count) : impl_(std::make_unique<Impl>()) {
   impl_->name = "ThreadPool_" + std::to_string(ThreadPoolGlobal::get().instance_index++);
   impl_->thread_count = thread_count;
 
   init();
 }
 
-ThreadPool::ThreadPool(size_t thread_count, Type type) : impl_(std::make_unique<ThreadPoolImpl>()) {
+ThreadPool::ThreadPool(size_t thread_count, Type type) : impl_(std::make_unique<Impl>()) {
   impl_->name = "ThreadPool_" + std::to_string(ThreadPoolGlobal::get().instance_index++);
   impl_->thread_count = thread_count;
   impl_->type = type;

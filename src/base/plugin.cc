@@ -61,15 +61,15 @@ struct PluginEntry final {
   Logger::Level log_level{Logger::kTrace};
 };
 
-// PluginImpl
-struct PluginImpl final {
+// Plugin::Impl
+struct Plugin::Impl final {
   Logger::Level log_level{Logger::kTrace};
   std::shared_mutex mtx;
   std::unordered_map<std::string, std::shared_ptr<PluginEntry>> plugin_map;
 };
 
 // Plugin
-Plugin::Plugin() : impl_(std::make_unique<PluginImpl>()) {}
+Plugin::Plugin() : impl_(std::make_unique<Impl>()) {}
 
 void Plugin::set_log_level(Logger::Level level) { impl_->log_level = level; }
 

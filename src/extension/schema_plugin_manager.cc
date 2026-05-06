@@ -30,7 +30,7 @@
 
 namespace vlink {
 
-struct SchemaPluginManagerImpl {
+struct SchemaPluginManager::Impl {
   Plugin plugin;
   std::shared_ptr<SchemaPluginInterface> interface;
 };
@@ -44,8 +44,7 @@ bool SchemaPluginManager::is_valid() const { return impl_->interface != nullptr;
 
 std::shared_ptr<SchemaPluginInterface> SchemaPluginManager::get_interface() const { return impl_->interface; }
 
-SchemaPluginManager::SchemaPluginManager(std::string schema_plugin_path)
-    : impl_(std::make_unique<SchemaPluginManagerImpl>()) {
+SchemaPluginManager::SchemaPluginManager(std::string schema_plugin_path) : impl_(std::make_unique<Impl>()) {
   if (schema_plugin_path.empty()) {
     schema_plugin_path = Utils::get_env("VLINK_SCHEMA_PLUGIN");
 

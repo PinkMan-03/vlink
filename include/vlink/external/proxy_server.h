@@ -246,7 +246,8 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
 
   void update_all();
 
-  std::unique_ptr<struct ProxyServerImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(ProxyServer)
 };

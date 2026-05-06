@@ -75,8 +75,8 @@ struct GlobalWriter final {
   VLINK_DISALLOW_COPY_AND_ASSIGN(GlobalWriter)
 };
 
-// BagWriterImpl
-struct BagWriterImpl final {
+// BagWriter::Impl
+struct BagWriter::Impl final {
   std::unordered_map<int, std::string> index_to_url_map;
   std::unordered_map<int, std::string> index_to_ser_map;
   std::unordered_map<std::string, int> url_to_index_map;
@@ -150,7 +150,7 @@ std::shared_ptr<BagWriter> BagWriter::filter_get(const std::string& path) {
 
 BagWriter* BagWriter::global_get() { return GlobalWriter::get().instance.get(); }
 
-BagWriter::BagWriter(const std::string& path, const Config& config) : impl_(std::make_unique<BagWriterImpl>()) {
+BagWriter::BagWriter(const std::string& path, const Config& config) : impl_(std::make_unique<Impl>()) {
   (void)path;
   (void)config;
 

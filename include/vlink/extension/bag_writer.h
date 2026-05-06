@@ -329,7 +329,8 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
   static std::string get_format_date(SystemClock* current = nullptr, bool file_format = false);
 
  private:
-  std::unique_ptr<struct BagWriterImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(BagWriter)
 };

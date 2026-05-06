@@ -127,7 +127,8 @@ class VLINK_EXPORT DiscoveryReporter : public MessageLoop {
 
   static const std::string& get_app_name();
 
-  std::unique_ptr<struct DiscoveryReporterImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(DiscoveryReporter)
 };

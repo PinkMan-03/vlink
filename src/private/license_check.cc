@@ -30,14 +30,14 @@
 
 namespace vlink {
 
-// LicenseCheckImpl
-struct LicenseCheckImpl final {
+// LicenseCheck::Impl
+struct LicenseCheck::Impl final {
   Timer check_timer;
   ElapsedTimer elapsed_timer;
 };
 
 // LicenseCheck
-LicenseCheck::LicenseCheck() : impl_(std::make_unique<LicenseCheckImpl>()) {
+LicenseCheck::LicenseCheck() : impl_(std::make_unique<Impl>()) {
   set_name("LicenseCheck");
 
   impl_->check_timer.set_interval(1000 * 10);

@@ -116,8 +116,8 @@ struct ProxyServerGlobal final {
   ProxyServerGlobal() = default;
 };
 
-// ProxyServerImpl
-struct ProxyServerImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// ProxyServer::Impl
+struct ProxyServer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<uint32_t> control_id{0};
   std::atomic<pb::proxy::Mode> mode{pb::proxy::OFFLINE};
 
@@ -172,7 +172,7 @@ struct ProxyServerImpl final {  // NOLINT(clang-analyzer-optin.performance.Paddi
 };
 
 // ProxyServer
-ProxyServer::ProxyServer(const Config& config) : impl_(std::make_unique<ProxyServerImpl>()) {
+ProxyServer::ProxyServer(const Config& config) : impl_(std::make_unique<Impl>()) {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
   set_name("ProxyServer");

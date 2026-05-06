@@ -125,7 +125,7 @@ auto future = loop.invoke_task_with_priority(
 
 ## Schedule::Status 生命周期
 
-`Schedule::Status` 是一个移动语义的 RAII 对象，内部通过 `shared_ptr<StatusImpl>` 管理状态。即使 Status 对象被销毁，已注册的回调仍然有效（因为任务包装器持有 shared_ptr）。
+`Schedule::Status` 是一个移动语义的 RAII 对象，内部通过 `shared_ptr<Status::Impl>` 管理状态。即使 Status 对象被销毁，已注册的回调仍然有效（因为任务包装器持有 shared_ptr）。
 
 ## 性能考量
 

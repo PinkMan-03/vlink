@@ -141,7 +141,8 @@ class VLINK_EXPORT BagReaderProcessor {
 
   void on_exec(bool at_end);
 
-  std::unique_ptr<struct BagReaderProcessorImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace vlink

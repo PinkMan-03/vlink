@@ -150,7 +150,8 @@ class VLINK_EXPORT Semaphore final {
   [[nodiscard]] size_t get_count() const noexcept;
 
  private:
-  std::unique_ptr<struct SemaphoreImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(Semaphore)
 };

@@ -30,8 +30,8 @@
 
 namespace vlink {
 
-// SemaphoreImpl
-struct SemaphoreImpl final {
+// Semaphore::Impl
+struct Semaphore::Impl final {
   mutable std::mutex mtx;
   vlink::condition_variable cv;
   size_t count{0};
@@ -40,7 +40,7 @@ struct SemaphoreImpl final {
 };
 
 // Semaphore
-Semaphore::Semaphore(size_t count) noexcept : impl_(std::make_unique<SemaphoreImpl>()) {
+Semaphore::Semaphore(size_t count) noexcept : impl_(std::make_unique<Impl>()) {
   impl_->count = count;
   impl_->initial_count = count;
 }

@@ -21,4 +21,5 @@ __pycache__
 
 .claude
 .codex
+.agents
 CLAUDE.md

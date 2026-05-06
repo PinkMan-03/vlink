@@ -37,8 +37,8 @@
 
 namespace vlink {
 
-// WheelTimerImpl
-struct WheelTimerImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// WheelTimer::Impl
+struct WheelTimer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   // Handler
   struct Handler final {
     WheelTimer::Key key{-1};
@@ -79,7 +79,7 @@ struct WheelTimerImpl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
 };
 
 // WheelTimer
-WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(std::make_unique<WheelTimerImpl>()) {
+WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(std::make_unique<Impl>()) {
   if VUNLIKELY (slots == 0 || interval_ms == 0) {
     VLOG_F("WheelTimer: Slots and interval_ms must be greater than 0.");
     return;
@@ -134,7 +134,7 @@ void WheelTimer::stop() {
     impl_->is_running = false;
     impl_->paused_flag = false;
     impl_->current_slot = 0;
-    impl_->wheels = std::vector<std::list<WheelTimerImpl::Handler>>(impl_->slots);
+    impl_->wheels = std::vector<std::list<Impl::Handler>>(impl_->slots);
     impl_->timer_index.clear();
   }
 }
@@ -335,7 +335,7 @@ void WheelTimer::run() {
             auto new_rounds = static_cast<uint32_t>(rounds64);
             auto new_slot = (impl_->current_slot + repeat_ticks_mod) % impl_->slots;
 
-            WheelTimerImpl::Handler new_handler(it->key, new_rounds, std::move(it->callback), it->repeat_interval_ms);
+            Impl::Handler new_handler(it->key, new_rounds, std::move(it->callback), it->repeat_interval_ms);
             auto& new_list = impl_->wheels[new_slot];
 
             new_list.emplace_back(std::move(new_handler));

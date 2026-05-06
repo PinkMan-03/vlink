@@ -878,7 +878,12 @@ int start_eproto_pub(const std::string& url, const std::string& proto_dir, const
     }
 
     raw_data = vlink::Bytes::create(root_msg->ByteSizeLong());
-    root_msg->SerializePartialToArray(raw_data.data(), raw_data.size());
+
+    bool ret = root_msg->SerializePartialToArray(raw_data.data(), raw_data.size());
+
+    if VUNLIKELY (!ret) {
+      raw_data.clear();
+    }
   }
 
   if (native_mode) {

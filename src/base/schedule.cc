@@ -47,7 +47,7 @@ Schedule::Config::Config(uint32_t _delay_ms, uint16_t _priority, uint32_t _sched
       execution_timeout_ms(_execution_timeout_ms) {}
 
 // Schedule::Status
-Schedule::Status::Status() : impl_(std::make_shared<Schedule::Status::StatusImpl>()) { impl_->is_valid = true; }
+Schedule::Status::Status() : impl_(std::make_shared<Schedule::Status::Impl>()) { impl_->is_valid = true; }
 
 Schedule::Status::~Status() = default;
 

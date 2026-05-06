@@ -212,7 +212,8 @@ class VLINK_EXPORT WheelTimer {
  private:
   void run();
 
-  std::unique_ptr<struct WheelTimerImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(WheelTimer)
 };

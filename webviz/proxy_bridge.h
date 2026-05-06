@@ -173,7 +173,8 @@ class ProxyBridge {
   void dispatch_data_callback(const ProxyAPI::Data& data);
 
  private:
-  std::unique_ptr<struct ProxyBridgeImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(ProxyBridge)
 };

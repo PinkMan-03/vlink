@@ -48,8 +48,8 @@ struct BagData {
   bool processed{false};
 };
 
-// BagReaderProcessorImpl
-struct BagReaderProcessorImpl final {
+// BagReaderProcessor::Impl
+struct BagReaderProcessor::Impl final {
   std::atomic_bool quit_flag{false};
 
   BagReaderProcessor::Config config;
@@ -66,7 +66,7 @@ struct BagReaderProcessorImpl final {
 };
 
 // BagReaderProcessor
-BagReaderProcessor::BagReaderProcessor(const Config& config) : impl_(std::make_unique<BagReaderProcessorImpl>()) {
+BagReaderProcessor::BagReaderProcessor(const Config& config) : impl_(std::make_unique<Impl>()) {
   impl_->config = config;
 
   impl_->thread = std::thread(&BagReaderProcessor::on_run, this);

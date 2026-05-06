@@ -68,7 +68,7 @@
 |------|------|--------|
 | `VLINK_TMP_DIR` | 临时文件目录覆盖 | 平台默认 |
 | `VLINK_LOCK_DIR` | 锁文件目录 | 同临时目录 |
-| `VLINK_BYTES_USE_MEMORY_POOL` | 启用 Bytes 内存池 (设为 `1`) | (标准分配器) |
+| `VLINK_MEMORY_LEVEL` | `MemoryPool` 默认分级（1..6，越大每档预留 chunk 越多） | 3 (Balanced) |
 
 ## 关键代码分析
 
@@ -159,7 +159,7 @@ export VLINK_PLUGIN_DIR=/usr/lib/vlink/plugins
 
 # 系统
 export VLINK_TMP_DIR=/var/run/vlink
-export VLINK_BYTES_USE_MEMORY_POOL=1
+export VLINK_MEMORY_LEVEL=3
 export VLINK_INTRA_BIND=1
 ```
 
@@ -197,5 +197,5 @@ make example_url_environment
 - `VLINK_LOG_CONSOLE_LEVEL` 可以在运行时通过 `Logger::set_console_level()` 动态调整。
 - `VLINK_BAG_PATH` 配合 CI/CD 可以自动化录制测试数据，用于回归测试和问题复现。
 - 安全相关的环境变量（`VLINK_SSL_*`）建议在生产环境中通过 Secret 管理工具注入，不要硬编码在配置文件中。
-- `VLINK_BYTES_USE_MEMORY_POOL=1` 在高频小消息场景下可以显著减少堆分配次数，提升性能。
+- `VLINK_MEMORY_LEVEL` 控制 `vlink::MemoryPool` 的分级 chunk 配置（默认 3 Balanced）。`Bytes::init_memory_pool()` 会以 `gen_by_env=true` 触发全局池构造，从而读取该变量；高频小消息场景可调到 4-5 增加预留 block 数。
 - `Utils::set_env` 的 `force=false` 参数允许应用程序设置默认值，同时允许部署环境通过 shell 变量覆盖。

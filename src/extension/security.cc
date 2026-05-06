@@ -40,8 +40,8 @@ namespace vlink {
 [[maybe_unused]] static constexpr const char* kDefaultAesKey = "vlink";
 [[maybe_unused]] static constexpr const char* kAesIV = "thun.lu@zohomail.cn";
 
-// SecurityImpl
-struct SecurityImpl final {
+// Security::Impl
+struct Security::Impl final {
   Bytes key;
   Bytes iv;
   std::mutex mtx;
@@ -57,7 +57,7 @@ struct SecurityImpl final {
 #endif
 };
 
-Security::Security() : impl_(std::make_unique<SecurityImpl>()) {
+Security::Security() : impl_(std::make_unique<Impl>()) {
 #ifdef VLINK_ENABLE_SECURITY
   impl_->key = Bytes::from_string(kDefaultAesKey);
   impl_->iv = Bytes::from_string(kAesIV);

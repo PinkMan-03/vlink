@@ -109,5 +109,6 @@ class FFmpegDecoder : protected vlink::MessageLoop {
 #endif
 
  private:
-  std::unique_ptr<struct VideoDecoderImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };

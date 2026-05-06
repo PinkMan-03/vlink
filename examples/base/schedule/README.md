@@ -90,9 +90,9 @@ loop.exec_task(config, []() { throw std::runtime_error("error"); })
 `Schedule::process()` 和 `Schedule::process_with_ret()` 是内部函数，由 `MessageLoop::exec_task()` 调用。它们：
 
 1. 将用户回调包装在一个带超时检测的闭包中
-2. 创建 `shared_ptr<StatusImpl>` 存储所有注册的回调
+2. 创建 `shared_ptr<Status::Impl>` 存储所有注册的回调
 3. 返回 `Status`/`RetStatus` 对象供用户链式注册回调
-4. 任务包装器和 Status 共享 `StatusImpl`，确保即使 Status 被销毁，回调仍有效
+4. 任务包装器和 Status 共享 `Status::Impl`，确保即使 Status 被销毁，回调仍有效
 
 ## 注意事项
 

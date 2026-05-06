@@ -93,8 +93,8 @@ template <typename T>
   }
 }
 
-// DiscoveryReporterImpl
-struct DiscoveryReporterImpl final {
+// DiscoveryReporter::Impl
+struct DiscoveryReporter::Impl final {
   std::unordered_set<NodeImpl*> info_set;
   std::mutex mtx;
   std::vector<std::string> message_list;
@@ -142,7 +142,7 @@ DiscoveryReporter* DiscoveryReporter::global_get() {
   return global.instance.get();
 }
 
-DiscoveryReporter::DiscoveryReporter() : impl_(std::make_unique<DiscoveryReporterImpl>()) {
+DiscoveryReporter::DiscoveryReporter() : impl_(std::make_unique<Impl>()) {
   set_name("DiscoveryReporter");
 
   static std::string native_discovery = Utils::get_env("VLINK_DISCOVER_NATIVE");

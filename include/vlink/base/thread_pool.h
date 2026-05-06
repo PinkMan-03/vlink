@@ -222,7 +222,8 @@ class VLINK_EXPORT ThreadPool {
  private:
   void init();
 
-  std::unique_ptr<struct ThreadPoolImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(ThreadPool)
 };

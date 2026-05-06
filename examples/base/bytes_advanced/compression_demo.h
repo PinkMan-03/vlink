@@ -81,19 +81,20 @@ inline void demo_crc32() {
   VLOG_I("CRC differs: ", (vlink::Bytes::get_crc_32(data3) != crc));
 }
 
-// Demonstrate memory pool initialization and release.
+// Demonstrate memory pool initialization.
+// init_memory_pool() triggers MemoryPool::global_instance(true), so the
+// shared pool's tier configuration follows VLINK_MEMORY_LEVEL (1..6).
+// The pool lives for the duration of the process.
 inline void demo_memory_pool() {
   VLOG_I("--- 8. Memory pool ---");
 
   vlink::Bytes::init_memory_pool();
-  VLOG_I("Memory pool initialized");
+  VLOG_I("Memory pool initialized (VLINK_MEMORY_LEVEL governs tier sizes)");
 
   auto pooled = vlink::Bytes::create(200);
   VLOG_I("Pooled allocation: size=", pooled.size());
 
   pooled.clear();
-  vlink::Bytes::release_memory_pool();
-  VLOG_I("Memory pool released");
 }
 
 }  // namespace compression_demo

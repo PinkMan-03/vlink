@@ -593,7 +593,8 @@ class VLINK_EXPORT Logger final {
 
   void write_to_file(Level level, std::string_view log) noexcept;
 
-  std::unique_ptr<struct LoggerImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   template <Logger::Level LevelT>
   friend class WrapperStream;

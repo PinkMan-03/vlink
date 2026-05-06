@@ -39,8 +39,8 @@
 
 namespace vlink {
 
-// SysSemaphoreImpl
-struct SysSemaphoreImpl final {
+// SysSemaphore::Impl
+struct SysSemaphore::Impl final {
 #if defined(_WIN32) || defined(__CYGWIN__)
   HANDLE handle{nullptr};
 #elif defined(__APPLE__)
@@ -54,7 +54,7 @@ struct SysSemaphoreImpl final {
 };
 
 // SysSemaphore
-SysSemaphore::SysSemaphore(size_t count) : impl_(std::make_unique<SysSemaphoreImpl>()) { impl_->count = count; }
+SysSemaphore::SysSemaphore(size_t count) : impl_(std::make_unique<Impl>()) { impl_->count = count; }
 
 SysSemaphore::~SysSemaphore() {
   if (is_attached()) {

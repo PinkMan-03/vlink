@@ -34,8 +34,8 @@
 
 namespace vlink {
 
-// TimerImpl
-struct TimerImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// Timer::Impl
+struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) std::atomic_bool is_busy{false};
   alignas(64) std::atomic<uint64_t> start_time{0};
   alignas(64) std::atomic<int32_t> remain_loop_count{Timer::kInfinite};
@@ -57,12 +57,12 @@ struct TimerImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
 };
 
 // Timer
-Timer::Timer() : impl_(std::make_unique<TimerImpl>()) {}
+Timer::Timer() : impl_(std::make_unique<Impl>()) {}
 
-Timer::Timer(MessageLoop* message_loop) : impl_(std::make_unique<TimerImpl>()) { attach(message_loop); }
+Timer::Timer(MessageLoop* message_loop) : impl_(std::make_unique<Impl>()) { attach(message_loop); }
 
 Timer::Timer(MessageLoop* message_loop, uint32_t interval_ms, int32_t loop_count, Callback&& callback)
-    : impl_(std::make_unique<TimerImpl>()) {
+    : impl_(std::make_unique<Impl>()) {
   impl_->interval = interval_ms;
   impl_->loop_count = loop_count;
   impl_->remain_loop_count = loop_count;
@@ -71,7 +71,7 @@ Timer::Timer(MessageLoop* message_loop, uint32_t interval_ms, int32_t loop_count
   attach(message_loop);
 }
 
-Timer::Timer(uint32_t interval_ms, int32_t loop_count, Callback&& callback) : impl_(std::make_unique<TimerImpl>()) {
+Timer::Timer(uint32_t interval_ms, int32_t loop_count, Callback&& callback) : impl_(std::make_unique<Impl>()) {
   impl_->interval = interval_ms;
   impl_->loop_count = loop_count;
   impl_->remain_loop_count = loop_count;

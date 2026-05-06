@@ -253,8 +253,8 @@ struct LoggerGlobal final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   LoggerGlobal() = default;
 };
 
-// LoggerImpl
-struct LoggerImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// Logger::Impl
+struct Logger::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic_bool disk_emergency{false};
   std::atomic_bool is_enable_backtrace{false};
 
@@ -482,7 +482,7 @@ bool Logger::is_writable(Level level) noexcept {
   return level >= global_instance.console_level || level >= global_instance.file_level;
 }
 
-Logger::Logger() noexcept : impl_(std::make_unique<LoggerImpl>()) {
+Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
   static auto& global_instance = LoggerGlobal::get();
 
   global_instance.is_busy.store(true, std::memory_order_release);

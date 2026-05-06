@@ -295,12 +295,13 @@ int main() {
     //   Shell: export VLINK_LOCK_DIR=/var/lock/vlink
     show_env("VLINK_LOCK_DIR", "Lock file directory");
 
-    // VLINK_BYTES_USE_MEMORY_POOL: Enable the Bytes memory pool allocator.
-    //   When set to "1", the Bytes type uses a pre-allocated memory pool
-    //   to reduce allocation overhead for frequent small allocations.
-    //   Default: (not set, uses standard allocator)
-    //   Shell: export VLINK_BYTES_USE_MEMORY_POOL=1
-    show_env("VLINK_BYTES_USE_MEMORY_POOL", "Enable Bytes memory pool (1=on)");
+    // VLINK_MEMORY_LEVEL: Tier configuration level for vlink::MemoryPool.
+    //   Integer in [1, 6]; out-of-range or non-numeric values clamp/fallback
+    //   to the default. Higher levels reserve more blocks per tier, trading
+    //   resident footprint for fewer upstream allocations.
+    //   Default: 3 (Balanced)
+    //   Shell: export VLINK_MEMORY_LEVEL=4
+    show_env("VLINK_MEMORY_LEVEL", "MemoryPool tier level (1..6, default 3)");
 
     // Show the current platform temp directory
     VLOG_I("  Platform tmp dir:", vlink::Utils::get_tmp_dir());
@@ -377,7 +378,7 @@ int main() {
     VLOG_I("  # System");
     VLOG_I("  export VLINK_TMP_DIR=/var/run/vlink");
     VLOG_I("  export VLINK_LOCK_DIR=/var/lock/vlink");
-    VLOG_I("  export VLINK_BYTES_USE_MEMORY_POOL=1");
+    VLOG_I("  export VLINK_MEMORY_LEVEL=3");
     VLOG_I("  export VLINK_INTRA_BIND=1");
   }
 

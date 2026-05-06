@@ -1195,6 +1195,11 @@ int check_env(bool available_case, const std::string& prefix) {
       {"VLINK_SCHEMA_PLUGIN", "", "Name of the dynamic plugin that loads Protobuf/FlatBuffers schemas.", false},
       {"VLINK_TMP_DIR", "", "Override directory used for temporary files.", false},
       {"VLINK_LOCK_DIR", "", "Override directory used for singleton lock files.", false},
+      {"VLINK_MEMORY_LEVEL", "",
+       "Selects the MemoryPool default-tier preset (1..6, default 3). Higher levels keep more blocks per chunk for "
+       "the Bytes allocator -- more resident memory, fewer upstream chunk allocations. Honoured only when "
+       "Bytes::init_memory_pool() is called at startup.",
+       false},
       {"VLINK_PLUGIN_DIR", "", "Directory searched by vlink::Plugin when loading dynamic modules.", false},
       {"VLINK_URL_PLUGINS", "",
        "Semicolon separated transport plugin library names to dlopen on start (e.g. vlink-zenoh).", false},

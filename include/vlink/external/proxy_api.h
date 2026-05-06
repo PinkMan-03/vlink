@@ -739,7 +739,8 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
 
   void process_error(Error error);
 
-  std::unique_ptr<struct ProxyAPIImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(ProxyAPI)
 };

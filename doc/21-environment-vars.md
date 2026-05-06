@@ -37,6 +37,7 @@
 | `VLINK_URL_REMAP`       | 文件路径 | URL 重映射 JSON 文件路径（子串匹配，详见 [传输后端 7.7](07-transport.md#77-url-重映射)） |
 | `VLINK_INTRA_BIND`      | 字符串   | 把所有 `intra://` URL 重定向到其他 scheme（值为 `shm`、`dds` 等；源码 `src/impl/url.cc:392`）；不同于 `VLINK_DDS_BIND` 的"仅 DDS 家族互转"语义 |
 | `VLINK_QOS_CONFIG`      | 文件路径 | QoS 配置文件路径                                                  |
+| `VLINK_MEMORY_LEVEL`    | 数字     | `vlink::MemoryPool` 默认 8 阶金字塔的分级（`1`..`6`，默认 `3` Balanced；越大每档预留 block 越多）。仅在首次构造全局池时读取，由 `Bytes::init_memory_pool()` / `MemoryPool::global_instance(true)` 触发。 |
 
 ```bash
 # 设置多个传输后端插件（分号分隔，只写基础名，不含 lib 前缀和 .so 后缀）

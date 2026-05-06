@@ -544,7 +544,8 @@ class VLINK_EXPORT MessageLoop {
   bool process_timer_task(int64_t& next_sleep_time);
 
   friend Timer;
-  std::unique_ptr<struct MessageLoopImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(MessageLoop)
 };

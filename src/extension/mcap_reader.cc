@@ -53,8 +53,8 @@ namespace vlink {
 
 [[maybe_unused]] static constexpr size_t kMaxTaskSize = 50000U;
 
-// McapReaderImpl
-struct McapReaderImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// McapReader::Impl
+struct McapReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<BagReader::Status> status{McapReader::kStoped};
   std::atomic_bool stop_flag{false};
   std::atomic_bool pause_flag{false};
@@ -130,7 +130,7 @@ struct McapReaderImpl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
 
 // McapReader
 McapReader::McapReader(const std::string& path, bool read_only, bool try_to_fix)
-    : BagReader(path, read_only, try_to_fix), impl_{std::make_unique<McapReaderImpl>()} {
+    : BagReader(path, read_only, try_to_fix), impl_{std::make_unique<Impl>()} {
   set_name("McapReader");
 
   impl_->url_to_ser_map.reserve(128);
@@ -713,7 +713,7 @@ void McapReader::do_pause() {
 }
 
 void McapReader::prepare_file(void* file) {
-  auto* wrapper_file = static_cast<McapReaderImpl::WrapperFile*>(file);
+  auto* wrapper_file = static_cast<Impl::WrapperFile*>(file);
 
   wrapper_file->has_completed = true;
 
@@ -1154,7 +1154,7 @@ void McapReader::prepare_file(void* file) {
 }
 
 void McapReader::open(const std::string& path) {
-  auto to_open = [this](McapReaderImpl::WrapperFile& wrapper_file) {
+  auto to_open = [this](Impl::WrapperFile& wrapper_file) {
     mcap::Status status;
 
     wrapper_file.reader = std::make_unique<mcap::McapReader>();
@@ -1269,7 +1269,7 @@ void McapReader::open(const std::string& path) {
             return;
           }
 
-          McapReaderImpl::WrapperFile wrapper_file;
+          Impl::WrapperFile wrapper_file;
           wrapper_file.path = file_db_str;
           wrapper_file.index = file_index;
 
@@ -1438,7 +1438,7 @@ void McapReader::open(const std::string& path) {
         return;
       }
     } else {
-      McapReaderImpl::WrapperFile wrapper_file;
+      Impl::WrapperFile wrapper_file;
       wrapper_file.path = impl_->path;
 
       to_open(wrapper_file);

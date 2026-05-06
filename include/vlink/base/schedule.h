@@ -51,7 +51,7 @@
  *
  * @note
  * - @c Status is move-only; copying is disabled.  The internal state is reference-counted
- *   via @c std::shared_ptr<StatusImpl>, so it is safe to return by value.
+ *   via @c std::shared_ptr<Impl>, so it is safe to return by value.
  * - @c RetStatus adds @c on_then (fires when callback returns @c true) and @c on_else
  *   (fires when callback returns @c false).
  * - Callbacks are invoked from the @c MessageLoop thread.
@@ -225,7 +225,7 @@ struct VLINK_EXPORT Schedule final {
    protected:
     friend Schedule;
 
-    struct StatusImpl final {
+    struct Impl final {
       std::atomic_bool is_valid{false};
       std::recursive_mutex mtx;
       Callback schedule_timeout_callback;
@@ -235,7 +235,7 @@ struct VLINK_EXPORT Schedule final {
       std::vector<RetCallback> then_callback_list;
     };
 
-    std::shared_ptr<StatusImpl> impl_;
+    std::shared_ptr<Impl> impl_;
   };
 
   /**

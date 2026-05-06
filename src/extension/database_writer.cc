@@ -57,8 +57,8 @@ namespace vlink {
 
 static constexpr int kSyncWriteInterval = 1000;  // ms
 
-// DatabaseWriterImpl
-struct DatabaseWriterImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// DatabaseWriter::Impl
+struct DatabaseWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   // UrlMsgInfo
   struct UrlMsgInfo final {
     int index{0};
@@ -156,7 +156,7 @@ struct DatabaseWriterImpl final {  // NOLINT(clang-analyzer-optin.performance.Pa
 
 // DatabaseWriter
 DatabaseWriter::DatabaseWriter(const std::string& path, const Config& config)
-    : BagWriter(path, config), impl_(std::make_unique<DatabaseWriterImpl>()) {
+    : BagWriter(path, config), impl_(std::make_unique<Impl>()) {
   set_name("DatabaseWriter");
 
   impl_->url_map.reserve(128);
@@ -1468,10 +1468,10 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
     }
   }
 
-  auto total_url_iter_ret = impl_->total_url_map.try_emplace(url, DatabaseWriterImpl::UrlMsgInfo());
-  auto url_iter_ret = impl_->url_map.try_emplace(url, DatabaseWriterImpl::UrlMsgInfo());
-  DatabaseWriterImpl::UrlMsgInfo& total_url_msg_info = total_url_iter_ret.first->second;
-  DatabaseWriterImpl::UrlMsgInfo& url_msg_info = url_iter_ret.first->second;
+  auto total_url_iter_ret = impl_->total_url_map.try_emplace(url, Impl::UrlMsgInfo());
+  auto url_iter_ret = impl_->url_map.try_emplace(url, Impl::UrlMsgInfo());
+  Impl::UrlMsgInfo& total_url_msg_info = total_url_iter_ret.first->second;
+  Impl::UrlMsgInfo& url_msg_info = url_iter_ret.first->second;
   auto resolved_schema_type = SchemaData::resolve_type(schema_type, ser_type);
 
   std::string next_ser_type = total_url_msg_info.ser_type;

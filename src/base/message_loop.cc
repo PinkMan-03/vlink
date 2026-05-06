@@ -72,8 +72,8 @@ struct MessageLoopGlobal final {
   MessageLoopGlobal() = default;
 };
 
-// MessageLoopImpl
-struct MessageLoopImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// MessageLoop::Impl
+struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   using NormalTaskTuple = std::tuple<uint32_t, MessageLoop::Callback>;
   using LockfreeTaskTuple = std::tuple<uint32_t, MessageLoop::Callback>;
   using PriorityTaskTuple = std::tuple<uint32_t, uint32_t, uint32_t, MessageLoop::Callback>;
@@ -121,13 +121,13 @@ struct MessageLoopImpl final {  // NOLINT(clang-analyzer-optin.performance.Paddi
 };
 
 // MessageLoop
-MessageLoop::MessageLoop() : impl_(std::make_unique<MessageLoopImpl>()) {
+MessageLoop::MessageLoop() : impl_(std::make_unique<Impl>()) {
   impl_->name = "MessageLoop_" + std::to_string(MessageLoopGlobal::get().instance_index++);
 
   impl_->normal_queue.emplace();
 }
 
-MessageLoop::MessageLoop(Type type) : impl_(std::make_unique<MessageLoopImpl>()) {
+MessageLoop::MessageLoop(Type type) : impl_(std::make_unique<Impl>()) {
   impl_->name = "MessageLoop_" + std::to_string(MessageLoopGlobal::get().instance_index++);
   impl_->type = type;
 
@@ -592,9 +592,9 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority) {
             return false;
           }
         } else if (impl_->strategy == kPopStrategy) {
-          MessageLoopImpl::LockfreeTaskTuple temp_task;
+          Impl::LockfreeTaskTuple temp_task;
 
-          bool ret = impl_->lockfree_queue->try_pop<MessageLoopImpl::LockfreeQueue::kNoBehavior>(temp_task);
+          bool ret = impl_->lockfree_queue->try_pop<Impl::LockfreeQueue::kNoBehavior>(temp_task);
           (void)ret;
           (void)temp_task;
 
@@ -615,9 +615,9 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority) {
                 return false;
               }
 
-              MessageLoopImpl::LockfreeTaskTuple temp_task;
+              Impl::LockfreeTaskTuple temp_task;
 
-              bool ret = impl_->lockfree_queue->try_pop<MessageLoopImpl::LockfreeQueue::kNoBehavior>(temp_task);
+              bool ret = impl_->lockfree_queue->try_pop<Impl::LockfreeQueue::kNoBehavior>(temp_task);
               (void)ret;
               (void)temp_task;
 
@@ -710,7 +710,7 @@ bool MessageLoop::push_lockfree_task(Callback&& callback) {
     start_time = get_current_time<std::chrono::steady_clock, std::chrono::milliseconds, uint32_t>();
   }
 
-  if VUNLIKELY (!impl_->lockfree_queue->try_push<MessageLoopImpl::LockfreeQueue::kNoBehavior>(
+  if VUNLIKELY (!impl_->lockfree_queue->try_push<Impl::LockfreeQueue::kNoBehavior>(
                     std::forward_as_tuple(start_time, std::move(callback)))) {
     CLOG_E("MessageLoop: Failed to push lockfree task (%s).", impl_->name.c_str());
     return false;
@@ -776,7 +776,7 @@ bool MessageLoop::process_normal_task(bool block) {
   [[maybe_unused]] bool is_timeout = true;
   int64_t sleep_time = -1;
 
-  MessageLoopImpl::NormalQueue temp_queue;
+  Impl::NormalQueue temp_queue;
 
   std::unique_lock lock(impl_->mtx);
 
@@ -786,7 +786,7 @@ bool MessageLoop::process_normal_task(bool block) {
   lock.unlock();
 
   while (!temp_queue.empty() && !impl_->force_quit_flag) {
-    auto&& [start_time, task] = std::move(const_cast<MessageLoopImpl::NormalTaskTuple&>(temp_queue.front()));
+    auto&& [start_time, task] = std::move(const_cast<Impl::NormalTaskTuple&>(temp_queue.front()));
     on_task_changed(std::move(task), start_time);
     temp_queue.pop();
   }
@@ -827,9 +827,9 @@ bool MessageLoop::process_lockfree_task(bool block) {
   [[maybe_unused]] bool is_timeout = true;
 
   while (!impl_->force_quit_flag) {
-    MessageLoopImpl::LockfreeTaskTuple temp_task;
+    Impl::LockfreeTaskTuple temp_task;
 
-    if (!impl_->lockfree_queue->try_pop<MessageLoopImpl::LockfreeQueue::kNoBehavior>(temp_task)) {
+    if (!impl_->lockfree_queue->try_pop<Impl::LockfreeQueue::kNoBehavior>(temp_task)) {
       break;
     }
 
@@ -878,7 +878,7 @@ bool MessageLoop::process_priority_task(bool block) {
   [[maybe_unused]] bool is_timeout = true;
   int64_t sleep_time = -1;
 
-  MessageLoopImpl::PriorityQueue temp_queue;
+  Impl::PriorityQueue temp_queue;
 
   std::unique_lock lock(impl_->mtx);
 
@@ -888,8 +888,7 @@ bool MessageLoop::process_priority_task(bool block) {
   lock.unlock();
 
   while (!temp_queue.empty() && !impl_->force_quit_flag) {
-    auto&& [priority, seq, start_time, task] =
-        std::move(const_cast<MessageLoopImpl::PriorityTaskTuple&>(temp_queue.top()));
+    auto&& [priority, seq, start_time, task] = std::move(const_cast<Impl::PriorityTaskTuple&>(temp_queue.top()));
 
     on_task_changed(std::move(task), start_time);
 
@@ -1008,8 +1007,8 @@ bool MessageLoop::process_timer_task(int64_t& next_sleep_time) {
           has_processed = true;
         } else if (impl_->type == kLockfreeType) {
           if VUNLIKELY (impl_->lockfree_queue->is_full(true)) {
-            MessageLoopImpl::LockfreeTaskTuple temp_task;
-            bool ret = impl_->lockfree_queue->try_pop<MessageLoopImpl::LockfreeQueue::kNoBehavior>(temp_task);
+            Impl::LockfreeTaskTuple temp_task;
+            bool ret = impl_->lockfree_queue->try_pop<Impl::LockfreeQueue::kNoBehavior>(temp_task);
 
             (void)temp_task;
             (void)ret;

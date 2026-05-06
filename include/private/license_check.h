@@ -38,7 +38,8 @@ class LicenseCheck final : protected MessageLoop {
   void do_check();
 
  private:
-  std::unique_ptr<struct LicenseCheckImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(LicenseCheck)
 };

@@ -467,7 +467,8 @@ class VLINK_EXPORT BagReader : public MessageLoop {
   static ActionType convert_action(std::string_view str);
 
  private:
-  std::unique_ptr<struct BagReaderImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(BagReader)
 };

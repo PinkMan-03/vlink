@@ -100,7 +100,8 @@ class VLINK_EXPORT SchemaPluginManager final {
 
   ~SchemaPluginManager();
 
-  std::unique_ptr<struct SchemaPluginManagerImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(SchemaPluginManager)
 };

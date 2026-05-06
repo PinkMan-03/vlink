@@ -59,15 +59,14 @@ namespace webviz {
 using RawPub = Publisher<Bytes>;
 using RawSub = Subscriber<Bytes>;
 
-// ProxyBridgeImpl
-struct ProxyBridgeImpl final {
+// ProxyBridge::Impl
+struct ProxyBridge::Impl final {
   MessageLoop* data_callback_loop{nullptr};
   ProxyBridge::DataCallbackMode data_callback_mode{ProxyBridge::kQueued};
   ProxyBridge::DataCallback data_callback;
 };
 
-ProxyBridge::ProxyBridge(const Config& config, MessageLoop* data_callback_loop)
-    : impl_(std::make_unique<ProxyBridgeImpl>()) {
+ProxyBridge::ProxyBridge(const Config& config, MessageLoop* data_callback_loop) : impl_(std::make_unique<Impl>()) {
   impl_->data_callback_loop = data_callback_loop;
   impl_->data_callback_mode = config.data_callback_mode;
 }

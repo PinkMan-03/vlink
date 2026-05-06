@@ -32,9 +32,8 @@
  *
  * - Buffers up to @c kStackSize (96) bytes are stored entirely within the object's inline
  *   @c stack_data_ array (small-buffer optimisation / SBO).
- * - Larger buffers are allocated from an optional @c pmr::synchronized_pool_resource (Linux
- *   only when @c __cpp_lib_memory_resource is available), or from the system heap via
- *   @c bytes_malloc() / @c bytes_free().
+ * - Larger buffers are allocated through @c bytes_malloc() / @c bytes_free(), which forward
+ *   to @c MemoryPool::global_instance() (a tiered free-list pool, see @c memory_pool.h).
  * - The total object size is exactly 128 bytes regardless of content.
  *
  * Ownership model:
@@ -68,7 +67,7 @@
  *   zero-copy payloads that must @b not be freed by VLink.
  * - @c is_ptr() returns @c true when size == 0 and offset == 0 and the object is not an owner,
  *   meaning the buffer holds only an opaque pointer created via @c shallow_copy_ptr().
- * - @c init_memory_pool() and @c release_memory_pool() must be called explicitly at application
+ * - @c init_memory_pool() may be called explicitly at application
  *   startup/shutdown if the memory pool is desired.  They are no-ops when the pool is unavailable.
  *
  * @par Example
@@ -116,22 +115,13 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Initialises the global thread-safe memory pool for @c Bytes allocations.
    *
    * @details
-   * On Linux with @c __cpp_lib_memory_resource support this initialises a
-   * @c pmr::synchronized_pool_resource that reduces per-allocation overhead.
+   * Triggers construction of the static @c MemoryPool used by @c bytes_malloc.
+   * The pool's tier configuration is built from @c MemoryPool::default_tiers(),
+   * which honours the @c VLINK_MEMORY_LEVEL environment variable.
    * Call this once at application start before any @c Bytes objects are created.
    * Safe to call multiple times; subsequent calls are no-ops.
    */
   static void init_memory_pool() noexcept;
-
-  /**
-   * @brief Releases the global memory pool and returns its memory to the OS.
-   *
-   * @details
-   * After this call, @c bytes_malloc falls back to the system heap allocator.
-   * Call once at application shutdown after all @c Bytes objects that used the pool
-   * have been destroyed, to avoid a use-after-free.
-   */
-  static void release_memory_pool() noexcept;
 
   /**
    * @brief Allocates a raw byte buffer from the memory pool (or heap if pool is unavailable).

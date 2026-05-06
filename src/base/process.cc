@@ -401,8 +401,8 @@ static void run_windows_write(WindowsWriteContext* context) {
   return std::string::npos;
 }
 
-// ProcessImpl
-struct ProcessImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// Process::Impl
+struct Process::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) std::atomic<Process::State> state{Process::kNotRunningState};
   alignas(64) std::atomic<Process::ExitStatus> exit_status{Process::kNormalExitStatus};
   alignas(64) std::atomic<Process::Error> error{Process::kNoError};
@@ -458,7 +458,7 @@ struct ProcessImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
 };
 
 // Process
-Process::Process() : impl_(std::make_unique<ProcessImpl>()) {}
+Process::Process() : impl_(std::make_unique<Impl>()) {}
 
 Process::~Process() {
   impl_->is_being_destroyed.store(true, std::memory_order_release);

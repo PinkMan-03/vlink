@@ -628,7 +628,8 @@ class VLINK_EXPORT Process {
                                      ExitStatus exit_status_to_report, State state_to_report, bool has_state_changed,
                                      bool has_stdout_data, bool has_stderr_data);
 
-  std::unique_ptr<struct ProcessImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(Process)
 };

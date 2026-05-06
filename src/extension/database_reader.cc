@@ -58,8 +58,8 @@ namespace vlink {
 
 [[maybe_unused]] static constexpr size_t kMaxTaskSize = 50000U;
 
-// DatabaseReaderImpl
-struct DatabaseReaderImpl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// DatabaseReader::Impl
+struct DatabaseReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<BagReader::Status> status{BagReader::kStoped};
   std::atomic_bool stop_flag{false};
   std::atomic_bool pause_flag{false};
@@ -138,7 +138,7 @@ struct DatabaseReaderImpl final {  // NOLINT(clang-analyzer-optin.performance.Pa
 
 // DatabaseReader
 DatabaseReader::DatabaseReader(const std::string& path, bool read_only, bool try_to_fix)
-    : BagReader(path, read_only, try_to_fix), impl_(std::make_unique<DatabaseReaderImpl>()) {
+    : BagReader(path, read_only, try_to_fix), impl_(std::make_unique<Impl>()) {
   set_name("DatabaseReader");
 
   impl_->url_to_ser_map.reserve(128);
@@ -1254,7 +1254,7 @@ void DatabaseReader::do_pause() {
 
 void DatabaseReader::prepare_file(void* file) {
 #ifdef VLINK_ENABLE_SQLITE
-  auto* wrapper_file = static_cast<DatabaseReaderImpl::WrapperFile*>(file);
+  auto* wrapper_file = static_cast<Impl::WrapperFile*>(file);
 
   wrapper_file->has_completed = true;
 
@@ -1950,7 +1950,7 @@ void DatabaseReader::prepare_file(void* file) {
 
 void DatabaseReader::open(const std::string& path) {
 #ifdef VLINK_ENABLE_SQLITE
-  auto to_open = [this](DatabaseReaderImpl::WrapperFile& wrapper_file) {
+  auto to_open = [this](Impl::WrapperFile& wrapper_file) {
     if (impl_->read_only) {
       int ret = ::sqlite3_open_v2(wrapper_file.path.c_str(), &wrapper_file.db, SQLITE_OPEN_READONLY, nullptr);
       if VUNLIKELY (ret != SQLITE_OK) {
@@ -2066,7 +2066,7 @@ void DatabaseReader::open(const std::string& path) {
             return;
           }
 
-          DatabaseReaderImpl::WrapperFile wrapper_file;
+          Impl::WrapperFile wrapper_file;
           wrapper_file.path = file_db_str;
           wrapper_file.index = file_index;
 
@@ -2230,7 +2230,7 @@ void DatabaseReader::open(const std::string& path) {
         return;
       }
     } else {
-      DatabaseReaderImpl::WrapperFile wrapper_file;
+      Impl::WrapperFile wrapper_file;
       wrapper_file.path = impl_->path;
       wrapper_file.index = 0;
 

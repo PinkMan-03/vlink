@@ -174,7 +174,8 @@ class VLINK_EXPORT DatabaseWriter final : public BagWriter {
 
   bool insert_schema(const SchemaData& schema_data);
 
-  std::unique_ptr<struct DatabaseWriterImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(DatabaseWriter)
 };

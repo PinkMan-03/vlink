@@ -470,8 +470,14 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
 
       if (is_leaf) {
         std::string text;
-        google::protobuf::TextFormat::PrintToString(sub_msg, &text);
-        result = std::move(text);
+        bool ret = google::protobuf::TextFormat::PrintToString(sub_msg, &text);
+
+        if VLIKELY (ret) {
+          result = std::move(text);
+        } else {
+          result = "";
+        }
+
         return true;
       }
 
@@ -518,8 +524,14 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
 
     if (is_leaf) {
       std::string text;
-      google::protobuf::TextFormat::PrintToString(sub_msg, &text);
-      result = std::move(text);
+      bool ret = google::protobuf::TextFormat::PrintToString(sub_msg, &text);
+
+      if VLIKELY (ret) {
+        result = std::move(text);
+      } else {
+        result = "";
+      }
+
       return true;
     }
 
@@ -1401,8 +1413,11 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
 
           if (proto_message != nullptr && proto_message->ParseFromArray(bytes.data(), static_cast<int>(bytes.size()))) {
             std::string text;
-            google::protobuf::TextFormat::PrintToString(*proto_message, &text);
-            std::cout << text << std::endl;
+            bool ret = google::protobuf::TextFormat::PrintToString(*proto_message, &text);
+
+            if VLIKELY (ret) {
+              std::cout << text << std::endl;
+            }
           } else {
             print_raw_summary();
           }

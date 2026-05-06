@@ -274,7 +274,8 @@ class VLINK_EXPORT DatabaseReader final : public BagReader {
 
   void read(const Config& config);
 
-  std::unique_ptr<struct DatabaseReaderImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(DatabaseReader)
 };

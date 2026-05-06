@@ -42,8 +42,8 @@
 
 namespace vlink {
 
-// SysSharememImpl
-struct SysSharememImpl final {
+// SysSharemem::Impl
+struct SysSharemem::Impl final {
 #if defined(_WIN32) || defined(__CYGWIN__)
   HANDLE handle{nullptr};
 #else
@@ -57,7 +57,7 @@ struct SysSharememImpl final {
 };
 
 // SysSharemem
-SysSharemem::SysSharemem() : impl_(std::make_unique<SysSharememImpl>()) {}
+SysSharemem::SysSharemem() : impl_(std::make_unique<Impl>()) {}
 
 SysSharemem::~SysSharemem() {
   if (is_attached()) {

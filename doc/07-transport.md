@@ -1146,7 +1146,8 @@ pub.publish(80.5f);
 #include <vlink/base/bytes.h>
 
 int main() {
-    // 1. 可选：初始化 Bytes 内存池（Linux 下减少堆分配开销）
+    // 1. 可选：初始化 Bytes 共享内存池（触发 MemoryPool::global_instance(true)，
+    //    根据 VLINK_MEMORY_LEVEL 选择分级配置）。无对应 release。
     vlink::Bytes::init_memory_pool();
 
     // 2. shm:// 后端：注册进程到 RouDi
@@ -1168,8 +1169,7 @@ int main() {
     // 清理：shm:// 后端注销进程
     vlink::ShmConf::deinit_runtime();
 
-    // 清理：Bytes 内存池
-    vlink::Bytes::release_memory_pool();
+    // 注意：MemoryPool 全局唯一且生命周期等同进程，没有对应的清理 API。
 
     return 0;
 }

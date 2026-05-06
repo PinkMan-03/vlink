@@ -56,10 +56,9 @@ bool BagReader::Info::UrlMeta::operator<(const BagReader::Info::UrlMeta& target)
   return index < target.index;
 }
 
-// BagReaderImpl
-struct BagReaderImpl final {
+// BagReader::Impl
+struct BagReader::Impl final {
   BagReader::OutputCallback output_callback;
-
   std::shared_ptr<BagReaderPluginInterface> plugin_interface;
 };
 
@@ -80,8 +79,7 @@ std::shared_ptr<BagReader> BagReader::create(const std::string& path, bool read_
   }
 }
 
-BagReader::BagReader(const std::string& path, bool read_only, bool try_to_fix)
-    : impl_(std::make_unique<BagReaderImpl>()) {
+BagReader::BagReader(const std::string& path, bool read_only, bool try_to_fix) : impl_(std::make_unique<Impl>()) {
   (void)path;
   (void)read_only;
   (void)try_to_fix;

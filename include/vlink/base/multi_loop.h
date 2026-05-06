@@ -126,7 +126,8 @@ class VLINK_EXPORT MultiLoop : public MessageLoop {
   void on_task_changed(Callback&& callback, uint32_t start_time) override;
 
  private:
-  std::unique_ptr<struct MultiLoopImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(MultiLoop)
 };

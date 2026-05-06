@@ -552,7 +552,7 @@ sub.listen([](const MyCustomProtocol& m) {
 
 - **固定对象大小**：对象自身始终为 128 字节（96 字节内联栈缓冲 + 元数据）。
 - **小缓冲优化（SBO）**：不超过 96 字节的数据直接存储在对象内，零堆分配。
-- **内存池支持**：Linux 下可启用 `pmr::synchronized_pool_resource`，减少堆分配开销。
+- **内存池支持**：堆分配走 `vlink::MemoryPool`（分级 free-list 池），按 size class 分发，减少堆分配开销。
 - **五种所有权模式**：
 
 | 工厂方法                        | 是否拥有内存 | 拷贝行为 | 典型用途                        |
@@ -608,12 +608,14 @@ auto* recovered = bytes_ptr.to_ptr<MyStruct>();
 ### 内存池
 
 ```cpp
-// 程序启动时（Linux 下启用 pmr 内存池）
+// 程序启动时调用一次：触发 vlink::MemoryPool::global_instance(true)，
+// 从 VLINK_MEMORY_LEVEL（1..6，默认 3）读取分级配置。
 vlink::Bytes::init_memory_pool();
 
-// 程序退出前释放
-vlink::Bytes::release_memory_pool();
+// 注意：MemoryPool 与进程同生共死，无需也无对应的 release_memory_pool()。
 ```
+
+`Bytes` 的堆分配统一走 `vlink::MemoryPool`（参见 [11.4 节](11-base-library.md#114-内存池-memorypool)）。
 
 ### 工具方法
 

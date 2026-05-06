@@ -253,7 +253,8 @@ class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
 
   void report_list();
 
-  std::unique_ptr<struct DiscoveryViewerImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(DiscoveryViewer)
 };

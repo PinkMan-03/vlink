@@ -421,7 +421,8 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
 
   static void clear_invalid_task(const std::shared_ptr<GraphTask>& task);
 
-  std::unique_ptr<struct GraphTaskImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(GraphTask)
 };

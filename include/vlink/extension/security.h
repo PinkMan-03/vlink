@@ -159,7 +159,8 @@ class VLINK_EXPORT Security final {
   bool decrypt(const Bytes& in, Bytes& out);
 
  private:
-  std::unique_ptr<struct SecurityImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(Security)
 };

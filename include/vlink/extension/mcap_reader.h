@@ -275,7 +275,8 @@ class VLINK_EXPORT McapReader final : public BagReader {
 
   void read(const Config& config);
 
-  std::unique_ptr<struct McapReaderImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(McapReader)
 };

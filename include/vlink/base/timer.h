@@ -332,7 +332,8 @@ class VLINK_EXPORT Timer final {
   Callback take_callback();
 
   friend class MessageLoop;
-  std::unique_ptr<struct TimerImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
   static constexpr uint32_t kMinInterval{10'000U};
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(Timer)

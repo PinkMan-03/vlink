@@ -18,6 +18,7 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | ----------------- | ------------------------------- | ---------------------------------------------- |
 | Logger            | `base/logger.h`                 | 全局单例日志器，四种输出风格，可插拔后端       |
 | Bytes             | `base/bytes.h`                  | 128 字节固定大小缓冲区，SBO + 五种所有权       |
+| MemoryPool        | `base/memory_pool.h`            | 分级（金字塔）free-list 内存池，Bytes 默认分配器 |
 | MessageLoop       | `base/message_loop.h`           | 单线程事件循环，集成定时器与优先级队列         |
 | Timer             | `base/timer.h`                  | 事件循环驱动的周期/单次定时器                  |
 | WheelTimer        | `base/wheel_timer.h`            | 哈希时间轮，O(1) 插入/删除大量超时             |
@@ -269,15 +270,148 @@ std::string hex = vlink::Bytes::convert_to_hex_str(buf.data(), buf.size());
 // 字节序反转
 auto reversed = vlink::Bytes::reverse_order(buf);
 
-// 内存池（Linux PMR，减少分配开销）
+// 内存池（统一走 vlink::MemoryPool，详见 11.4）
 vlink::Bytes::init_memory_pool();   // 应用启动时调用一次
-// ... 使用 Bytes ...
-vlink::Bytes::release_memory_pool(); // 应用退出前调用
+// 注意：MemoryPool 与进程生命周期等同，没有对应的 release_memory_pool()
 ```
 
 ---
 
-## 11.4 消息循环 MessageLoop
+## 11.4 内存池 MemoryPool
+
+### 概述
+
+`vlink::MemoryPool`（`base/memory_pool.h`）是一个分级（金字塔）的 free-list
+内存池，所有路径自包含、无外部依赖。`Bytes` 通过它分配堆缓冲。
+
+### 分级 Tier 模型
+
+每个 tier 保存 `{max_size, blocks_per_chunk}`：
+
+- `max_size`：该 tier 可服务的最大字节数（含上界）。allocate 请求按从小到大
+  顺序匹配第一个 `max_size >= bytes` 的 tier。
+- `blocks_per_chunk`：单个 upstream chunk 内最多容纳的 block 数。chunk 增长几何
+  倍数（首块 1 个 block，逐次翻倍直到 `blocks_per_chunk` 上限）。
+
+请求大于最大 tier 的 `max_size`（典型如 4K RGBA 帧）或 `alignment >
+alignof(std::max_align_t)` 时走 oversized 直通路径，直接 `::operator new` /
+`::operator delete`，不进入池，但仍会被独立计数。
+
+### 默认 Tier 表与 VLINK_MEMORY_LEVEL
+
+`MemoryPool::default_tiers()` 返回 8 阶金字塔配置，由环境变量
+`VLINK_MEMORY_LEVEL`（1..6，默认 3）从一张手工写死的查表里选择一行：
+
+| Level | 风格      | 含义                                                   |
+| ----- | --------- | ------------------------------------------------------ |
+| `1`   | Tiny      | 端侧/嵌入式，最小驻留 chunk                            |
+| `2`   | Small     | 受限设备                                               |
+| `3`   | Balanced  | **默认**                                               |
+| `4`   | Large     | 服务器/高吞吐                                          |
+| `5`   | XLarge    | 大批量小消息                                           |
+| `6`   | Massive   | 极端预热场景，每档预留 block 最多                      |
+
+非数字、超出 [1, 6] 的取值会被钳到合法区间，并打印 warning。
+
+### 主要 API
+
+```cpp
+namespace vlink {
+
+class MemoryPool final {
+ public:
+  struct Tier { size_t max_size; size_t blocks_per_chunk; };
+  struct TierStats { /* max_size, block_size, hit_count, ... */ };
+  struct OversizedStats { /* alloc_count, alloc_bytes, dealloc_count */ };
+
+  // 进程级共享单例，gen_by_env=true 时按 VLINK_MEMORY_LEVEL 选 tier。
+  // Bytes::init_memory_pool() 内部就是 MemoryPool::global_instance(true)。
+  static MemoryPool& global_instance(bool gen_by_env = false);
+
+  // 当前 VLINK_MEMORY_LEVEL 对应的 8 阶默认配置。
+  [[nodiscard]] static std::vector<Tier> default_tiers();
+
+  // 自定义 tier 数组；非法/空时回退到 level-3 默认金字塔。构造不抛异常。
+  explicit MemoryPool(const std::vector<Tier>& tiers = {});
+
+  // 路由到首个 max_size >= bytes 的 tier；超出最大 tier 或对齐过严走直通。
+  // 失败返回 nullptr，永不抛异常。
+  [[nodiscard]] void* allocate(size_t bytes,
+                               size_t alignment = alignof(std::max_align_t)) noexcept;
+
+  // 必须传与 allocate 相同的 bytes，否则会路由到错误 tier 损坏 free-list。
+  void deallocate(void* p, size_t bytes,
+                  size_t alignment = alignof(std::max_align_t)) noexcept;
+
+  // 统计快照
+  [[nodiscard]] size_t get_tier_count() const noexcept;
+  [[nodiscard]] std::vector<TierStats> get_stats() const noexcept;
+  [[nodiscard]] OversizedStats get_oversized_stats() const noexcept;
+  void reset_stats() noexcept;
+};
+
+}  // namespace vlink
+```
+
+### 使用示例
+
+```cpp
+#include <vlink/base/memory_pool.h>
+
+// 1) 用于 Bytes（推荐）：应用启动时调用一次
+vlink::Bytes::init_memory_pool();   // 等价 MemoryPool::global_instance(true)
+
+// 2) 直接使用全局池
+auto& pool = vlink::MemoryPool::global_instance();
+void* p = pool.allocate(512);       // 落到 1 KiB 以内的 tier
+pool.deallocate(p, 512);            // bytes 必须严格匹配
+
+// 3) 自定义 tier 数组
+std::vector<vlink::MemoryPool::Tier> tiers{
+    {64U,    256U},
+    {1024U,  64U},
+    {64U * 1024U, 8U},
+};
+vlink::MemoryPool local_pool(tiers);
+
+// 4) 查看统计
+for (const auto& s : pool.get_stats()) {
+    MLOG_I("tier max={} block={} hits={}", s.max_size, s.block_size, s.hit_count);
+}
+auto over = pool.get_oversized_stats();
+MLOG_I("oversized: count={} bytes={}", over.alloc_count, over.alloc_bytes);
+```
+
+### 线程安全与生命周期
+
+- 所有 public 方法 `noexcept`，可从多线程并发调用。锁粒度是 per-tier，因此不
+  同 size class 之间不互相竞争。
+- `global_instance()` 是 Meyers' singleton，进程生命周期内持续存在，**没有**
+  对应的 `release` API。如需释放上游 chunk，只能通过销毁本地 `MemoryPool`
+  实例完成（注意销毁前必须确保所有 block 已归还）。
+- `deallocate` 必须传入与 `allocate` 相同的 `bytes`，否则会路由到错误 tier，
+  破坏该 tier 的 free-list。
+
+### 与 Bytes 的关系
+
+```
+Bytes::create() / bytes_malloc()
+   |
+   v
+MemoryPool::global_instance().allocate(size)
+   |
+   +-- size <= 最大 tier 的 max_size --> 命中某 tier 的 free-list
+   |
+   +-- 否则                              --> ::operator new 直通路径
+```
+
+调用 `Bytes::init_memory_pool()` 只是**显式地**触发首次构造（带 `gen_by_env=
+true` 让池读取 `VLINK_MEMORY_LEVEL`）。如果不显式调用，首次 `Bytes` 堆分配
+也会触发懒加载，但此时取的是 level-3 默认值，不再读环境变量。
+
+---
+
+## 11.5 消息循环 MessageLoop
 
 `vlink::MessageLoop` 是 VLink 中的核心任务调度器，也是定时器、Schedule 等机制的基础。
 它实现了一个**单线程串行事件循环**：所有任务在同一个线程上顺序执行，
@@ -794,7 +928,7 @@ VLOG_I("shutdown complete");
 
 ---
 
-## 11.5 定时器
+## 11.6 定时器
 
 ![定时器类型对比](images/timer-types.png)
 
@@ -1017,7 +1151,7 @@ dt.reset();
 
 ---
 
-## 11.6 线程池 ThreadPool
+## 11.7 线程池 ThreadPool
 
 ![线程池架构](images/thread-pool-architecture.png)
 
@@ -1078,7 +1212,7 @@ pool.shutdown();
 
 ---
 
-## 11.7 进程管理 Process
+## 11.8 进程管理 Process
 
 `vlink::Process` 是 VLink 基础库提供的跨平台子进程管理类，API 设计参考了 Qt 的 QProcess，
 用于启动、监控、通信和终止子进程。它支持 stdout/stderr 的管道捕获、stdin 写入、
@@ -1514,7 +1648,7 @@ int main() {
 
 ---
 
-## 11.8 并发原语
+## 11.9 并发原语
 
 ### 并发组件对比表
 
@@ -2270,7 +2404,7 @@ int main() {
 
 ---
 
-## 11.9 IPC 原语
+## 11.10 IPC 原语
 
 VLink 在 `vlink::base` 层提供了两个跨进程 IPC 原语类：
 
@@ -2573,7 +2707,7 @@ int main() {
 
 ---
 
-## 11.10 任务调度
+## 11.11 任务调度
 
 ### Schedule -- 任务调度包装器
 
@@ -2714,7 +2848,7 @@ std::string dot = save->export_to_dot();
 
 ---
 
-## 11.11 性能分析
+## 11.12 性能分析
 
 VLink 内置轻量级性能分析工具，用于量化节点和通信操作的 CPU 利用率，
 同时提供高性能日志格式化流。
@@ -2964,7 +3098,7 @@ int main() {
 
 ---
 
-## 11.12 工具类
+## 11.13 工具类
 
 ### Format -- 轻量格式化器
 

@@ -86,8 +86,8 @@ namespace vlink {
   return std::to_string(node_count);
 }
 
-// DiscoveryViewerImpl
-struct DiscoveryViewerImpl final {
+// DiscoveryViewer::Impl
+struct DiscoveryViewer::Impl final {
   struct Comparator final {
     bool operator()(const DiscoveryViewer::Info& lhs, const DiscoveryViewer::Info& rhs) const {
       if (lhs.sort_index < rhs.sort_index) {
@@ -461,7 +461,7 @@ DiscoveryViewer* DiscoveryViewer::global_get() {
   return global.instance.get();
 }
 
-DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<DiscoveryViewerImpl>()) {
+DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>()) {
   set_name("DiscoveryViewer");
 
   static std::string native_discovery = Utils::get_env("VLINK_DISCOVER_NATIVE");

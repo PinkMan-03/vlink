@@ -179,7 +179,8 @@ class VLINK_EXPORT SysSemaphore final {
   [[nodiscard]] size_t get_count() const;
 
  private:
-  std::unique_ptr<struct SysSemaphoreImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(SysSemaphore)
 };

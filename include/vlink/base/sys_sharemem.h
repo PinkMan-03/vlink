@@ -186,7 +186,8 @@ class VLINK_EXPORT SysSharemem final {
   [[nodiscard]] size_t size() const;
 
  private:
-  std::unique_ptr<struct SysSharememImpl> impl_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(SysSharemem)
 };

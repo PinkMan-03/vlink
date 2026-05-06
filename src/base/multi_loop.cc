@@ -45,20 +45,20 @@ struct MultiLoopGlobal final {
   MultiLoopGlobal() = default;
 };
 
-// MultiLoopImpl
-struct MultiLoopImpl final {
+// MultiLoop::Impl
+struct MultiLoop::Impl final {
   std::optional<ThreadPool> thread_pool;
   size_t thread_num{0};
 };
 
 // MultiLoop
-MultiLoop::MultiLoop(size_t thread_num) : impl_(std::make_unique<MultiLoopImpl>()) {
+MultiLoop::MultiLoop(size_t thread_num) : impl_(std::make_unique<Impl>()) {
   impl_->thread_num = thread_num;
 
   set_name("MultiLoop_" + std::to_string(MultiLoopGlobal::get().instance_index++));
 }
 
-MultiLoop::MultiLoop(size_t thread_num, Type type) : MessageLoop(type), impl_(std::make_unique<MultiLoopImpl>()) {
+MultiLoop::MultiLoop(size_t thread_num, Type type) : MessageLoop(type), impl_(std::make_unique<Impl>()) {
   impl_->thread_num = thread_num;
 
   set_name("MultiLoop_" + std::to_string(MultiLoopGlobal::get().instance_index++));

@@ -200,7 +200,7 @@ inline Node<ImplT, SecT>::~Node() {
 ```cpp
 static void NodeImpl::global_init() {
     Logger::get();                    // 日志系统
-    Bytes::init_memory_pool();        // Linux 下的 pmr 内存池
+    Bytes::init_memory_pool();        // 触发 MemoryPool::global_instance(true)，读取 VLINK_MEMORY_LEVEL
     BagWriter::global_get();          // 全局录包器（由 VLINK_BAG_PATH 激活）
     DiscoveryReporter::global_get();  // 全局发现上报
 }
