@@ -112,7 +112,7 @@ struct Config final {
 
 ### OutputCallback
 ```cpp
-using OutputCallback = std::function<void(
+using OutputCallback = vlink::Function<void(
     int64_t timestamp,         // 消息时间戳（微秒）
     const std::string& url,    // Topic URL
     ActionType action_type,    // 操作类型
@@ -121,13 +121,13 @@ using OutputCallback = std::function<void(
 
 ### StatusCallback
 ```cpp
-using StatusCallback = std::function<void(Status status)>;
+using StatusCallback = vlink::Function<void(Status status)>;
 // Status: kStoped(0), kPaused(1), kPlaying(2)
 ```
 
 ### FinishCallback
 ```cpp
-using FinishCallback = std::function<void(bool is_interrupted)>;
+using FinishCallback = vlink::Function<void(bool is_interrupted)>;
 // is_interrupted: true 表示由 stop() 中断，false 表示自然结束
 ```
 

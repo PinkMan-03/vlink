@@ -519,7 +519,7 @@ struct Config final {
 `OutputCallback` 签名：
 
 ```cpp
-using OutputCallback = std::function<void(
+using OutputCallback = vlink::Function<void(
     int64_t timestamp,        // 消息时间戳（微秒）
     const std::string& url,   // Topic URL
     ActionType action_type,   // 动作类型

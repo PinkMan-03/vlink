@@ -202,7 +202,7 @@ class Getter : public Node<GetterImpl, SecT>;
 | -------------- | --------------------------------------------- | ---------------------- |
 | `UniquePtr`    | `std::unique_ptr<Getter<ValueT, SecT>>`        | unique_ptr 别名        |
 | `SharedPtr`    | `std::shared_ptr<Getter<ValueT, SecT>>`        | shared_ptr 别名        |
-| `MsgCallback`  | `std::function<void(const ValueT&)>`           | 值变更回调函数类型     |
+| `MsgCallback`  | `vlink::Function<void(const ValueT&)>`         | 值变更回调函数类型     |
 
 ### 静态常量
 

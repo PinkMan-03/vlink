@@ -38,6 +38,8 @@
 //
 #include "../common_test.h"
 
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+
 // ---------------------------------------------------------------------------
 // TEST SUITE: construction
 // ---------------------------------------------------------------------------
@@ -252,6 +254,8 @@ TEST_SUITE("base-MemoryResource - is_equal") {
     CHECK_FALSE(a.is_equal(*sys));
   }
 }
+
+#endif
 
 // ---------------------------------------------------------------------------
 // NOTE: do_allocate's std::bad_alloc path is exercised only when the

@@ -257,7 +257,7 @@ explicit Subscriber(const ConfT& conf,
 // - 回调在传输线程上执行，除非已 attach() 到 MessageLoop
 // - 返回 true 表示注册成功
 bool listen(MsgCallback&& callback);
-// 其中：using MsgCallback = std::function<void(const MsgT&)>;
+// 其中：using MsgCallback = vlink::Function<void(const MsgT&)>;
 ```
 
 ### 零拷贝相关

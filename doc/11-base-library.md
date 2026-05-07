@@ -17,9 +17,12 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | 组件              | 头文件                          | 功能简述                                       |
 | ----------------- | ------------------------------- | ---------------------------------------------- |
 | Logger            | `base/logger.h`                 | 全局单例日志器，四种输出风格，可插拔后端       |
+| LoggerPlugin      | `base/logger_plugin_interface.h`| 自定义日志后端的纯虚接口，与 Plugin 系统配合   |
 | Bytes             | `base/bytes.h`                  | 128 字节固定大小缓冲区，SBO + 五种所有权       |
 | MemoryPool        | `base/memory_pool.h`            | 分级（金字塔）free-list 内存池，Bytes 默认分配器 |
 | MemoryResource    | `base/memory_resource.h`        | `std::pmr::memory_resource` 适配器，桥接 `MemoryPool` |
+| Function          | `base/functional.h`             | 类型擦除可调用包装器，64 字节 SBO + `MemoryPool` 堆回退 |
+| ConditionVariable | `base/condition_variable.h`     | POSIX `CLOCK_MONOTONIC` 条件变量，替代 std 实现 |
 | MessageLoop       | `base/message_loop.h`           | 单线程事件循环，集成定时器与优先级队列         |
 | Timer             | `base/timer.h`                  | 事件循环驱动的周期/单次定时器                  |
 | WheelTimer        | `base/wheel_timer.h`            | 哈希时间轮，O(1) 插入/删除大量超时             |
@@ -41,6 +44,14 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | FastStream        | `base/fast_stream.h`            | 高性能输出流（Logger 内部引擎）                |
 | Format            | `base/format.h`                 | 轻量无堆分配的 `{}` 占位符格式化器             |
 | Utils             | `base/utils.h`                  | 平台无关的进程、线程、信号工具函数             |
+| Helpers           | `base/helpers.h`                | 字符串/数字/哈希/格式化等无状态工具函数        |
+| Plugin            | `base/plugin.h`                 | 类型安全的动态插件加载器，含版本校验与生命周期 |
+| Exception         | `base/exception.h`              | VLink 异常类型（封装标准异常层级）             |
+| Uint128           | `base/uint128.h`                | 可移植 128 位无符号整数及完整运算符           |
+| CachedTimestamp   | `base/cached_timestamp.h`       | 低开销线程安全的格式化时间戳生成器（Logger 内用） |
+| NameDetector      | `base/name_detector.h`          | 编译期类型名/枚举名检测工具                    |
+| Traits            | `base/traits.h`                 | 内部模板元编程类型萃取                         |
+| Macros            | `base/macros.h`                 | 跨平台导出/对齐/分支预测等宏定义               |
 
 ---
 
@@ -362,14 +373,20 @@ class MemoryPool final {
   // 越界值钳到 [0, 9]。L9 满载占用上限不超过 500 MiB。
   explicit MemoryPool(int level);
 
-  // 路由到首个 max_size >= bytes 的 tier；超出最大 tier、对齐过严，或池是
-  // bypass 模式时走直通路径。失败返回 nullptr，永不抛异常。
-  [[nodiscard]] void* allocate(size_t bytes,
-                               size_t alignment = alignof(std::max_align_t)) noexcept;
+  // 块默认对齐，等价于 alignof(std::max_align_t)，作为 allocate/deallocate
+  // 的 alignment 参数默认值。
+  static constexpr size_t kBlockAlignment = alignof(std::max_align_t);
 
-  // 必须传与 allocate 相同的 bytes，否则会路由到错误 tier 损坏 free-list。
+  // 路由到首个 max_size >= bytes 的 tier；超出最大 tier、对齐过严
+  // (alignment > kBlockAlignment)，或池是 bypass 模式时走直通路径。失败返回
+  // nullptr，永不抛异常。
+  [[nodiscard]] void* allocate(size_t bytes,
+                               size_t alignment = kBlockAlignment) noexcept;
+
+  // 必须传与 allocate 相同的 bytes/alignment，否则会路由到错误 tier 损坏
+  // free-list。
   void deallocate(void* p, size_t bytes,
-                  size_t alignment = alignof(std::max_align_t)) noexcept;
+                  size_t alignment = kBlockAlignment) noexcept;
 
   // 统计快照
   [[nodiscard]] size_t get_tier_count() const noexcept;   // bypass 时为 0
@@ -481,12 +498,17 @@ class MemoryResource : public std::pmr::memory_resource {
   MemoryResource();
 
   // 拥有自己的私有池，按 level 构造。level=0 = bypass。
-  explicit MemoryResource(int level);
+  // prealloc=true 时按 level 对应的 tier 表预填满每个 tier。
+  explicit MemoryResource(int level, bool prealloc = false);
 
   ~MemoryResource() override;   // 私有池在此销毁；global_instance 是 no-op
 
   // 直接拿到底层池，可调用 get_stats / clear / trim 等。
   [[nodiscard]] MemoryPool& get_memory_pool() noexcept;
+
+  // 等同于 get_memory_pool().trim()。
+  // 仅释放完全空闲的 chunk，活跃分配不受影响；可与 allocate/deallocate 并发。
+  void trim() noexcept;
 };
 
 }  // namespace vlink
@@ -531,6 +553,121 @@ std::pmr::vector<int> b(&bypass);       // 每次直通 ::operator new
   释放底层池；其他构造路径产生的 resource 在析构时同时销毁自己拥有的池。
 - `MemoryResource` 不可拷贝、不可移动，与 `std::pmr::memory_resource` 契约
   一致。
+
+---
+
+## 11.4.2 类型擦除可调用包装器 Function
+
+`vlink::Function<R(Args...)>`（`base/functional.h`）是 `std::function` 的高性能
+替代品，针对 VLink 热路径（消息回调、定时器、线程池任务等）做了三处关键调优：
+
+- **64 字节 SBO（一行缓存）**：`kSboSize = 64`，足以容纳常见的捕获集合（若干
+  `shared_ptr`、几个指针、若干小型 POD），命中后整个对象保留在 inline 缓冲区
+  内，零堆分配。`sizeof(Function)` ≈ 72 字节（SBO + vtable 指针）。
+- **`MemoryPool` 堆回退**：当目标 `sizeof` 超过 64、或 `alignof` 超过
+  `alignof(std::max_align_t)`、或移动构造可能抛异常时，存储改为从
+  `vlink::MemoryPool::global_instance()` 分配，并在析构时归还到同一池。**全程
+  不调用全局 `operator new` / `operator delete`**，与 `Bytes` 共享分级 free-list
+  的复用收益。
+- **`std::function` 互转**：转换构造接受任何满足 `is_invocable_r` 的可调用对
+  象，`std::function ⇄ vlink::Function` 双向都可隐式构造（无需显式 `cast`）。
+
+### 平台开关
+
+`functional.h` 顶部使用 `VLINK_ENABLE_BASE_FUNCTIONAL` 决定启用哪条实现路径：
+
+- 默认在 `__unix__ && !__CYGWIN__` 下自动启用，用 VLink 自实现的 SBO + 池回退。
+- 其他平台（如 Windows 原生工具链）下别名为 `std::function`，源码无需改动。
+
+### 主要 API
+
+```cpp
+namespace vlink {
+
+template <typename SignatureT>
+class Function;                                     // 主模板未定义，仅特化
+
+template <typename R, typename... Args>
+class Function<R(Args...)> {
+ public:
+  static constexpr std::size_t kSboSize = 64U;
+  using result_type = R;
+
+  Function() noexcept = default;                    // 空
+  Function(std::nullptr_t) noexcept;                // 空
+  Function(const Function&);                        // 复制目标的拷贝构造
+  Function(Function&&) noexcept;                    // 偷取并清空对方
+
+  template <typename F /* 可调用且可拷贝 */>
+  Function(F&& f);                                  // 来自任意兼容可调用对象
+
+  Function& operator=(const Function&);
+  Function& operator=(Function&&) noexcept;
+  Function& operator=(std::nullptr_t) noexcept;     // reset 为空
+
+  R operator()(Args...) const;                      // 空时抛 std::bad_function_call
+  explicit operator bool() const noexcept;          // 是否持有目标
+
+  void swap(Function& other) noexcept;
+};
+
+}  // namespace vlink
+```
+
+### 性能与内存
+
+| 路径   | 触发条件                                                  | 调用开销           |
+| ------ | --------------------------------------------------------- | ------------------ |
+| Inline | `sizeof(F) ≤ 64` 且 `alignof(F) ≤ max_align_t` 且移动 noexcept | 1 次间接调用       |
+| Heap   | 不满足 inline 条件                                        | 1 次间接调用 + 1 次额外加载 |
+
+- 调用开销恒定为通过 vtable 的 1 次间接 call；inline 路径无额外指针追逐，
+  heap 路径在调用前多 1 次加载读取目标指针。
+- vtable 是按 `F` 静态生成的链接期单例，4 个函数指针：`invoke / copy_construct /
+  move_construct / destroy`。
+- heap 路径在 `allocate` 时记录 `sizeof(F)` 与 `alignof(F)`，析构时按相同参数
+  归还，确保命中正确的池 tier。
+- 拷贝/移动具备强异常安全：抛异常时已分配内存归还、`*this` 维持上一个一致状
+  态。
+
+### 与 std::function 对齐的语义
+
+- `R operator()(Args...) const` 在空时抛 `std::bad_function_call`。
+- 转换构造要求目标可拷贝构造（`std::function` 同样要求），`move-only` 仿函数
+  在编译期被拒绝。
+- 函数指针 / 成员指针目标若为 `nullptr`，得到一个空 `Function`，不分配、不安
+  装 vtable。
+- `R == void` 时静默丢弃目标返回值（与 `std::function` 一致）。
+
+### 使用示例
+
+```cpp
+#include <vlink/base/functional.h>
+
+vlink::Function<int(int, int)> add = [](int a, int b) { return a + b; };
+int x = add(1, 2);                                  // 3
+
+vlink::Function<void()> noop;                       // 空
+if (noop) { noop(); }                               // 跳过，不抛
+
+vlink::Function<void()> heavy = [big_capture]() {   // 大捕获 → 池回退
+  // ...
+};
+
+// std::function 双向互转：
+std::function<void(int)> stdfn = [](int x) { /* ... */ };
+vlink::Function<void(int)> wrapped = stdfn;          // 包装 std::function
+std::function<void(int)> back     = wrapped;         // 解包到 std::function
+```
+
+### 在 VLink 中的使用位置
+
+`vlink::Function` 是框架内部所有回调类型的实际承载（公共别名仍以
+`MsgCallback / RespCallback / ReqCallback / Security::Callback / OutputCallback /
+StatusCallback / FinishCallback / Timer::Callback / ThreadPool::Callback /
+WheelTimer::Callback` 等具体名字暴露）。其在事件、方法、字段三种通信模型，以
+及定时器、线程池、Schedule、GraphTask、BagWriter / BagReader 的回调注册路径中
+全面替换 `std::function`，避免了热路径上对全局 `operator new` 的依赖。
 
 ---
 
@@ -2414,6 +2551,135 @@ worker.join();
 - `get_count()` 返回的是快照值，在并发环境下仅供调试参考
 - 这是进程内信号量；如需跨进程同步，请使用 `SysSemaphore`
 - `reset(true)` 是破坏性操作，仅在受控关闭时使用
+
+### ConditionVariable 单调时钟条件变量
+
+#### 适用场景
+
+`vlink::ConditionVariable` 是 `std::condition_variable` 的就地替换，针对老版本
+GCC / 部分 libc 上 `std::condition_variable` 内部使用 `CLOCK_REALTIME` 进行
+`wait_for / wait_until` 而引发的两类问题：
+
+- 系统时钟被 NTP 调整、用户改时区/时间，导致提前唤醒或永久等不到。
+- `wait_for(steady_clock duration)` 仍可能被 realtime 跳变影响。
+
+VLink 的实现通过 `pthread_condattr_setclock(&attr, CLOCK_MONOTONIC)` 显式锁定
+单调时钟，所有 `wait_for / wait_until` 在墙钟跳变下行为稳定。在非 POSIX 平
+台（Windows）该 bug 不适用，类型直接别名到 `std::` 版本。
+
+#### 平台开关
+
+`condition_variable.h` 顶部使用 `VLINK_ENABLE_BASE_CONDITION` 决定实现路径：
+
+- 默认在 `__unix__ && !__CYGWIN__` 下启用 pthread 实现。
+- 其他平台下 `vlink::ConditionVariable` / `vlink::ConditionVariableAny` 是
+  `std::condition_variable` / `std::condition_variable_any` 的别名。
+
+#### 主要 API
+
+```cpp
+namespace vlink {
+
+class ConditionVariable final {
+ public:
+  using native_handle_type = pthread_cond_t*;
+
+  ConditionVariable() noexcept;
+  ~ConditionVariable() noexcept;
+
+  void notify_one() noexcept;
+  void notify_all() noexcept;
+
+  void wait(std::unique_lock<std::mutex>& lock) noexcept;
+
+  template <typename PredicateT>
+  void wait(std::unique_lock<std::mutex>& lock, PredicateT p) noexcept;
+
+  template <typename ClockT, typename DurationT>
+  std::cv_status wait_until(std::unique_lock<std::mutex>& lock,
+                            const std::chrono::time_point<ClockT, DurationT>& atime) noexcept;
+
+  template <typename ClockT, typename DurationT, typename PredicateT>
+  bool wait_until(std::unique_lock<std::mutex>& lock,
+                  const std::chrono::time_point<ClockT, DurationT>& atime,
+                  PredicateT p) noexcept;
+
+  template <typename RepT, typename PeriodT>
+  std::cv_status wait_for(std::unique_lock<std::mutex>& lock,
+                          const std::chrono::duration<RepT, PeriodT>& rtime) noexcept;
+
+  template <typename RepT, typename PeriodT, typename PredicateT>
+  bool wait_for(std::unique_lock<std::mutex>& lock,
+                const std::chrono::duration<RepT, PeriodT>& rtime,
+                PredicateT p) noexcept;
+
+  [[nodiscard]] native_handle_type native_handle() noexcept;
+};
+
+class ConditionVariableAny final {
+  // 同上签名，但 wait / wait_for / wait_until 的 lock 形参为任意 BasicLockable。
+};
+
+// std-风格小写别名：
+using condition_variable     = ConditionVariable;
+using condition_variable_any = ConditionVariableAny;
+
+}  // namespace vlink
+```
+
+#### 语义
+
+- 所有 `wait_until` 在内部把目标时间点转换为 `steady_clock` 的等价时刻后再
+  等，对调用瞬间之前已经过去的截止时间立即返回 `cv_status::timeout`，与标
+  准库一致。
+- 持续时间-向上取整（`ceil` / `ceil_impl`）保证 `wait_for(rtime)` 的实际等
+  待不会短于 `rtime`，避免亚刻度截断带来的提前唤醒。
+- `ConditionVariable` 不可拷贝、不可移动；`ConditionVariableAny` 通过内部
+  `shared_ptr<SharedState>` 管理 `pthread_cond_t + std::mutex`。
+- 析构时 `pthread_cond_destroy` 总是调用，对未被任何线程等待的实例同样安
+  全。
+
+#### 使用示例
+
+```cpp
+#include <mutex>
+#include <vlink/base/condition_variable.h>
+
+std::mutex mtx;
+vlink::ConditionVariable cv;
+bool ready = false;
+
+// 消费者：
+{
+  std::unique_lock<std::mutex> lock(mtx);
+  cv.wait_for(lock, std::chrono::milliseconds(200), [&] { return ready; });
+}
+
+// 生产者：
+{
+  std::lock_guard<std::mutex> lock(mtx);
+  ready = true;
+}
+cv.notify_one();
+```
+
+`ConditionVariableAny` 在不能或不愿使用 `unique_lock<std::mutex>` 时使用：
+
+```cpp
+vlink::SpinLock spin;                                      // SpinLock 也是 BasicLockable
+vlink::ConditionVariableAny cv_any;
+{
+  std::lock_guard<vlink::SpinLock> guard(spin);
+  // ... 检查条件 ...
+}
+cv_any.notify_all();
+```
+
+#### 在 VLink 中的使用位置
+
+`Semaphore` / `MessageLoop` 唤醒等待 / `Schedule` 超时检测等内部模块都使用
+`ConditionVariable` 而非 `std::condition_variable`，确保跨 NTP / 用户改表的
+时序稳定性。
 
 ### 并发原语选型决策树
 

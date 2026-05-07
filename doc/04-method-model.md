@@ -62,7 +62,7 @@ class Client : public Node<ClientImpl, SecT>;
 using UniquePtr       = std::unique_ptr<Client<ReqT, RespT, SecT>>;
 using SharedPtr       = std::shared_ptr<Client<ReqT, RespT, SecT>>;
 using ConnectCallback = NodeImpl::ConnectCallback;             // void(bool)
-using RespCallback    = std::function<void(const RespT&)>;
+using RespCallback    = vlink::Function<void(const RespT&)>;
 
 static constexpr ImplType           kImplType = kClient;
 static constexpr bool               kHasResp  = !std::is_same_v<RespT, Traits::EmptyType>;
@@ -130,7 +130,7 @@ bool wait_for_connected(std::chrono::milliseconds timeout = Timeout::kDefaultInt
 // 立即返回，响应到来时在传输线程（或 attach 的 MessageLoop）上调用 callback
 // 返回 true：请求被传输层接受；false：发送失败
 bool invoke(const ReqT& req, RespCallback&& callback);
-// 其中：using RespCallback = std::function<void(const RespT&)>;
+// 其中：using RespCallback = vlink::Function<void(const RespT&)>;
 
 // --- 方式四：异步调用，future 形式 ---
 // 仅当 kHasResp = true 时有效（static_assert 保护）
@@ -166,13 +166,13 @@ class Server : public Node<ServerImpl, SecT>;
 
 ```cpp
 // fire-and-forget 回调（RespT 必须为 EmptyType）
-using ReqCallback         = std::function<void(const ReqT&)>;
+using ReqCallback         = vlink::Function<void(const ReqT&)>;
 
 // 同步响应回调：在回调内填充 resp，框架自动发送
-using ReqRespCallback     = std::function<void(const ReqT&, RespT&)>;
+using ReqRespCallback     = vlink::Function<void(const ReqT&, RespT&)>;
 
 // 异步响应回调：保存 req_id，稍后调用 reply(req_id, resp) 发送响应
-using ReqAsyncRespCallback = std::function<void(uint64_t req_id, const ReqT&)>;
+using ReqAsyncRespCallback = vlink::Function<void(uint64_t req_id, const ReqT&)>;
 ```
 
 ### 工厂方法与构造函数
