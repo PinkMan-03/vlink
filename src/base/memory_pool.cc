@@ -40,15 +40,17 @@
 
 namespace vlink {
 
-static constexpr int kMinMemoryLevel = 1;
-static constexpr int kMaxMemoryLevel = 6;
+static constexpr int kMinMemoryLevel = 0;
+static constexpr int kMaxMemoryLevel = 9;
 static constexpr int kDefaultMemoryLevel = 3;
 static constexpr size_t kMaxTierCount = 8U;
-static constexpr size_t kMaxLevelCount = 6U;
+static constexpr size_t kMaxLevelCount = 10U;
 static constexpr size_t kInitialBlocksPerChunk = 1U;
 static constexpr size_t kInitialChunksReserve = 16U;
 
 static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCount] = {
+    // L0
+    {},
     // L1
     {
         {128U, 32U},
@@ -115,6 +117,39 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 16U},
         {12U * 1024U * 1024U, 4U},
     },
+    // L7
+    {
+        {128U, 2048U},
+        {512U, 1024U},
+        {2U * 1024U, 512U},
+        {8U * 1024U, 256U},
+        {64U * 1024U, 128U},
+        {512U * 1024U, 64U},
+        {4U * 1024U * 1024U, 16U},
+        {12U * 1024U * 1024U, 6U},
+    },
+    // L8
+    {
+        {128U, 4096U},
+        {512U, 2048U},
+        {2U * 1024U, 1024U},
+        {8U * 1024U, 512U},
+        {64U * 1024U, 256U},
+        {512U * 1024U, 96U},
+        {4U * 1024U * 1024U, 24U},
+        {12U * 1024U * 1024U, 6U},
+    },
+    // L9
+    {
+        {128U, 8192U},
+        {512U, 4096U},
+        {2U * 1024U, 2048U},
+        {8U * 1024U, 1024U},
+        {64U * 1024U, 512U},
+        {512U * 1024U, 128U},
+        {4U * 1024U * 1024U, 32U},
+        {12U * 1024U * 1024U, 8U},
+    },
 };
 
 struct MemoryFreeNode final {
@@ -156,11 +191,15 @@ static constexpr size_t round_up(size_t value, size_t alignment) noexcept {
 
 static constexpr bool default_tier_table_well_formed() noexcept {
   for (const auto& row : kDefaultTierTable) {
+    if (row[0].max_size == 0U) {
+      continue;
+    }
+
     for (size_t t = 0; t < kMaxTierCount; ++t) {
       const auto& tier = row[t];
 
       if (tier.max_size == 0U) {
-        return false;
+        break;
       }
 
       if (tier.max_size < sizeof(MemoryFreeNode)) {
@@ -283,6 +322,21 @@ static void tier_deallocate(MemoryTierState& state, void* p) noexcept {
   state.free_list_head = node;
 }
 
+static void prealloc_full_quota(MemoryTierState& state) noexcept {
+  state.mtx.lock();
+
+  state.next_chunk_blocks = state.blocks_per_chunk;
+  const bool ok = grow_tier_chunk(state);
+  state.next_chunk_blocks = kInitialBlocksPerChunk;
+
+  state.mtx.unlock();
+
+  if VUNLIKELY (!ok) {
+    CLOG_W("MemoryPool: prealloc failed for tier (max_size=%zu, blocks_per_chunk=%zu); tier reverts to lazy growth.",
+           state.max_size, state.blocks_per_chunk);
+  }
+}
+
 static bool validate_tiers_log(const std::vector<MemoryPool::Tier>& tiers) noexcept {
   static constexpr size_t kMaxTierSize = SIZE_MAX - MemoryPool::kBlockAlignment + 1U;
 
@@ -324,7 +378,26 @@ static bool validate_tiers_log(const std::vector<MemoryPool::Tier>& tiers) noexc
   return true;
 }
 
-// MemoryPool::Impl
+static MemoryPool::Config create_memory_config(int level, bool prealloc) {
+  if VUNLIKELY (level < kMinMemoryLevel || level > kMaxMemoryLevel) {
+    CLOG_W("MemoryPool: level %d out of range [%d, %d], clamped.", level, kMinMemoryLevel, kMaxMemoryLevel);
+    level = (level < kMinMemoryLevel) ? kMinMemoryLevel : kMaxMemoryLevel;
+  }
+
+  const auto row_index = static_cast<size_t>(level - kMinMemoryLevel);
+  const auto& row = kDefaultTierTable[row_index];
+
+  MemoryPool::Config config;
+  config.prealloc = prealloc;
+  config.tiers.reserve(kMaxTierCount);
+
+  for (size_t i = 0; i < kMaxTierCount && row[i].max_size != 0; ++i) {
+    config.tiers.emplace_back(row[i]);
+  }
+
+  return config;
+}
+
 struct MemoryPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) size_t tier_max_sizes[kMaxTierCount]{};
   MemoryTierState* tier_states[kMaxTierCount]{};
@@ -336,18 +409,25 @@ struct MemoryPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
   alignas(64) std::atomic<uint64_t> oversized_dealloc_count{0};
 };
 
-// MemoryPool
-MemoryPool::MemoryPool(const std::vector<Tier>& tiers) : impl_(std::make_unique<Impl>()) {
-  const bool use_caller = !tiers.empty() && validate_tiers_log(tiers);
+MemoryPool::MemoryPool() : MemoryPool(Config{}) {}
+
+MemoryPool::MemoryPool(int level, bool prealloc) : MemoryPool(create_memory_config(level, prealloc)) {}
+
+MemoryPool::MemoryPool(const Config& config) : impl_(std::make_unique<Impl>()) {
+  if (config.tiers.empty()) {
+    impl_->tier_count = 0;
+    return;
+  }
 
   std::vector<Tier> fallback;
+  const bool use_caller = validate_tiers_log(config.tiers);
 
   if VUNLIKELY (!use_caller) {
     const auto& row = kDefaultTierTable[kDefaultMemoryLevel - kMinMemoryLevel];
     fallback.assign(row, row + kMaxTierCount);
   }
 
-  const std::vector<Tier>& source = use_caller ? tiers : fallback;
+  const std::vector<Tier>& source = use_caller ? config.tiers : fallback;
 
   impl_->tier_count = source.size();
   impl_->owned_states.reserve(source.size());
@@ -365,6 +445,12 @@ MemoryPool::MemoryPool(const std::vector<Tier>& tiers) : impl_(std::make_unique<
     impl_->tier_max_sizes[i] = cfg.max_size;
     impl_->tier_states[i] = state.get();
     impl_->owned_states.emplace_back(std::move(state));
+  }
+
+  if (config.prealloc) {
+    for (auto& state : impl_->owned_states) {
+      prealloc_full_quota(*state);
+    }
   }
 }
 
@@ -604,26 +690,7 @@ void MemoryPool::clear() noexcept {
 
 void MemoryPool::trim() noexcept { clear(); }
 
-size_t MemoryPool::find_tier(size_t bytes) const noexcept {
-  const size_t count = impl_->tier_count;
-  const size_t* const sizes = impl_->tier_max_sizes;
-
-  for (size_t i = 0; i < count; ++i) {
-    if (bytes <= sizes[i]) {
-      return i;
-    }
-  }
-
-  return kMaxTierCount;
-}
-
-MemoryPool& MemoryPool::global_instance(bool use_env_level) {
-  static MemoryPool instance(use_env_level ? default_tiers() : std::vector<Tier>{});
-
-  return instance;
-}
-
-std::vector<MemoryPool::Tier> MemoryPool::default_tiers() {
+MemoryPool::Config MemoryPool::get_default_config() {
   static int level = []() noexcept {
     const std::string env_value = Utils::get_env("VLINK_MEMORY_LEVEL", "3");
 
@@ -651,9 +718,30 @@ std::vector<MemoryPool::Tier> MemoryPool::default_tiers() {
     return parsed;
   }();
 
-  const auto& row = kDefaultTierTable[level - kMinMemoryLevel];
+  static bool prealloc_env = (Utils::get_env("VLINK_MEMORY_PREALLOC") == "1");
 
-  return std::vector<Tier>(row, row + kMaxTierCount);
+  Config config = create_memory_config(level, prealloc_env);
+
+  return config;
+}
+
+MemoryPool& MemoryPool::global_instance(bool use_env_level) {
+  static MemoryPool instance(use_env_level ? get_default_config() : create_memory_config(kDefaultMemoryLevel, false));
+
+  return instance;
+}
+
+size_t MemoryPool::find_tier(size_t bytes) const noexcept {
+  const size_t count = impl_->tier_count;
+  const size_t* const sizes = impl_->tier_max_sizes;
+
+  for (size_t i = 0; i < count; ++i) {
+    if (bytes <= sizes[i]) {
+      return i;
+    }
+  }
+
+  return kMaxTierCount;
 }
 
 }  // namespace vlink

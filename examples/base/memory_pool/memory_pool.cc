@@ -55,18 +55,19 @@ void print_tier_stats(const vlink::MemoryPool& pool) {
 
 int main() {
   // ---------------------------------------------------------------
-  // 1. Local pool with default_tiers() honours VLINK_MEMORY_LEVEL.
+  // 1. Local pool with get_default_config() honours VLINK_MEMORY_LEVEL.
   // ---------------------------------------------------------------
   {
-    VLOG_I("=== Section 1: default_tiers() ===");
+    VLOG_I("=== Section 1: get_default_config() ===");
 
-    auto tiers = vlink::MemoryPool::default_tiers();
-    MLOG_I("  VLINK_MEMORY_LEVEL produced {} tiers", tiers.size());
-    for (size_t i = 0; i < tiers.size(); ++i) {
-      MLOG_I("    cfg[{}]: max_size={} blocks_per_chunk={}", i, tiers[i].max_size, tiers[i].blocks_per_chunk);
+    auto config = vlink::MemoryPool::get_default_config();
+    MLOG_I("  VLINK_MEMORY_LEVEL produced {} tiers (prealloc={})", config.tiers.size(), config.prealloc);
+    for (size_t i = 0; i < config.tiers.size(); ++i) {
+      MLOG_I("    cfg[{}]: max_size={} blocks_per_chunk={}", i, config.tiers[i].max_size,
+             config.tiers[i].blocks_per_chunk);
     }
 
-    vlink::MemoryPool pool(tiers);
+    vlink::MemoryPool pool(config);
     MLOG_I("  pool.get_tier_count() = {}", pool.get_tier_count());
 
     // 2 KiB chunk header sized request + 1 KiB hot path + 1 MiB rare path.
@@ -104,12 +105,13 @@ int main() {
     VLOG_I("=== Section 2: Oversized passthrough ===");
 
     // Tiny pool whose biggest tier is only 1 KiB.
-    std::vector<vlink::MemoryPool::Tier> tiny_tiers{
+    vlink::MemoryPool::Config tiny_cfg;
+    tiny_cfg.tiers = {
         {64U, 128U},
         {256U, 64U},
         {1024U, 16U},
     };
-    vlink::MemoryPool tiny(tiny_tiers);
+    vlink::MemoryPool tiny(tiny_cfg);
 
     constexpr size_t kHuge = 32U * 1024U * 1024U;  // 32 MiB -- way past the 1 KiB top tier
     void* huge = tiny.allocate(kHuge);
@@ -129,12 +131,14 @@ int main() {
   {
     VLOG_I("=== Section 3: Custom tier configuration ===");
 
-    std::vector<vlink::MemoryPool::Tier> page_tiers{
+    vlink::MemoryPool::Config page_cfg;
+    page_cfg.tiers = {
         {64U, 256U},
         {4U * 1024U, 64U},
         {64U * 1024U, 8U},
     };
-    vlink::MemoryPool page_pool(page_tiers);
+    page_cfg.prealloc = true;  // fill every tier to full blocks_per_chunk quota up-front
+    vlink::MemoryPool page_pool(page_cfg);
 
     constexpr size_t kPageBytes = 4096U;
     constexpr size_t kPageCount = 32U;
@@ -183,6 +187,47 @@ int main() {
 
     VLOG_I("  Stats after a few Bytes allocations:");
     print_tier_stats(global);
+  }
+
+  // ---------------------------------------------------------------
+  // 5. Construct directly by level -- no need to spell out a tier array.
+  // ---------------------------------------------------------------
+  {
+    VLOG_I("=== Section 5: MemoryPool(int level) ===");
+
+    // Equivalent to MemoryPool(get_default_config row #5); out-of-range values
+    // are clamped to [0, 9] with a warning.
+    vlink::MemoryPool level5_pool(5);
+    MLOG_I("  level5_pool tier count = {}", level5_pool.get_tier_count());
+
+    void* p = level5_pool.allocate(96);
+    if (p != nullptr) {
+      level5_pool.deallocate(p, 96);
+      VLOG_I("  level5_pool routed a 96B alloc to tier 0:");
+      print_tier_stats(level5_pool);
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // 6. Bypass mode -- empty tier list / level 0 / VLINK_MEMORY_LEVEL=0.
+  //    Every allocate -> ::operator new, every deallocate -> ::operator delete.
+  //    All tier counts stay 0; only the oversized counters move.
+  // ---------------------------------------------------------------
+  {
+    VLOG_I("=== Section 6: Bypass mode (VLINK_MEMORY_LEVEL=0 / empty tiers) ===");
+
+    vlink::MemoryPool bypass_pool;  // no-arg ctor = bypass; same as MemoryPool(0)
+    MLOG_I("  bypass_pool tier count = {} (expect 0)", bypass_pool.get_tier_count());
+
+    void* a = bypass_pool.allocate(48);
+    void* b = bypass_pool.allocate(64U * 1024U);
+
+    if (a != nullptr) bypass_pool.deallocate(a, 48);
+    if (b != nullptr) bypass_pool.deallocate(b, 64U * 1024U);
+
+    auto over = bypass_pool.get_oversized_stats();
+    MLOG_I("  bypass oversized: alloc_count={} alloc_bytes={} dealloc_count={}", over.alloc_count, over.alloc_bytes,
+           over.dealloc_count);
   }
 
   VLOG_I("MemoryPool example finished.");

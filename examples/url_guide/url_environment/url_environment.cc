@@ -296,12 +296,14 @@ int main() {
     show_env("VLINK_LOCK_DIR", "Lock file directory");
 
     // VLINK_MEMORY_LEVEL: Tier configuration level for vlink::MemoryPool.
-    //   Integer in [1, 6]; out-of-range or non-numeric values clamp/fallback
-    //   to the default. Higher levels reserve more blocks per tier, trading
-    //   resident footprint for fewer upstream allocations.
+    //   Integer in [0, 9]; 0 = bypass mode (every allocation goes straight to
+    //   ::operator new / delete). 1..9 select the built-in pyramid; higher
+    //   levels reserve more blocks per tier, trading resident footprint for
+    //   fewer upstream allocations. Out-of-range or non-numeric values clamp
+    //   to [0, 9].
     //   Default: 3 (Balanced)
     //   Shell: export VLINK_MEMORY_LEVEL=4
-    show_env("VLINK_MEMORY_LEVEL", "MemoryPool tier level (1..6, default 3)");
+    show_env("VLINK_MEMORY_LEVEL", "MemoryPool tier level (0..9, default 3; 0 = bypass)");
 
     // Show the current platform temp directory
     VLOG_I("  Platform tmp dir:", vlink::Utils::get_tmp_dir());

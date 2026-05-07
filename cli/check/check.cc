@@ -1196,9 +1196,12 @@ int check_env(bool available_case, const std::string& prefix) {
       {"VLINK_TMP_DIR", "", "Override directory used for temporary files.", false},
       {"VLINK_LOCK_DIR", "", "Override directory used for singleton lock files.", false},
       {"VLINK_MEMORY_LEVEL", "",
-       "Selects the MemoryPool default-tier preset (1..6, default 3). Higher levels keep more blocks per chunk for "
-       "the Bytes allocator -- more resident memory, fewer upstream chunk allocations. Honoured only when "
-       "Bytes::init_memory_pool() is called at startup.",
+       "MemoryPool tier level (0..9, default 3). 0 = bypass; 1..9 select built-in pyramid (higher = more "
+       "resident memory, fewer upstream allocs). Honoured only when Bytes::init_memory_pool() is called.",
+       false},
+      {"VLINK_MEMORY_PREALLOC", "",
+       "Set to 1 to fill every tier to its full blocks_per_chunk quota when the global MemoryPool is built "
+       "(best-effort).",
        false},
       {"VLINK_PLUGIN_DIR", "", "Directory searched by vlink::Plugin when loading dynamic modules.", false},
       {"VLINK_URL_PLUGINS", "",

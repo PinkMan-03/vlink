@@ -83,7 +83,7 @@ inline void demo_crc32() {
 
 // Demonstrate memory pool initialization.
 // init_memory_pool() triggers MemoryPool::global_instance(true), so the
-// shared pool's tier configuration follows VLINK_MEMORY_LEVEL (1..6).
+// shared pool's tier configuration follows VLINK_MEMORY_LEVEL (1..9).
 // The pool lives for the duration of the process.
 inline void demo_memory_pool() {
   VLOG_I("--- 8. Memory pool ---");

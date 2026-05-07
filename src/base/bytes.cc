@@ -103,7 +103,7 @@ uint8_t* Bytes::bytes_malloc(size_t size) noexcept {
 
 void Bytes::bytes_free(uint8_t* ptr, size_t size) noexcept { MemoryPool::global_instance().deallocate(ptr, size); }
 
-void Bytes::init_memory_pool() noexcept { (void)MemoryPool::global_instance(true); }
+void Bytes::init_memory_pool() noexcept { (void)MemoryPool::global_instance(); }
 
 void Bytes::release_memory_pool() noexcept { MemoryPool::global_instance().clear(); }
 

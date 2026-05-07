@@ -35,11 +35,12 @@
  *
  * Tier configuration:
  *
- * | Source                              | When used                                              |
- * | ----------------------------------- | ------------------------------------------------------ |
- * | Caller-supplied tier vector         | @c MemoryPool ctor with non-empty, well-formed tiers   |
- * | @c default_tiers() (level 1..6)     | @c global_instance(true) or as ctor fallback           |
- * | Built-in level-3 balanced pyramid   | Empty / malformed input; never read at runtime         |
+ * | Source                                | When used                                              |
+ * | ------------------------------------- | ------------------------------------------------------ |
+ * | Caller-supplied @c Config             | @c MemoryPool(const Config&) with non-empty tiers      |
+ * | @c get_default_config() (level 0..9)  | @c global_instance(true)                               |
+ * | Built-in level-3 balanced pyramid     | Malformed input fallback; @c global_instance(false)    |
+ * | Built-in level @c N row               | @c MemoryPool(int level, bool prealloc) ctor           |
  *
  * Cleanup primitives:
  *
@@ -62,7 +63,7 @@
  * @par Example
  * @code
  * auto& pool = vlink::MemoryPool::global_instance();
- * void* p = pool.allocate(512);                  // 1 KiB tier
+ * void* p = pool.allocate(512);                  // routes to the 512 B tier
  * pool.deallocate(p, 512);                       // bytes MUST match
  *
  * pool.trim();                                   // periodic memory reclaim
@@ -110,6 +111,29 @@ class VLINK_EXPORT MemoryPool final {
   };
 
   /**
+   * @brief Constructor configuration: tier list plus optional preallocation.
+   *
+   * @details
+   * Wraps the @c Tier vector so additional knobs can be attached without
+   * widening the @c MemoryPool constructor signature.
+   *
+   * @c prealloc controls whether the constructor eagerly fills every tier
+   * to its full @c blocks_per_chunk quota on construction (one upstream
+   * allocation per tier, sized for the entire quota).  Default @c false
+   * keeps the lazy geometric-growth behaviour (idle pool footprint = 0).
+   * Set to @c true for latency-critical paths that want to pay the entire
+   * upstream allocation cost up-front instead of growing on the hot path.
+   *
+   * @note Preallocation is best-effort: if @c ::operator @c new fails for
+   *       any tier, that tier remains in its lazy state and the constructor
+   *       continues with the rest.
+   */
+  struct Config final {
+    std::vector<Tier> tiers;  ///< Tier descriptors.  Empty = bypass mode.
+    bool prealloc{false};     ///< If @c true, eagerly fill each tier to its full @c blocks_per_chunk quota.
+  };
+
+  /**
    * @brief Per-tier runtime statistics snapshot.
    *
    * @details
@@ -144,51 +168,61 @@ class VLINK_EXPORT MemoryPool final {
   };
 
   /**
-   * @brief Returns the process-wide shared @c MemoryPool instance.
+   * @brief Constructs an empty pool in bypass mode.
    *
    * @details
-   * Lazily constructs a Meyers' singleton (thread-safe under C++11+).  Only
-   * the very first call decides the configuration; subsequent calls return
-   * the same instance and ignore @p use_env_level.
-   *
-   * @warning If env-driven tuning is required, ensure your bootstrap code
-   *          (e.g. @c Bytes::init_memory_pool) is the first caller.  When the
-   *          first call passes @c false, the pool falls back to the level-3
-   *          default pyramid for the program's lifetime.
-   *
-   * @param use_env_level  @c true: build from @c default_tiers() (honours
-   *                       @c VLINK_MEMORY_LEVEL).  @c false (default): use
-   *                       the built-in level-3 pyramid.
-   * @return Reference to the global pool, valid for the program's lifetime.
+   * Equivalent to @c MemoryPool(Config{}): every allocation routes through
+   * @c ::operator @c new / @c ::operator @c delete (no tiered free lists,
+   * no preallocation).
    */
-  static MemoryPool& global_instance(bool use_env_level = false);
+  MemoryPool();
 
   /**
-   * @brief Returns the 8-tier default pyramid for the current @c VLINK_MEMORY_LEVEL.
+   * @brief Constructs a tiered pool with the built-in pyramid for the given
+   *        level.
    *
    * @details
-   * Each level (1..6) maps to a hand-coded row of {max_size, blocks_per_chunk}
-   * pairs -- nothing is computed at runtime.  Non-numeric or out-of-range
-   * env values are clamped to [1, 6] with a warning.
+   * Selects a row from the built-in tier table.  Out-of-range values are
+   * clamped to @c [0, 9] and a warning is logged.  Level @c 0 yields bypass
+   * mode (no pool, every alloc goes through @c ::operator @c new); the
+   * @p prealloc flag is ignored in bypass mode (no tiers to fill).
+   * At level @c 9 the fully-saturated resident footprint stays under 500 MiB.
    *
-   * @return An 8-tier configuration ready to pass to the constructor.
+   * Equivalent to @c MemoryPool(Config{tiers_for(level), prealloc}); see the
+   * @c Config-based constructor for the full validation, fallback, and
+   * preallocation contract.
+   *
+   * @param level     Built-in level in @c [0, 9].
+   * @param prealloc  When @c true, eagerly fills every tier to its full
+   *                  @c blocks_per_chunk quota with one upstream allocation
+   *                  per tier (best-effort; failures revert that tier to
+   *                  lazy growth).  Defaults to @c false (lazy / on-demand).
    */
-  [[nodiscard]] static std::vector<Tier> default_tiers();
+  explicit MemoryPool(int level, bool prealloc = false);
 
   /**
-   * @brief Constructs a tiered pool with the given tier configuration.
+   * @brief Constructs a tiered pool with the given configuration.
    *
    * @details
-   * Empty or malformed input (non-monotonic ordering, duplicate
-   * @c max_size, zero @c max_size, zero @c blocks_per_chunk, or @c max_size
-   * below the minimum required block size) logs an error and silently falls
-   * back to the level-3 default pyramid.  Validation never throws;
-   * @c std::bad_alloc may still propagate from the internal vector growths.
+   * Empty @c config.tiers puts the pool in @b bypass mode -- every
+   * @c allocate goes straight to @c ::operator @c new and every
+   * @c deallocate to @c ::operator @c delete (equivalent to
+   * @c VLINK_MEMORY_LEVEL=0).  Malformed but non-empty input
+   * (non-monotonic ordering, duplicate @c max_size, zero @c max_size,
+   * zero @c blocks_per_chunk, or @c max_size below the minimum required
+   * block size) logs an error and silently falls back to the level-3
+   * default pyramid.  Validation never throws; @c std::bad_alloc may still
+   * propagate from the internal vector growths.
    *
-   * @param tiers  Tier descriptors, strictly ascending by @c max_size with
-   *               every field > 0.  Defaults to empty (uses level-3 fallback).
+   * When @c config.prealloc is @c true, the constructor eagerly fills every
+   * tier to its full @c blocks_per_chunk quota in a single upstream
+   * allocation per tier (best-effort: tiers whose @c ::operator @c new
+   * fails are left in lazy state).  Bypass mode ignores @c prealloc --
+   * there are no tiers to fill.
+   *
+   * @param config  Tier descriptors and preallocation flag.
    */
-  explicit MemoryPool(const std::vector<Tier>& tiers = {});
+  explicit MemoryPool(const Config& config);
 
   /**
    * @brief Releases every chunk owned by the pool, unconditionally.
@@ -232,7 +266,8 @@ class VLINK_EXPORT MemoryPool final {
   /**
    * @brief Returns the number of configured tiers.
    *
-   * @return Tier count (1..8 for valid configurations).
+   * @return Tier count.  @c 0 indicates bypass mode (level @c 0 or empty
+   *         caller-supplied tier list).  @c 1..8 for normal configurations.
    */
   [[nodiscard]] size_t get_tier_count() const noexcept;
 
@@ -302,6 +337,47 @@ class VLINK_EXPORT MemoryPool final {
    * not have to use a name that historically suggested a destructive reset.
    */
   void trim() noexcept;
+
+  /**
+   * @brief Returns the default tier pyramid for the current
+   *        @c VLINK_MEMORY_LEVEL and @c VLINK_MEMORY_PREALLOC.
+   *
+   * @details
+   * Each level (0..9) maps to a hand-coded row of {max_size, blocks_per_chunk}
+   * pairs -- nothing is computed at runtime.  Level @c 0 returns an empty
+   * tier vector (bypass mode).  Levels @c 1..9 return up to 8 tiers spanning
+   * 128 B .. 12 MiB with monotonically growing @c blocks_per_chunk.
+   * Non-numeric or out-of-range @c VLINK_MEMORY_LEVEL values are clamped to
+   * @c [0, 9] with a warning.  At level @c 9 the fully-saturated footprint
+   * stays under 500 MiB.
+   *
+   * @c VLINK_MEMORY_PREALLOC populates the @c prealloc flag of the
+   * returned config.  Only the literal value @c "1" enables preallocation;
+   * any other value (including unset, @c "true", @c "yes", or whitespace)
+   * keeps the default @c false.
+   *
+   * @return @c Config ready to pass to the constructor.
+   */
+  [[nodiscard]] static Config get_default_config();
+
+  /**
+   * @brief Returns the process-wide shared @c MemoryPool instance.
+   *
+   * @details
+   * Lazily constructs a Meyers' singleton (thread-safe under C++11+).  Only
+   * the very first call decides the configuration; subsequent calls return
+   * the same instance and ignore @p use_env_level.
+   *
+   * @warning Whichever value @p use_env_level takes on the first call is
+   *          baked in for the program's lifetime.
+   *
+   * @param use_env_level  @c true (default): build from @c get_default_config(),
+   *                       honouring @c VLINK_MEMORY_LEVEL and
+   *                       @c VLINK_MEMORY_PREALLOC.  @c false: use the
+   *                       built-in level-3 pyramid (no env, no preallocation).
+   * @return Reference to the global pool, valid for the program's lifetime.
+   */
+  static MemoryPool& global_instance(bool use_env_level = true);
 
  private:
   size_t find_tier(size_t bytes) const noexcept;

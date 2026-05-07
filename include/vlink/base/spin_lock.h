@@ -199,20 +199,24 @@ inline void SpinLock::lock() noexcept {
   uint32_t total_spin = 0;
   uint16_t spin_count = 0;
   uint16_t backoff = 1;
+  bool warned = false;
 
   for (;;) {
     if (!flag_.exchange(true, std::memory_order_acquire)) {
       return;
     }
 
-    while (flag_.load(std::memory_order_relaxed)) {
+    do {
       ++total_spin;
 
       if (++spin_count >= backoff) {
         if VUNLIKELY (total_spin > kMaxSpinCount) {
           // LCOV_EXCL_START
           // GCOVR_EXCL_START
-          VLOG_E("SpinLock: exceeded max spin count.");
+          if (!warned) {
+            VLOG_E("SpinLock: exceeded max spin count.");
+            warned = true;
+          }
           std::this_thread::sleep_for(std::chrono::microseconds(10));
           // GCOVR_EXCL_STOP
           // LCOV_EXCL_STOP
@@ -225,7 +229,7 @@ inline void SpinLock::lock() noexcept {
         }
         spin_count = 0;
       }
-    }
+    } while (flag_.load(std::memory_order_relaxed));
   }
 }
 

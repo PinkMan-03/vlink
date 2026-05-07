@@ -19,6 +19,7 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | Logger            | `base/logger.h`                 | 全局单例日志器，四种输出风格，可插拔后端       |
 | Bytes             | `base/bytes.h`                  | 128 字节固定大小缓冲区，SBO + 五种所有权       |
 | MemoryPool        | `base/memory_pool.h`            | 分级（金字塔）free-list 内存池，Bytes 默认分配器 |
+| MemoryResource    | `base/memory_resource.h`        | `std::pmr::memory_resource` 适配器，桥接 `MemoryPool` |
 | MessageLoop       | `base/message_loop.h`           | 单线程事件循环，集成定时器与优先级队列         |
 | Timer             | `base/timer.h`                  | 事件循环驱动的周期/单次定时器                  |
 | WheelTimer        | `base/wheel_timer.h`            | 哈希时间轮，O(1) 插入/删除大量超时             |
@@ -301,19 +302,28 @@ alignof(std::max_align_t)` 时走 oversized 直通路径，直接 `::operator ne
 
 ### 默认 Tier 表与 VLINK_MEMORY_LEVEL
 
-`MemoryPool::default_tiers()` 返回 8 阶金字塔配置，由环境变量
-`VLINK_MEMORY_LEVEL`（1..6，默认 3）从一张手工写死的查表里选择一行：
+`MemoryPool::get_default_config()` 返回 8 阶金字塔配置，由环境变量
+`VLINK_MEMORY_LEVEL`（`0`..`9`，默认 `3`）从一张编译期常量表中按行索引：
 
-| Level | 风格      | 含义                                                   |
-| ----- | --------- | ------------------------------------------------------ |
-| `1`   | Tiny      | 端侧/嵌入式，最小驻留 chunk                            |
-| `2`   | Small     | 受限设备                                               |
-| `3`   | Balanced  | **默认**                                               |
-| `4`   | Large     | 服务器/高吞吐                                          |
-| `5`   | XLarge    | 大批量小消息                                           |
-| `6`   | Massive   | 极端预热场景，每档预留 block 最多                      |
+| Level | 风格      | 含义                                                                                  |
+| ----- | --------- | ------------------------------------------------------------------------------------- |
+| `0`   | Bypass    | 完全不走池：每次 `allocate` 直接 `::operator new`、每次 `deallocate` 直接 `::operator delete`。oversized 计数照常增长，所有 tier 计数为 0 |
+| `1`   | Tiny      | 端侧/嵌入式，最小驻留 chunk                                                           |
+| `2`   | Small     | 受限设备                                                                              |
+| `3`   | Balanced  | **默认**                                                                              |
+| `4`   | Large     | 服务器/高吞吐                                                                         |
+| `5`   | XLarge    | 大批量小消息                                                                          |
+| `6`   | Massive   | 重 IO/视频流；每档 block_per_chunk 翻倍                                              |
+| `7`   | Heavy     | 长时间高负载；小 tier 进一步倍增                                                      |
+| `8`   | Saturate  | 接近饱和的多生产者场景                                                                |
+| `9`   | Peak      | 高吞吐峰值；满载占用上限不超过 500 MiB                                                |
 
-非数字、超出 [1, 6] 的取值会被钳到合法区间，并打印 warning。
+非数字、超出 `[0, 9]` 的取值会被钳到合法区间，并打印 warning。
+
+设置 `VLINK_MEMORY_PREALLOC=1` 时，`get_default_config()` 返回的 `Config` 会
+带上 `prealloc=true`，构造函数据此为每个 tier 一次性预分配满额
+`blocks_per_chunk` 的 chunk（best-effort）；其它值或未设置保持懒加载。
+该变量同样仅在首次构造全局池时读取。
 
 ### 主要 API
 
@@ -323,21 +333,37 @@ namespace vlink {
 class MemoryPool final {
  public:
   struct Tier { size_t max_size; size_t blocks_per_chunk; };
+  struct Config { std::vector<Tier> tiers; bool prealloc{false}; };
   struct TierStats { /* max_size, block_size, hit_count, ... */ };
   struct OversizedStats { /* alloc_count, alloc_bytes, dealloc_count */ };
 
-  // 进程级共享单例，gen_by_env=true 时按 VLINK_MEMORY_LEVEL 选 tier。
+  // 进程级共享单例。
+  //   use_env_level=true（默认）：按 VLINK_MEMORY_LEVEL / VLINK_MEMORY_PREALLOC 配置。
+  //   use_env_level=false：使用 level-3 默认金字塔，不读环境变量、不预分配。
+  // 仅首次调用决定配置；之后调用忽略 use_env_level，返回同一实例。
   // Bytes::init_memory_pool() 内部就是 MemoryPool::global_instance(true)。
-  static MemoryPool& global_instance(bool gen_by_env = false);
+  static MemoryPool& global_instance(bool use_env_level = true);
 
-  // 当前 VLINK_MEMORY_LEVEL 对应的 8 阶默认配置。
-  [[nodiscard]] static std::vector<Tier> default_tiers();
+  // 当前 VLINK_MEMORY_LEVEL / VLINK_MEMORY_PREALLOC 对应的 Config。
+  [[nodiscard]] static Config get_default_config();
 
-  // 自定义 tier 数组；非法/空时回退到 level-3 默认金字塔。构造不抛异常。
-  explicit MemoryPool(const std::vector<Tier>& tiers = {});
+  // 显式 Config（tiers + prealloc）：
+  //   空 tiers = bypass 模式（每次直通 ::operator new / delete）。
+  //   非空但格式非法（max_size==0 / blocks_per_chunk==0 / 非递增 /
+  //     max_size < sizeof(FreeNode)）= 回退到 level-3 默认金字塔，并打 error。
+  //   prealloc=true 时构造期为每个 tier 预分配满额 blocks_per_chunk 的 chunk（best-effort）。
+  //   构造不抛异常（vector 增长例外）。
+  explicit MemoryPool(const Config& config);
 
-  // 路由到首个 max_size >= bytes 的 tier；超出最大 tier 或对齐过严走直通。
-  // 失败返回 nullptr，永不抛异常。
+  // 无参构造 = bypass（等价 MemoryPool(Config{})）。
+  MemoryPool();
+
+  // 按 level 从内置 10 行 tier 表（L0..L9，L0 是空哨兵 = bypass）取一行。
+  // 越界值钳到 [0, 9]。L9 满载占用上限不超过 500 MiB。
+  explicit MemoryPool(int level);
+
+  // 路由到首个 max_size >= bytes 的 tier；超出最大 tier、对齐过严，或池是
+  // bypass 模式时走直通路径。失败返回 nullptr，永不抛异常。
   [[nodiscard]] void* allocate(size_t bytes,
                                size_t alignment = alignof(std::max_align_t)) noexcept;
 
@@ -346,7 +372,7 @@ class MemoryPool final {
                   size_t alignment = alignof(std::max_align_t)) noexcept;
 
   // 统计快照
-  [[nodiscard]] size_t get_tier_count() const noexcept;
+  [[nodiscard]] size_t get_tier_count() const noexcept;   // bypass 时为 0
   [[nodiscard]] std::vector<TierStats> get_stats() const noexcept;
   [[nodiscard]] OversizedStats get_oversized_stats() const noexcept;
   void reset_stats() noexcept;
@@ -373,13 +399,21 @@ auto& pool = vlink::MemoryPool::global_instance();
 void* p = pool.allocate(512);       // 落到 1 KiB 以内的 tier
 pool.deallocate(p, 512);            // bytes 必须严格匹配
 
-// 3) 自定义 tier 数组
-std::vector<vlink::MemoryPool::Tier> tiers{
+// 3) 自定义 Config（tier 数组 + 可选预分配）
+vlink::MemoryPool::Config cfg;
+cfg.tiers = {
     {64U,    256U},
     {1024U,  64U},
     {64U * 1024U, 8U},
 };
-vlink::MemoryPool local_pool(tiers);
+cfg.prealloc = true;                    // 构造期为每个 tier 预分配满额 blocks_per_chunk
+vlink::MemoryPool local_pool(cfg);
+
+// 3a) 按 level 直接构造（等价 get_default_config 的某一行）
+vlink::MemoryPool level5_pool(5);
+
+// 3b) Bypass 模式：无参构造 / level=0 都直通 ::operator new
+vlink::MemoryPool bypass_pool;          // 或 vlink::MemoryPool bypass_pool(0);
 
 // 4) 查看统计
 for (const auto& s : pool.get_stats()) {
@@ -414,9 +448,89 @@ MemoryPool::global_instance().allocate(size)
    +-- 否则                              --> ::operator new 直通路径
 ```
 
-调用 `Bytes::init_memory_pool()` 只是**显式地**触发首次构造（带 `gen_by_env=
-true` 让池读取 `VLINK_MEMORY_LEVEL`）。如果不显式调用，首次 `Bytes` 堆分配
-也会触发懒加载，但此时取的是 level-3 默认值，不再读环境变量。
+调用 `Bytes::init_memory_pool()` 只是**显式地**触发首次构造（带
+`use_env_level=true` 让池读取 `VLINK_MEMORY_LEVEL`）。如果不显式调用，首次
+`Bytes` 堆分配也会触发懒加载，但此时取的是 level-3 默认值，不再读环境变量。
+
+---
+
+## 11.4.1 PMR 适配器 MemoryResource
+
+`vlink::MemoryResource`（`base/memory_resource.h`）是 `std::pmr::memory_resource`
+的适配器，让任何 pmr-aware 容器（`std::pmr::vector`、`std::pmr::string`、
+`std::pmr::polymorphic_allocator<T>` 等）通过 `vlink::MemoryPool` 完成底层字节
+分配。该类不带 `final`，可被继承。
+
+### 主要 API
+
+```cpp
+namespace vlink {
+
+class MemoryResource : public std::pmr::memory_resource {
+ public:
+  // 进程级共享 resource，包装 MemoryPool::global_instance()。
+  // 该 resource 不持有底层池；与 Bytes 共享同一个全局池。
+  // use_env_level 默认 true，仅首次调用生效。
+  static MemoryResource& global_instance(bool use_env_level = true);
+
+  // 拥有自己的私有池，按 Config 构造（tiers + prealloc）。
+  // 空 tiers = bypass。语义同 MemoryPool 构造函数。
+  explicit MemoryResource(const MemoryPool::Config& config);
+
+  // 无参构造 = bypass。
+  MemoryResource();
+
+  // 拥有自己的私有池，按 level 构造。level=0 = bypass。
+  explicit MemoryResource(int level);
+
+  ~MemoryResource() override;   // 私有池在此销毁；global_instance 是 no-op
+
+  // 直接拿到底层池，可调用 get_stats / clear / trim 等。
+  [[nodiscard]] MemoryPool& get_memory_pool() noexcept;
+};
+
+}  // namespace vlink
+```
+
+### 使用示例
+
+```cpp
+#include <memory_resource>
+
+#include <vlink/base/memory_resource.h>
+
+// 1) 进程级共享 resource：与 Bytes 共用同一个全局池。
+std::pmr::vector<int> v(&vlink::MemoryResource::global_instance());
+v.reserve(1024);                                    // 经全局 MemoryPool 分配
+
+// 2) 私有 resource，level=3 默认金字塔。
+vlink::MemoryResource res(3);
+std::pmr::polymorphic_allocator<char> alloc(&res);
+std::pmr::string s(alloc);
+
+// 3) 私有 resource，自定义 Config。
+vlink::MemoryPool::Config cfg;
+cfg.tiers = {{64, 16}, {1024, 4}};
+cfg.prealloc = true;
+vlink::MemoryResource custom(cfg);
+std::pmr::vector<double> w(&custom);
+
+// 4) Bypass：无参构造拥有一个 bypass 私有池。
+vlink::MemoryResource bypass;
+std::pmr::vector<int> b(&bypass);       // 每次直通 ::operator new
+```
+
+### 语义与生命周期
+
+- `do_allocate` 在底层池返回 `nullptr` 时抛 `std::bad_alloc`（pmr 契约要求）；
+  其余路径不抛异常。底层 `MemoryPool::allocate` 本身永不抛。
+- `do_is_equal` 当且仅当两个 resource 指向**同一个底层 `MemoryPool` 对象**时
+  返回 `true`。两个分别用相同 tier 数组构造的私有 resource 拥有各自的私有
+  池，因此不相等。
+- `global_instance()` 返回的 resource 仅是全局池的别名（不拥有），析构时不
+  释放底层池；其他构造路径产生的 resource 在析构时同时销毁自己拥有的池。
+- `MemoryResource` 不可拷贝、不可移动，与 `std::pmr::memory_resource` 契约
+  一致。
 
 ---
 

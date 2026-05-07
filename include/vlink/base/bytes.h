@@ -116,8 +116,10 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    *
    * @details
    * Triggers construction of the static @c MemoryPool used by @c bytes_malloc.
-   * The pool's tier configuration is built from @c MemoryPool::default_tiers(),
-   * which honours the @c VLINK_MEMORY_LEVEL environment variable.
+   * The pool's tier configuration is built from @c MemoryPool::get_default_config(),
+   * which honours the @c VLINK_MEMORY_LEVEL environment variable (0..9,
+   * default 3; 0 = bypass mode, every allocation goes straight to
+   * @c ::operator @c new / @c delete).
    * Call this once at application start before any @c Bytes objects are created.
    * Safe to call multiple times; subsequent calls are no-ops.
    */

@@ -47,12 +47,21 @@ using vlink::MemoryPool;
 // Helpers
 // ---------------------------------------------------------------------------
 
-static std::vector<MemoryPool::Tier> simple_tiers() {
-  return {
+static MemoryPool::Config simple_tiers() {
+  MemoryPool::Config cfg;
+  cfg.tiers = {
       {64, 4},
       {256, 4},
       {1024, 2},
   };
+  return cfg;
+}
+
+static MemoryPool::Config make_config(std::vector<MemoryPool::Tier> tiers, bool prealloc = false) {
+  MemoryPool::Config cfg;
+  cfg.tiers = std::move(tiers);
+  cfg.prealloc = prealloc;
+  return cfg;
 }
 
 static uint64_t total_hits(const std::vector<MemoryPool::TierStats>& stats) {
@@ -76,8 +85,9 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     CHECK(pool.get_oversized_stats().alloc_count == 0u);
   }
 
-  TEST_CASE("default_tiers (level 3) is well-formed and ends at 12 MiB") {
-    auto tiers = MemoryPool::default_tiers();
+  TEST_CASE("get_default_config (level 3) is well-formed and ends at 12 MiB") {
+    auto config = MemoryPool::get_default_config();
+    const auto& tiers = config.tiers;
 
     CHECK(tiers.size() == 8u);
     CHECK(tiers.front().max_size == 128u);
@@ -89,46 +99,151 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     }
   }
 
-  TEST_CASE("construct from default_tiers") {
-    auto tiers = MemoryPool::default_tiers();
-    CHECK_NOTHROW(MemoryPool{tiers});
+  TEST_CASE("construct from get_default_config") {
+    auto config = MemoryPool::get_default_config();
+    CHECK_NOTHROW(MemoryPool{config});
   }
 
-  TEST_CASE("empty tier list falls back to level-3 defaults") {
+  TEST_CASE("empty tier list selects bypass mode (every alloc -> ::operator new)") {
     MemoryPool pool({});
+    CHECK(pool.get_tier_count() == 0u);
+    CHECK(pool.get_stats().empty());
+
+    void* p = pool.allocate(128);
+    CHECK(p != nullptr);
+    CHECK(pool.get_oversized_stats().alloc_count == 1u);
+    pool.deallocate(p, 128);
+    CHECK(pool.get_oversized_stats().dealloc_count == 1u);
+  }
+
+  TEST_CASE("default-constructed pool selects bypass mode") {
+    MemoryPool pool;
+    CHECK(pool.get_tier_count() == 0u);
+  }
+
+  TEST_CASE("MemoryPool(int level) — level 0 is bypass") {
+    MemoryPool pool(0);
+    CHECK(pool.get_tier_count() == 0u);
+  }
+
+  TEST_CASE("MemoryPool(int level) — level 3 yields the level-3 pyramid") {
+    MemoryPool pool(3);
     auto stats = pool.get_stats();
     CHECK(stats.size() >= 4u);
     CHECK(stats.front().max_size == 128u);
     CHECK(stats.back().max_size == 12u * 1024u * 1024u);
   }
 
-  TEST_CASE("default-constructed pool uses level-3 defaults") {
-    MemoryPool pool;
-    CHECK(pool.get_tier_count() >= 4u);
+  TEST_CASE("MemoryPool(int level) — out-of-range level is clamped") {
+    MemoryPool pool(99);
+    CHECK(pool.get_tier_count() >= 4u);  // clamped to L6
   }
 
   TEST_CASE("zero max_size triggers default-pyramid fallback") {
-    std::vector<MemoryPool::Tier> tiers = {{0, 4}};
-    MemoryPool pool(tiers);
+    MemoryPool pool(make_config({{0, 4}}));
     CHECK(pool.get_tier_count() >= 4u);
   }
 
   TEST_CASE("zero blocks_per_chunk triggers default-pyramid fallback") {
-    std::vector<MemoryPool::Tier> tiers = {{64, 0}};
-    MemoryPool pool(tiers);
+    MemoryPool pool(make_config({{64, 0}}));
     CHECK(pool.get_tier_count() >= 4u);
   }
 
   TEST_CASE("non-monotonic ordering triggers default-pyramid fallback") {
-    std::vector<MemoryPool::Tier> tiers = {{256, 4}, {64, 4}};
-    MemoryPool pool(tiers);
+    MemoryPool pool(make_config({{256, 4}, {64, 4}}));
     CHECK(pool.get_tier_count() >= 4u);
   }
 
   TEST_CASE("duplicate max_size triggers default-pyramid fallback") {
-    std::vector<MemoryPool::Tier> tiers = {{64, 4}, {64, 4}};
-    MemoryPool pool(tiers);
+    MemoryPool pool(make_config({{64, 4}, {64, 4}}));
     CHECK(pool.get_tier_count() >= 4u);
+  }
+
+  TEST_CASE("prealloc=false leaves every tier lazy (no upstream alloc until first allocate)") {
+    MemoryPool pool(make_config({{64, 8}, {256, 4}}, /*prealloc=*/false));
+
+    auto stats = pool.get_stats();
+    REQUIRE(stats.size() == 2u);
+    CHECK(stats[0].chunk_count == 0u);
+    CHECK(stats[0].upstream_alloc_count == 0u);
+    CHECK(stats[1].chunk_count == 0u);
+    CHECK(stats[1].upstream_alloc_count == 0u);
+  }
+
+  TEST_CASE("prealloc=true fills every tier to its full blocks_per_chunk in one upstream alloc") {
+    constexpr size_t kBpc0 = 8;
+    constexpr size_t kBpc1 = 4;
+    MemoryPool pool(make_config({{64, kBpc0}, {256, kBpc1}}, /*prealloc=*/true));
+
+    auto stats = pool.get_stats();
+    REQUIRE(stats.size() == 2u);
+
+    CHECK(stats[0].chunk_count == 1u);
+    CHECK(stats[0].upstream_alloc_count == 1u);
+    CHECK(stats[0].upstream_alloc_bytes == stats[0].block_size * kBpc0);
+
+    CHECK(stats[1].chunk_count == 1u);
+    CHECK(stats[1].upstream_alloc_count == 1u);
+    CHECK(stats[1].upstream_alloc_bytes == stats[1].block_size * kBpc1);
+  }
+
+  TEST_CASE("prealloc=true serves blocks_per_chunk allocations without further upstream growth") {
+    constexpr size_t kBpc = 6;
+    MemoryPool pool(make_config({{64, kBpc}}, /*prealloc=*/true));
+
+    std::vector<void*> blocks;
+    blocks.reserve(kBpc);
+    for (size_t i = 0; i < kBpc; ++i) {
+      void* p = pool.allocate(64);
+      REQUIRE(p != nullptr);
+      blocks.push_back(p);
+    }
+
+    auto stats = pool.get_stats();
+    REQUIRE(stats.size() == 1u);
+    CHECK(stats[0].chunk_count == 1u);           // still the same prealloc chunk
+    CHECK(stats[0].upstream_alloc_count == 1u);  // no extra upstream allocations
+    CHECK(stats[0].hit_count == kBpc);
+
+    for (void* p : blocks) {
+      pool.deallocate(p, 64);
+    }
+  }
+
+  TEST_CASE("after exhausting the prealloc chunk, subsequent grows follow geometric (one-time semantics)") {
+    constexpr size_t kBpc = 8;
+    MemoryPool pool(make_config({{64, kBpc}}, /*prealloc=*/true));
+
+    std::vector<void*> blocks;
+    blocks.reserve(kBpc + 1);
+    for (size_t i = 0; i < kBpc; ++i) {
+      blocks.push_back(pool.allocate(64));
+    }
+
+    void* extra = pool.allocate(64);
+    REQUIRE(extra != nullptr);
+    blocks.push_back(extra);
+
+    auto stats = pool.get_stats();
+    REQUIRE(stats.size() == 1u);
+    CHECK(stats[0].chunk_count == 2u);  // one prealloc + one geometric grow
+    CHECK(stats[0].upstream_alloc_count == 2u);
+
+    // Geometric growth must start from kInitialBlocksPerChunk (=1), not from blocks_per_chunk.
+    // The second chunk therefore holds exactly one block.
+    const size_t prealloc_bytes = stats[0].block_size * kBpc;
+    const size_t total = stats[0].upstream_alloc_bytes;
+    CHECK(total == prealloc_bytes + stats[0].block_size);
+
+    for (void* p : blocks) {
+      pool.deallocate(p, 64);
+    }
+  }
+
+  TEST_CASE("prealloc=true on empty tiers (bypass) is a no-op") {
+    MemoryPool pool(make_config({}, /*prealloc=*/true));
+    CHECK(pool.get_tier_count() == 0u);
+    CHECK(pool.get_oversized_stats().alloc_count == 0u);
   }
 }
 
@@ -228,7 +343,7 @@ TEST_SUITE("base-MemoryPool - free list reuse") {
 
   TEST_CASE("geometric growth: filling a tier needs sub-linear chunks") {
     // kInitialBlocksPerChunk=1, cap=4 -> chunks of 1,2,4 blocks = 7 total max.
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     std::vector<void*> blocks;
     for (int i = 0; i < 7; ++i) {
@@ -243,7 +358,7 @@ TEST_SUITE("base-MemoryPool - free list reuse") {
   }
 
   TEST_CASE("an additional alloc beyond the first chunk triggers a second chunk") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     std::vector<void*> blocks;
     for (int i = 0; i < 3; ++i) {
@@ -258,7 +373,7 @@ TEST_SUITE("base-MemoryPool - free list reuse") {
   }
 
   TEST_CASE("blocks within a tier are unique pointers") {
-    MemoryPool pool({{128, 64}});
+    MemoryPool pool(make_config({{128, 64}}));
 
     std::unordered_set<void*> seen;
     std::vector<void*> blocks;
@@ -301,7 +416,7 @@ TEST_SUITE("base-MemoryPool - stats") {
   }
 
   TEST_CASE("block_size is rounded up to alignof(max_align_t)") {
-    MemoryPool pool({{8, 4}, {24, 4}, {64, 4}});
+    MemoryPool pool(make_config({{8, 4}, {24, 4}, {64, 4}}));
 
     auto stats = pool.get_stats();
     CHECK(stats[0].block_size >= sizeof(void*));
@@ -311,7 +426,7 @@ TEST_SUITE("base-MemoryPool - stats") {
   }
 
   TEST_CASE("upstream_alloc_bytes accumulates chunk sizes") {
-    MemoryPool pool({{128, 4}});
+    MemoryPool pool(make_config({{128, 4}}));
 
     void* a = pool.allocate(128);
     void* b = pool.allocate(128);
@@ -329,7 +444,7 @@ TEST_SUITE("base-MemoryPool - stats") {
   }
 
   TEST_CASE("reset_stats clears per-call counters but preserves physical pool state") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     void* p = pool.allocate(64);
     pool.deallocate(p, 64);
@@ -362,7 +477,7 @@ TEST_SUITE("base-MemoryPool - stats") {
 
 TEST_SUITE("base-MemoryPool - clear") {
   TEST_CASE("clear with no live blocks releases every chunk") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     std::vector<void*> blocks;
     for (int i = 0; i < 7; ++i) {
@@ -399,7 +514,7 @@ TEST_SUITE("base-MemoryPool - clear") {
   }
 
   TEST_CASE("clear preserves chunks that still back a live allocation") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     // First fill several chunks, then return all but one block.
     std::vector<void*> blocks;
@@ -434,7 +549,7 @@ TEST_SUITE("base-MemoryPool - clear") {
   }
 
   TEST_CASE("clear leaves the surviving chunk's free nodes reusable") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     // Two blocks from the same first chunk (kInitialBlocksPerChunk == 1
     // gives a 1-block chunk first, then a 2-block chunk; pin one block in
@@ -477,7 +592,7 @@ TEST_SUITE("base-MemoryPool - clear") {
   }
 
   TEST_CASE("clear leaves oversized stats untouched") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     constexpr size_t kBig = 4096;
     void* p = pool.allocate(kBig);
@@ -496,7 +611,7 @@ TEST_SUITE("base-MemoryPool - clear") {
   }
 
   TEST_CASE("clear on an empty pool is a no-op") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
     pool.clear();
     pool.clear();
 
@@ -506,7 +621,7 @@ TEST_SUITE("base-MemoryPool - clear") {
   }
 
   TEST_CASE("clear with all blocks live keeps every chunk") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     std::vector<void*> blocks;
     for (int i = 0; i < 7; ++i) {
@@ -533,7 +648,7 @@ TEST_SUITE("base-MemoryPool - clear") {
 
   TEST_CASE("clear with chunks count > stack buffer (heap spill path)") {
     // kStackSlots in clear() is 64; force >64 chunks via tight blocks_per_chunk.
-    MemoryPool pool({{64, 1}});
+    MemoryPool pool(make_config({{64, 1}}));
 
     constexpr int kAllocations = 200;
     std::vector<void*> blocks;
@@ -568,7 +683,7 @@ TEST_SUITE("base-MemoryPool - clear") {
   }
 
   TEST_CASE("clear racing with concurrent allocate/deallocate keeps live blocks valid") {
-    MemoryPool pool(MemoryPool::default_tiers());
+    MemoryPool pool(MemoryPool::get_default_config());
 
     constexpr int kWorkers = 4;
     constexpr int kIterations = 2000;
@@ -645,7 +760,7 @@ TEST_SUITE("base-MemoryPool - clear") {
 TEST_SUITE("base-MemoryPool - geometric chunk growth") {
   TEST_CASE("upstream_alloc_count grows sub-linearly with block count") {
     // Cap at 32 -> chunks of 1,2,4,8,16,32 = 63 covers 63 blocks in 6 chunks.
-    MemoryPool pool({{64, 32}});
+    MemoryPool pool(make_config({{64, 32}}));
 
     std::vector<void*> blocks;
     for (int i = 0; i < 63; ++i) {
@@ -660,7 +775,7 @@ TEST_SUITE("base-MemoryPool - geometric chunk growth") {
   }
 
   TEST_CASE("blocks_per_chunk acts as a hard cap") {
-    MemoryPool pool({{64, 4}});
+    MemoryPool pool(make_config({{64, 4}}));
 
     std::vector<void*> blocks;
     for (int i = 0; i < 32; ++i) {
@@ -681,7 +796,7 @@ TEST_SUITE("base-MemoryPool - geometric chunk growth") {
 
 TEST_SUITE("base-MemoryPool - large frames") {
   TEST_CASE("4 MiB-sized allocation routes to the largest pooled tier") {
-    MemoryPool pool(MemoryPool::default_tiers());
+    MemoryPool pool(MemoryPool::get_default_config());
 
     constexpr size_t k_size = 3u * 1024u * 1024u;  // 3 MiB, fits in the 4 MiB tier
     static_assert(k_size <= 4u * 1024u * 1024u, "must fit in 4 MiB tier");
@@ -698,7 +813,7 @@ TEST_SUITE("base-MemoryPool - large frames") {
   }
 
   TEST_CASE("8 MP NV12 image (~12 MB) fits in the largest tier") {
-    MemoryPool pool(MemoryPool::default_tiers());
+    MemoryPool pool(MemoryPool::get_default_config());
 
     constexpr size_t k8mp_nv12 = 8'000'000u * 3u / 2u;  // 12 MB
     static_assert(k8mp_nv12 < 12u * 1024u * 1024u, "must fit in the 12 MiB tier");
@@ -714,7 +829,7 @@ TEST_SUITE("base-MemoryPool - large frames") {
   }
 
   TEST_CASE("4K RGBA-sized request uses the oversized path") {
-    MemoryPool pool(MemoryPool::default_tiers());
+    MemoryPool pool(MemoryPool::get_default_config());
 
     constexpr size_t k4k_rgba = 3840u * 2160u * 4u;  // ~33 MiB
     static_assert(k4k_rgba > 12u * 1024u * 1024u, "test premise");
@@ -730,20 +845,19 @@ TEST_SUITE("base-MemoryPool - large frames") {
 }
 
 TEST_SUITE("base-MemoryPool - VLINK_MEMORY_LEVEL") {
-  TEST_CASE("default_tiers respects the cached level (1..6 selects a known row)") {
-    auto tiers = MemoryPool::default_tiers();
+  TEST_CASE("get_default_config respects the cached level (1..6 selects a known row)") {
+    const auto& tiers = MemoryPool::get_default_config().tiers;
 
     REQUIRE(tiers.size() >= 4u);
     CHECK(tiers.front().max_size == 128u);
     CHECK(tiers.front().blocks_per_chunk > 0u);
 
-    // Every level shares the same 8-tier shape; the largest tier is always 12 MiB.
     CHECK(tiers.size() == 8u);
     CHECK(tiers.back().max_size == 12u * 1024u * 1024u);
   }
 
   TEST_CASE("largest tier never produces a chunk above the 32 MiB cap") {
-    auto tiers = MemoryPool::default_tiers();
+    const auto& tiers = MemoryPool::get_default_config().tiers;
     const auto& largest = tiers.back();
     constexpr size_t kChunkCap = 32u * 1024u * 1024u;
     CHECK(largest.blocks_per_chunk * largest.max_size <= kChunkCap);
@@ -756,7 +870,7 @@ TEST_SUITE("base-MemoryPool - VLINK_MEMORY_LEVEL") {
 
 TEST_SUITE("base-MemoryPool - concurrency") {
   TEST_CASE("concurrent cold allocations all succeed and stay bounded") {
-    MemoryPool pool({{64, 64}});
+    MemoryPool pool(make_config({{64, 64}}));
 
     constexpr int kThreads = 32;
 
@@ -804,7 +918,7 @@ TEST_SUITE("base-MemoryPool - concurrency") {
   }
 
   TEST_CASE("many threads alloc/dealloc without races or corruption") {
-    MemoryPool pool(MemoryPool::default_tiers());
+    MemoryPool pool(MemoryPool::get_default_config());
 
     constexpr int kThreads = 8;
     constexpr int kIterations = 4'000;

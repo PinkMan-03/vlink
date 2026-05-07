@@ -609,7 +609,7 @@ auto* recovered = bytes_ptr.to_ptr<MyStruct>();
 
 ```cpp
 // 程序启动时调用一次：触发 vlink::MemoryPool::global_instance(true)，
-// 从 VLINK_MEMORY_LEVEL（1..6，默认 3）读取分级配置。
+// 从 VLINK_MEMORY_LEVEL（0..9，默认 3；0 = bypass，直通 ::operator new）读取分级配置。
 vlink::Bytes::init_memory_pool();
 
 // 周期性 trim：仅释放完全空闲的 chunk，含 live block 的 chunk 保留；
