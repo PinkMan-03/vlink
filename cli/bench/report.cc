@@ -55,7 +55,7 @@ namespace vlink::bench::report {
 struct TerminalColumn final {
   std::string title;
   int width{0};
-  std::function<std::string(const AggregatedCase&)> value;
+  vlink::Function<std::string(const AggregatedCase&)> value;
 };
 
 struct TerminalLayout final {

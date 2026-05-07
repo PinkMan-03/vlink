@@ -1802,7 +1802,7 @@ void ZenohClient::on_data_callback(z_loaned_reply_t* reply, void* context) {
 
   Bytes resp_bytes = Bytes::shallow_copy(payload.data, payload.size);
 
-  std::function<void(uint64_t, const Bytes&)> callback;
+  vlink::Function<void(uint64_t, const Bytes&)> callback;
   NodeImpl* owner = nullptr;
 
   {

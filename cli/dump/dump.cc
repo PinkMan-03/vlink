@@ -116,8 +116,8 @@ struct DumpRecord {
   std::vector<double> expr_results;
 };
 
-using DumpCallback = std::function<void(int64_t timestamp, const std::string& url, const std::string& ser,
-                                        vlink::SchemaType schema_type, const vlink::Bytes& bytes)>;
+using DumpCallback = vlink::Function<void(int64_t timestamp, const std::string& url, const std::string& ser,
+                                          vlink::SchemaType schema_type, const vlink::Bytes& bytes)>;
 
 [[maybe_unused]] static std::atomic_bool has_quit{false};
 [[maybe_unused]] std::atomic_bool is_broken{false};

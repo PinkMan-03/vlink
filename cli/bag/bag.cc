@@ -89,8 +89,8 @@ std::mutex print_mtx;
 std::thread print_thread;
 vlink::ElapsedTimer main_elapsed_timer{vlink::ElapsedTimer::kMicro};
 vlink::ElapsedTimer pause_elapsed_timer{vlink::ElapsedTimer::kMicro};
-std::function<int64_t()> time_callback;
-std::function<int64_t()> split_index_callback;
+vlink::Function<int64_t()> time_callback;
+vlink::Function<int64_t()> split_index_callback;
 
 vlink::ElapsedTimer total_size_timer;
 

@@ -56,12 +56,12 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 
 #include "../base/bytes.h"
+#include "../base/functional.h"
 #include "../impl/types.h"
 
 namespace vlink {
@@ -82,7 +82,7 @@ class VLINK_EXPORT BagReaderProcessor {
    * Called from an internal processing thread after the cache window has elapsed.
    */
   using OutputCallback =
-      std::function<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
+      vlink::Function<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
 
   /**
    * @struct Config

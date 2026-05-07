@@ -57,10 +57,10 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <utility>
 
+#include "../base/functional.h"
 #include "../base/plugin.h"
 #include "../impl/types.h"
 
@@ -102,7 +102,7 @@ class BagReaderPluginInterface {
    * Stored in @c output_callback_.  Call this inside @c push() to forward a message.
    */
   using OutputCallback =
-      std::function<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
+      vlink::Function<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
 
   /**
    * @brief Returns version and build metadata for this plugin.

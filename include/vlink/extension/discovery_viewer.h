@@ -60,11 +60,11 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "../base/functional.h"
 #include "../base/macros.h"
 #include "../base/message_loop.h"
 #include "../impl/types.h"
@@ -145,7 +145,7 @@ class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
    * Invoked on the viewer's event loop thread.  The vector is a snapshot of the
    * current live endpoint list.
    */
-  using Callback = std::function<void(const std::vector<Info>& info_list)>;
+  using Callback = vlink::Function<void(const std::vector<Info>& info_list)>;
 
   /**
    * @brief Converts a transport string to the corresponding @c ImplType value.

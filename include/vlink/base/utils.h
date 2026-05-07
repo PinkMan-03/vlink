@@ -51,12 +51,12 @@
 
 #pragma once
 
-#include <functional>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "./functional.h"
 #include "./macros.h"
 
 #ifdef _MSC_VER
@@ -306,7 +306,7 @@ VLINK_EXPORT bool set_thread_stick(uint32_t core_mask, std::thread* thread = nul
  * @param pass_through  If @c true, re-raise the signal after the callback returns so that
  *                      the default OS behaviour (core dump, etc.) also occurs.  Default: @c false.
  */
-VLINK_EXPORT void register_terminate_signal(std::function<void(int)>&& callback, bool is_async = false,
+VLINK_EXPORT void register_terminate_signal(vlink::Function<void(int)>&& callback, bool is_async = false,
                                             bool pass_through = false) noexcept;
 
 /**
@@ -318,7 +318,7 @@ VLINK_EXPORT void register_terminate_signal(std::function<void(int)>&& callback,
  *
  * @param callback  Callback invoked with the signal number when a crash signal fires.
  */
-VLINK_EXPORT void register_crash_signal(std::function<void(int)>&& callback) noexcept;
+VLINK_EXPORT void register_crash_signal(vlink::Function<void(int)>&& callback) noexcept;
 
 /**
  * @brief Starts a background thread that detects keyboard input.
@@ -331,7 +331,7 @@ VLINK_EXPORT void register_crash_signal(std::function<void(int)>&& callback) noe
  * @param callback  Callback invoked with the key name, or @c nullptr to ignore.  Default: @c nullptr.
  * @param poll_ms   Polling interval in milliseconds.  Default: 20.
  */
-VLINK_EXPORT void start_detect_keyboard(std::function<void(const std::string& key)>&& callback = nullptr,
+VLINK_EXPORT void start_detect_keyboard(vlink::Function<void(const std::string& key)>&& callback = nullptr,
                                         int poll_ms = 20) noexcept;
 
 /**

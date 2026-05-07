@@ -83,7 +83,6 @@
 
 #pragma once
 
-#include <functional>
 #include <future>
 #include <limits>
 #include <memory>
@@ -91,6 +90,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "./functional.h"
 #include "./schedule.h"
 #include "./timer.h"
 
@@ -109,7 +109,7 @@ class VLINK_EXPORT MessageLoop {
   /**
    * @brief Callback type for tasks and event handlers.
    */
-  using Callback = std::function<void()>;
+  using Callback = vlink::Function<void()>;
 
   /**
    * @brief Queue implementation type.

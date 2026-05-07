@@ -53,7 +53,7 @@ int main() {
     // Signature: void set_security_callbacks(
     //     Security::Callback&& encrypt_callback,
     //     Security::Callback&& decrypt_callback)
-    // where Security::Callback = std::function<bool(const Bytes& in, Bytes& out)>
+    // where Security::Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>
     sub.set_security_callbacks(xor_cipher::encrypt, xor_cipher::decrypt);
     sub.listen([&received](const std::string& msg) {
       received++;
@@ -159,7 +159,7 @@ int main() {
   // ======== Section 4: Callback Signature Reference ========
   {
     std::cout << "\n[4] Callback Signature Reference" << std::endl;
-    std::cout << "   Security::Callback = std::function<bool(const Bytes& in, Bytes& out)>" << std::endl;
+    std::cout << "   Security::Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>" << std::endl;
     std::cout << std::endl;
     std::cout << "   Encrypt callback:" << std::endl;
     std::cout << "     Input:  'in'  = plaintext bytes from the serialized message" << std::endl;

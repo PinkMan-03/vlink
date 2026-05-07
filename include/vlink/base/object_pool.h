@@ -82,7 +82,6 @@
 
 #pragma once
 
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -90,6 +89,7 @@
 #include <utility>
 #include <vector>
 
+#include "./functional.h"
 #include "./macros.h"
 
 namespace vlink {
@@ -115,7 +115,7 @@ class ObjectPool : public std::enable_shared_from_this<ObjectPool<T>> {
    * Must return a non-null @c unique_ptr<T>.  Throwing or returning @c nullptr causes
    * the acquisition call to propagate the error to the caller.
    */
-  using FactoryCallback = std::function<std::unique_ptr<T>()>;
+  using FactoryCallback = vlink::Function<std::unique_ptr<T>()>;
 
   /**
    * @brief Callback type for resetting an object before acquisition or after release.
@@ -124,7 +124,7 @@ class ObjectPool : public std::enable_shared_from_this<ObjectPool<T>> {
    * Called with a reference to the object.  Exceptions thrown here are caught; on release,
    * the object is discarded (not returned to the pool) if the reset throws.
    */
-  using ResetCallback = std::function<void(T&)>;
+  using ResetCallback = vlink::Function<void(T&)>;
 
   /**
    * @brief Controls when the @c ResetCallback is invoked relative to acquire and release.

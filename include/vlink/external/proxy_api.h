@@ -150,6 +150,7 @@
 #include <vector>
 
 #include "../base/bytes.h"
+#include "../base/functional.h"
 #include "../base/message_loop.h"
 #include "../impl/types.h"
 
@@ -347,7 +348,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @c connected is @c true when the first valid heartbeat is received; @c false
    * when 5 seconds pass without a heartbeat or when the control channel disconnects.
    */
-  using ConnectCallback = std::function<void(bool connected)>;
+  using ConnectCallback = vlink::Function<void(bool connected)>;
 
   /**
    * @brief Callback invoked when an error or error-clear event is detected.
@@ -356,7 +357,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * Only fired when the @c Error state transitions (e.g. @c kNoError to
    * @c kVersionCompError, or back to @c kNoError).
    */
-  using ErrorCallback = std::function<void(Error error)>;
+  using ErrorCallback = vlink::Function<void(Error error)>;
 
   /**
    * @brief Callback delivering the server's wall-clock and boot-time from each heartbeat.
@@ -364,14 +365,14 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @param sys_time   Server system time in microseconds since the Unix epoch.
    * @param boot_time  Server uptime in microseconds since boot.
    */
-  using TimeCallback = std::function<void(uint64_t sys_time, uint64_t boot_time)>;
+  using TimeCallback = vlink::Function<void(uint64_t sys_time, uint64_t boot_time)>;
 
   /**
    * @brief Callback delivering the per-topic statistics list once per second.
    *
    * @param info_list  List of @c Info records for all currently observed topics.
    */
-  using InfoCallback = std::function<void(const std::vector<Info>& info_list)>;
+  using InfoCallback = vlink::Function<void(const std::vector<Info>& info_list)>;
 
   /**
    * @brief Callback delivering raw message data relayed by @c ProxyServer.
@@ -381,7 +382,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * play mode.  The @c Data::raw bytes are shallow-borrowed; copy if you need
    * to retain them beyond the callback.
    */
-  using DataCallback = std::function<void(const Data& data)>;
+  using DataCallback = vlink::Function<void(const Data& data)>;
 
   /**
    * @brief Constructs a @c ProxyAPI with the given configuration.

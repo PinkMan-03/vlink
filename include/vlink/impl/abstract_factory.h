@@ -79,6 +79,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "../base/functional.h"
 #include "../base/logger.h"
 #include "./node_impl.h"
 
@@ -111,15 +112,15 @@ class AbstractObject : public AbstractNode {
   using StatusCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::StatusCallback>;  ///< Per-impl status callbacks.
 
   using FindConnectCallback =
-      std::function<void(NodeImpl*, const NodeImpl::ConnectCallback&)>;  ///< Traversal visitor for connect callbacks.
-  using FindReqRespCallback =
-      std::function<void(NodeImpl*, const NodeImpl::ReqRespCallback&)>;  ///< Traversal visitor for req/resp callbacks.
+      vlink::Function<void(NodeImpl*, const NodeImpl::ConnectCallback&)>;  ///< Traversal visitor for connect callbacks.
+  using FindReqRespCallback = vlink::Function<void(
+      NodeImpl*, const NodeImpl::ReqRespCallback&)>;  ///< Traversal visitor for req/resp callbacks.
   using FindMsgCallback =
-      std::function<void(NodeImpl*, const NodeImpl::MsgCallback&)>;  ///< Traversal visitor for message callbacks.
-  using FindIntraMsgCallback = std::function<void(
+      vlink::Function<void(NodeImpl*, const NodeImpl::MsgCallback&)>;  ///< Traversal visitor for message callbacks.
+  using FindIntraMsgCallback = vlink::Function<void(
       NodeImpl*, const NodeImpl::IntraMsgCallback&)>;  ///< Traversal visitor for intra-msg callbacks.
   using FindStatusCallback =
-      std::function<void(NodeImpl*, const NodeImpl::StatusCallback&)>;  ///< Traversal visitor for status callbacks.
+      vlink::Function<void(NodeImpl*, const NodeImpl::StatusCallback&)>;  ///< Traversal visitor for status callbacks.
 
   /**
    * @brief Registers a @c NodeImpl instance with this topic object.

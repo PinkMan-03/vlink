@@ -65,7 +65,6 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <future>
 #include <memory>
 #include <string>
@@ -75,6 +74,7 @@
 #include <vector>
 
 #include "../base/bytes.h"
+#include "../base/functional.h"
 #include "../base/macros.h"
 #include "../base/message_loop.h"
 #include "../impl/types.h"
@@ -202,27 +202,27 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    * @param action_type  Action type (kPublish, kRequest, etc.).
    * @param data         Serialized message payload.
    */
-  using OutputCallback = std::function<void(int64_t microseconds_timestamp, const std::string& url,
-                                            ActionType action_type, const Bytes& data)>;
+  using OutputCallback = vlink::Function<void(int64_t microseconds_timestamp, const std::string& url,
+                                              ActionType action_type, const Bytes& data)>;
 
   /**
    * @brief Callback fired whenever the playback @c Status changes.
    *
    * @param status  New playback status.
    */
-  using StatusCallback = std::function<void(Status status)>;
+  using StatusCallback = vlink::Function<void(Status status)>;
 
   /**
    * @brief Callback fired when the reader has opened the file and is ready to start playing.
    */
-  using ReadyCallback = std::function<void()>;
+  using ReadyCallback = vlink::Function<void()>;
 
   /**
    * @brief Callback fired when playback has finished (or was interrupted).
    *
    * @param is_interrupted  @c true if @c stop() was called before natural end.
    */
-  using FinishCallback = std::function<void(bool is_interrupted)>;
+  using FinishCallback = vlink::Function<void(bool is_interrupted)>;
 
   /**
    * @brief Creates a concrete @c BagReader for @p path, selecting the implementation by extension.

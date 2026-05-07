@@ -72,12 +72,12 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "./functional.h"
 #include "./macros.h"
 
 namespace vlink {
@@ -142,7 +142,7 @@ class VLINK_EXPORT Process {
   /**
    * @brief Callback type invoked when an error occurs.
    */
-  using ErrorCallback = std::function<void(Error)>;
+  using ErrorCallback = vlink::Function<void(Error)>;
 
   /**
    * @brief Callback type invoked when the process exits.
@@ -150,17 +150,17 @@ class VLINK_EXPORT Process {
    * @details
    * First argument is the exit code; second is @c kNormalExitStatus or @c kCrashExitStatus.
    */
-  using FinishedCallback = std::function<void(int, ExitStatus)>;
+  using FinishedCallback = vlink::Function<void(int, ExitStatus)>;
 
   /**
    * @brief Callback type invoked when new data is available on a pipe.
    */
-  using ReadyReadCallback = std::function<void()>;
+  using ReadyReadCallback = vlink::Function<void()>;
 
   /**
    * @brief Callback type invoked when the process state changes.
    */
-  using StateChangedCallback = std::function<void(State)>;
+  using StateChangedCallback = vlink::Function<void(State)>;
 
   /**
    * @brief Sentinel wait timeout meaning wait indefinitely.

@@ -44,7 +44,7 @@ namespace vlink {
 
 VLINK_DEFINE_GLOBAL_PROPERTY(DdsConf)
 
-std::map<std::string, std::function<void*()>> DdsConf::type_support_map_;
+std::map<std::string, vlink::Function<void*()>> DdsConf::type_support_map_;
 std::map<std::string, Qos> DdsConf::qos_map_;
 std::shared_mutex DdsConf::mtx_;
 
@@ -68,7 +68,7 @@ void DdsConf::register_qos(const std::string& name, const Qos& qos) {
 
 void DdsConf::register_qos_internal(const std::string& name, const Qos& qos) { qos_map_[name] = qos; }
 
-std::function<void*()> DdsConf::find_type_support(const std::string& name) {
+vlink::Function<void*()> DdsConf::find_type_support(const std::string& name) {
   std::shared_lock lock(mtx_);
   auto iter = type_support_map_.find(name);
 

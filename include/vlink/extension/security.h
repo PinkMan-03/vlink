@@ -63,11 +63,11 @@
 
 #pragma once
 
-#include <functional>
 #include <memory>
 #include <string>
 
 #include "../base/bytes.h"
+#include "../base/functional.h"
 #include "../base/macros.h"
 
 namespace vlink {
@@ -91,7 +91,7 @@ class VLINK_EXPORT Security final {
    * @p out and return @c true on success.  When a custom callback is installed via
    * @c set_callbacks(), the built-in AES implementation is bypassed.
    */
-  using Callback = std::function<bool(const Bytes& in, Bytes& out)>;
+  using Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>;
 
   /**
    * @brief Constructs a @c Security object with the default AES key and IV.

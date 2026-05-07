@@ -67,8 +67,8 @@ using ShmID2 = std::tuple<uint8_t, std::string, int32_t, int32_t, int32_t, int32
 
 class Shm2Factory final : public AbstractFactory<ShmID2> {
  public:
-  using DetectCallback = std::function<void()>;
-  using PollCallback = std::function<void()>;
+  using DetectCallback = vlink::Function<void()>;
+  using PollCallback = vlink::Function<void()>;
 
   struct PollEntry final {
     PollCallback callback;
@@ -304,12 +304,12 @@ class Shm2Client final : public AbstractObject<ShmID2>, public std::enable_share
   iox2_waitset_guard_h guard_{nullptr};
 
   std::mutex mtx_;
-  std::unordered_map<uint64_t, std::function<void(uint64_t, const Bytes&)>> callbacks_;
+  std::unordered_map<uint64_t, vlink::Function<void(uint64_t, const Bytes&)>> callbacks_;
 
   std::unordered_map<uint64_t, iox2_pending_response_t> pending_storage_map_;
   std::unordered_map<uint64_t, iox2_pending_response_h> pending_map_;
 
-  std::function<void()> req_notifier_fn_;
+  vlink::Function<void()> req_notifier_fn_;
 
   struct ClientLoanEntry {
     std::unique_ptr<iox2_request_mut_t> storage;

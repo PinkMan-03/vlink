@@ -65,9 +65,9 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <memory>
 
+#include "./functional.h"
 #include "./macros.h"
 
 namespace vlink {
@@ -84,7 +84,7 @@ class VLINK_EXPORT Timer final {
   /**
    * @brief Callback type invoked on each timer tick.
    */
-  using Callback = std::function<void()>;
+  using Callback = vlink::Function<void()>;
 
   /**
    * @brief Sentinel loop count meaning repeat indefinitely.

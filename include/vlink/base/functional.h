@@ -22,23 +22,23 @@
  */
 
 /**
- * @file callback.h
+ * @file functional.h
  * @brief Type-erased callable wrapper with a 64 byte small-buffer optimisation backed
  *        by @c vlink::MemoryPool for the heap-fallback path.
  *
  * @details
- * @c vlink::Callback<R(Args...)> is a drop-in @c std::function -style wrapper tuned
+ * @c vlink::Function<R(Args...)> is a drop-in @c std::function -style wrapper tuned
  * for VLink hot paths.  Three design choices shape its behaviour:
  *
  * - @b SBO @b size : @c kSboSize is fixed at @c 64 bytes (one cache line), large
  *   enough to host most realistic capture sets (a handful of @c shared_ptr , a few
  *   pointers, a few small structs) without ever calling into the heap.  @c sizeof
- *   @c (Callback) lands at ~72 bytes which is bigger than @c std::function but still
+ *   @c (Function) lands at ~72 bytes which is bigger than @c std::function but still
  *   tight enough for typical task-queue use.
  *
  * - @b std::function @b interop : because the converting constructor accepts any
  *   callable that meets @c is_invocable_r , a @c std::function value can be wrapped
- *   into a @c Callback (and vice-versa) without explicit casts.  Direct assignment in
+ *   into a @c Function (and vice-versa) without explicit casts.  Direct assignment in
  *   either direction is supported.
  *
  * - @b Pooled @b heap : when the target does not fit inline, the storage is allocated
@@ -65,23 +65,23 @@
  * - @c R operator()(Args...) const re-throws @c std::bad_function_call when empty.
  * - @c operator bool reports non-emptiness.
  * - Copy and move follow the underlying target's constructors.  A target lacking a
- *   public copy constructor is rejected at @c Callback's converting constructor.
+ *   public copy constructor is rejected at @c Function's converting constructor.
  * - Function-pointer / member-pointer targets equal to @c nullptr produce an empty
- *   @c Callback (no allocation, no vtable).
+ *   @c Function (no allocation, no vtable).
  *
  * @par Example
  * @code
- * vlink::Callback<int(int, int)> add = [](int a, int b) { return a + b; };
+ * vlink::Function<int(int, int)> add = [](int a, int b) { return a + b; };
  * int x = add(1, 2);                                // 3
  *
- * vlink::Callback<void()> noop;                     // empty
+ * vlink::Function<void()> noop;                     // empty
  * if (noop) { noop(); }                             // skipped
  *
- * vlink::Callback<void()> heavy = [big_capture]() { ... };   // pooled if > 64 B
+ * vlink::Function<void()> heavy = [big_capture]() { ... };   // pooled if > 64 B
  *
  * // std::function interop -- both directions supported via converting constructors:
  * std::function<void(int)> stdfn = [](int x) { ... };
- * vlink::Callback<void(int)> wrapped = stdfn;       // wrap a std::function
+ * vlink::Function<void(int)> wrapped = stdfn;       // wrap a std::function
  * std::function<void(int)> back = wrapped;          // unwrap into a std::function
  * @endcode
  */
@@ -90,11 +90,11 @@
 
 #include <functional>
 
-#if !defined(VLINK_ENABLE_BASE_CALLBACK) && defined(__unix__) && !defined(__CYGWIN__)
-#define VLINK_ENABLE_BASE_CALLBACK
+#if !defined(VLINK_ENABLE_BASE_FUNCTIONAL) && defined(__unix__) && !defined(__CYGWIN__)
+#define VLINK_ENABLE_BASE_FUNCTIONAL
 #endif
 
-#ifdef VLINK_ENABLE_BASE_CALLBACK
+#ifdef VLINK_ENABLE_BASE_FUNCTIONAL
 #include <cstddef>
 #include <new>
 #include <type_traits>
@@ -105,18 +105,18 @@
 
 namespace vlink {
 
-template <typename Signature>
-class Callback;
+template <typename SignatureT>
+class Function;
 
 /**
- * @class Callback
+ * @class Function
  * @brief Type-erased callable wrapper, partial @c std::function replacement.
  *
  * @tparam R     Return type of the wrapped callable.
  * @tparam Args  Parameter types of the wrapped callable.
  */
 template <typename R, typename... Args>
-class Callback<R(Args...)> {
+class Function<R(Args...)> {
  public:
   /**
    * @brief Inline-storage byte budget (one cache line).
@@ -134,14 +134,14 @@ class Callback<R(Args...)> {
   using result_type = R;
 
   /**
-   * @brief Constructs an empty @c Callback.
+   * @brief Constructs an empty @c Function.
    */
-  Callback() noexcept = default;
+  Function() noexcept = default;
 
   /**
-   * @brief Constructs an empty @c Callback from @c nullptr.
+   * @brief Constructs an empty @c Function from @c nullptr.
    */
-  Callback(std::nullptr_t) noexcept {}  // NOLINT(google-explicit-constructor)
+  Function(std::nullptr_t) noexcept {}  // NOLINT(google-explicit-constructor)
 
   /**
    * @brief Copy-constructs from @p other.
@@ -150,15 +150,15 @@ class Callback<R(Args...)> {
    * If @p other holds a target, the target's copy constructor is invoked into
    * inline storage or via @c vlink::MemoryPool, mirroring @p other's storage strategy.
    */
-  Callback(const Callback& other) { copy_from(other); }
+  Function(const Function& other) { copy_from(other); }
 
   /**
    * @brief Move-constructs from @p other and leaves @p other empty.
    */
-  Callback(Callback&& other) noexcept { move_from(std::move(other)); }
+  Function(Function&& other) noexcept { move_from(std::move(other)); }
 
   /**
-   * @brief Constructs a @c Callback from any compatible callable @p f.
+   * @brief Constructs a @c Function from any compatible callable @p f.
    *
    * @details
    * @p f must be invocable with @c Args... and return a value convertible to @c R.
@@ -167,11 +167,11 @@ class Callback<R(Args...)> {
    */
   template <
       typename F, typename DecayF = std::decay_t<F>,
-      typename = std::enable_if_t<!std::is_same_v<DecayF, Callback> && !std::is_same_v<DecayF, std::nullptr_t> &&
+      typename = std::enable_if_t<!std::is_same_v<DecayF, Function> && !std::is_same_v<DecayF, std::nullptr_t> &&
                                   std::is_copy_constructible_v<DecayF> && std::is_invocable_r_v<R, DecayF&, Args...>>>
-  Callback(F&& f) {  // NOLINT(google-explicit-constructor)
+  Function(F&& f) {  // NOLINT(google-explicit-constructor)
     if constexpr (kIsPointerLike<DecayF>) {
-      if (f == nullptr) {
+      if VUNLIKELY (f == nullptr) {
         return;
       }
     }
@@ -182,9 +182,9 @@ class Callback<R(Args...)> {
   /**
    * @brief Copy assignment via copy-and-swap.
    */
-  Callback& operator=(const Callback& other) {
-    if (this != &other) {
-      Callback tmp(other);
+  Function& operator=(const Function& other) {
+    if VLIKELY (this != &other) {
+      Function tmp(other);
       swap(tmp);
     }
 
@@ -194,8 +194,8 @@ class Callback<R(Args...)> {
   /**
    * @brief Move assignment.  Resets @c *this to empty and steals from @p other.
    */
-  Callback& operator=(Callback&& other) noexcept {
-    if (this != &other) {
+  Function& operator=(Function&& other) noexcept {
+    if VLIKELY (this != &other) {
       reset();
       move_from(std::move(other));
     }
@@ -206,7 +206,7 @@ class Callback<R(Args...)> {
   /**
    * @brief Resets to empty state.
    */
-  Callback& operator=(std::nullptr_t) noexcept {
+  Function& operator=(std::nullptr_t) noexcept {
     reset();
     return *this;
   }
@@ -215,10 +215,10 @@ class Callback<R(Args...)> {
    * @brief Replaces the wrapped target with @p f via copy-and-swap.
    */
   template <typename F, typename DecayF = std::decay_t<F>,
-            typename = std::enable_if_t<!std::is_same_v<DecayF, Callback> && std::is_copy_constructible_v<DecayF> &&
+            typename = std::enable_if_t<!std::is_same_v<DecayF, Function> && std::is_copy_constructible_v<DecayF> &&
                                         std::is_invocable_r_v<R, DecayF&, Args...>>>
-  Callback& operator=(F&& f) {
-    Callback tmp(std::forward<F>(f));
+  Function& operator=(F&& f) {
+    Function tmp(std::forward<F>(f));
     swap(tmp);
     return *this;
   }
@@ -227,16 +227,16 @@ class Callback<R(Args...)> {
    * @brief Destructor.
    *
    * @details
-   * If the @c Callback holds a target, runs that target's destructor.  For pool-allocated
+   * If the @c Function holds a target, runs that target's destructor.  For pool-allocated
    * targets the underlying memory is then returned to @c vlink::MemoryPool .
-   * Empty @c Callback instances are destroyed at zero cost.
+   * Empty @c Function instances are destroyed at zero cost.
    */
-  ~Callback() { reset(); }
+  ~Function() { reset(); }
 
   /**
    * @brief Invokes the wrapped target with @p args.
    *
-   * @throws std::bad_function_call if the @c Callback is empty.
+   * @throws std::bad_function_call if the @c Function is empty.
    */
   R operator()(Args... args) const {
     if VUNLIKELY (vtable_ == nullptr) {
@@ -247,19 +247,19 @@ class Callback<R(Args...)> {
   }
 
   /**
-   * @brief Returns @c true iff the @c Callback wraps a target.
+   * @brief Returns @c true iff the @c Function wraps a target.
    */
   explicit operator bool() const noexcept { return vtable_ != nullptr; }
 
   /**
    * @brief Exchanges the wrapped target with @p other.
    */
-  void swap(Callback& other) noexcept {
-    if (this == &other) {
+  void swap(Function& other) noexcept {
+    if VUNLIKELY (this == &other) {
       return;
     }
 
-    Callback tmp(std::move(*this));
+    Function tmp(std::move(*this));
     *this = std::move(other);
     other = std::move(tmp);
   }
@@ -284,7 +284,12 @@ class Callback<R(Args...)> {
   struct InlineVTable {
     static R invoke(const void* storage, Args... args) {
       auto* f = reinterpret_cast<F*>(const_cast<void*>(storage));
-      return std::invoke(*f, std::forward<Args>(args)...);
+
+      if constexpr (std::is_void_v<R>) {
+        std::invoke(*f, std::forward<Args>(args)...);
+      } else {
+        return std::invoke(*f, std::forward<Args>(args)...);
+      }
     }
 
     static void copy_construct(void* dst, const void* src) {
@@ -308,12 +313,20 @@ class Callback<R(Args...)> {
   struct HeapVTable {
     static R invoke(const void* storage, Args... args) {
       F* f = *static_cast<F* const*>(storage);
-      return std::invoke(*f, std::forward<Args>(args)...);
+
+      if constexpr (std::is_void_v<R>) {
+        std::invoke(*f, std::forward<Args>(args)...);
+      } else {
+        return std::invoke(*f, std::forward<Args>(args)...);
+      }
     }
 
     static void copy_construct(void* dst, const void* src) {
       F* src_f = *static_cast<F* const*>(src);
-      void* mem = MemoryPool::global_instance().allocate(sizeof(F), alignof(F));
+
+      static auto& pool = MemoryPool::global_instance();
+
+      void* mem = pool.allocate(sizeof(F), alignof(F));
 
       if VUNLIKELY (mem == nullptr) {
         throw std::bad_alloc();
@@ -323,7 +336,7 @@ class Callback<R(Args...)> {
         F* new_f = ::new (mem) F(*src_f);
         *static_cast<F**>(dst) = new_f;
       } catch (...) {
-        MemoryPool::global_instance().deallocate(mem, sizeof(F), alignof(F));
+        pool.deallocate(mem, sizeof(F), alignof(F));
         throw;
       }
     }
@@ -340,7 +353,11 @@ class Callback<R(Args...)> {
 
       if VLIKELY (f != nullptr) {
         f->~F();
-        MemoryPool::global_instance().deallocate(f, sizeof(F), alignof(F));
+
+        static auto& pool = MemoryPool::global_instance();
+
+        pool.deallocate(f, sizeof(F), alignof(F));
+
         *slot = nullptr;
       }
     }
@@ -372,7 +389,9 @@ class Callback<R(Args...)> {
     if constexpr (kIsInline<F>) {
       ::new (&storage_) F(std::forward<Source>(src));
     } else {
-      void* mem = MemoryPool::global_instance().allocate(sizeof(F), alignof(F));
+      static auto& pool = MemoryPool::global_instance();
+
+      void* mem = pool.allocate(sizeof(F), alignof(F));
 
       if VUNLIKELY (mem == nullptr) {
         throw std::bad_alloc();
@@ -382,7 +401,7 @@ class Callback<R(Args...)> {
         F* new_f = ::new (mem) F(std::forward<Source>(src));
         *reinterpret_cast<F**>(&storage_) = new_f;
       } catch (...) {
-        MemoryPool::global_instance().deallocate(mem, sizeof(F), alignof(F));
+        pool.deallocate(mem, sizeof(F), alignof(F));
         throw;
       }
     }
@@ -390,15 +409,15 @@ class Callback<R(Args...)> {
     vtable_ = get_vtable<F>();
   }
 
-  void copy_from(const Callback& other) {
-    if (other.vtable_ != nullptr) {
+  void copy_from(const Function& other) {
+    if VLIKELY (other.vtable_ != nullptr) {
       other.vtable_->copy_construct(&storage_, &other.storage_);
       vtable_ = other.vtable_;
     }
   }
 
-  void move_from(Callback&& other) noexcept {
-    if (other.vtable_ != nullptr) {
+  void move_from(Function&& other) noexcept {
+    if VLIKELY (other.vtable_ != nullptr) {
       other.vtable_->move_construct(&storage_, &other.storage_);
       vtable_ = other.vtable_;
       other.vtable_ = nullptr;
@@ -420,30 +439,30 @@ class Callback<R(Args...)> {
  * @brief Free-function @c swap for ADL.
  */
 template <typename R, typename... Args>
-inline void swap(Callback<R(Args...)>& lhs, Callback<R(Args...)>& rhs) noexcept {
+inline void swap(Function<R(Args...)>& lhs, Function<R(Args...)>& rhs) noexcept {
   lhs.swap(rhs);
 }
 
 /**
- * @brief Equality with @c nullptr -- empty if and only if the @c Callback holds no target.
+ * @brief Equality with @c nullptr -- empty if and only if the @c Function holds no target.
  */
 template <typename R, typename... Args>
-inline bool operator==(const Callback<R(Args...)>& cb, std::nullptr_t) noexcept {
+inline bool operator==(const Function<R(Args...)>& cb, std::nullptr_t) noexcept {
   return !cb;
 }
 
 template <typename R, typename... Args>
-inline bool operator==(std::nullptr_t, const Callback<R(Args...)>& cb) noexcept {
+inline bool operator==(std::nullptr_t, const Function<R(Args...)>& cb) noexcept {
   return !cb;
 }
 
 template <typename R, typename... Args>
-inline bool operator!=(const Callback<R(Args...)>& cb, std::nullptr_t) noexcept {
+inline bool operator!=(const Function<R(Args...)>& cb, std::nullptr_t) noexcept {
   return static_cast<bool>(cb);
 }
 
 template <typename R, typename... Args>
-inline bool operator!=(std::nullptr_t, const Callback<R(Args...)>& cb) noexcept {
+inline bool operator!=(std::nullptr_t, const Function<R(Args...)>& cb) noexcept {
   return static_cast<bool>(cb);
 }
 
@@ -453,8 +472,8 @@ inline bool operator!=(std::nullptr_t, const Callback<R(Args...)>& cb) noexcept 
 
 namespace vlink {
 
-template <typename Signature>
-using Callback = std::function<Signature>;
+template <typename SignatureT>
+using Function = std::function<SignatureT>;
 }
 
 #endif

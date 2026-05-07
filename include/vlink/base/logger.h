@@ -89,7 +89,6 @@
 #pragma once
 
 #include <cstdio>
-#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -101,6 +100,7 @@
 #include "./exception.h"
 #include "./fast_stream.h"
 #include "./format.h"
+#include "./functional.h"
 #include "./macros.h"
 
 namespace vlink {
@@ -199,7 +199,7 @@ class VLINK_EXPORT Logger final {
    * Registered handlers are called synchronously from the logging thread.
    * The @c std::string_view is valid only for the duration of the call.
    */
-  using Callback = std::function<void(Level, std::string_view)>;
+  using Callback = vlink::Function<void(Level, std::string_view)>;
 
   /**
    * @brief Carries the source file name and line number for detail annotation.

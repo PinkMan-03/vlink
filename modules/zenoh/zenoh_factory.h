@@ -257,7 +257,7 @@ class ZenohClient final : public AbstractObject<ZenohID>, public std::enable_sha
 
   struct ResponseCallback final {
     NodeImpl* owner{nullptr};
-    std::function<void(uint64_t, const Bytes&)> callback;
+    vlink::Function<void(uint64_t, const Bytes&)> callback;
   };
 
   std::unordered_map<uint64_t, ResponseCallback> callbacks_;

@@ -78,11 +78,11 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
 
+#include "./functional.h"
 #include "./macros.h"
 
 namespace vlink {
@@ -99,17 +99,17 @@ struct VLINK_EXPORT Schedule final {
   /**
    * @brief Callback type for void tasks and lifecycle hooks (schedule/execution timeout, else).
    */
-  using Callback = std::function<void()>;
+  using Callback = vlink::Function<void()>;
 
   /**
    * @brief Callback type for tasks that return a boolean result.
    */
-  using RetCallback = std::function<bool()>;
+  using RetCallback = vlink::Function<bool()>;
 
   /**
    * @brief Callback type invoked when an exception is caught inside the task.
    */
-  using CatchCallback = std::function<void(std::exception&)>;
+  using CatchCallback = vlink::Function<void(std::exception&)>;
 
   /**
    * @struct Config

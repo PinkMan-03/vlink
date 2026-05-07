@@ -234,7 +234,8 @@ static void end_diag(DiagContext& ctx, DiagType type, const std::string& detail)
   ctx.cv.notify_one();
 }
 
-static void run_check(DiagContext& ctx, const std::string& title, int delay_ms, const std::function<void()>& check_fn) {
+static void run_check(DiagContext& ctx, const std::string& title, int delay_ms,
+                      const vlink::Function<void()>& check_fn) {
   if (!diag_accepted(ctx, title)) {
     return;
   }
@@ -449,7 +450,7 @@ void check_file_env(DiagContext& ctx, const std::string& env_key, bool warn_if_m
   end_diag(ctx, DiagType::kPass, file);
 }
 
-double sample_avg(const std::function<double()>& fn, vlink::MessageLoop* loop, int times, int interval_ms) {
+double sample_avg(const vlink::Function<double()>& fn, vlink::MessageLoop* loop, int times, int interval_ms) {
   double total = 0;
 
   for (int i = 0; i < times; ++i) {

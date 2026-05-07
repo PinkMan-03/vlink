@@ -82,13 +82,13 @@
 
 #pragma once
 
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 
 #include "./base/condition_variable.h"
+#include "./base/functional.h"
 #include "./impl/getter_impl.h"
 #include "./node.h"
 
@@ -111,7 +111,7 @@ class Getter : public Node<GetterImpl, SecT> {
   using SharedPtr = std::shared_ptr<Getter<ValueT, SecT>>;
 
   /** @brief User-facing callback type for value-change notifications. */
-  using MsgCallback = std::function<void(const ValueT&)>;
+  using MsgCallback = vlink::Function<void(const ValueT&)>;
 
   /** @brief Node role identifier (@c kGetter). */
   static constexpr ImplType kImplType = kGetter;

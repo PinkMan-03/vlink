@@ -90,10 +90,10 @@
 
 #pragma once
 
-#include <functional>
 #include <memory>
 #include <string>
 
+#include "./base/functional.h"
 #include "./impl/subscriber_impl.h"
 #include "./node.h"
 
@@ -116,7 +116,7 @@ class Subscriber : public Node<SubscriberImpl, SecT> {
   using SharedPtr = std::shared_ptr<Subscriber<MsgT, SecT>>;
 
   /** @brief User-facing callback type for received messages. */
-  using MsgCallback = std::function<void(const MsgT&)>;
+  using MsgCallback = vlink::Function<void(const MsgT&)>;
 
   /** @brief Node role identifier (@c kSubscriber). */
   static constexpr ImplType kImplType = kSubscriber;

@@ -1319,8 +1319,8 @@ uint64_t get_native_thread_id() noexcept {
 struct SignalHelper final {
   bool is_async{false};
   bool pass_through{false};
-  std::function<void(int)> terminate_callback{nullptr};
-  std::function<void(int)> crash_callback{nullptr};
+  vlink::Function<void(int)> terminate_callback{nullptr};
+  vlink::Function<void(int)> crash_callback{nullptr};
 
   static SignalHelper& get() {
     static SignalHelper instance;
@@ -1358,7 +1358,7 @@ struct SignalHelper final {
   ~SignalHelper() = default;
 };
 
-void register_terminate_signal(std::function<void(int)>&& callback, bool is_async, bool pass_through) noexcept {
+void register_terminate_signal(vlink::Function<void(int)>&& callback, bool is_async, bool pass_through) noexcept {
   static auto& instance = SignalHelper::get();
 
   instance.terminate_callback = std::move(callback);
@@ -1398,7 +1398,7 @@ void register_terminate_signal(std::function<void(int)>&& callback, bool is_asyn
 #endif
 }
 
-void register_crash_signal(std::function<void(int)>&& callback) noexcept {
+void register_crash_signal(vlink::Function<void(int)>&& callback) noexcept {
   static auto& instance = SignalHelper::get();
 
   instance.crash_callback = std::move(callback);
@@ -1438,7 +1438,7 @@ struct KeyboardHelper final {
   std::mutex mtx;
   vlink::condition_variable cv;
   std::thread thread;
-  std::function<void(const std::string& key)> callback;
+  vlink::Function<void(const std::string& key)> callback;
 
   static KeyboardHelper& get() {
     static KeyboardHelper instance;
@@ -1449,7 +1449,7 @@ struct KeyboardHelper final {
   KeyboardHelper() = default;
 };
 
-void start_detect_keyboard(std::function<void(const std::string& key)>&& callback, int poll_ms) noexcept {
+void start_detect_keyboard(vlink::Function<void(const std::string& key)>&& callback, int poll_ms) noexcept {
   static auto& instance = KeyboardHelper::get();
 
   if (instance.has_detect) {

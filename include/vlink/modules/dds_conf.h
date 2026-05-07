@@ -91,13 +91,13 @@
 #ifdef VLINK_SUPPORT_DDS
 
 #include <cstdint>
-#include <functional>
 #include <map>
 #include <shared_mutex>
 #include <string>
 #include <tuple>
 #include <vector>
 
+#include "../base/functional.h"
 #include "../extension/qos.h"
 #include "../impl/conf.h"
 
@@ -245,14 +245,14 @@ struct VLINK_EXPORT DdsConf final : public Conf {
 
   static void register_qos_internal(const std::string& name, const Qos& qos);
 
-  static std::function<void*()> find_type_support(const std::string& name);
+  static vlink::Function<void*()> find_type_support(const std::string& name);
 
   static const Qos& find_qos(const std::string& name);
 
   static std::string get_topic_for_url(const std::string& url);
 
   friend class DdsFactory;
-  static std::map<std::string, std::function<void*()>> type_support_map_;
+  static std::map<std::string, vlink::Function<void*()>> type_support_map_;
   static std::map<std::string, Qos> qos_map_;
   static std::shared_mutex mtx_;
   static constexpr const char* kRespSuffix{"___resp"};

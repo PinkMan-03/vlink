@@ -60,12 +60,12 @@
 
 #pragma once
 
-#include <functional>
 #include <future>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include "./functional.h"
 #include "./macros.h"
 
 namespace vlink {
@@ -82,7 +82,7 @@ class VLINK_EXPORT ThreadPool {
   /**
    * @brief Callback type for tasks submitted to the pool.
    */
-  using Callback = std::function<void()>;
+  using Callback = vlink::Function<void()>;
 
   /**
    * @brief Queue implementation type.

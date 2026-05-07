@@ -67,11 +67,11 @@
 
 #include <any>
 #include <atomic>
-#include <functional>
 #include <memory>
 #include <string>
 
 #include "../base/bytes.h"
+#include "../base/functional.h"
 #include "../extension/status.h"
 #include "../impl/conf.h"
 #include "../impl/types.h"
@@ -145,19 +145,19 @@ class VLINK_EXPORT NodeImpl {
    *
    * @param bool  @c true when connected; @c false when disconnected.
    */
-  using ConnectCallback = std::function<void(bool)>;
+  using ConnectCallback = vlink::Function<void(bool)>;
 
   /**
    * @brief Callback invoked on DDS status events (e.g. deadline missed).
    *
    * @param ptr  Polymorphic status object; downcast to the concrete type.
    */
-  using StatusCallback = std::function<void(const Status::BasePtr& ptr)>;
+  using StatusCallback = vlink::Function<void(const Status::BasePtr& ptr)>;
 
   /**
    * @brief Callback invoked when a @c SetterImpl sync completes.
    */
-  using SyncCallback = std::function<void()>;
+  using SyncCallback = vlink::Function<void()>;
 
   /**
    * @brief Callback for @c ServerImpl request/response processing.
@@ -167,14 +167,14 @@ class VLINK_EXPORT NodeImpl {
    * The handler writes its response into @c *response_bytes_ptr; if
    * @c response_bytes_ptr is @c nullptr the server is in fire-and-forget mode.
    */
-  using ReqRespCallback = std::function<void(uint64_t, const Bytes&, Bytes*)>;
+  using ReqRespCallback = vlink::Function<void(uint64_t, const Bytes&, Bytes*)>;
 
   /**
    * @brief Callback delivering a raw serialised message to a @c SubscriberImpl or @c GetterImpl.
    *
    * @param bytes  Received payload; lifetime is scoped to the callback.
    */
-  using MsgCallback = std::function<void(const Bytes&)>;
+  using MsgCallback = vlink::Function<void(const Bytes&)>;
 
   /**
    * @brief Callback delivering an in-process @c IntraData message.
@@ -183,7 +183,7 @@ class VLINK_EXPORT NodeImpl {
    * Only used on @c intra:// transport.  The @c IntraData is a @c shared_ptr
    * to the payload type, so no copy occurs.
    */
-  using IntraMsgCallback = std::function<void(const IntraData&)>;
+  using IntraMsgCallback = vlink::Function<void(const IntraData&)>;
 
   /**
    * @brief Initialises the underlying transport channel.

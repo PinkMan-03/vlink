@@ -98,7 +98,6 @@
 #pragma once
 
 #include <chrono>
-#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -106,6 +105,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "./base/functional.h"
 #include "./impl/client_impl.h"
 #include "./node.h"
 
@@ -132,7 +132,7 @@ class Client : public Node<ClientImpl, SecT> {
   using ConnectCallback = NodeImpl::ConnectCallback;
 
   /** @brief Callback type for async response delivery. */
-  using RespCallback = std::function<void(const RespT&)>;
+  using RespCallback = vlink::Function<void(const RespT&)>;
 
   /** @brief Node role identifier (@c kClient). */
   static constexpr ImplType kImplType = kClient;

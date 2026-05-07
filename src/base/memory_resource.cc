@@ -23,7 +23,7 @@
 
 #include "./base/memory_resource.h"
 
-#ifdef VLINK_ENABLE_MEMORY_RESOURCE
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
 
 #include <new>
 

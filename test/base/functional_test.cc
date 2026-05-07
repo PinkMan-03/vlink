@@ -23,13 +23,12 @@
 
 // NOLINTBEGIN
 
-#include "./base/callback.h"
+#include "./base/functional.h"
 
 #include <doctest/doctest.h>
 
 #include <array>
 #include <atomic>
-#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -41,31 +40,31 @@
 #ifdef VLINK_ENABLE_CALLBACK
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - construction & emptiness") {
+TEST_SUITE("base-Function - construction & emptiness") {
   // -------------------------------------------------------------------------
-  TEST_CASE("default-constructed Callback is empty") {
-    Callback<void()> cb;
+  TEST_CASE("default-constructed Function is empty") {
+    Function<void()> cb;
     CHECK(!cb);
     CHECK(cb == nullptr);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("nullptr-constructed Callback is empty") {
-    Callback<int(int)> cb(nullptr);
+  TEST_CASE("nullptr-constructed Function is empty") {
+    Function<int(int)> cb(nullptr);
     CHECK(!cb);
     CHECK(cb == nullptr);
     CHECK(nullptr == cb);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("invoking an empty Callback throws std::bad_function_call") {
-    Callback<void()> cb;
+  TEST_CASE("invoking an empty Function throws std::bad_function_call") {
+    Function<void()> cb;
     CHECK_THROWS_AS(cb(), std::bad_function_call);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback constructed from a lambda is non-empty") {
-    Callback<int(int)> cb = [](int x) { return x * 2; };
+  TEST_CASE("Function constructed from a lambda is non-empty") {
+    Function<int(int)> cb = [](int x) { return x * 2; };
     CHECK(static_cast<bool>(cb));
     CHECK(cb != nullptr);
     CHECK(cb(21) == 42);
@@ -73,11 +72,11 @@ TEST_SUITE("base-Callback - construction & emptiness") {
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - SBO inline storage") {
+TEST_SUITE("base-Function - SBO inline storage") {
   // -------------------------------------------------------------------------
   TEST_CASE("small lambda fits in inline storage (no heap)") {
     int counter = 0;
-    Callback<void()> cb = [&counter]() { ++counter; };
+    Function<void()> cb = [&counter]() { ++counter; };
 
     cb();
     cb();
@@ -91,7 +90,7 @@ TEST_SUITE("base-Callback - SBO inline storage") {
     auto a = std::make_shared<int>(1);
     auto b = std::make_shared<int>(2);
     auto c = std::make_shared<int>(3);
-    Callback<int()> cb = [a, b, c]() { return *a + *b + *c; };
+    Function<int()> cb = [a, b, c]() { return *a + *b + *c; };
 
     CHECK(cb() == 6);
   }
@@ -103,7 +102,7 @@ TEST_SUITE("base-Callback - SBO inline storage") {
       payload[i] = static_cast<int>(i);
     }
 
-    Callback<int()> cb = [payload]() {
+    Function<int()> cb = [payload]() {
       int sum = 0;
       for (int v : payload) sum += v;
       return sum;
@@ -113,11 +112,11 @@ TEST_SUITE("base-Callback - SBO inline storage") {
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("kSboSize is 64") { CHECK(Callback<void()>::kSboSize == 64U); }
+  TEST_CASE("kSboSize is 64") { CHECK(Function<void()>::kSboSize == 64U); }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - MemoryPool heap fallback") {
+TEST_SUITE("base-Function - MemoryPool heap fallback") {
   // -------------------------------------------------------------------------
   TEST_CASE("heap fallback path allocates and releases without leak") {
     auto count = std::make_shared<std::atomic<int>>(0);
@@ -139,7 +138,7 @@ TEST_SUITE("base-Callback - MemoryPool heap fallback") {
     };
 
     {
-      Callback<void()> cb = LargeFunctor(count);
+      Function<void()> cb = LargeFunctor(count);
       cb();
     }
 
@@ -153,14 +152,14 @@ TEST_SUITE("base-Callback - MemoryPool heap fallback") {
       payload[i] = static_cast<int>(i);
     }
 
-    Callback<int()> a = [payload]() {
+    Function<int()> a = [payload]() {
       int sum = 0;
       for (int v : payload) sum += v;
       return sum;
     };
 
-    Callback<int()> b(a);
-    Callback<int()> c(std::move(a));
+    Function<int()> b(a);
+    Function<int()> c(std::move(a));
 
     const int expected = (127 * 128) / 2;
     CHECK(b() == expected);
@@ -170,20 +169,20 @@ TEST_SUITE("base-Callback - MemoryPool heap fallback") {
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - copy and move semantics") {
+TEST_SUITE("base-Function - copy and move semantics") {
   // -------------------------------------------------------------------------
-  TEST_CASE("copy-constructed Callback invokes the same target") {
-    Callback<int(int)> a = [](int x) { return x + 1; };
-    Callback<int(int)> b(a);
+  TEST_CASE("copy-constructed Function invokes the same target") {
+    Function<int(int)> a = [](int x) { return x + 1; };
+    Function<int(int)> b(a);
 
     CHECK(a(10) == 11);
     CHECK(b(10) == 11);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("move-constructed Callback steals the target and leaves source empty") {
-    Callback<int(int)> a = [](int x) { return x + 5; };
-    Callback<int(int)> b(std::move(a));
+  TEST_CASE("move-constructed Function steals the target and leaves source empty") {
+    Function<int(int)> a = [](int x) { return x + 5; };
+    Function<int(int)> b(std::move(a));
 
     CHECK(b(7) == 12);
     CHECK(!a);
@@ -191,8 +190,8 @@ TEST_SUITE("base-Callback - copy and move semantics") {
 
   // -------------------------------------------------------------------------
   TEST_CASE("copy assignment replaces the existing target") {
-    Callback<int()> a = []() { return 1; };
-    Callback<int()> b = []() { return 2; };
+    Function<int()> a = []() { return 1; };
+    Function<int()> b = []() { return 2; };
 
     a = b;
 
@@ -202,8 +201,8 @@ TEST_SUITE("base-Callback - copy and move semantics") {
 
   // -------------------------------------------------------------------------
   TEST_CASE("move assignment replaces the existing target and leaves source empty") {
-    Callback<int()> a = []() { return 1; };
-    Callback<int()> b = []() { return 2; };
+    Function<int()> a = []() { return 1; };
+    Function<int()> b = []() { return 2; };
 
     a = std::move(b);
 
@@ -213,30 +212,30 @@ TEST_SUITE("base-Callback - copy and move semantics") {
 
   // -------------------------------------------------------------------------
   TEST_CASE("assignment to nullptr clears the target") {
-    Callback<int()> cb = []() { return 42; };
+    Function<int()> cb = []() { return 42; };
     cb = nullptr;
     CHECK(!cb);
   }
 
   // -------------------------------------------------------------------------
   TEST_CASE("self-copy-assignment is a no-op") {
-    Callback<int()> cb = []() { return 99; };
+    Function<int()> cb = []() { return 99; };
     cb = cb;  // NOLINT(clang-diagnostic-self-assign-overloaded)
     CHECK(cb() == 99);
   }
 
   // -------------------------------------------------------------------------
   TEST_CASE("self-move-assignment is a no-op") {
-    Callback<int()> cb = []() { return 99; };
-    Callback<int()>& ref = cb;  // alias to dodge -Wself-move while keeping the test intent
+    Function<int()> cb = []() { return 99; };
+    Function<int()>& ref = cb;  // alias to dodge -Wself-move while keeping the test intent
     cb = std::move(ref);
     CHECK(cb() == 99);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("swap exchanges targets between two Callbacks") {
-    Callback<int()> a = []() { return 1; };
-    Callback<int()> b = []() { return 2; };
+  TEST_CASE("swap exchanges targets between two Functions") {
+    Function<int()> a = []() { return 1; };
+    Function<int()> b = []() { return 2; };
 
     swap(a, b);
 
@@ -245,9 +244,9 @@ TEST_SUITE("base-Callback - copy and move semantics") {
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("swap with empty Callback transfers ownership") {
-    Callback<int()> a = []() { return 7; };
-    Callback<int()> b;
+  TEST_CASE("swap with empty Function transfers ownership") {
+    Function<int()> a = []() { return 7; };
+    Function<int()> b;
 
     a.swap(b);
 
@@ -258,14 +257,14 @@ TEST_SUITE("base-Callback - copy and move semantics") {
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - shared_ptr capture lifetime") {
+TEST_SUITE("base-Function - shared_ptr capture lifetime") {
   // -------------------------------------------------------------------------
-  TEST_CASE("destroying the Callback releases shared_ptr capture") {
+  TEST_CASE("destroying the Function releases shared_ptr capture") {
     auto resource = std::make_shared<int>(123);
     CHECK(resource.use_count() == 1);
 
     {
-      Callback<int()> cb = [resource]() { return *resource; };
+      Function<int()> cb = [resource]() { return *resource; };
       CHECK(resource.use_count() == 2);
       CHECK(cb() == 123);
     }
@@ -274,13 +273,13 @@ TEST_SUITE("base-Callback - shared_ptr capture lifetime") {
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("copying the Callback duplicates shared_ptr capture") {
+  TEST_CASE("copying the Function duplicates shared_ptr capture") {
     auto resource = std::make_shared<int>(0);
-    Callback<void()> a = [resource]() { ++(*resource); };
+    Function<void()> a = [resource]() { ++(*resource); };
 
     CHECK(resource.use_count() == 2);
 
-    Callback<void()> b(a);
+    Function<void()> b(a);
 
     CHECK(resource.use_count() == 3);
 
@@ -291,34 +290,34 @@ TEST_SUITE("base-Callback - shared_ptr capture lifetime") {
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("moving the Callback transfers shared_ptr capture without bumping use_count") {
+  TEST_CASE("moving the Function transfers shared_ptr capture without bumping use_count") {
     auto resource = std::make_shared<int>(0);
-    Callback<void()> a = [resource]() { ++(*resource); };
+    Function<void()> a = [resource]() { ++(*resource); };
 
     CHECK(resource.use_count() == 2);
 
-    Callback<void()> b(std::move(a));
+    Function<void()> b(std::move(a));
 
     CHECK(resource.use_count() == 2);
   }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - target kinds") {
+TEST_SUITE("base-Function - target kinds") {
   // -------------------------------------------------------------------------
   static int free_function(int x) { return x + 100; }
 
-  TEST_CASE("Callback wraps a free function pointer") {
-    Callback<int(int)> cb = &free_function;
+  TEST_CASE("Function wraps a free function pointer") {
+    Function<int(int)> cb = &free_function;
     CHECK(cb(2) == 102);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback constructed from a null function pointer becomes empty") {
+  TEST_CASE("Function constructed from a null function pointer becomes empty") {
     using Fn = int (*)(int);
     Fn fn = nullptr;
 
-    Callback<int(int)> cb(fn);
+    Function<int(int)> cb(fn);
 
     CHECK(!cb);
   }
@@ -329,17 +328,17 @@ TEST_SUITE("base-Callback - target kinds") {
     int add(int x) const { return base + x; }
   };
 
-  TEST_CASE("Callback wraps a member function via lambda capture") {
+  TEST_CASE("Function wraps a member function via lambda capture") {
     Adder adder{10};
 
-    Callback<int(int)> cb = [&adder](int x) { return adder.add(x); };
+    Function<int(int)> cb = [&adder](int x) { return adder.add(x); };
 
     CHECK(cb(5) == 15);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback wraps a stateful functor (mutable lambda)") {
-    Callback<int()> cb = [counter = 0]() mutable { return ++counter; };
+  TEST_CASE("Function wraps a stateful functor (mutable lambda)") {
+    Function<int()> cb = [counter = 0]() mutable { return ++counter; };
 
     CHECK(cb() == 1);
     CHECK(cb() == 2);
@@ -348,29 +347,29 @@ TEST_SUITE("base-Callback - target kinds") {
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - argument kinds") {
+TEST_SUITE("base-Function - argument kinds") {
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback forwards by-value argument") {
-    Callback<int(int)> cb = [](int x) { return x; };
+  TEST_CASE("Function forwards by-value argument") {
+    Function<int(int)> cb = [](int x) { return x; };
     CHECK(cb(7) == 7);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback forwards by-const-reference argument") {
-    Callback<size_t(const std::string&)> cb = [](const std::string& s) { return s.size(); };
+  TEST_CASE("Function forwards by-const-reference argument") {
+    Function<size_t(const std::string&)> cb = [](const std::string& s) { return s.size(); };
     CHECK(cb("hello") == 5U);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback forwards rvalue-reference argument (move-only payload)") {
-    Callback<int(std::unique_ptr<int>)> cb = [](std::unique_ptr<int> p) { return *p; };
+  TEST_CASE("Function forwards rvalue-reference argument (move-only payload)") {
+    Function<int(std::unique_ptr<int>)> cb = [](std::unique_ptr<int> p) { return *p; };
     CHECK(cb(std::make_unique<int>(42)) == 42);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback returning void compiles and runs") {
+  TEST_CASE("Function returning void compiles and runs") {
     int side_effect = 0;
-    Callback<void(int)> cb = [&side_effect](int x) { side_effect = x; };
+    Function<void(int)> cb = [&side_effect](int x) { side_effect = x; };
 
     cb(99);
 
@@ -378,14 +377,14 @@ TEST_SUITE("base-Callback - argument kinds") {
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback with multiple arguments") {
-    Callback<int(int, int, int)> cb = [](int a, int b, int c) { return a + b + c; };
+  TEST_CASE("Function with multiple arguments") {
+    Function<int(int, int, int)> cb = [](int a, int b, int c) { return a + b + c; };
     CHECK(cb(1, 2, 3) == 6);
   }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - destruction tracking") {
+TEST_SUITE("base-Function - destruction tracking") {
   // -------------------------------------------------------------------------
   struct DestructorCounter {
     std::shared_ptr<std::atomic<int>> count;
@@ -409,18 +408,18 @@ TEST_SUITE("base-Callback - destruction tracking") {
     void operator()() const {}
   };
 
-  TEST_CASE("inline target is destroyed exactly once when Callback dies") {
+  TEST_CASE("inline target is destroyed exactly once when Function dies") {
     auto count = std::make_shared<std::atomic<int>>(0);
 
     {
-      Callback<void()> cb = DestructorCounter(count);
+      Function<void()> cb = DestructorCounter(count);
       cb();
     }
 
-    // 1 destruction: the moved-into-Callback storage.
+    // 1 destruction: the moved-into-Function storage.
     // (Temporaries in expression are also destroyed but their internal counters are
     // copies; we check >=1 to tolerate compiler temporaries from the converting
-    // constructor path, but lifetimes inside Callback contribute at least one.)
+    // constructor path, but lifetimes inside Function contribute at least one.)
     CHECK(count->load() >= 1);
   }
 
@@ -445,7 +444,7 @@ TEST_SUITE("base-Callback - destruction tracking") {
     };
 
     {
-      Callback<void()> cb = LargePayload(count);
+      Function<void()> cb = LargePayload(count);
       cb();
     }
 
@@ -454,30 +453,30 @@ TEST_SUITE("base-Callback - destruction tracking") {
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - operator(), exception forwarding") {
+TEST_SUITE("base-Function - operator(), exception forwarding") {
   // -------------------------------------------------------------------------
   TEST_CASE("exception thrown from target propagates") {
-    Callback<void()> cb = []() { throw std::runtime_error("boom"); };
+    Function<void()> cb = []() { throw std::runtime_error("boom"); };
     CHECK_THROWS_AS(cb(), std::runtime_error);
   }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - std::bind / reference_wrapper / member ptr") {
+TEST_SUITE("base-Function - std::bind / reference_wrapper / member ptr") {
   // -------------------------------------------------------------------------
   static int multiply(int a, int b) { return a * b; }
 
-  TEST_CASE("Callback wraps std::bind result") {
-    Callback<int(int)> cb = std::bind(&multiply, std::placeholders::_1, 3);  // NOLINT(modernize-avoid-bind)
+  TEST_CASE("Function wraps std::bind result") {
+    Function<int(int)> cb = std::bind(&multiply, std::placeholders::_1, 3);  // NOLINT(modernize-avoid-bind)
     CHECK(cb(5) == 15);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback wraps std::reference_wrapper to a callable") {
+  TEST_CASE("Function wraps std::reference_wrapper to a callable") {
     auto fn = [](int x) { return x + 1; };
     auto ref = std::ref(fn);
 
-    Callback<int(int)> cb = ref;
+    Function<int(int)> cb = ref;
     CHECK(cb(10) == 11);
   }
 
@@ -488,25 +487,25 @@ TEST_SUITE("base-Callback - std::bind / reference_wrapper / member ptr") {
     int operator()(int x) const { return base + x * 2; }
   };
 
-  TEST_CASE("Callback wraps a functor with operator() directly") {
-    Callback<int(int)> cb = Adder2{100};
+  TEST_CASE("Function wraps a functor with operator() directly") {
+    Function<int(int)> cb = Adder2{100};
     CHECK(cb(5) == 110);
   }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - composition and reset") {
+TEST_SUITE("base-Function - composition and reset") {
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback can hold another Callback as the target") {
-    Callback<int(int)> inner = [](int x) { return x + 1; };
-    Callback<int(int)> outer = [inner](int x) { return inner(x) * 2; };
+  TEST_CASE("Function can hold another Function as the target") {
+    Function<int(int)> inner = [](int x) { return x + 1; };
+    Function<int(int)> outer = [inner](int x) { return inner(x) * 2; };
 
     CHECK(outer(3) == 8);  // (3 + 1) * 2
   }
 
   // -------------------------------------------------------------------------
   TEST_CASE("operator= with new lambda overrides previous target") {
-    Callback<int()> cb = []() { return 1; };
+    Function<int()> cb = []() { return 1; };
     cb = []() { return 2; };
     CHECK(cb() == 2);
 
@@ -516,81 +515,81 @@ TEST_SUITE("base-Callback - composition and reset") {
 
   // -------------------------------------------------------------------------
   TEST_CASE("nullptr assignment after copy leaves both destination empty and source intact") {
-    Callback<int()> a = []() { return 7; };
-    Callback<int()> b = a;
+    Function<int()> a = []() { return 7; };
+    Function<int()> b = a;
     a = nullptr;
     CHECK(!a);
     CHECK(b() == 7);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("move from empty Callback yields empty Callback") {
-    Callback<int()> a;  // empty
-    Callback<int()> b(std::move(a));
+  TEST_CASE("move from empty Function yields empty Function") {
+    Function<int()> a;  // empty
+    Function<int()> b(std::move(a));
     CHECK(!a);
     CHECK(!b);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("copy from empty Callback yields empty Callback") {
-    Callback<int()> a;  // empty
-    Callback<int()> b(a);
+  TEST_CASE("copy from empty Function yields empty Function") {
+    Function<int()> a;  // empty
+    Function<int()> b(a);
     CHECK(!a);
     CHECK(!b);
   }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - return-type and signature variations") {
+TEST_SUITE("base-Function - return-type and signature variations") {
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback returning by-value std::string") {
-    Callback<std::string()> cb = []() { return std::string("hello"); };
+  TEST_CASE("Function returning by-value std::string") {
+    Function<std::string()> cb = []() { return std::string("hello"); };
     CHECK(cb() == "hello");
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback returning std::unique_ptr (move-only result)") {
-    Callback<std::unique_ptr<int>()> cb = []() { return std::make_unique<int>(42); };
+  TEST_CASE("Function returning std::unique_ptr (move-only result)") {
+    Function<std::unique_ptr<int>()> cb = []() { return std::make_unique<int>(42); };
     auto p = cb();
     CHECK(p != nullptr);
     CHECK(*p == 42);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback with no arguments and void return") {
+  TEST_CASE("Function with no arguments and void return") {
     int counter = 0;
-    Callback<void()> cb = [&counter]() { ++counter; };
+    Function<void()> cb = [&counter]() { ++counter; };
     cb();
     cb();
     CHECK(counter == 2);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback with widely different return type from F (R-conversion)") {
-    Callback<long(int)> cb = [](int x) -> int { return x * 10; };
+  TEST_CASE("Function with widely different return type from F (R-conversion)") {
+    Function<long(int)> cb = [](int x) -> int { return x * 10; };
     CHECK(cb(7) == 70L);
   }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - const-correctness") {
+TEST_SUITE("base-Function - const-correctness") {
   // -------------------------------------------------------------------------
-  TEST_CASE("operator() is callable on a const Callback") {
-    const Callback<int()> cb = []() { return 13; };
+  TEST_CASE("operator() is callable on a const Function") {
+    const Function<int()> cb = []() { return 13; };
     CHECK(cb() == 13);
   }
 
   // -------------------------------------------------------------------------
   TEST_CASE("mutable lambda preserves state across const invocations") {
-    Callback<int()> cb = [counter = 0]() mutable { return ++counter; };
-    const Callback<int()>& ref = cb;
+    Function<int()> cb = [counter = 0]() mutable { return ++counter; };
+    const Function<int()>& ref = cb;
     CHECK(ref() == 1);
     CHECK(ref() == 2);
   }
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - exception safety") {
+TEST_SUITE("base-Function - exception safety") {
   // -------------------------------------------------------------------------
   struct ThrowingOnCopy {
     int value{0};
@@ -611,14 +610,14 @@ TEST_SUITE("base-Callback - exception safety") {
     void operator()() const {}
   };
 
-  TEST_CASE("throw from F's copy ctor during Callback copy leaves destination empty and source intact") {
+  TEST_CASE("throw from F's copy ctor during Function copy leaves destination empty and source intact") {
     bool throw_flag = false;
     ThrowingOnCopy original(&throw_flag);
 
-    Callback<void()> a = original;  // first copy: throw_flag false, ok
+    Function<void()> a = original;  // first copy: throw_flag false, ok
 
     throw_flag = true;
-    Callback<void()> b;
+    Function<void()> b;
     CHECK_THROWS_AS(b = a, std::runtime_error);  // copy from a triggers ThrowingOnCopy::copy
     CHECK(!b);                                   // b stays empty
     CHECK(static_cast<bool>(a));                 // a unchanged
@@ -626,42 +625,42 @@ TEST_SUITE("base-Callback - exception safety") {
 }
 
 // ---------------------------------------------------------------------------
-TEST_SUITE("base-Callback - std::function interop") {
+TEST_SUITE("base-Function - std::function interop") {
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback wraps a std::function via converting constructor") {
+  TEST_CASE("Function wraps a std::function via converting constructor") {
     std::function<int(int)> stdfn = [](int x) { return x * 3; };
-    Callback<int(int)> cb = stdfn;
+    Function<int(int)> cb = stdfn;
     CHECK(cb(4) == 12);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("std::function wraps a Callback via its converting constructor") {
-    Callback<int(int)> cb = [](int x) { return x + 100; };
+  TEST_CASE("std::function wraps a Function via its converting constructor") {
+    Function<int(int)> cb = [](int x) { return x + 100; };
     std::function<int(int)> stdfn = cb;
     CHECK(stdfn(5) == 105);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("Callback assigned from std::function value") {
+  TEST_CASE("Function assigned from std::function value") {
     std::function<int()> stdfn = []() { return 7; };
-    Callback<int()> cb;
+    Function<int()> cb;
     cb = stdfn;
     CHECK(cb() == 7);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("std::function assigned from Callback value") {
-    Callback<int()> cb = []() { return 9; };
+  TEST_CASE("std::function assigned from Function value") {
+    Function<int()> cb = []() { return 9; };
     std::function<int()> stdfn;
     stdfn = cb;
     CHECK(stdfn() == 9);
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("round-trip Callback -> std::function -> Callback preserves behaviour") {
-    Callback<int(int)> a = [](int x) { return x * x; };
+  TEST_CASE("round-trip Function -> std::function -> Function preserves behaviour") {
+    Function<int(int)> a = [](int x) { return x * x; };
     std::function<int(int)> mid = a;
-    Callback<int(int)> b = mid;
+    Function<int(int)> b = mid;
     CHECK(b(11) == 121);
   }
 }

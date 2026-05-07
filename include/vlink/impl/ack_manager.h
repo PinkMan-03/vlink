@@ -60,12 +60,12 @@
 
 #pragma once
 
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <set>
 
 #include "../base/condition_variable.h"
+#include "../base/functional.h"
 #include "../base/macros.h"
 
 namespace vlink {
@@ -92,7 +92,7 @@ class VLINK_EXPORT AckManager final {
    * Should return @c false if the send fails (e.g. no server connected),
    * causing @c process() to remove the request and return @c false immediately.
    */
-  using ProcessCallback = std::function<bool()>;
+  using ProcessCallback = vlink::Function<bool()>;
 
   /**
    * @brief Optional callback invoked inside @c notify() while holding the request lock.
@@ -101,7 +101,7 @@ class VLINK_EXPORT AckManager final {
    * Provides the responder a chance to fill the response buffer before the
    * waiting @c process() thread is woken.  May be @c nullptr.
    */
-  using NotifyCallback = std::function<void()>;
+  using NotifyCallback = vlink::Function<void()>;
 
   /**
    * @brief Shared ownership handle for an in-flight request token.
