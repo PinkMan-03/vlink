@@ -56,7 +56,7 @@
  * auto B = vlink::GraphTask::create("B", []{ step_b(); });
  * auto C = vlink::GraphTask::create("C", []{ step_c(); });
  *
- * A-- > B-- > C;  // A depends on B, B depends on C (execution order: C, B, A)
+ * A-- > B-- > C;  // A runs before B, B runs before C (execution order: A, B, C)
  * @endcode
  *
  * @note
@@ -73,8 +73,8 @@
  * auto proc  = vlink::GraphTask::create("proc",  [] { process();   });
  * auto save  = vlink::GraphTask::create("save",  [] { save_data(); });
  *
- * // A-- > B calls A->succeed(B), meaning B must complete before A.
- * // So save-- > proc-- > load produces execution order: load, proc, save.
+ * // A-- > B calls A->succeed(B), meaning A must complete before B.
+ * // So save-- > proc-- > load produces execution order: save, proc, load.
  * save-- > proc-- > load;
  *
  * assert(!save->has_cycle());
@@ -215,22 +215,22 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
   void cancel();
 
   /**
-   * @brief Declares that this task must complete before @p task starts.
+   * @brief Declares that @p task must complete before this task starts.
    *
    * @details
    * Equivalent to @c task->succeed(this_task).
    *
-   * @param task  Successor task.
+   * @param task  Predecessor task that must run before @c *this.
    */
   void precede(const std::shared_ptr<GraphTask>& task);
 
   /**
-   * @brief Declares that @p task must complete before this task starts.
+   * @brief Declares that this task must complete before @p task starts.
    *
    * @details
    * Equivalent to @c task->precede(this_task).
    *
-   * @param task  Predecessor task.
+   * @param task  Successor task that runs after @c *this.
    */
   void succeed(const std::shared_ptr<GraphTask>& task);
 

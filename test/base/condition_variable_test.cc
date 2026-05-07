@@ -25,7 +25,7 @@
 
 #include "./base/condition_variable.h"
 
-#if defined(__unix__) && !defined(__CYGWIN__)
+#if defined(VLINK_ENABLE_CONDITION)
 
 #include <doctest/doctest.h>
 

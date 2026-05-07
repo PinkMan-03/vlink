@@ -96,9 +96,9 @@ class VLINK_EXPORT ThreadPool {
    * @brief Idle strategy controlling CPU and wake-up latency trade-offs.
    */
   enum Strategy : uint8_t {
-    kOptimizationStrategy = 0,  ///< Balance latency and CPU via yield
-    kPopStrategy = 1,           ///< Busy-poll (lowest latency, highest CPU)
-    kBlockStrategy = 2,         ///< Block on condition variable (lowest CPU)
+    kOptimizationStrategy = 0,  ///< Balance: when full, retry; after 10 retries drop oldest and push.
+    kPopStrategy = 1,           ///< When full, drop oldest immediately and push the new task.
+    kBlockStrategy = 2,         ///< When full, retry indefinitely with 1 ms sleep between attempts.
   };
 
   /**
@@ -171,11 +171,19 @@ class VLINK_EXPORT ThreadPool {
    * @brief Posts a task to the queue for execution by a worker thread.
    *
    * @details
-   * Thread-safe.  Returns @c false if the pool is shutting down or the queue is full
-   * (@c get_max_task_count()).
+   * Thread-safe.  Returns @c false only if the pool has been shut down (@c shutdown()
+   * called).  Behaviour when the queue is full depends on the configured @c Strategy:
+   *
+   * - @c kOptimizationStrategy: retry up to 10 times with 1 ms sleep between attempts;
+   *   after that, drop the oldest entry and push the new task (still returns @c true).
+   * - @c kPopStrategy: drop the oldest entry immediately and push the new task.
+   * - @c kBlockStrategy: retry indefinitely with 1 ms sleep until space is available.
+   *
+   * In none of these paths does the function return @c false because the queue is full.
    *
    * @param callback  Task to execute.
-   * @return @c true if enqueued successfully.
+   * @return @c true if enqueued (possibly after dropping an older task or blocking).
+   *         @c false if the pool has been shut down.
    */
   bool post_task(Callback&& callback);
 

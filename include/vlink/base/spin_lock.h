@@ -33,11 +33,17 @@
  *
  * Locking strategy inside @c lock():
  * -# Try to acquire with @c exchange(true, acquire); if successful, return.
- * -# Spin with @c load(relaxed) until the flag appears free, then retry.
+ * -# Spin with @c load(relaxed) until the flag appears free, then retry the
+ *    @c exchange.  The @c do/while form guarantees at least one spin tick
+ *    per outer iteration so back-off is honoured even under tight contention.
  * -# Apply exponential back-off: after every @c backoff spins, call
  *    @c Utils::yield_cpu() (a CPU-pause instruction).
- * -# If @c kMaxSpinCount (50000) is exceeded, sleep for 10 us and log an
- *    error.  This is a safety valve for pathological contention.
+ * -# Back-off starts at 8 and doubles each round up to 1024.
+ * -# Once @c kMaxSpinCount (50000) is exceeded, the back-off action switches
+ *    from @c yield_cpu to a 10 us sleep (repeating per back-off cycle).  The
+ *    "exceeded" warning is logged at most once over this @c SpinLock's
+ *    lifetime (latched in an atomic flag) to avoid log floods under sustained
+ *    pathological contention across many acquisitions.
  *
  * Cache-line alignment (@c alignas(64)) prevents false sharing when multiple
  * @c SpinLock objects reside in adjacent memory.
@@ -109,10 +115,12 @@ class SpinLock final {
    *
    * @details
    * Uses an exponential back-off strategy to reduce bus contention:
-   * - Spins with @c load(relaxed) for up to @c backoff iterations.
-   * - Calls @c Utils::yield_cpu() (PAUSE/WFE/yield) when @c backoff is reached.
-   * - Back-off doubles each round up to 1024.
-   * - After 50000 total spins, logs an error and sleeps 10 us.
+   * - Spins with @c load(relaxed) for up to @c backoff iterations per cycle.
+   * - Calls @c Utils::yield_cpu() (PAUSE/WFE/yield) at the end of each cycle.
+   * - Back-off starts at 8 and doubles each cycle up to 1024.
+   * - Once total spins exceed 50000, switches the back-off action to a 10 us
+   *   sleep (repeated per back-off cycle).  The warning is logged at most
+   *   once per @c SpinLock instance over its lifetime.
    *
    * @warning
    * This function must not be called recursively from the same thread; doing so
@@ -145,6 +153,7 @@ class SpinLock final {
   static constexpr size_t kInterferenceSize = 64U;
 
   alignas(kInterferenceSize) std::atomic<bool> flag_{false};
+  std::atomic<bool> warned_{false};
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(SpinLock)
 };
@@ -200,7 +209,6 @@ inline void SpinLock::lock() noexcept {
   uint32_t total_spin = 0;
   uint16_t spin_count = 0;
   uint16_t backoff = kInitialBackoff;
-  bool warned = false;
 
   for (;;) {
     if (!flag_.exchange(true, std::memory_order_acquire)) {
@@ -214,9 +222,8 @@ inline void SpinLock::lock() noexcept {
         if VUNLIKELY (total_spin > kMaxSpinCount) {
           // LCOV_EXCL_START
           // GCOVR_EXCL_START
-          if (!warned) {
+          if (!warned_.exchange(true, std::memory_order_relaxed)) {
             VLOG_E("SpinLock: exceeded max spin count.");
-            warned = true;
           }
           std::this_thread::sleep_for(std::chrono::microseconds(10));
           // GCOVR_EXCL_STOP

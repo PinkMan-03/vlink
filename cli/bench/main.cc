@@ -428,7 +428,7 @@ bool parse_integral(const std::string& token, T& value) {
     if (pos != token.size()) {
       return false;
     }
-  } catch (...) {
+  } catch (std::exception&) {
     return false;
   }
 

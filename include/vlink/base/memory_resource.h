@@ -76,12 +76,12 @@
 
 #if defined(__linux__) && __has_include(<memory_resource>)
 #include <memory_resource>
-#if defined(__cpp_lib_memory_resource)
-#define VLINK_ENABLE_MEMORY_RESOURCE
+#if !defined(VLINK_ENABLE_BASE_MEMORY_RESOURCE) && defined(__cpp_lib_memory_resource)
+#define VLINK_ENABLE_BASE_MEMORY_RESOURCE
 #endif
 #endif
 
-#ifdef VLINK_ENABLE_MEMORY_RESOURCE
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
 
 #include <cstddef>
 

@@ -210,10 +210,8 @@ class VLINK_EXPORT WheelTimer {
   void set_catchup_limit(uint32_t max_slots_to_catch_up);
 
  private:
-  void run();
-
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  std::shared_ptr<Impl> impl_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(WheelTimer)
 };

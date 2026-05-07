@@ -79,6 +79,7 @@ std::any IntraNode::get_native_handle() const { return this; }
 bool IntraNode::publish(IntraType type, uint32_t channel, const Bytes& msg_data) {
   if (type == IntraType::kQueue && pipeline_) {
     std::weak_ptr<IntraNode> weak_self = shared_from_this();
+
     pipeline_->post_task([weak_self, channel, msg_data]() {
       auto self = weak_self.lock();
 
@@ -120,6 +121,7 @@ bool IntraNode::publish(IntraType type, uint32_t channel, const Bytes& msg_data)
 bool IntraNode::publish(IntraType type, uint32_t channel, const IntraData& intra_data) {
   if (type == IntraType::kQueue && pipeline_) {
     std::weak_ptr<IntraNode> weak_self = shared_from_this();
+
     pipeline_->post_task([weak_self, channel, intra_data]() {
       auto self = weak_self.lock();
 
@@ -161,6 +163,7 @@ bool IntraNode::publish(IntraType type, uint32_t channel, const IntraData& intra
 bool IntraNode::call(IntraType type, uint32_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback) {
   if (type == IntraType::kQueue && pipeline_) {
     std::weak_ptr<IntraNode> weak_self = shared_from_this();
+
     pipeline_->post_task([weak_self, channel, req_data, callback = std::move(callback)]() {
       auto self = weak_self.lock();
 

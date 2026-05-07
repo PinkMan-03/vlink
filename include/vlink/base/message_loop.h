@@ -39,13 +39,14 @@
  * | @c kLockfreeType  | MpmcQueue (lock-free MPMC)     | 10000            | Fastest single-producer path   |
  * | @c kPriorityType  | Priority queue                 | 10000            | Supports task priority levels  |
  *
- * Dispatch strategies:
+ * Dispatch strategies (control behaviour when the task queue is FULL on push;
+ * idle dispatch is always cv-based, independent of strategy):
  *
- * | Strategy              | Behaviour                                                               |
- * | --------------------- | ----------------------------------------------------------------------- |
- * | @c kOptimizationStrategy | Yields CPU when queue is empty; balances latency vs CPU usage        |
- * | @c kPopStrategy       | Busy-waits by repeatedly polling the queue (lowest latency)             |
- * | @c kBlockStrategy     | Blocks on a condition variable when the queue is empty (lowest CPU)     |
+ * | Strategy                | Behaviour when push hits the cap                                        |
+ * | ----------------------- | ----------------------------------------------------------------------- |
+ * | @c kOptimizationStrategy | Retry up to 10 times with 1 ms sleep each; then drop oldest and push  |
+ * | @c kPopStrategy         | Drop the oldest entry immediately and push the new task                 |
+ * | @c kBlockStrategy       | Retry indefinitely with 1 ms sleep until space is available             |
  *
  * Run modes:
  * - @c run() -- blocks the calling thread until @c quit() is called.
@@ -129,9 +130,9 @@ class VLINK_EXPORT MessageLoop {
    * See class documentation for a comparison table.
    */
   enum Strategy : uint8_t {
-    kOptimizationStrategy = 0,  ///< Balance latency and CPU via yield
-    kPopStrategy = 1,           ///< Busy-poll (lowest latency, highest CPU)
-    kBlockStrategy = 2,         ///< Block on condition variable (lowest CPU)
+    kOptimizationStrategy = 0,  ///< Balance: when full, retry; after 10 retries drop oldest and push.
+    kPopStrategy = 1,           ///< When full, drop oldest immediately and push the new task.
+    kBlockStrategy = 2,         ///< When full, retry indefinitely with 1 ms sleep between attempts.
   };
 
   /**
@@ -298,10 +299,14 @@ class VLINK_EXPORT MessageLoop {
    * @brief Posts a task to the queue for execution on the loop thread.
    *
    * @details
-   * Thread-safe.  Returns @c false if the loop is shutting down or the queue is full (@c kMaxTaskSize).
+   * Thread-safe.  Returns @c false only if the loop has been signalled to quit.
+   * When the queue is at the cap (@c kMaxTaskSize), behaviour follows the configured
+   * @c Strategy (drop oldest immediately, retry-then-drop, or retry indefinitely);
+   * none of those paths returns @c false because of fullness.
    *
    * @param callback  Task to execute.
-   * @return @c true if the task was successfully enqueued.
+   * @return @c true if the task was eventually enqueued (possibly after dropping an
+   *         older task or blocking).  @c false if the loop is quitting.
    */
   bool post_task(Callback&& callback);
 

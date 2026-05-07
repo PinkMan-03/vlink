@@ -93,16 +93,19 @@
 #pragma once
 
 #include <condition_variable>
-#include <memory>
-#include <utility>
 
-#ifdef __unix__
+#if !defined(VLINK_ENABLE_BASE_CONDITION) && defined(__unix__) && !defined(__CYGWIN__)
+#define VLINK_ENABLE_BASE_CONDITION
+#endif
 
+#ifdef VLINK_ENABLE_BASE_CONDITION
 #include <pthread.h>
 
 #include <cerrno>
 #include <chrono>
+#include <memory>
 #include <mutex>
+#include <utility>
 
 namespace vlink {
 

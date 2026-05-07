@@ -38,9 +38,6 @@
 //
 #include "../common_test.h"
 
-using vlink::MemoryPool;
-using vlink::MemoryResource;
-
 // ---------------------------------------------------------------------------
 // TEST SUITE: construction
 // ---------------------------------------------------------------------------

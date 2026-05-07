@@ -44,13 +44,18 @@
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
 #include <vlink/base/cpu_profiler.h>
+#include <vlink/base/cpu_profiler_guard.h>
 #include <vlink/base/deadline_timer.h>
 #include <vlink/base/elapsed_timer.h>
 #include <vlink/base/helpers.h>
+#include <vlink/base/memory_pool.h>
+#include <vlink/base/memory_resource.h>
+#include <vlink/base/multi_loop.h>
 #include <vlink/base/process.h>
 #include <vlink/base/spin_lock.h>
 #include <vlink/base/thread_pool.h>
 #include <vlink/base/timer.h>
+#include <vlink/base/wheel_timer.h>
 #include <vlink/extension/bag_reader.h>
 #include <vlink/extension/bag_writer.h>
 #include <vlink/extension/discovery_viewer.h>
@@ -155,7 +160,7 @@ std::function<void(const MsgT&)> make_value_callback(nb::callable py_cb, const c
     nb::gil_scoped_acquire gil;
     try {
       cb->fn(Codec::to_python(value));
-    } catch (...) {
+    } catch (std::exception&) {
       report_current_exception(context);
     }
   };
@@ -168,7 +173,7 @@ inline vlink::NodeImpl::ConnectCallback make_connect_callback(nb::callable py_cb
     nb::gil_scoped_acquire gil;
     try {
       cb->fn(connected);
-    } catch (...) {
+    } catch (std::exception&) {
       report_current_exception(context);
     }
   };
@@ -181,7 +186,7 @@ inline std::function<void()> make_void_callback(nb::callable py_cb, const char* 
     nb::gil_scoped_acquire gil;
     try {
       cb->fn();
-    } catch (...) {
+    } catch (std::exception&) {
       report_current_exception(context);
     }
   };
@@ -278,7 +283,7 @@ void bind_node_common(Class& cls) {
                 d["type"] = static_cast<int>(status->get_type());
                 d["description"] = status->get_string();
                 cb->fn(d);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::register_status_handler");
               }
             });
@@ -358,7 +363,7 @@ void bind_server(nb::module_& m, const char* name, const char* doc) {
                if (!result.is_none()) {
                  resp = RespCodec::from_python_owned(result);
                }
-             } catch (...) {
+             } catch (std::exception&) {
                report_current_exception("vlink::Server.listen");
              }
            });
@@ -373,7 +378,7 @@ void bind_server(nb::module_& m, const char* name, const char* doc) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(req_id, ReqCodec::to_python(req));
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Server.listen_for_reply");
               }
             });
@@ -435,7 +440,7 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(RespCodec::to_python(resp));
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Client.invoke_async");
               }
             });
@@ -567,7 +572,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_static(
           "encode_to_base64",
           [](nb::handle data) {
-            auto b = PythonCodec<vlink::Bytes>::from_python(data);
+            PythonBufferView view(data);
+            auto b = vlink::Bytes::shallow_copy(view.data(), view.size());
             return vlink::Bytes::encode_to_base64(b);
           },
           "bytes"_a)
@@ -575,7 +581,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_static(
           "get_crc_32",
           [](nb::handle data) {
-            auto b = PythonCodec<vlink::Bytes>::from_python(data);
+            PythonBufferView view(data);
+            auto b = vlink::Bytes::shallow_copy(view.data(), view.size());
             return vlink::Bytes::get_crc_32(b);
           },
           "bytes"_a)
@@ -603,7 +610,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_static(
           "reverse_order",
           [](nb::handle data) {
-            auto b = PythonCodec<vlink::Bytes>::from_python(data);
+            PythonBufferView view(data);
+            auto b = vlink::Bytes::shallow_copy(view.data(), view.size());
             return vlink::Bytes::reverse_order(b);
           },
           "bytes"_a)
@@ -699,7 +707,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(static_cast<int>(level), std::string(msg));
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Logger.register_console_handler");
               }
             });
@@ -714,7 +722,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(static_cast<int>(level), std::string(msg));
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Logger.register_file_handler");
               }
             });
@@ -968,6 +976,117 @@ NB_MODULE(_vlink_nanobind, m) {
            })
       .def("__exit__", [](vlink::SpinLock& self, nb::object, nb::object, nb::object) { self.unlock(); });
 
+  nb::class_<vlink::CpuProfiler>(m, "CpuProfiler", "CPU active-time profiler")
+      .def(nb::init<>())
+      .def_static("is_global_enabled", &vlink::CpuProfiler::is_global_enabled)
+      .def("begin", &vlink::CpuProfiler::begin)
+      .def("end", &vlink::CpuProfiler::end)
+      .def("get", &vlink::CpuProfiler::get)
+      .def("restart", &vlink::CpuProfiler::restart)
+      .def("__enter__",
+           [](vlink::CpuProfiler& self) -> vlink::CpuProfiler& {
+             self.begin();
+             return self;
+           })
+      .def("__exit__", [](vlink::CpuProfiler& self, nb::object, nb::object, nb::object) { self.end(); });
+
+  nb::class_<vlink::CpuProfilerGuard>(m, "CpuProfilerGuard", "RAII guard that brackets CpuProfiler.begin/end")
+      .def(nb::init<vlink::CpuProfiler*>(), "profiler"_a, nb::keep_alive<1, 2>());
+
+  nb::class_<vlink::MultiLoop, vlink::MessageLoop>(m, "MultiLoop", "Thread-pool backed MessageLoop")
+      .def(nb::init<size_t>(), "thread_num"_a = static_cast<size_t>(4))
+      .def(nb::init<size_t, vlink::MessageLoop::Type>(), "thread_num"_a, "type"_a);
+
+  nb::class_<vlink::WheelTimer>(m, "WheelTimer", "Hierarchical timing wheel")
+      .def(nb::init<uint32_t, uint32_t>(), "slots"_a, "interval_ms"_a)
+      .def("start", &vlink::WheelTimer::start)
+      .def("stop", &vlink::WheelTimer::stop)
+      .def("pause", &vlink::WheelTimer::pause)
+      .def("resume", &vlink::WheelTimer::resume)
+      .def("wakeup", &vlink::WheelTimer::wakeup)
+      .def(
+          "add",
+          [](vlink::WheelTimer& self, uint32_t timeout_ms, nb::callable callback,
+             uint32_t repeat_ms) -> vlink::WheelTimer::Key {
+            auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
+            return self.add(
+                timeout_ms,
+                [cb](vlink::WheelTimer::Key key) {
+                  if (!Py_IsInitialized()) return;
+                  nb::gil_scoped_acquire gil;
+                  try {
+                    cb->fn(key);
+                  } catch (std::exception&) {
+                    report_current_exception("vlink::WheelTimer.add");
+                  }
+                },
+                repeat_ms);
+          },
+          "timeout_ms"_a, "callback"_a, "repeat_ms"_a = 0,
+          "Schedule callback(key) once after timeout_ms; if repeat_ms>0 reschedule that interval. Returns Key.")
+      .def("remove", &vlink::WheelTimer::remove, "key"_a)
+      .def("set_catchup_limit", &vlink::WheelTimer::set_catchup_limit, "max_slots_to_catch_up"_a);
+
+  auto mp_cls = nb::class_<vlink::MemoryPool>(m, "MemoryPool", "Tiered (pyramid) memory pool with per-tier statistics");
+
+  nb::class_<vlink::MemoryPool::Tier>(mp_cls, "Tier")
+      .def(nb::init<>())
+      .def(
+          "__init__",
+          [](vlink::MemoryPool::Tier* self, size_t max_size, size_t blocks_per_chunk) {
+            new (self) vlink::MemoryPool::Tier{max_size, blocks_per_chunk};
+          },
+          "max_size"_a, "blocks_per_chunk"_a)
+      .def_rw("max_size", &vlink::MemoryPool::Tier::max_size)
+      .def_rw("blocks_per_chunk", &vlink::MemoryPool::Tier::blocks_per_chunk);
+
+  nb::class_<vlink::MemoryPool::Config>(mp_cls, "Config")
+      .def(nb::init<>())
+      .def_rw("tiers", &vlink::MemoryPool::Config::tiers)
+      .def_rw("prealloc", &vlink::MemoryPool::Config::prealloc);
+
+  nb::class_<vlink::MemoryPool::TierStats>(mp_cls, "TierStats")
+      .def_ro("max_size", &vlink::MemoryPool::TierStats::max_size)
+      .def_ro("blocks_per_chunk", &vlink::MemoryPool::TierStats::blocks_per_chunk)
+      .def_ro("block_size", &vlink::MemoryPool::TierStats::block_size)
+      .def_ro("hit_count", &vlink::MemoryPool::TierStats::hit_count)
+      .def_ro("deallocate_count", &vlink::MemoryPool::TierStats::deallocate_count)
+      .def_ro("in_use_blocks", &vlink::MemoryPool::TierStats::in_use_blocks)
+      .def_ro("chunk_count", &vlink::MemoryPool::TierStats::chunk_count)
+      .def_ro("upstream_alloc_count", &vlink::MemoryPool::TierStats::upstream_alloc_count)
+      .def_ro("upstream_alloc_bytes", &vlink::MemoryPool::TierStats::upstream_alloc_bytes);
+
+  nb::class_<vlink::MemoryPool::OversizedStats>(mp_cls, "OversizedStats")
+      .def_ro("alloc_count", &vlink::MemoryPool::OversizedStats::alloc_count)
+      .def_ro("alloc_bytes", &vlink::MemoryPool::OversizedStats::alloc_bytes)
+      .def_ro("dealloc_count", &vlink::MemoryPool::OversizedStats::dealloc_count);
+
+  mp_cls.def(nb::init<>())
+      .def(nb::init<int, bool>(), "level"_a, "prealloc"_a = false)
+      .def(nb::init<const vlink::MemoryPool::Config&>(), "config"_a)
+      .def("get_tier_count", &vlink::MemoryPool::get_tier_count)
+      .def("get_stats", &vlink::MemoryPool::get_stats)
+      .def("get_oversized_stats", &vlink::MemoryPool::get_oversized_stats)
+      .def("reset_stats", &vlink::MemoryPool::reset_stats)
+      .def("clear", &vlink::MemoryPool::clear)
+      .def("trim", &vlink::MemoryPool::trim)
+      .def_static("get_default_config", &vlink::MemoryPool::get_default_config)
+      .def_static("global_instance", &vlink::MemoryPool::global_instance, "use_env_level"_a = true,
+                  nb::rv_policy::reference);
+  mp_cls.attr("kBlockAlignment") = vlink::MemoryPool::kBlockAlignment;
+
+#ifdef VLINK_ENABLE_MEMORY_RESOURCE
+  nb::class_<vlink::MemoryResource>(m, "MemoryResource",
+                                    "std::pmr::memory_resource adapter delegating to a vlink::MemoryPool")
+      .def(nb::init<>())
+      .def(nb::init<int, bool>(), "level"_a, "prealloc"_a = false)
+      .def(nb::init<const vlink::MemoryPool::Config&>(), "config"_a)
+      .def("get_memory_pool", &vlink::MemoryResource::get_memory_pool, nb::rv_policy::reference)
+      .def("trim", &vlink::MemoryResource::trim)
+      .def_static("global_instance", &vlink::MemoryResource::global_instance, "use_env_level"_a = true,
+                  nb::rv_policy::reference);
+#endif
+
   nb::class_<vlink::Process> proc(m, "Process", "Child process management");
 
   nb::enum_<vlink::Process::State>(proc, "State")
@@ -1019,7 +1138,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(error);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Process.register_error_callback");
               }
             });
@@ -1034,7 +1153,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(code, status);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Process.register_finished_callback");
               }
             });
@@ -1049,7 +1168,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(state);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Process.register_state_changed_callback");
               }
             });
@@ -1212,7 +1331,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(key);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Utils.start_detect_keyboard");
               }
             },
@@ -1229,7 +1348,7 @@ NB_MODULE(_vlink_nanobind, m) {
           nb::gil_scoped_acquire gil;
           try {
             cb->fn(sig);
-          } catch (...) {
+          } catch (std::exception&) {
             report_current_exception("vlink::Utils.register_crash_signal");
           }
         });
@@ -1245,7 +1364,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(sig);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::Utils.register_terminate_signal");
               }
             },
@@ -1470,7 +1589,7 @@ NB_MODULE(_vlink_nanobind, m) {
                     if (result.is_none()) return false;
                     out = PythonCodec<vlink::Bytes>::from_python_owned(result);
                     return true;
-                  } catch (...) {
+                  } catch (std::exception&) {
                     report_current_exception("vlink::Security.set_callbacks(encrypt)");
                     return false;
                   }
@@ -1483,7 +1602,7 @@ NB_MODULE(_vlink_nanobind, m) {
                     if (result.is_none()) return false;
                     out = PythonCodec<vlink::Bytes>::from_python_owned(result);
                     return true;
-                  } catch (...) {
+                  } catch (std::exception&) {
                     report_current_exception("vlink::Security.set_callbacks(decrypt)");
                     return false;
                   }
@@ -1493,7 +1612,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(
           "encrypt",
           [](vlink::Security& self, nb::handle data) -> nb::object {
-            auto in_bytes = PythonCodec<vlink::Bytes>::from_python(data);
+            PythonBufferView view(data);
+            auto in_bytes = vlink::Bytes::shallow_copy(view.data(), view.size());
             vlink::Bytes out;
             if (self.encrypt(in_bytes, out)) return PythonCodec<vlink::Bytes>::to_python(out);
             return nb::none();
@@ -1502,7 +1622,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(
           "decrypt",
           [](vlink::Security& self, nb::handle data) -> nb::object {
-            auto in_bytes = PythonCodec<vlink::Bytes>::from_python(data);
+            PythonBufferView view(data);
+            auto in_bytes = vlink::Bytes::shallow_copy(view.data(), view.size());
             vlink::Bytes out;
             if (self.decrypt(in_bytes, out)) return PythonCodec<vlink::Bytes>::to_python(out);
             return nb::none();
@@ -1570,7 +1691,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(info_list);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::DiscoveryViewer.register_callback");
               }
             });
@@ -1642,7 +1763,7 @@ NB_MODULE(_vlink_nanobind, m) {
                   nb::gil_scoped_acquire gil;
                   try {
                     cb->fn(idx, file_name);
-                  } catch (...) {
+                  } catch (std::exception&) {
                     report_current_exception("vlink::BagWriter.register_split_callback");
                   }
                 },
@@ -1752,7 +1873,7 @@ NB_MODULE(_vlink_nanobind, m) {
                   nb::gil_scoped_acquire gil;
                   try {
                     cb->fn(ts, url, static_cast<int>(action_type), PythonCodec<vlink::Bytes>::to_python(data));
-                  } catch (...) {
+                  } catch (std::exception&) {
                     report_current_exception("vlink::BagReader.register_output_callback");
                   }
                 });
@@ -1767,7 +1888,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(status);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::BagReader.register_status_callback");
               }
             });
@@ -1782,7 +1903,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn();
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::BagReader.register_ready_callback");
               }
             });
@@ -1797,7 +1918,7 @@ NB_MODULE(_vlink_nanobind, m) {
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(interrupted);
-              } catch (...) {
+              } catch (std::exception&) {
                 report_current_exception("vlink::BagReader.register_finish_callback");
               }
             });

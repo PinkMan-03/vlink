@@ -36,6 +36,7 @@ struct Semaphore::Impl final {
   vlink::condition_variable cv;
   size_t count{0};
   size_t initial_count{0};
+  size_t in_flight_count{0};
   bool quit_flag{false};
 };
 
@@ -46,16 +47,15 @@ Semaphore::Semaphore(size_t count) noexcept : impl_(std::make_unique<Impl>()) {
 }
 
 Semaphore::~Semaphore() noexcept {
-  {
-    std::lock_guard lock(impl_->mtx);
-    impl_->quit_flag = true;
-  }
-
+  std::unique_lock lock(impl_->mtx);
+  impl_->quit_flag = true;
   impl_->cv.notify_all();
+  impl_->cv.wait(lock, [this]() -> bool { return impl_->in_flight_count == 0; });
 }
 
 bool Semaphore::acquire(size_t n, int timeout_ms) noexcept {
   std::unique_lock lock(impl_->mtx);
+  ++impl_->in_flight_count;
 
   auto predicate = [this, n] { return impl_->count >= n || impl_->quit_flag; };
 
@@ -68,15 +68,23 @@ bool Semaphore::acquire(size_t n, int timeout_ms) noexcept {
     acquired = impl_->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), predicate) && (impl_->count >= n);
   }
 
+  bool result;
+
   if VUNLIKELY (impl_->quit_flag) {
-    return false;
+    result = false;
+  } else {
+    if (acquired) {
+      impl_->count -= n;
+    }
+
+    result = acquired;
   }
 
-  if (acquired) {
-    impl_->count -= n;
+  if (--impl_->in_flight_count == 0) {
+    impl_->cv.notify_all();
   }
 
-  return acquired;
+  return result;
 }
 
 void Semaphore::release(size_t n) noexcept {

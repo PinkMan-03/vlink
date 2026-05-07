@@ -321,6 +321,7 @@ void GraphTask::process_and_traverse(const FindTaskCallback& callback) {
   task_stack.emplace(shared_from_this());
 
   std::unordered_map<GraphTask*, int> pending_count_map;
+  std::unordered_set<GraphTask*> processed;
 
   std::vector<std::shared_ptr<GraphTask>> top_task_list;
 
@@ -328,7 +329,9 @@ void GraphTask::process_and_traverse(const FindTaskCallback& callback) {
     auto current_task = task_stack.top();
     task_stack.pop();
 
-    std::vector<std::shared_ptr<GraphTask>> task_list;
+    if (!processed.insert(current_task.get()).second) {
+      continue;
+    }
 
     {
       std::lock_guard lock(current_task->impl_->mtx);
@@ -341,7 +344,10 @@ void GraphTask::process_and_traverse(const FindTaskCallback& callback) {
 
         current_task->update_status(kStatusPending);
 
-        task_list.emplace_back(current_task);
+        auto& sub_pending_count = pending_count_map[current_task.get()];
+        current_task->impl_->pending_index = ++sub_pending_count;
+
+        top_task_list.emplace_back(current_task);
       }
 
       for (const auto& task : current_task->impl_->succeed_task_list) {
@@ -351,27 +357,26 @@ void GraphTask::process_and_traverse(const FindTaskCallback& callback) {
           continue;
         }
 
-        task_ptr->impl_->is_ready = false;
-        task_ptr->impl_->is_enable = false;
+        bool first_seen = (pending_count_map.find(task_ptr.get()) == pending_count_map.end());
 
-        task_ptr->update_status(kStatusPending);
+        auto& sub_pending_count = pending_count_map[task_ptr.get()];
+        task_ptr->impl_->pending_index = ++sub_pending_count;
 
-        task_list.emplace_back(task_ptr);
+        if (first_seen) {
+          task_ptr->impl_->is_ready = false;
+          task_ptr->impl_->is_enable = false;
 
-        task_stack.emplace(task_ptr);
+          task_ptr->update_status(kStatusPending);
+
+          top_task_list.emplace_back(task_ptr);
+          task_stack.emplace(task_ptr);
+        }
 
         if VUNLIKELY (recursion_count++ >= impl_->max_recursion_depth) {
           CLOG_F("GraphTask: Recursion detection exceeds the upper limit (%d).", impl_->max_recursion_depth.load());
           return;
         }
       }
-    }
-
-    for (const auto& task : task_list) {
-      auto& sub_pending_count = pending_count_map[task.get()];
-      task->impl_->pending_index = ++sub_pending_count;
-
-      top_task_list.emplace_back(task);
     }
   }
 

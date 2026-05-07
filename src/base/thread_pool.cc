@@ -240,9 +240,15 @@ bool ThreadPool::shutdown() {
 
   impl_->cv.notify_all();
 
+  const auto self_id = std::this_thread::get_id();
+
   for (auto& thread : impl_->threads) {
     if (thread.joinable()) {
-      thread.join();
+      if (thread.get_id() == self_id) {
+        thread.detach();
+      } else {
+        thread.join();
+      }
     }
   }
 

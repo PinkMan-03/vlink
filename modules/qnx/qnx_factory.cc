@@ -152,23 +152,29 @@ QnxServer::~QnxServer() {
 bool QnxServer::publish(uint32_t channel, const Bytes& msg_data) {
   is_busy_ = true;
 
-  QnxFactory::get_message_loop().post_task([this, channel, msg_data] {
-    if VUNLIKELY (quit_flag_) {
-      is_busy_ = false;
+  QnxFactory::get_message_loop().post_task([weak_self = weak_from_this(), channel, msg_data] {
+    auto self = weak_self.lock();
+
+    if VUNLIKELY (!self) {
       return;
     }
 
-    std::lock_guard lock(mtx_);
-
-    if VUNLIKELY (clients_.empty()) {
-      is_busy_ = false;
+    if VUNLIKELY (self->quit_flag_) {
+      self->is_busy_ = false;
       return;
     }
 
-    auto iter = channels_.find(channel);
+    std::lock_guard lock(self->mtx_);
 
-    if VUNLIKELY (iter == channels_.end()) {
-      is_busy_ = false;
+    if VUNLIKELY (self->clients_.empty()) {
+      self->is_busy_ = false;
+      return;
+    }
+
+    auto iter = self->channels_.find(channel);
+
+    if VUNLIKELY (iter == self->channels_.end()) {
+      self->is_busy_ = false;
       return;
     }
 
@@ -195,7 +201,7 @@ bool QnxServer::publish(uint32_t channel, const Bytes& msg_data) {
     int ret = -1;
 
     for (auto id : list) {
-      auto back_coid = clients_[id];
+      auto back_coid = self->clients_[id];
 
       ret = ::MsgSend(back_coid, msg_data_buf.data(), msg_data_buf.size(), 0, 0);
 
@@ -204,7 +210,7 @@ bool QnxServer::publish(uint32_t channel, const Bytes& msg_data) {
       }
     }
 
-    is_busy_ = false;
+    self->is_busy_ = false;
   });
   return true;
 }
@@ -440,82 +446,89 @@ std::any QnxClient::get_native_handle() const { return this; }
 bool QnxClient::call(uint32_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback) {
   is_busy_ = true;
 
-  QnxFactory::get_message_loop().post_task([this, channel, callback = std::move(callback), req_data] {
-    if VUNLIKELY (quit_flag_) {
-      is_busy_ = false;
-      return;
-    }
+  QnxFactory::get_message_loop().post_task(
+      [weak_self = weak_from_this(), channel, callback = std::move(callback), req_data] {
+        auto self = weak_self.lock();
 
-    if VUNLIKELY (coid_ < 0 || !back_fd_) {
-      is_busy_ = false;
-      return;
-    }
+        if VUNLIKELY (!self) {
+          return;
+        }
 
-    int ret = -1;
+        if VUNLIKELY (self->quit_flag_) {
+          self->is_busy_ = false;
+          return;
+        }
 
-    QnxHeader header;
+        if VUNLIKELY (self->coid_ < 0 || !self->back_fd_) {
+          self->is_busy_ = false;
+          return;
+        }
 
-    std::memset(&header, 0, sizeof(QnxHeader));
+        int ret = -1;
 
-    header.msg.type = callback ? QnxMsg::kInvoke : QnxMsg::kSend;
-    header.msg.size = req_data.size();
-    header.msg.channel = channel;
+        QnxHeader header;
 
-    Bytes req_data_buf;
-
-    if (req_data.size() <= QnxMsg::kBufferSize) {
-      std::memcpy(header.msg.buffer, req_data.data(), req_data.size());
-      req_data_buf = Bytes::shallow_copy(reinterpret_cast<uint8_t*>(&header), sizeof(header));
-    } else {
-      req_data_buf = Bytes::create(sizeof(header) + req_data.size());
-      std::memcpy(req_data_buf.data(), &header, sizeof(header));
-      std::memcpy(req_data_buf.data() + sizeof(header), req_data.data(), req_data.size());
-    }
-
-    if VLIKELY (callback) {
-      QnxMsg resp_msg;
-
-      std::memset(&resp_msg, 0, sizeof(QnxMsg));
-
-      ret = ::MsgSend(coid_, req_data_buf.data(), req_data_buf.size(), &resp_msg, sizeof(resp_msg));
-
-      if VUNLIKELY (ret < 0) {
-        VLOG_E("QnxFactory: Client MsgSend failed.");
-        is_busy_ = false;
-        return;
-      }
-
-      if (resp_msg.size <= QnxMsg::kBufferSize) {
-        Bytes resp_data = Bytes::shallow_copy(resp_msg.buffer, resp_msg.size);
-
-        callback(resp_data);
-      } else {
         std::memset(&header, 0, sizeof(QnxHeader));
 
-        header.msg.type = QnxMsg::kGetResult;
-        header.msg.size = 0;
-        header.msg.other.token = resp_msg.other.token;
+        header.msg.type = callback ? QnxMsg::kInvoke : QnxMsg::kSend;
+        header.msg.size = req_data.size();
+        header.msg.channel = channel;
 
-        Bytes resp_data = Bytes::create(resp_msg.size);
+        Bytes req_data_buf;
 
-        ::MsgSend(coid_, &header, sizeof(header), resp_data.data(), resp_data.size());
+        if (req_data.size() <= QnxMsg::kBufferSize) {
+          std::memcpy(header.msg.buffer, req_data.data(), req_data.size());
+          req_data_buf = Bytes::shallow_copy(reinterpret_cast<uint8_t*>(&header), sizeof(header));
+        } else {
+          req_data_buf = Bytes::create(sizeof(header) + req_data.size());
+          std::memcpy(req_data_buf.data(), &header, sizeof(header));
+          std::memcpy(req_data_buf.data() + sizeof(header), req_data.data(), req_data.size());
+        }
 
-        callback(resp_data);
-      }
-    } else {
-      ret = ::MsgSend(coid_, req_data_buf.data(), req_data_buf.size(), 0, 0);
+        if VLIKELY (callback) {
+          QnxMsg resp_msg;
 
-      if VUNLIKELY (ret < 0) {
-        VLOG_E("QnxFactory: Client MsgSend failed.");
+          std::memset(&resp_msg, 0, sizeof(QnxMsg));
 
-        is_busy_ = false;
+          ret = ::MsgSend(self->coid_, req_data_buf.data(), req_data_buf.size(), &resp_msg, sizeof(resp_msg));
 
-        return;
-      }
-    }
+          if VUNLIKELY (ret < 0) {
+            VLOG_E("QnxFactory: Client MsgSend failed.");
+            self->is_busy_ = false;
+            return;
+          }
 
-    is_busy_ = false;
-  });
+          if (resp_msg.size <= QnxMsg::kBufferSize) {
+            Bytes resp_data = Bytes::shallow_copy(resp_msg.buffer, resp_msg.size);
+
+            callback(resp_data);
+          } else {
+            std::memset(&header, 0, sizeof(QnxHeader));
+
+            header.msg.type = QnxMsg::kGetResult;
+            header.msg.size = 0;
+            header.msg.other.token = resp_msg.other.token;
+
+            Bytes resp_data = Bytes::create(resp_msg.size);
+
+            ::MsgSend(self->coid_, &header, sizeof(header), resp_data.data(), resp_data.size());
+
+            callback(resp_data);
+          }
+        } else {
+          ret = ::MsgSend(self->coid_, req_data_buf.data(), req_data_buf.size(), 0, 0);
+
+          if VUNLIKELY (ret < 0) {
+            VLOG_E("QnxFactory: Client MsgSend failed.");
+
+            self->is_busy_ = false;
+
+            return;
+          }
+        }
+
+        self->is_busy_ = false;
+      });
 
   return true;
 }
@@ -523,14 +536,20 @@ bool QnxClient::call(uint32_t channel, const Bytes& req_data, NodeImpl::MsgCallb
 bool QnxClient::subscribe(uint32_t channel) {
   is_busy_ = true;
 
-  QnxFactory::get_message_loop().post_task([this, channel] {
-    if VUNLIKELY (quit_flag_) {
-      is_busy_ = false;
+  QnxFactory::get_message_loop().post_task([weak_self = weak_from_this(), channel] {
+    auto self = weak_self.lock();
+
+    if VUNLIKELY (!self) {
       return;
     }
 
-    if VUNLIKELY (coid_ < 0 || !back_fd_) {
-      is_busy_ = false;
+    if VUNLIKELY (self->quit_flag_) {
+      self->is_busy_ = false;
+      return;
+    }
+
+    if VUNLIKELY (self->coid_ < 0 || !self->back_fd_) {
+      self->is_busy_ = false;
       return;
     }
 
@@ -546,16 +565,16 @@ bool QnxClient::subscribe(uint32_t channel) {
 
     std::memset(header.msg.buffer, 0, QnxMsg::kBufferSize);
 
-    header.msg.other.id = coid_ | QnxFactory::get_pid();
+    header.msg.other.id = self->coid_ | QnxFactory::get_pid();
 
-    ret = ::MsgSend(coid_, &header, sizeof(header), 0, 0);
+    ret = ::MsgSend(self->coid_, &header, sizeof(header), 0, 0);
 
     if VUNLIKELY (ret < 0) {
       VLOG_E("QnxFactory: Client MsgSend subscribe failed.");
-      disconnect();
+      self->disconnect();
     }
 
-    is_busy_ = false;
+    self->is_busy_ = false;
   });
 
   return true;
@@ -597,15 +616,21 @@ bool QnxClient::listen() {
           if VLIKELY (!quit_flag_) {
             is_busy_ = true;
 
-            QnxFactory::get_message_loop().post_task([this]() {
-              if VUNLIKELY (quit_flag_) {
-                is_busy_ = false;
+            QnxFactory::get_message_loop().post_task([weak_self = weak_from_this()]() {
+              auto self = weak_self.lock();
+
+              if VUNLIKELY (!self) {
                 return;
               }
 
-              try_detect();
+              if VUNLIKELY (self->quit_flag_) {
+                self->is_busy_ = false;
+                return;
+              }
 
-              is_busy_ = false;
+              self->try_detect();
+
+              self->is_busy_ = false;
             });
           }
         }

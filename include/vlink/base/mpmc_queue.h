@@ -436,8 +436,6 @@ inline void MpmcQueue<T>::emplace(Args&&... args) noexcept {
 
   while (turn(head) * 2U != chunk.turn.load(kMemoryOrderAcquire)) {
     if VUNLIKELY (quit_flag_.value.load(kMemoryOrderAcquire)) {
-      chunk.construct();
-      chunk.turn.store((turn(head) * 2U) + 1U, kMemoryOrderRelease);
       return;
     }
 
@@ -512,7 +510,6 @@ inline void MpmcQueue<T>::pop(T& v) noexcept {
 
   while (turn(tail) * 2U + 1U != chunk.turn.load(kMemoryOrderAcquire)) {
     if VUNLIKELY (quit_flag_.value.load(kMemoryOrderAcquire)) {
-      chunk.turn.store((turn(tail) * 2U) + 2U, kMemoryOrderRelease);
       return;
     }
 

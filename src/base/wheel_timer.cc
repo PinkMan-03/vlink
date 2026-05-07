@@ -73,69 +73,91 @@ struct WheelTimer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
   std::thread worker_thread;
 
   std::mutex mtx;
+  std::mutex lifecycle_mtx;
   vlink::condition_variable cv;
 
   std::unordered_map<WheelTimer::Key, std::pair<uint32_t, std::list<Handler>::iterator>> timer_index;
+
+  void run();
 };
 
 // WheelTimer
-WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(std::make_unique<Impl>()) {
+WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(std::make_shared<Impl>()) {
   if VUNLIKELY (slots == 0 || interval_ms == 0) {
     VLOG_F("WheelTimer: Slots and interval_ms must be greater than 0.");
-    return;
   }
 
-  impl_->slots = slots;
-  impl_->interval_ms = interval_ms;
-  impl_->wheels.resize(slots);
+  impl_->slots = (slots == 0) ? 1U : slots;
+  impl_->interval_ms = (interval_ms == 0) ? 1U : interval_ms;
+  impl_->wheels.resize(impl_->slots);
 }
 
 WheelTimer::~WheelTimer() { stop(); }
 
 void WheelTimer::start() {
-  std::unique_lock lock(impl_->mtx);
+  std::lock_guard lifecycle_lock(impl_->lifecycle_mtx);
 
-  if VUNLIKELY (impl_->is_running) {
-    VLOG_W("WheelTimer: Timer is already running.");
-    return;
+  {
+    std::lock_guard lock(impl_->mtx);
+    if VUNLIKELY (impl_->is_running) {
+      VLOG_W("WheelTimer: Timer is already running.");
+      return;
+    }
   }
-
-  impl_->stop_flag = false;
-  impl_->is_running = true;
-
-  lock.unlock();
 
   if (impl_->worker_thread.joinable()) {
     impl_->worker_thread.join();
   }
 
-  impl_->worker_thread = std::thread([this]() { this->run(); });
+  {
+    std::lock_guard lock(impl_->mtx);
+    impl_->stop_flag = false;
+    impl_->is_running = true;
+  }
+
+  try {
+    auto impl_copy = impl_;
+    impl_->worker_thread = std::thread([impl_copy]() { impl_copy->run(); });
+  } catch (std::exception&) {
+    {
+      std::lock_guard lock(impl_->mtx);
+      impl_->is_running = false;
+    }
+
+    throw;
+  }
 }
 
 void WheelTimer::stop() {
-  std::unique_lock lock(impl_->mtx);
-
-  impl_->stop_flag = true;
-
-  lock.unlock();
+  {
+    std::lock_guard lock(impl_->mtx);
+    impl_->stop_flag = true;
+  }
 
   wakeup();
 
-  bool called_from_worker =
+  const bool called_from_worker =
       impl_->worker_thread.joinable() && impl_->worker_thread.get_id() == std::this_thread::get_id();
 
-  if (impl_->worker_thread.joinable() && !called_from_worker) {
-    impl_->worker_thread.join();
+  if (called_from_worker) {
+    if (impl_->lifecycle_mtx.try_lock()) {
+      if (impl_->worker_thread.joinable()) {
+        impl_->worker_thread.detach();
+      }
+
+      impl_->lifecycle_mtx.unlock();
+    }
+
+    return;
   }
 
-  lock.lock();
+  std::lock_guard lifecycle_lock(impl_->lifecycle_mtx);
 
-  if (!called_from_worker) {
-    impl_->is_running = false;
-    impl_->paused_flag = false;
-    impl_->current_slot = 0;
-    impl_->wheels = std::vector<std::list<Impl::Handler>>(impl_->slots);
-    impl_->timer_index.clear();
+  if (impl_->worker_thread.joinable()) {
+    impl_->worker_thread.join();
+  } else {
+    std::unique_lock lock(impl_->mtx);
+    impl_->cv.wait(lock, [this]() { return !impl_->is_running.load(std::memory_order_acquire); });
   }
 }
 
@@ -203,10 +225,12 @@ WheelTimer::Key WheelTimer::add(uint32_t timeout_ms, Callback&& callback, uint32
 
   while (impl_->timer_index.find(key) != impl_->timer_index.end() && probe < 8) {
     key = impl_->next_key++;
+
     if (key <= 0) {
       impl_->next_key = 1;
       key = impl_->next_key++;
     }
+
     ++probe;
   }
 
@@ -260,39 +284,43 @@ uint32_t WheelTimer::get_remaining_time(Key key) const {
   uint32_t delta_slot = (slot + impl_->slots - current_slot) % impl_->slots;
   uint32_t rounds = it->second.second->remaining_rounds;
 
-  return (rounds * impl_->slots + delta_slot) * impl_->interval_ms;
+  uint64_t total_ticks = static_cast<uint64_t>(rounds) * impl_->slots + delta_slot;
+  uint64_t total_ms = total_ticks * impl_->interval_ms;
+
+  return (total_ms > std::numeric_limits<uint32_t>::max()) ? std::numeric_limits<uint32_t>::max()
+                                                           : static_cast<uint32_t>(total_ms);
 }
 
 void WheelTimer::set_catchup_limit(uint32_t max_slots_to_catch_up) { impl_->catchup_limit = max_slots_to_catch_up; }
 
-void WheelTimer::run() {
-  std::vector<std::pair<Key, Callback>> callbacks_to_execute;
+void WheelTimer::Impl::run() {
+  std::vector<std::pair<WheelTimer::Key, WheelTimer::Callback>> callbacks_to_execute;
 
-  auto interval = std::chrono::milliseconds(impl_->interval_ms);
+  auto interval = std::chrono::milliseconds(interval_ms);
 
   auto next_tick = std::chrono::steady_clock::now();
 
   for (;;) {
-    std::unique_lock lock(impl_->mtx);
+    std::unique_lock lock(mtx);
 
-    if VUNLIKELY (impl_->stop_flag) {
+    if VUNLIKELY (stop_flag) {
       break;
     }
 
-    while (impl_->paused_flag && !impl_->stop_flag) {
-      impl_->cv.wait(lock);
+    while (paused_flag && !stop_flag) {
+      cv.wait(lock);
     }
 
-    if VUNLIKELY (impl_->stop_flag) {
+    if VUNLIKELY (stop_flag) {
       break;
     }
 
     auto now = std::chrono::steady_clock::now();
 
     if (now < next_tick) {
-      impl_->cv.wait_until(lock, next_tick, [this]() -> bool { return impl_->stop_flag || impl_->paused_flag; });
+      cv.wait_until(lock, next_tick, [this]() -> bool { return stop_flag || paused_flag; });
 
-      if VUNLIKELY (impl_->stop_flag) {
+      if VUNLIKELY (stop_flag) {
         break;
       }
 
@@ -300,10 +328,10 @@ void WheelTimer::run() {
     }
 
     uint32_t advanced = 0;
-    uint32_t catchup_limit_snapshot = impl_->catchup_limit.load();
+    uint32_t catchup_limit_snapshot = catchup_limit.load();
 
-    while (now >= next_tick && !impl_->stop_flag && !impl_->paused_flag) {
-      auto& timers = impl_->wheels[impl_->current_slot];
+    while (now >= next_tick && !stop_flag && !paused_flag) {
+      auto& timers = wheels[current_slot];
 
       for (auto it = timers.begin(); it != timers.end();) {
         if VLIKELY (it->remaining_rounds > 0) {
@@ -313,47 +341,46 @@ void WheelTimer::run() {
           if (it->repeat_interval_ms > 0) {
             callbacks_to_execute.emplace_back(it->key, it->callback);
 
-            uint64_t repeat_ticks =
-                (static_cast<uint64_t>(it->repeat_interval_ms) + impl_->interval_ms - 1) / impl_->interval_ms;
+            uint64_t repeat_ticks = (static_cast<uint64_t>(it->repeat_interval_ms) + interval_ms - 1) / interval_ms;
 
             if VUNLIKELY (repeat_ticks == 0) {
               repeat_ticks = 1;
             }
 
-            uint64_t rounds64 = repeat_ticks / impl_->slots;
+            uint64_t rounds64 = repeat_ticks / slots;
 
             if VUNLIKELY (rounds64 > std::numeric_limits<uint32_t>::max()) {
               VLOG_E("WheelTimer: Repeat interval too large.");
 
-              impl_->timer_index.erase(it->key);
+              timer_index.erase(it->key);
               it = timers.erase(it);
 
               continue;
             }
 
-            auto repeat_ticks_mod = static_cast<uint32_t>(repeat_ticks % impl_->slots);
+            auto repeat_ticks_mod = static_cast<uint32_t>(repeat_ticks % slots);
             auto new_rounds = static_cast<uint32_t>(rounds64);
-            auto new_slot = (impl_->current_slot + repeat_ticks_mod) % impl_->slots;
+            auto new_slot = (current_slot + repeat_ticks_mod) % slots;
 
-            Impl::Handler new_handler(it->key, new_rounds, std::move(it->callback), it->repeat_interval_ms);
-            auto& new_list = impl_->wheels[new_slot];
+            Handler new_handler(it->key, new_rounds, std::move(it->callback), it->repeat_interval_ms);
+            auto& new_list = wheels[new_slot];
 
             new_list.emplace_back(std::move(new_handler));
 
             auto new_it = std::prev(new_list.end());
 
-            impl_->timer_index[it->key] = {new_slot, new_it};
+            timer_index[it->key] = {new_slot, new_it};
 
             it = timers.erase(it);
           } else {
             callbacks_to_execute.emplace_back(it->key, std::move(it->callback));
-            impl_->timer_index.erase(it->key);
+            timer_index.erase(it->key);
             it = timers.erase(it);
           }
         }
       }
 
-      impl_->current_slot = (impl_->current_slot + 1) % impl_->slots;
+      current_slot = (current_slot + 1) % slots;
 
       next_tick += interval;
 
@@ -364,14 +391,14 @@ void WheelTimer::run() {
       }
     }
 
-    // catch up
+    constexpr int64_t kStaleTickResetIntervals = 10;
     now = std::chrono::steady_clock::now();
-    if (next_tick + interval * 10 < now) {
+
+    if (next_tick + interval * kStaleTickResetIntervals < now) {
       next_tick = now + interval;
     }
-    //
 
-    std::vector<std::pair<Key, Callback>> pending_callbacks;
+    std::vector<std::pair<WheelTimer::Key, WheelTimer::Callback>> pending_callbacks;
     pending_callbacks.swap(callbacks_to_execute);
 
     lock.unlock();
@@ -381,9 +408,16 @@ void WheelTimer::run() {
     }
   }
 
-  std::lock_guard lock(impl_->mtx);
-  impl_->is_running = false;
-  impl_->paused_flag = false;
+  {
+    std::lock_guard lock(mtx);
+    is_running = false;
+    paused_flag = false;
+    current_slot = 0;
+    wheels = std::vector<std::list<Handler>>(slots);
+    timer_index.clear();
+  }
+
+  cv.notify_all();
 }
 
 }  // namespace vlink

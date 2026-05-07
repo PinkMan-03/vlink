@@ -37,6 +37,7 @@ namespace vlink {
 // Timer::Impl
 struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) std::atomic_bool is_busy{false};
+  alignas(64) std::atomic<uint32_t> in_flight_count{0};
   alignas(64) std::atomic<uint64_t> start_time{0};
   alignas(64) std::atomic<int32_t> remain_loop_count{Timer::kInfinite};
   alignas(64) std::atomic<uint64_t> invoke_count{0};
@@ -54,6 +55,8 @@ struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::mutex mtx;
   std::recursive_mutex recursive_mtx;
   vlink::condition_variable cv;
+
+  std::shared_ptr<std::atomic_bool> alive_flag{std::make_shared<std::atomic_bool>(true)};
 };
 
 // Timer
@@ -79,14 +82,18 @@ Timer::Timer(uint32_t interval_ms, int32_t loop_count, Callback&& callback) : im
 }
 
 Timer::~Timer() {
+  impl_->alive_flag->store(false);
+
   MessageLoop* message_loop = impl_->message_loop.load();
 
   if (message_loop && !impl_->is_once_type) {
-    if (message_loop->is_running() && !message_loop->is_in_same_thread()) {
-      wait_for_idle();
-    }
+    const bool should_wait = message_loop->is_running() && !message_loop->is_in_same_thread();
 
     detach();
+
+    if (should_wait) {
+      wait_for_idle();
+    }
   }
 }
 
@@ -257,9 +264,20 @@ void Timer::run_callback() {
   impl_->cv.notify_all();
 }
 
+void Timer::begin_in_flight() { impl_->in_flight_count.fetch_add(1, std::memory_order_acq_rel); }
+
+void Timer::end_in_flight() {
+  if (impl_->in_flight_count.fetch_sub(1, std::memory_order_acq_rel) == 1U) {
+    std::lock_guard lock(impl_->mtx);
+    impl_->cv.notify_all();
+  }
+}
+
 void Timer::wait_for_idle() {
   std::unique_lock lock(impl_->mtx);
-  impl_->cv.wait(lock, [this]() -> bool { return !impl_->is_busy; });
+  impl_->cv.wait(lock, [this]() -> bool {
+    return !impl_->is_busy && impl_->in_flight_count.load(std::memory_order_acquire) == 0;
+  });
 }
 
 void Timer::clear() { impl_->message_loop.store(nullptr); }
@@ -309,5 +327,7 @@ Timer::Callback Timer::take_callback() {
   std::lock_guard lock(impl_->recursive_mtx);
   return std::exchange(impl_->callback, nullptr);
 }
+
+std::shared_ptr<std::atomic_bool> Timer::get_alive_flag() const { return impl_->alive_flag; }
 
 }  // namespace vlink

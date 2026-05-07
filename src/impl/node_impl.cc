@@ -56,7 +56,7 @@ struct NodeImplHelper final {
   std::shared_mutex mtx;
   std::shared_mutex status_mtx;
   NodeImpl::StatusCallback status_callback;
-  MessageLoop* message_loop{nullptr};
+  std::atomic<MessageLoop*> message_loop{nullptr};
 
   std::shared_ptr<BagWriter> data_recorder;
 };
@@ -131,23 +131,17 @@ bool NodeImpl::check_version(const Version& version) {
 }
 
 bool NodeImpl::attach(class MessageLoop* message_loop) {
-  if (helper_->message_loop) {
-    return false;
-  }
-
-  helper_->message_loop = message_loop;
-
-  return true;
+  MessageLoop* expected = nullptr;
+  return helper_->message_loop.compare_exchange_strong(expected, message_loop, std::memory_order_release,
+                                                       std::memory_order_relaxed);
 }
 
 bool NodeImpl::detach() {
-  if (!helper_->message_loop) {
+  auto* message_loop = helper_->message_loop.exchange(nullptr, std::memory_order_acq_rel);
+
+  if (!message_loop) {
     return false;
   }
-
-  auto* message_loop = helper_->message_loop;
-
-  helper_->message_loop = nullptr;
 
   if (!message_loop->is_in_same_thread()) {
     message_loop->wait_for_idle();
@@ -156,7 +150,7 @@ bool NodeImpl::detach() {
   return true;
 }
 
-class MessageLoop* NodeImpl::get_message_loop() const { return helper_->message_loop; }
+class MessageLoop* NodeImpl::get_message_loop() const { return helper_->message_loop.load(std::memory_order_acquire); }
 
 void NodeImpl::register_status_handler(StatusCallback&& callback) {
   if VUNLIKELY (transport_type != TransportType::kDds && transport_type != TransportType::kDdsc &&
@@ -188,7 +182,7 @@ void NodeImpl::call_status(Status::BasePtr ptr) {
     return;
   }
 
-  auto* message_loop = helper_->message_loop;
+  auto* message_loop = helper_->message_loop.load(std::memory_order_acquire);
 
   if (message_loop) {
     message_loop->post_task([this, ptr]() mutable {

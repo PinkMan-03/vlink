@@ -95,7 +95,7 @@ int get_env_int_or_default(const char* name, int default_value) noexcept {
     }
 
     return parsed;
-  } catch (...) {
+  } catch (std::exception&) {
     return default_value;
   }
 }
@@ -960,7 +960,7 @@ bool wait_for_worker_start(uint64_t& start_ns, std::string& error) {
     }
 
     start_ns = static_cast<uint64_t>(parsed);
-  } catch (...) {
+  } catch (std::exception&) {
     error = "worker start signal failed";
     return false;
   }
@@ -1775,7 +1775,7 @@ bool run_local_pubsub_case(const Bench::Scenario& scenario, Bench::ScenarioResul
         if (sub_sleep_us > 0) {
           std::this_thread::sleep_for(std::chrono::microseconds(sub_sleep_us));
         }
-      } catch (...) {
+      } catch (std::exception&) {
       }
     });
 
@@ -1926,7 +1926,7 @@ bool run_local_pubsub_case(const Bench::Scenario& scenario, Bench::ScenarioResul
         }
 
         publisher_cpu_ms.at(static_cast<size_t>(index)) = static_cast<double>(pub_cpu.get()) / 1000.0;
-      } catch (...) {
+      } catch (std::exception&) {
       }
     });
   }

@@ -1094,7 +1094,13 @@ bool Shm2Client::is_connected() const {
 void Shm2Client::enable_detect_timer() {
   if (!has_detect_timer_) {
     has_detect_timer_ = true;
-    Shm2Factory::get().add_detect_method_callback(pf_handle_, [this]() { detect_server(); });
+    Shm2Factory::get().add_detect_method_callback(pf_handle_, [weak = weak_from_this()]() {
+      auto self = weak.lock();
+
+      if VLIKELY (self) {
+        self->detect_server();
+      }
+    });
   }
 }
 
@@ -1258,12 +1264,6 @@ bool Shm2Client::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCall
 }
 
 void Shm2Client::detect_server() {
-  std::weak_ptr<Shm2Client> weak_self = shared_from_this();
-
-  if VUNLIKELY (!weak_self.lock()) {
-    return;
-  }
-
   if VUNLIKELY (quit_flag_) {
     return;
   }
@@ -1583,7 +1583,13 @@ void Shm2Publisher::enable_detect_timer() {
   if (!has_detect_timer_) {
     has_detect_timer_ = true;
 
-    Shm2Factory::get().add_detect_event_callback(pf_handle_, [this]() { detect_subscribers(); });
+    Shm2Factory::get().add_detect_event_callback(pf_handle_, [weak = weak_from_this()]() {
+      auto self = weak.lock();
+
+      if VLIKELY (self) {
+        self->detect_subscribers();
+      }
+    });
   }
 }
 
@@ -1595,12 +1601,6 @@ void Shm2Publisher::disable_detect_timer() {
 }
 
 void Shm2Publisher::detect_subscribers() {
-  std::weak_ptr<Shm2Publisher> weak_self = shared_from_this();
-
-  if VUNLIKELY (!weak_self.lock()) {
-    return;
-  }
-
   if VUNLIKELY (quit_flag_) {
     return;
   }

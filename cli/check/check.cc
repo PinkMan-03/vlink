@@ -1737,7 +1737,7 @@ int check_test() {
     try {
       const auto info = std::filesystem::space("/dev/shm");
       ok = info.available >= 64ULL * 1024ULL * 1024ULL;
-    } catch (...) {
+    } catch (std::exception&) {
       ok = false;
     }
 

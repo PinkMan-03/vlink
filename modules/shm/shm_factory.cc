@@ -810,7 +810,13 @@ void ShmClient::enable_detect_timer() {
   if (!has_detect_timer_) {
     has_detect_timer_ = true;
 
-    ShmFactory::get().add_detect_callback(this, [this]() { detect_server(); });
+    ShmFactory::get().add_detect_callback(this, [weak = weak_from_this()]() {
+      auto self = weak.lock();
+
+      if VLIKELY (self) {
+        self->detect_server();
+      }
+    });
   }
 }
 
@@ -922,12 +928,6 @@ bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallb
 }
 
 void ShmClient::detect_server() {
-  std::weak_ptr<ShmClient> weak_self = shared_from_this();
-
-  if VUNLIKELY (!weak_self.lock()) {
-    return;
-  }
-
   if VUNLIKELY (quit_flag_) {
     return;
   }
@@ -1091,7 +1091,13 @@ bool ShmPublisher::publish(uint64_t channel, const Bytes& bytes) {
 void ShmPublisher::enable_detect_timer() {
   if (!has_detect_timer_) {
     has_detect_timer_ = true;
-    ShmFactory::get().add_detect_callback(this, [this]() { detect_subscribers(); });
+    ShmFactory::get().add_detect_callback(this, [weak = weak_from_this()]() {
+      auto self = weak.lock();
+
+      if VLIKELY (self) {
+        self->detect_subscribers();
+      }
+    });
   }
 }
 
@@ -1103,12 +1109,6 @@ void ShmPublisher::disable_detect_timer() {
 }
 
 void ShmPublisher::detect_subscribers() {
-  std::weak_ptr<ShmPublisher> weak_self = shared_from_this();
-
-  if VUNLIKELY (!weak_self.lock()) {
-    return;
-  }
-
   if VUNLIKELY (quit_flag_) {
     return;
   }

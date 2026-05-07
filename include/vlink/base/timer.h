@@ -63,6 +63,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -311,6 +312,10 @@ class VLINK_EXPORT Timer final {
  private:
   void run_callback();
 
+  void begin_in_flight();
+
+  void end_in_flight();
+
   void wait_for_idle();
 
   void clear();
@@ -330,6 +335,8 @@ class VLINK_EXPORT Timer final {
   bool has_callback() const;
 
   Callback take_callback();
+
+  std::shared_ptr<std::atomic_bool> get_alive_flag() const;
 
   friend class MessageLoop;
   struct Impl;

@@ -437,7 +437,7 @@ TEST_SUITE("base-ObjectPool - thread safety") {
           try {
             auto obj = pool->get();
             obj->value = i;
-          } catch (...) {
+          } catch (std::exception&) {
             ++errors;
           }
         }
@@ -469,7 +469,7 @@ TEST_SUITE("base-ObjectPool - thread safety") {
             Widget* raw = pool->borrow();
             raw->value = i;
             pool->give_back(raw);
-          } catch (...) {
+          } catch (std::exception&) {
             errors.fetch_add(1);
           }
         }
@@ -500,7 +500,7 @@ TEST_SUITE("base-ObjectPool - thread safety") {
           try {
             auto obj = pool->get_shared();
             obj->value = i;
-          } catch (...) {
+          } catch (std::exception&) {
             errors.fetch_add(1);
           }
         }

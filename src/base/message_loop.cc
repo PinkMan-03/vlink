@@ -93,6 +93,7 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
   alignas(64) std::atomic_bool quit_flag{false};
   alignas(64) std::atomic_bool force_quit_flag{false};
   alignas(64) std::atomic_bool is_busy{false};
+  alignas(64) std::atomic_bool wakeup_pending{false};
 
   std::atomic<std::thread::id> thread_id;
 
@@ -421,17 +422,31 @@ bool MessageLoop::wakeup() {
     return false;
   }
 
-  impl_->is_busy = true;
-  impl_->cv.notify_one();
+  {
+    std::lock_guard lock(impl_->mtx);
+    impl_->wakeup_pending = true;
+    impl_->is_busy = true;
+  }
+
+  impl_->cv.notify_all();
 
   return true;
 }
 
 void MessageLoop::reset_lockfree_capacity() {
-  if (impl_->type == kLockfreeType) {
-    size_t max_task_size = get_max_task_count();
-    impl_->lockfree_queue.emplace(max_task_size);
+  if (impl_->type != kLockfreeType) {
+    return;
   }
+
+  std::lock_guard lock(impl_->mtx);
+
+  if VUNLIKELY (impl_->is_running) {
+    CLOG_E("MessageLoop: reset_lockfree_capacity called while running (%s).", impl_->name.c_str());
+    return;
+  }
+
+  size_t max_task_size = get_max_task_count();
+  impl_->lockfree_queue.emplace(max_task_size);
 }
 
 bool MessageLoop::is_running() const { return impl_->is_running; }
@@ -808,7 +823,9 @@ bool MessageLoop::process_normal_task(bool block) {
   impl_->cv.notify_all();
 
   if (block) {
-    auto predicate = [this]() -> bool { return impl_->quit_flag || impl_->is_busy || !impl_->normal_queue->empty(); };
+    auto predicate = [this]() -> bool {
+      return impl_->quit_flag || impl_->is_busy || !impl_->normal_queue->empty() || impl_->wakeup_pending;
+    };
 
     if (sleep_time < 0) {
       impl_->cv.wait(lock, std::move(predicate));
@@ -816,6 +833,8 @@ bool MessageLoop::process_normal_task(bool block) {
     } else if (sleep_time > 0) {
       is_timeout = !impl_->cv.wait_for(lock, std::chrono::nanoseconds(sleep_time), std::move(predicate));
     }
+
+    impl_->wakeup_pending = false;
   }
 
   return true;
@@ -858,7 +877,7 @@ bool MessageLoop::process_lockfree_task(bool block) {
 
   if (block) {
     auto predicate = [this]() -> bool {
-      return impl_->quit_flag || impl_->is_busy || !impl_->lockfree_queue->empty(true);
+      return impl_->quit_flag || impl_->is_busy || !impl_->lockfree_queue->empty(true) || impl_->wakeup_pending;
     };
 
     if (sleep_time < 0) {
@@ -867,6 +886,8 @@ bool MessageLoop::process_lockfree_task(bool block) {
     } else if (sleep_time > 0) {
       is_timeout = !impl_->cv.wait_for(lock, std::chrono::nanoseconds(sleep_time), std::move(predicate));
     }
+
+    impl_->wakeup_pending = false;
   }
 
   return true;
@@ -912,7 +933,9 @@ bool MessageLoop::process_priority_task(bool block) {
   impl_->cv.notify_all();
 
   if (block) {
-    auto predicate = [this]() -> bool { return impl_->quit_flag || impl_->is_busy || !impl_->priority_queue->empty(); };
+    auto predicate = [this]() -> bool {
+      return impl_->quit_flag || impl_->is_busy || !impl_->priority_queue->empty() || impl_->wakeup_pending;
+    };
 
     if (sleep_time < 0) {
       impl_->cv.wait(lock, std::move(predicate));
@@ -920,6 +943,8 @@ bool MessageLoop::process_priority_task(bool block) {
     } else if (sleep_time > 0) {
       is_timeout = !impl_->cv.wait_for(lock, std::chrono::nanoseconds(sleep_time), std::move(predicate));
     }
+
+    impl_->wakeup_pending = false;
   }
 
   return true;
@@ -977,15 +1002,24 @@ bool MessageLoop::process_timer_task(int64_t& next_sleep_time) {
     if (remain_loop_count > 0) {
       has_erase = false;
 
-      auto run_timer_callback = [this, timer]() {
-        std::unique_lock timer_lock(impl_->mtx);
-
-        if VUNLIKELY (impl_->timer_set.count(timer) == 0) {
+      auto alive_flag = timer->get_alive_flag();
+      auto run_timer_callback = [this, timer, alive_flag]() {
+        if VUNLIKELY (!alive_flag->load()) {
           return;
         }
 
-        timer_lock.unlock();
+        {
+          std::lock_guard timer_lock(impl_->mtx);
+
+          if VUNLIKELY (!alive_flag->load() || impl_->timer_set.count(timer) == 0) {
+            return;
+          }
+
+          timer->begin_in_flight();
+        }
+
         timer->run_callback();
+        timer->end_in_flight();
       };
 
       for (int64_t i = 0; timer->get_remain_loop_count() != 0 && i < remain_loop_count; ++i) {
