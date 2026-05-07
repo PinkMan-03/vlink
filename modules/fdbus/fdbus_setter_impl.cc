@@ -66,7 +66,7 @@ void FdbusSetterImpl::write(const Bytes& value_data) {
 }
 
 void FdbusSetterImpl::sync(SyncCallback&& callback) {
-  object_->register_sub_connect_callback(this, [callback = std::move(callback)](bool connected) {
+  object_->register_sub_connect_callback(this, [callback = std::move(callback)](bool connected) mutable {
     if (connected) {
       callback();
     }

@@ -22,6 +22,7 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | MemoryPool        | `base/memory_pool.h`            | 分级（金字塔）free-list 内存池，Bytes 默认分配器 |
 | MemoryResource    | `base/memory_resource.h`        | `std::pmr::memory_resource` 适配器，桥接 `MemoryPool` |
 | Function          | `base/functional.h`             | 类型擦除可调用包装器，64 字节 SBO + `MemoryPool` 堆回退 |
+| MoveFunction      | `base/functional.h`             | 移动专属类型擦除包装器，对应 C++23 `std::move_only_function` |
 | ConditionVariable | `base/condition_variable.h`     | POSIX `CLOCK_MONOTONIC` 条件变量，替代 std 实现 |
 | MessageLoop       | `base/message_loop.h`           | 单线程事件循环，集成定时器与优先级队列         |
 | Timer             | `base/timer.h`                  | 事件循环驱动的周期/单次定时器                  |
@@ -558,7 +559,7 @@ std::pmr::vector<int> b(&bypass);       // 每次直通 ::operator new
 
 ## 11.4.2 类型擦除可调用包装器 Function
 
-`vlink::Function<R(Args...)>`（`base/functional.h`）是 `std::function` 的高性能
+`vlink::Function<ReturnT(ArgsT...)>`（`base/functional.h`）是 `std::function` 的高性能
 替代品，针对 VLink 热路径（消息回调、定时器、线程池任务等）做了三处关键调优：
 
 - **64 字节 SBO（一行缓存）**：`kSboSize = 64`，足以容纳常见的捕获集合（若干
@@ -587,25 +588,25 @@ namespace vlink {
 template <typename SignatureT>
 class Function;                                     // 主模板未定义，仅特化
 
-template <typename R, typename... Args>
-class Function<R(Args...)> {
+template <typename ReturnT, typename... ArgsT>
+class Function<ReturnT(ArgsT...)> {
  public:
   static constexpr std::size_t kSboSize = 64U;
-  using result_type = R;
+  using result_type = ReturnT;
 
   Function() noexcept = default;                    // 空
   Function(std::nullptr_t) noexcept;                // 空
   Function(const Function&);                        // 复制目标的拷贝构造
   Function(Function&&) noexcept;                    // 偷取并清空对方
 
-  template <typename F /* 可调用且可拷贝 */>
-  Function(F&& f);                                  // 来自任意兼容可调用对象
+  template <typename FunctorT /* 可调用且可拷贝 */>
+  Function(FunctorT&& f);                                  // 来自任意兼容可调用对象
 
   Function& operator=(const Function&);
   Function& operator=(Function&&) noexcept;
   Function& operator=(std::nullptr_t) noexcept;     // reset 为空
 
-  R operator()(Args...) const;                      // 空时抛 std::bad_function_call
+  ReturnT operator()(ArgsT...) const;                      // 空时抛 std::bad_function_call
   explicit operator bool() const noexcept;          // 是否持有目标
 
   void swap(Function& other) noexcept;
@@ -618,26 +619,26 @@ class Function<R(Args...)> {
 
 | 路径   | 触发条件                                                  | 调用开销           |
 | ------ | --------------------------------------------------------- | ------------------ |
-| Inline | `sizeof(F) ≤ 64` 且 `alignof(F) ≤ max_align_t` 且移动 noexcept | 1 次间接调用       |
+| Inline | `sizeof(FunctorT) ≤ 64` 且 `alignof(FunctorT) ≤ max_align_t` 且移动 noexcept | 1 次间接调用       |
 | Heap   | 不满足 inline 条件                                        | 1 次间接调用 + 1 次额外加载 |
 
 - 调用开销恒定为通过 vtable 的 1 次间接 call；inline 路径无额外指针追逐，
   heap 路径在调用前多 1 次加载读取目标指针。
-- vtable 是按 `F` 静态生成的链接期单例，4 个函数指针：`invoke / copy_construct /
+- vtable 是按 `FunctorT` 静态生成的链接期单例，4 个函数指针：`invoke / copy_construct /
   move_construct / destroy`。
-- heap 路径在 `allocate` 时记录 `sizeof(F)` 与 `alignof(F)`，析构时按相同参数
+- heap 路径在 `allocate` 时记录 `sizeof(FunctorT)` 与 `alignof(FunctorT)`，析构时按相同参数
   归还，确保命中正确的池 tier。
 - 拷贝/移动具备强异常安全：抛异常时已分配内存归还、`*this` 维持上一个一致状
   态。
 
 ### 与 std::function 对齐的语义
 
-- `R operator()(Args...) const` 在空时抛 `std::bad_function_call`。
+- `ReturnT operator()(ArgsT...) const` 在空时抛 `std::bad_function_call`。
 - 转换构造要求目标可拷贝构造（`std::function` 同样要求），`move-only` 仿函数
   在编译期被拒绝。
 - 函数指针 / 成员指针目标若为 `nullptr`，得到一个空 `Function`，不分配、不安
   装 vtable。
-- `R == void` 时静默丢弃目标返回值（与 `std::function` 一致）。
+- `ReturnT == void` 时静默丢弃目标返回值（与 `std::function` 一致）。
 
 ### 使用示例
 
@@ -668,6 +669,186 @@ StatusCallback / FinishCallback / Timer::Callback / ThreadPool::Callback /
 WheelTimer::Callback` 等具体名字暴露）。其在事件、方法、字段三种通信模型，以
 及定时器、线程池、Schedule、GraphTask、BagWriter / BagReader 的回调注册路径中
 全面替换 `std::function`，避免了热路径上对全局 `operator new` 的依赖。
+
+> 部分回调已迁移到下文的 `vlink::MoveFunction`（move-only 版本，调用语义与
+> `std::move_only_function` 对齐）。完整迁移清单见 §11.4.3 的"在 VLink 中的实
+> 际迁移落点"。继续保留 `Function` 的回调通常出于需要 lock-then-copy snapshot
+> 或返回-by-value 等无法用 move-only 表达的语义。
+
+---
+
+## 11.4.3 移动专属可调用包装器 MoveFunction
+
+`vlink::MoveFunction<ReturnT(ArgsT...)>`（`base/functional.h`）是 C++23
+`std::move_only_function` 的 VLink 等价物：与 `Function` 共享同一份 64 字节 SBO
++ `MemoryPool` 堆回退基础设施，但放宽了对目标的拷贝可构造要求，**接受
+move-only 可调用对象**（捕获了 `std::unique_ptr` 的 lambda、`std::packaged_task`
+等），并且 `MoveFunction` 自身也是 move-only。
+
+适用场景：
+
+- `std::packaged_task<ReturnT()>` 等本身 move-only 的目标，原本必须用
+  `shared_ptr<packaged_task>` 包一层才能塞进 `Function`，使用 `MoveFunction`
+  后可直接 `[t = std::move(task)]() mutable { t(); }`，少一次堆分配 + 原子
+  refcount。
+- 捕获 `unique_ptr` / `promise` / 大块 move-only buffer 的 lambda。
+- 设计上明确不需要拷贝、希望在编译期约束生命周期的回调。
+
+### 主要 API
+
+```cpp
+namespace vlink {
+
+template <typename ReturnT, typename... ArgsT>
+class MoveFunction<ReturnT(ArgsT...)> {
+ public:
+  static constexpr std::size_t kSboSize = 64U;
+  using result_type = ReturnT;
+
+  MoveFunction() noexcept = default;                    // 空
+  MoveFunction(std::nullptr_t) noexcept;                // 空
+  MoveFunction(const MoveFunction&) = delete;           // 禁拷贝
+  MoveFunction& operator=(const MoveFunction&) = delete;
+  MoveFunction(MoveFunction&&) noexcept;                // 偷取并清空对方
+  MoveFunction& operator=(MoveFunction&&) noexcept;
+
+  template <typename FunctorT /* 可调用且 move-constructible */>
+  MoveFunction(FunctorT&& f);                                  // 来自任意兼容可调用对象
+
+  MoveFunction& operator=(std::nullptr_t) noexcept;
+  template <typename FunctorT> MoveFunction& operator=(FunctorT&& f);
+
+  ReturnT operator()(ArgsT...);                                // 非 const！空时抛 std::bad_function_call
+  explicit operator bool() const noexcept;
+  void swap(MoveFunction& other) noexcept;
+
+#if defined(__cpp_rtti)
+  const std::type_info& target_type() const noexcept;
+  template <typename FunctorT> FunctorT*       target() noexcept;
+  template <typename FunctorT> const FunctorT* target() const noexcept;
+#endif
+};
+
+}  // namespace vlink
+```
+
+### 与 std::move_only_function 的差异
+
+| 维度 | `std::move_only_function` (C++23) | `vlink::MoveFunction` |
+| --- | --- | --- |
+| 空对象调用 | 未定义行为 | 抛 `std::bad_function_call`（与 `vlink::Function` 一致，便于排错） |
+| `target_type()` / `target<FunctorT>()` | 未提供 | 提供（受 `__cpp_rtti` 控制） |
+| cv / ref / noexcept 限定签名 | 支持 | 仅特化 `ReturnT(ArgsT...)`；其他形式落入主模板 → 硬错误 |
+
+### 隐式转换矩阵
+
+| 来源 | 至 `vlink::MoveFunction<S>` | 备注 |
+| --- | --- | --- |
+| `vlink::Function<S>` 左值 | ✅ 复制 | `Function` 自身可拷贝 |
+| `vlink::Function<S>` 右值 | ✅ 移动 | 推荐路径 |
+| `std::function<S>` 左值 | ✅ 复制 | 同上 |
+| `std::function<S>` 右值 | ✅ 移动 | |
+| `std::move_only_function<S>` 右值 | ✅ 移动 | 仅在 `__cpp_lib_move_only_function` 可用时启用 |
+| `std::move_only_function<S>` 左值 | ❌ | 源 move-only |
+| `MoveFunction<OtherSig>` 右值 | ✅ 移动（再包一层）| 跨签名包裹会落到 heap，并增加一次间接调用，详见下注 |
+| 任意 move-only 仿函数（左值） | ❌ | SFINAE 拒绝：`is_constructible_v<FunctorT, FunctorT&>` 为 false（等价于缺拷贝构造） |
+| 任意 move-only 仿函数（右值） | ✅ 移动 | |
+| 函数指针 / 成员指针 == nullptr | ✅ 得空 `MoveFunction` | 与 `Function` 一致 |
+| 空源（任一 wrapper） | ✅ 得空 `MoveFunction` | 不分配、不安装 vtable |
+
+| 至 | 来源 `MoveFunction<S>` | 备注 |
+| --- | --- | --- |
+| `std::move_only_function<S>` | ✅ 移动 | 通过标准库的转换构造，无需特殊钩子；但因 `sizeof(MoveFunction) ≈ 72` 字节超过 `std::move_only_function` 典型 SBO，落入其堆路径并多一次间接调用 |
+| `vlink::Function<S>` | ❌ | `Function` 要求目标可拷贝，move-only 被 SFINAE 拒绝 |
+| `std::function<S>` | ❌（编译错） | 标准要求目标可拷贝（Mandates） |
+
+> **跨签名 / 跨包装的代价**：将一个非空的 `Function<A>` 或 `MoveFunction<A>`
+> 包成 `MoveFunction<B>`，因为 `sizeof(MoveFunction)` ≈ 72 字节超过 SBO，
+> 落入 `MemoryPool` 堆路径，且每次调用经过 **两层 vtable 间接调用**。能直接
+> 包装原始 callable 时优先直接包装。
+
+### 调用语义注意
+
+- `operator()` 是 **非 const**，与 `std::move_only_function` 的默认签名一致；
+  因此 `const MoveFunction<...>` 不能直接调用。如果需要 const 调用语义，请
+  使用 `vlink::Function`。
+- 移动后的 `MoveFunction` 处于空状态，再次调用会抛 `std::bad_function_call`。
+- 重载集合中同时含 `f(Function<S>)` 与 `f(MoveFunction<S>)` 会对任何两侧都能
+  匹配的可调用对象产生歧义（与 `std::function` ↔ `std::move_only_function`
+  的情形相同），建议同一重载集合内只用一种类型。
+
+### 典型用法
+
+```cpp
+#include <vlink/base/functional.h>
+
+#include <future>
+#include <memory>
+
+// 1) 直接捕获 unique_ptr —— 替换原 shared_ptr 包装
+auto big = std::make_unique<HeavyWork>(/* ... */);
+vlink::MoveFunction<void()> task = [w = std::move(big)]() { w->run(); };
+
+// 2) 包装 packaged_task，省去 shared_ptr 间接层
+std::packaged_task<int()> pt([] { return 42; });
+auto fut = pt.get_future();
+vlink::MoveFunction<void()> cb = [t = std::move(pt)]() mutable { t(); };
+cb();
+int v = fut.get();    // 42
+
+// 3) 从 vlink::Function 移入（适合一次性消费）
+vlink::Function<int()> f = [] { return 7; };
+vlink::MoveFunction<int()> mf = std::move(f);
+```
+
+### 在 VLink 中的实际迁移落点
+
+下表列出当前已切到 `MoveFunction` 的回调类型；其余回调因为 lock-then-copy
+snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性等约束保留为
+`Function`。
+
+| 域 | 回调类型 | 迁移层级 |
+| --- | --- | --- |
+| `base/timer` | `Timer::Callback` | TIER 1 |
+| `base/logger` | `Logger::Callback` | TIER 1 |
+| `base/schedule` | `Schedule::Callback`, `RetCallback`, `CatchCallback` | TIER 1 / TIER 2 |
+| `base/graph_task` | `GraphTask::Callback`, `ConditionCallback`, `StatusCallback`, `FindTaskCallback` | TIER 1 / TIER 2 |
+| `base/utils` | `register_terminate_signal` / `register_crash_signal` / `start_detect_keyboard` 参数 | TIER 1 |
+| `base/message_loop` | `MessageLoop::Callback` | TIER 2 |
+| `base/thread_pool` | `ThreadPool::Callback` | TIER 2 |
+| `impl/ack_manager` | `AckManager::ProcessCallback`, `NotifyCallback` | TIER 1 |
+| `extension/security` | `Security::Callback` | TIER 1 |
+| `extension/bag_reader` | `OutputCallback`, `StatusCallback`, `ReadyCallback`, `FinishCallback` | TIER 1 |
+| `extension/bag_writer` | `SplitCallback`, `SchemaCallback` | TIER 1 |
+| `extension/bag_reader_processor`, `bag_reader_plugin_interface` | `OutputCallback` | TIER 1 |
+| `external/proxy_api` | `ConnectCallback`, `ErrorCallback`, `TimeCallback`, `InfoCallback`, `DataCallback` | TIER 1 |
+
+随之带来的变化：
+
+- `MessageLoop::invoke_task / invoke_task_with_priority` 与
+  `ThreadPool::invoke_task` 不再用 `std::shared_ptr<std::packaged_task>` 桥接，
+  直接以移动捕获包装 `std::packaged_task`，每次调用省一次 heap 分配 + 一次
+  原子 refcount。
+- `Schedule::process_with_ret` 内部的 `run_with_timeout` 形参改为非-const ref，
+  外层 wrapper lambda 与 `Schedule::process` 中的适配 lambda 加 `mutable`。
+- `GraphTask::process_and_traverse` 形参由 `const FindTaskCallback&` 改为
+  `FindTaskCallback&&`。
+
+仍保留为 `Function` 的回调（出于真实 copy / 公共模板 / const-ref 遍历约束）：
+
+- `WheelTimer::Callback`（`wheel_timer.cc` 重复 tick lvalue copy）。
+- `Process::ErrorCallback / FinishedCallback / ReadyReadCallback / StateChangedCallback`
+  （shared_lock 下 snapshot copy）。
+- `dds_conf::find_type_support` 与 `type_support_map_`（`std::map` 返回-by-value）。
+- `DiscoveryViewer::Callback`（lock-then-copy）。
+- `NodeImpl::ConnectCallback / StatusCallback / ReqRespCallback / MsgCallback /
+  IntraMsgCallback / SyncCallback`（`AbstractObject` 遍历用 `const&` + 各
+  module factory 的 const-lambda 捕获 + setter_impl 转入 `ConnectCallback` 通道）。
+- `Subscriber<T>::MsgCallback / Server<...>::ReqCallback / ReqRespCallback /
+  ReqAsyncRespCallback / Client<...>::RespCallback / Getter<T>::MsgCallback`
+  （`internal/*-inl.h` 的 const-lambda 捕获 + 公共模板 ABI 限制）。
+- `AbstractFactory::Find*Callback`、`ObjectPool<T>::FactoryCallback / ResetCallback`
+  （前者为 const-ref 遍历约束，后者为公共模板 alias）。
 
 ---
 

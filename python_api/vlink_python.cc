@@ -153,11 +153,16 @@ struct PythonCodec<vlink::Bytes> {
 };
 
 template <typename MsgT, typename Codec = PythonCodec<MsgT>>
-std::function<void(const MsgT&)> make_value_callback(nb::callable py_cb, const char* context) {
+auto make_value_callback(nb::callable py_cb, const char* context) {
   auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
-  return [cb, context](const MsgT& value) {
-    if (!Py_IsInitialized()) return;
+
+  return [cb = std::move(cb), context](const MsgT& value) {
+    if (!Py_IsInitialized()) {
+      return;
+    }
+
     nb::gil_scoped_acquire gil;
+
     try {
       cb->fn(Codec::to_python(value));
     } catch (std::exception&) {
@@ -166,11 +171,16 @@ std::function<void(const MsgT&)> make_value_callback(nb::callable py_cb, const c
   };
 }
 
-inline vlink::NodeImpl::ConnectCallback make_connect_callback(nb::callable py_cb, const char* context) {
+inline auto make_connect_callback(nb::callable py_cb, const char* context) {
   auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
-  return [cb, context](bool connected) {
-    if (!Py_IsInitialized()) return;
+
+  return [cb = std::move(cb), context](bool connected) {
+    if (!Py_IsInitialized()) {
+      return;
+    }
+
     nb::gil_scoped_acquire gil;
+
     try {
       cb->fn(connected);
     } catch (std::exception&) {
@@ -179,11 +189,16 @@ inline vlink::NodeImpl::ConnectCallback make_connect_callback(nb::callable py_cb
   };
 }
 
-inline std::function<void()> make_void_callback(nb::callable py_cb, const char* context) {
+inline auto make_void_callback(nb::callable py_cb, const char* context) {
   auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
-  return [cb, context]() {
-    if (!Py_IsInitialized()) return;
+
+  return [cb = std::move(cb), context]() {
+    if (!Py_IsInitialized()) {
+      return;
+    }
+
     nb::gil_scoped_acquire gil;
+
     try {
       cb->fn();
     } catch (std::exception&) {

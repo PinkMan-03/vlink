@@ -172,16 +172,22 @@ SomeipClient::SomeipClient(const SomeipID& id) {
                                      auto payload = message->get_payload();
                                      Bytes resp_data = Bytes::shallow_copy(payload->get_data(), payload->get_length());
 
-                                     std::lock_guard lock(mtx_);
-                                     auto iter = resp_callbacks_.find(message->get_request());
+                                     NodeImpl::MsgCallback cb;
+                                     {
+                                       std::lock_guard lock(mtx_);
+                                       auto iter = resp_callbacks_.find(message->get_request());
 
-                                     if VUNLIKELY (iter == resp_callbacks_.end()) {
-                                       return;
+                                       if VUNLIKELY (iter == resp_callbacks_.end()) {
+                                         return;
+                                       }
+
+                                       cb = std::move(iter->second);
+                                       resp_callbacks_.erase(iter);
                                      }
 
-                                     iter->second(resp_data);
-
-                                     resp_callbacks_.erase(message->get_request());
+                                     if VLIKELY (cb) {
+                                       cb(resp_data);
+                                     }
                                    }
                                  });
 

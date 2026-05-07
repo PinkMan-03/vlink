@@ -111,7 +111,7 @@ class Point3DDialog : public QDialog {
     };
 
     NodeType type;
-    std::function<bool(int, const PointValueList&)> eval;
+    vlink::Function<bool(int, const PointValueList&)> eval;
     std::vector<std::shared_ptr<ASTNode>> children;
 
     ASTNode(NodeType t) : type(t) {}
@@ -228,7 +228,7 @@ class Point3DDialog : public QDialog {
 
   QString current_expr_;
   std::shared_ptr<ASTNode> cached_ast_;
-  QHash<QString, std::function<bool(int, const PointValueList&)>> expression_cache_;
+  QHash<QString, vlink::Function<bool(int, const PointValueList&)>> expression_cache_;
   bool has_expr_finished_{false};
 
 #ifdef VLINK_ENABLE_VIEWER_OSG

@@ -23,11 +23,11 @@
 
 #pragma once
 
+#include <vlink/base/functional.h>
 #include <vlink/base/macros.h>
 #include <vlink/external/proxy_api.h>
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -86,11 +86,11 @@ class ProxyBridge {
     ServerConfig server;
   };
 
-  using ConnectCallback = std::function<void(bool connected)>;
-  using ErrorCallback = std::function<void(ProxyAPI::Error error)>;
-  using TimeCallback = std::function<void(uint64_t sys_time, uint64_t boot_time)>;
-  using InfoCallback = std::function<void(const std::vector<ProxyAPI::Info>& info_list)>;
-  using DataCallback = std::function<void(const ProxyAPI::Data& data)>;
+  using ConnectCallback = vlink::MoveFunction<void(bool connected)>;
+  using ErrorCallback = vlink::MoveFunction<void(ProxyAPI::Error error)>;
+  using TimeCallback = vlink::MoveFunction<void(uint64_t sys_time, uint64_t boot_time)>;
+  using InfoCallback = vlink::MoveFunction<void(const std::vector<ProxyAPI::Info>& info_list)>;
+  using DataCallback = vlink::MoveFunction<void(const ProxyAPI::Data& data)>;
 
   ProxyBridge(const Config& config, MessageLoop* data_callback_loop);
 

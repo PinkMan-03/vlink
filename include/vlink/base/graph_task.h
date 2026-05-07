@@ -128,12 +128,12 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
   /**
    * @brief Callback type for regular (void-returning) tasks.
    */
-  using Callback = vlink::Function<void()>;
+  using Callback = vlink::MoveFunction<void()>;
 
   /**
    * @brief Callback type for condition tasks; returns the branch index to activate.
    */
-  using ConditionCallback = vlink::Function<int()>;
+  using ConditionCallback = vlink::MoveFunction<int()>;
 
   /**
    * @brief Callback for status change notifications.
@@ -142,7 +142,7 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
    * Called whenever the task's @c Status changes.
    * First argument is the task name; second is the new status.
    */
-  using StatusCallback = vlink::Function<void(const std::string&, Status)>;
+  using StatusCallback = vlink::MoveFunction<void(const std::string&, Status)>;
 
   /**
    * @brief Creates a regular (void) task node.
@@ -393,7 +393,7 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
   [[nodiscard]] std::string export_to_dot() const;
 
  protected:
-  using FindTaskCallback = vlink::Function<void(const std::shared_ptr<GraphTask>&)>;
+  using FindTaskCallback = vlink::MoveFunction<void(const std::shared_ptr<GraphTask>&)>;
 
   explicit GraphTask(Callback&& callback, int condition_number);
 
@@ -405,7 +405,7 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
 
   ~GraphTask();
 
-  void process_and_traverse(const FindTaskCallback& callback);
+  void process_and_traverse(FindTaskCallback&& callback);
 
  private:
   int invoke(bool once);

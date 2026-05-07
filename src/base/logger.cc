@@ -30,6 +30,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -238,8 +239,10 @@ struct LoggerGlobal final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   bool file_level_by_user{false};
   bool console_format_enable{false};
   bool utc_enable{false};
+  // Protected by callback_mtx (shared on read/invoke, exclusive on register).
   Logger::Callback console_callback;
   Logger::Callback file_callback;
+  mutable std::shared_mutex callback_mtx;
   std::ios_base::fmtflags stream_flags{std::ios_base::dec | std::ios_base::skipws};
   int stream_precision{6};
   int stream_width{0};
@@ -340,11 +343,19 @@ void Logger::flush() noexcept {
 }
 
 void Logger::register_console_handler(Callback&& callback) noexcept {
-  LoggerGlobal::get().console_callback = std::move(callback);
+  auto& global_instance = LoggerGlobal::get();
+
+  std::unique_lock lock(global_instance.callback_mtx);
+
+  global_instance.console_callback = std::move(callback);
 }
 
 void Logger::register_file_handler(Callback&& callback) noexcept {
-  LoggerGlobal::get().file_callback = std::move(callback);
+  auto& global_instance = LoggerGlobal::get();
+
+  std::unique_lock lock(global_instance.callback_mtx);
+
+  global_instance.file_callback = std::move(callback);
 }
 
 void Logger::set_console_level(Level level) noexcept {
@@ -892,9 +903,13 @@ void Logger::write_to_console(Level level, std::string_view log) noexcept {
     return;
   }
 
-  if VUNLIKELY (global_instance.console_callback) {
-    global_instance.console_callback(level, log);
-    return;
+  {
+    std::shared_lock callback_lock(global_instance.callback_mtx);
+
+    if VUNLIKELY (global_instance.console_callback) {
+      global_instance.console_callback(level, log);
+      return;
+    }
   }
 
   if VUNLIKELY (impl_->is_enable_backtrace.load(std::memory_order_acquire)) {
@@ -986,9 +1001,13 @@ void Logger::write_to_file(Level level, std::string_view log) noexcept {
     return;
   }
 
-  if VUNLIKELY (global_instance.file_callback) {
-    global_instance.file_callback(level, log);
-    return;
+  {
+    std::shared_lock callback_lock(global_instance.callback_mtx);
+
+    if VUNLIKELY (global_instance.file_callback) {
+      global_instance.file_callback(level, log);
+      return;
+    }
   }
 
   if (impl_->interface) {

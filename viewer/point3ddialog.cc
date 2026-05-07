@@ -2881,7 +2881,7 @@ bool Point3DDialog::evaluate_expression(int index, const QString& exp_str, const
     return expression_cache_[exp_str](index, value_list);
   }
 
-  std::function<bool(int, const PointValueList&)> eval_func;
+  vlink::Function<bool(int, const PointValueList&)> eval_func;
 
   bool ok = false;
 
@@ -3146,9 +3146,11 @@ bool Point3DDialog::evaluate_expression(int index, const QString& exp_str, const
     return false;
   }
 
-  expression_cache_.insert(exp_str, eval_func);
+  const bool result = eval_func(index, value_list);
 
-  return eval_func(index, value_list);
+  expression_cache_.insert(exp_str, std::move(eval_func));
+
+  return result;
 }
 
 bool Point3DDialog::check_expression(int index, const PointValueList& value_list) {

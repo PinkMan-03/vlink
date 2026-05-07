@@ -92,7 +92,7 @@ class VLINK_EXPORT AckManager final {
    * Should return @c false if the send fails (e.g. no server connected),
    * causing @c process() to remove the request and return @c false immediately.
    */
-  using ProcessCallback = vlink::Function<bool()>;
+  using ProcessCallback = vlink::MoveFunction<bool()>;
 
   /**
    * @brief Optional callback invoked inside @c notify() while holding the request lock.
@@ -101,7 +101,7 @@ class VLINK_EXPORT AckManager final {
    * Provides the responder a chance to fill the response buffer before the
    * waiting @c process() thread is woken.  May be @c nullptr.
    */
-  using NotifyCallback = vlink::Function<void()>;
+  using NotifyCallback = vlink::MoveFunction<void()>;
 
   /**
    * @brief Shared ownership handle for an in-flight request token.

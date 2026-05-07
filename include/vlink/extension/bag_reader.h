@@ -202,27 +202,27 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    * @param action_type  Action type (kPublish, kRequest, etc.).
    * @param data         Serialized message payload.
    */
-  using OutputCallback = vlink::Function<void(int64_t microseconds_timestamp, const std::string& url,
-                                              ActionType action_type, const Bytes& data)>;
+  using OutputCallback = vlink::MoveFunction<void(int64_t microseconds_timestamp, const std::string& url,
+                                                  ActionType action_type, const Bytes& data)>;
 
   /**
    * @brief Callback fired whenever the playback @c Status changes.
    *
    * @param status  New playback status.
    */
-  using StatusCallback = vlink::Function<void(Status status)>;
+  using StatusCallback = vlink::MoveFunction<void(Status status)>;
 
   /**
    * @brief Callback fired when the reader has opened the file and is ready to start playing.
    */
-  using ReadyCallback = vlink::Function<void()>;
+  using ReadyCallback = vlink::MoveFunction<void()>;
 
   /**
    * @brief Callback fired when playback has finished (or was interrupted).
    *
    * @param is_interrupted  @c true if @c stop() was called before natural end.
    */
-  using FinishCallback = vlink::Function<void(bool is_interrupted)>;
+  using FinishCallback = vlink::MoveFunction<void(bool is_interrupted)>;
 
   /**
    * @brief Creates a concrete @c BagReader for @p path, selecting the implementation by extension.

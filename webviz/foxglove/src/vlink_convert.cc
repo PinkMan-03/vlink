@@ -29,6 +29,7 @@
 #define VLINK_HAS_PROTOBUF_JSON_UTIL
 #endif
 #endif
+#include <vlink/base/functional.h>
 #include <vlink/base/helpers.h>
 
 #include <algorithm>
@@ -36,7 +37,6 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <utility>
 
 #include "../../webviz_common.h"
@@ -787,7 +787,7 @@ bool VlinkConvert::resolve_proto_schema(const std::string& proto_name, std::stri
   std::unordered_set<std::string> seen;
 #endif
 
-  std::function<void(const google::protobuf::FileDescriptor*)> dfs =
+  vlink::MoveFunction<void(const google::protobuf::FileDescriptor*)> dfs =
       [&dfs, &ordered, &seen](const google::protobuf::FileDescriptor* fd) {
         if VUNLIKELY (!fd) {
           return;

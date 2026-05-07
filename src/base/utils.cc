@@ -1319,8 +1319,8 @@ uint64_t get_native_thread_id() noexcept {
 struct SignalHelper final {
   bool is_async{false};
   bool pass_through{false};
-  vlink::Function<void(int)> terminate_callback{nullptr};
-  vlink::Function<void(int)> crash_callback{nullptr};
+  vlink::MoveFunction<void(int)> terminate_callback{nullptr};
+  vlink::MoveFunction<void(int)> crash_callback{nullptr};
 
   static SignalHelper& get() {
     static SignalHelper instance;
@@ -1358,7 +1358,7 @@ struct SignalHelper final {
   ~SignalHelper() = default;
 };
 
-void register_terminate_signal(vlink::Function<void(int)>&& callback, bool is_async, bool pass_through) noexcept {
+void register_terminate_signal(vlink::MoveFunction<void(int)>&& callback, bool is_async, bool pass_through) noexcept {
   static auto& instance = SignalHelper::get();
 
   instance.terminate_callback = std::move(callback);
@@ -1398,7 +1398,7 @@ void register_terminate_signal(vlink::Function<void(int)>&& callback, bool is_as
 #endif
 }
 
-void register_crash_signal(vlink::Function<void(int)>&& callback) noexcept {
+void register_crash_signal(vlink::MoveFunction<void(int)>&& callback) noexcept {
   static auto& instance = SignalHelper::get();
 
   instance.crash_callback = std::move(callback);
@@ -1438,7 +1438,7 @@ struct KeyboardHelper final {
   std::mutex mtx;
   vlink::condition_variable cv;
   std::thread thread;
-  vlink::Function<void(const std::string& key)> callback;
+  vlink::MoveFunction<void(const std::string& key)> callback;
 
   static KeyboardHelper& get() {
     static KeyboardHelper instance;
@@ -1449,7 +1449,7 @@ struct KeyboardHelper final {
   KeyboardHelper() = default;
 };
 
-void start_detect_keyboard(vlink::Function<void(const std::string& key)>&& callback, int poll_ms) noexcept {
+void start_detect_keyboard(vlink::MoveFunction<void(const std::string& key)>&& callback, int poll_ms) noexcept {
   static auto& instance = KeyboardHelper::get();
 
   if (instance.has_detect) {
@@ -1464,6 +1464,10 @@ void start_detect_keyboard(vlink::Function<void(const std::string& key)>&& callb
 
   instance.thread = std::thread([poll_ms]() {
     std::unique_lock lock(instance.mtx);
+
+    if VUNLIKELY (!instance.callback) {
+      return;
+    }
 
 #ifdef _WIN32
     HANDLE hconsole = ::GetStdHandle(STD_INPUT_HANDLE);

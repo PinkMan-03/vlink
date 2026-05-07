@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -60,6 +61,8 @@ bool BagReader::Info::UrlMeta::operator<(const BagReader::Info::UrlMeta& target)
 struct BagReader::Impl final {
   BagReader::OutputCallback output_callback;
   std::shared_ptr<BagReaderPluginInterface> plugin_interface;
+  // Protects output_callback against concurrent register vs invoke.
+  mutable std::shared_mutex output_callback_mtx;
 };
 
 // BagReader
@@ -95,6 +98,8 @@ void BagReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInter
   if VLIKELY (impl_->plugin_interface) {
     impl_->plugin_interface->register_output_callback(
         [this](int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data) {
+          std::shared_lock callback_lock(impl_->output_callback_mtx);
+
           if (impl_->output_callback) {
             impl_->output_callback(timestamp, url, action_type, data);
           }
@@ -109,6 +114,8 @@ void BagReader::register_ready_callback(ReadyCallback&& ready_callback) { (void)
 void BagReader::register_finish_callback(FinishCallback&& finish_callback) { (void)finish_callback; }
 
 void BagReader::register_output_callback(OutputCallback&& output_callback) {
+  std::unique_lock lock(impl_->output_callback_mtx);
+
   impl_->output_callback = std::move(output_callback);
 }
 
@@ -116,6 +123,8 @@ void BagReader::process_output(int64_t timestamp, const std::string& url, Action
   if (impl_->plugin_interface) {
     impl_->plugin_interface->push(timestamp, url, action_type, data);
   } else {
+    std::shared_lock callback_lock(impl_->output_callback_mtx);
+
     if (impl_->output_callback) {
       impl_->output_callback(timestamp, url, action_type, data);
     }

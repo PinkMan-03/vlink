@@ -29,8 +29,12 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
+#include <future>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
@@ -38,6 +42,25 @@
 #include "../common_test.h"
 
 #ifdef VLINK_ENABLE_BASE_FUNCTIONAL
+
+namespace {
+
+struct MoveOnlyCallable {
+  MoveOnlyCallable() = default;
+  MoveOnlyCallable(const MoveOnlyCallable&) = delete;
+  MoveOnlyCallable(MoveOnlyCallable&&) noexcept = default;
+  MoveOnlyCallable& operator=(const MoveOnlyCallable&) = delete;
+  MoveOnlyCallable& operator=(MoveOnlyCallable&&) noexcept = default;
+
+  void operator()() const {}
+};
+
+static_assert(!std::is_constructible_v<Function<void()>, MoveOnlyCallable>,
+              "std::function-compatible Function must reject move-only targets");
+static_assert(!std::is_assignable_v<Function<void()>&, MoveOnlyCallable>,
+              "std::function-compatible Function assignment must reject move-only targets");
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 TEST_SUITE("base-Function - construction & emptiness") {
@@ -346,6 +369,64 @@ TEST_SUITE("base-Function - target kinds") {
   }
 }
 
+#if defined(__cpp_rtti)
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-Function - target access") {
+  // -------------------------------------------------------------------------
+  static int target_free_function(int x) { return x + 100; }
+
+  TEST_CASE("empty Function reports typeid(void) and no target") {
+    Function<int()> cb;
+
+    CHECK(cb.target_type() == typeid(void));
+    CHECK(cb.target<int (*)()>() == nullptr);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("target returns the stored inline callable") {
+    auto fn = [base = 4](int x) { return base + x; };
+    using Fn = decltype(fn);
+
+    Function<int(int)> cb = fn;
+
+    CHECK(cb.target_type() == typeid(Fn));
+    REQUIRE(cb.target<Fn>() != nullptr);
+    CHECK((*cb.target<Fn>())(5) == 9);
+    CHECK(cb.target<int (*)(int)>() == nullptr);
+
+    const Function<int(int)>& cref = cb;
+    REQUIRE(cref.target<Fn>() != nullptr);
+    CHECK((*cref.target<Fn>())(6) == 10);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("target returns the stored heap callable") {
+    struct LargeTarget {
+      std::array<int, 32> payload{};
+
+      int operator()() const { return 17 + static_cast<int>(payload.size()); }
+    };
+
+    Function<int()> cb = LargeTarget{};
+
+    CHECK(cb.target_type() == typeid(LargeTarget));
+    REQUIRE(cb.target<LargeTarget>() != nullptr);
+    CHECK((*cb.target<LargeTarget>())() == 49);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("target returns the stored function pointer") {
+    using Fn = int (*)(int);
+
+    Function<int(int)> cb = &target_free_function;
+
+    CHECK(cb.target_type() == typeid(Fn));
+    REQUIRE(cb.target<Fn>() != nullptr);
+    CHECK((*cb.target<Fn>())(2) == 102);
+  }
+}
+#endif
+
 // ---------------------------------------------------------------------------
 TEST_SUITE("base-Function - argument kinds") {
   // -------------------------------------------------------------------------
@@ -634,6 +715,17 @@ TEST_SUITE("base-Function - std::function interop") {
   }
 
   // -------------------------------------------------------------------------
+  TEST_CASE("empty std::function constructs an empty Function") {
+    std::function<int(int)> stdfn;
+
+    Function<int(int)> cb = stdfn;
+
+    CHECK(!cb);
+    CHECK(cb == nullptr);
+    CHECK_THROWS_AS(cb(1), std::bad_function_call);
+  }
+
+  // -------------------------------------------------------------------------
   TEST_CASE("std::function wraps a Function via its converting constructor") {
     Function<int(int)> cb = [](int x) { return x + 100; };
     std::function<int(int)> stdfn = cb;
@@ -649,11 +741,40 @@ TEST_SUITE("base-Function - std::function interop") {
   }
 
   // -------------------------------------------------------------------------
+  TEST_CASE("assigning an empty std::function clears the Function") {
+    Function<int()> cb = []() { return 7; };
+    std::function<int()> stdfn;
+
+    cb = stdfn;
+
+    CHECK(!cb);
+    CHECK_THROWS_AS(cb(), std::bad_function_call);
+  }
+
+  // -------------------------------------------------------------------------
   TEST_CASE("std::function assigned from Function value") {
     Function<int()> cb = []() { return 9; };
     std::function<int()> stdfn;
     stdfn = cb;
     CHECK(stdfn() == 9);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty std::function with a compatible signature constructs an empty Function") {
+    std::function<int(int)> stdfn;
+
+    Function<long(int)> cb = stdfn;
+
+    CHECK(!cb);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty Function with a compatible signature constructs an empty Function") {
+    Function<int(int)> inner;
+
+    Function<long(int)> outer = inner;
+
+    CHECK(!outer);
   }
 
   // -------------------------------------------------------------------------
@@ -664,6 +785,420 @@ TEST_SUITE("base-Function - std::function interop") {
     CHECK(b(11) == 121);
   }
 }
+
+// =============================================================================
+// MoveFunction tests
+// =============================================================================
+
+namespace {
+
+struct UniquePtrCallable {
+  std::unique_ptr<int> data;
+
+  UniquePtrCallable() = default;
+  explicit UniquePtrCallable(int v) : data(std::make_unique<int>(v)) {}
+
+  UniquePtrCallable(const UniquePtrCallable&) = delete;
+  UniquePtrCallable(UniquePtrCallable&&) noexcept = default;
+  UniquePtrCallable& operator=(const UniquePtrCallable&) = delete;
+  UniquePtrCallable& operator=(UniquePtrCallable&&) noexcept = default;
+
+  int operator()() const { return data ? *data : -1; }
+};
+
+static_assert(!std::is_copy_constructible_v<UniquePtrCallable>);
+static_assert(std::is_move_constructible_v<UniquePtrCallable>);
+
+static_assert(!std::is_copy_constructible_v<MoveFunction<int()>>, "MoveFunction must be move-only");
+static_assert(!std::is_copy_assignable_v<MoveFunction<int()>>, "MoveFunction must be move-only");
+static_assert(std::is_nothrow_move_constructible_v<MoveFunction<int()>>, "MoveFunction move ctor must be noexcept");
+static_assert(std::is_nothrow_move_assignable_v<MoveFunction<int()>>, "MoveFunction move op= must be noexcept");
+
+static_assert(std::is_constructible_v<MoveFunction<int()>, UniquePtrCallable>,
+              "MoveFunction must accept move-only rvalue targets");
+static_assert(!std::is_constructible_v<MoveFunction<int()>, UniquePtrCallable&>,
+              "MoveFunction must reject move-only lvalue targets (no copy ctor)");
+static_assert(!std::is_constructible_v<Function<int()>, UniquePtrCallable>, "Function must reject move-only targets");
+
+static_assert(std::is_constructible_v<MoveFunction<int()>, Function<int()>>,
+              "MoveFunction must accept Function rvalue (move-in)");
+static_assert(std::is_constructible_v<MoveFunction<int()>, std::function<int()>>,
+              "MoveFunction must accept std::function");
+static_assert(!std::is_constructible_v<Function<int()>, MoveFunction<int()>>,
+              "vlink::Function must reject move-only MoveFunction (SFINAE-based copy check)");
+// Note: std::function uses Mandates (not Constraints) for the copy_constructible
+// check, so std::is_constructible_v<std::function<...>, MoveFunction<...>> reports
+// true in libstdc++ even though instantiation would hard-error.  Verifying that
+// rejection requires a SFINAE wrapper, not a trait probe.
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - construction & emptiness") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("default-constructed MoveFunction is empty") {
+    MoveFunction<void()> cb;
+    CHECK(!cb);
+    CHECK(cb == nullptr);
+    CHECK(nullptr == cb);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("nullptr-constructed MoveFunction is empty") {
+    MoveFunction<int(int)> cb(nullptr);
+    CHECK(!cb);
+    CHECK(cb == nullptr);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("invoking an empty MoveFunction throws std::bad_function_call") {
+    MoveFunction<void()> cb;
+    CHECK_THROWS_AS(cb(), std::bad_function_call);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction stores a copyable lambda") {
+    MoveFunction<int(int)> cb = [](int x) { return x * 2; };
+    CHECK(static_cast<bool>(cb));
+    CHECK(cb != nullptr);
+    CHECK(cb(21) == 42);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction stores a move-only lambda (unique_ptr capture)") {
+    auto up = std::make_unique<int>(42);
+    MoveFunction<int()> cb = [p = std::move(up)]() { return *p; };
+    CHECK(cb() == 42);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction stores a move-only callable struct") {
+    MoveFunction<int()> cb = UniquePtrCallable{7};
+    CHECK(cb() == 7);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction wraps std::packaged_task without shared_ptr trampoline") {
+    std::packaged_task<int()> task([] { return 100; });
+    auto fut = task.get_future();
+
+    MoveFunction<void()> cb = [t = std::move(task)]() mutable { t(); };
+    cb();
+
+    CHECK(fut.get() == 100);
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - move semantics") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("move construction transfers ownership") {
+    MoveFunction<int()> a = [] { return 5; };
+    MoveFunction<int()> b = std::move(a);
+
+    CHECK(!a);
+    CHECK(static_cast<bool>(b));
+    CHECK(b() == 5);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("move assignment transfers ownership") {
+    MoveFunction<int()> a = [] { return 5; };
+    MoveFunction<int()> b = [] { return 10; };
+
+    b = std::move(a);
+
+    CHECK(!a);
+    CHECK(b() == 5);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("self-move-assign is safe") {
+    MoveFunction<int()> a = [] { return 7; };
+    auto& ref = a;
+    a = std::move(ref);
+    CHECK(static_cast<bool>(a));
+    CHECK(a() == 7);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("self-swap is safe") {
+    MoveFunction<int()> a = [] { return 3; };
+    a.swap(a);
+    CHECK(a() == 3);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("ADL swap exchanges targets") {
+    MoveFunction<int()> a = [] { return 1; };
+    MoveFunction<int()> b = [] { return 2; };
+
+    using std::swap;
+    swap(a, b);
+
+    CHECK(a() == 2);
+    CHECK(b() == 1);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("nullptr assignment clears MoveFunction") {
+    MoveFunction<int()> a = [] { return 9; };
+    a = nullptr;
+    CHECK(!a);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("rvalue lambda assignment replaces target") {
+    MoveFunction<int()> a = [] { return 1; };
+    a = [] { return 99; };
+    CHECK(a() == 99);
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - heap fallback") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("large move-only target uses heap path and survives move") {
+    struct Heavy {
+      std::unique_ptr<int> p;
+      std::array<int, 32> pad{};
+
+      Heavy() : p(std::make_unique<int>(99)) {
+        for (size_t i = 0; i < pad.size(); ++i) {
+          pad[i] = static_cast<int>(i);
+        }
+      }
+
+      Heavy(const Heavy&) = delete;
+      Heavy(Heavy&&) noexcept = default;
+      Heavy& operator=(const Heavy&) = delete;
+      Heavy& operator=(Heavy&&) noexcept = default;
+
+      int operator()() const { return *p + static_cast<int>(pad.size()); }
+    };
+
+    MoveFunction<int()> cb = Heavy{};
+    CHECK(cb() == 99 + 32);
+
+    MoveFunction<int()> moved = std::move(cb);
+    CHECK(!cb);
+    CHECK(moved() == 99 + 32);
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - empty source propagation") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty std::function -> empty MoveFunction") {
+    std::function<int()> sf;
+    MoveFunction<int()> mf = sf;
+    CHECK(!mf);
+    CHECK_THROWS_AS(mf(), std::bad_function_call);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty std::function with compatible signature -> empty MoveFunction") {
+    std::function<int(int)> sf;
+    MoveFunction<long(int)> mf = sf;
+    CHECK(!mf);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty vlink::Function -> empty MoveFunction") {
+    Function<int()> f;
+    MoveFunction<int()> mf = std::move(f);
+    CHECK(!mf);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty MoveFunction (different signature) -> empty MoveFunction") {
+    MoveFunction<int()> a;
+    MoveFunction<long()> b = std::move(a);
+    CHECK(!b);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("nullptr function pointer -> empty MoveFunction") {
+    using FnPtr = int (*)();
+    FnPtr p = nullptr;
+    MoveFunction<int()> mf = p;
+    CHECK(!mf);
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - cross-type conversion") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("vlink::Function rvalue -> MoveFunction") {
+    Function<int()> f = [] { return 42; };
+    MoveFunction<int()> mf = std::move(f);
+    CHECK(mf() == 42);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("vlink::Function lvalue -> MoveFunction (Function is copy-constructible)") {
+    Function<int()> f = [] { return 21; };
+    MoveFunction<int()> mf = f;
+    CHECK(mf() == 21);
+    CHECK(static_cast<bool>(f));  // f untouched -- the lvalue path copies
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("std::function lvalue -> MoveFunction") {
+    std::function<int()> sf = [] { return 7; };
+    MoveFunction<int()> mf = sf;
+    CHECK(mf() == 7);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("round-trip MoveFunction -> MoveFunction (different signature)") {
+    MoveFunction<int(int)> a = [](int x) { return x + 1; };
+    MoveFunction<long(int)> b = std::move(a);
+    CHECK(b(10) == 11);
+  }
+}
+
+#if defined(__cpp_rtti)
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - target access") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty MoveFunction reports typeid(void) and no target") {
+    MoveFunction<int()> cb;
+    CHECK(cb.target_type() == typeid(void));
+    CHECK(cb.target<int (*)()>() == nullptr);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("target returns the stored inline callable") {
+    auto fn = [base = 4](int x) { return base + x; };
+    using Fn = decltype(fn);
+
+    MoveFunction<int(int)> cb = fn;
+
+    CHECK(cb.target_type() == typeid(Fn));
+    REQUIRE(cb.target<Fn>() != nullptr);
+    CHECK((*cb.target<Fn>())(5) == 9);
+
+    const MoveFunction<int(int)>& cref = cb;
+    REQUIRE(cref.target<Fn>() != nullptr);
+    CHECK((*cref.target<Fn>())(6) == 10);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("target returns the stored heap callable") {
+    MoveFunction<int()> cb = UniquePtrCallable{17};
+
+    CHECK(cb.target_type() == typeid(UniquePtrCallable));
+    REQUIRE(cb.target<UniquePtrCallable>() != nullptr);
+    CHECK((*cb.target<UniquePtrCallable>())() == 17);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("moved-from MoveFunction reports empty target") {
+    MoveFunction<int()> a = [] { return 5; };
+    MoveFunction<int()> b = std::move(a);
+
+    CHECK(a.target_type() == typeid(void));
+    CHECK(a.target<int (*)()>() == nullptr);
+  }
+}
+#endif
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - additional target kinds") {
+  // -------------------------------------------------------------------------
+  static int free_fn_for_movefn(int x) { return x + 1; }
+
+  TEST_CASE("MoveFunction wraps a free function pointer") {
+    MoveFunction<int(int)> cb = &free_fn_for_movefn;
+    CHECK(cb(7) == 8);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction wraps a member function pointer") {
+    struct S {
+      int v = 0;
+      int add(int x) const { return v + x; }
+    };
+    S s{10};
+
+    MoveFunction<int(const S&, int)> cb = &S::add;
+    CHECK(cb(s, 3) == 13);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("nullptr member function pointer -> empty MoveFunction") {
+    struct S {
+      int add(int x) const { return x; }
+    };
+    using MemPtr = int (S::*)(int) const;
+    MemPtr p = nullptr;
+
+    MoveFunction<int(const S&, int)> cb = p;
+    CHECK(!cb);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction stores a mutable lambda and mutates state across calls") {
+    MoveFunction<int()> cb = [n = 0]() mutable { return ++n; };
+    CHECK(cb() == 1);
+    CHECK(cb() == 2);
+    CHECK(cb() == 3);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("cross-signature wrap of a heap-stored move-only target preserves behaviour") {
+    struct Heavy {
+      std::unique_ptr<int> p;
+      std::array<int, 32> pad{};
+      Heavy() : p(std::make_unique<int>(50)) {}
+      Heavy(const Heavy&) = delete;
+      Heavy(Heavy&&) noexcept = default;
+      Heavy& operator=(const Heavy&) = delete;
+      Heavy& operator=(Heavy&&) noexcept = default;
+      int operator()() const { return *p; }
+    };
+
+    MoveFunction<int()> inner = Heavy{};
+    MoveFunction<long()> outer = std::move(inner);
+    CHECK(!inner);
+    CHECK(outer() == 50);
+  }
+}
+
+#if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - std::move_only_function interop") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("empty std::move_only_function -> empty MoveFunction") {
+    std::move_only_function<int()> sm;
+    MoveFunction<int()> mf = std::move(sm);
+    CHECK(!mf);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("non-empty std::move_only_function -> MoveFunction (move)") {
+    std::move_only_function<int()> sm = [] { return 13; };
+    MoveFunction<int()> mf = std::move(sm);
+    CHECK(mf() == 13);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction -> std::move_only_function (move)") {
+    MoveFunction<int()> mf = [] { return 11; };
+    std::move_only_function<int()> sm = std::move(mf);
+    CHECK(sm() == 11);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("round-trip MoveFunction -> std::move_only_function -> MoveFunction") {
+    MoveFunction<int(int)> a = [](int x) { return x * x; };
+    std::move_only_function<int(int)> mid = std::move(a);
+    MoveFunction<int(int)> b = std::move(mid);
+    CHECK(b(11) == 121);
+  }
+}
+#endif
 
 #endif
 

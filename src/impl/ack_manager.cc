@@ -23,7 +23,6 @@
 
 #include "./impl/ack_manager.h"
 
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <set>

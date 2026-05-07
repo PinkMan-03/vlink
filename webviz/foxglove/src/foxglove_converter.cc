@@ -23,6 +23,7 @@
 
 #include "foxglove_converter.h"
 
+#include <vlink/base/functional.h>
 #include <vlink/base/helpers.h>
 
 #include <CameraCalibration.fbs.hpp>
@@ -2860,7 +2861,7 @@ bool FoxgloveConverter::resolve_proto_schema(const std::string& proto_name, std:
         std::unordered_set<std::string> seen;
 #endif
 
-        std::function<void(const google::protobuf::FileDescriptor*)> dfs;
+        vlink::MoveFunction<void(const google::protobuf::FileDescriptor*)> dfs;
 
         dfs = [&ordered, &seen, &dfs](const google::protobuf::FileDescriptor* fd) {
 #if GOOGLE_PROTOBUF_VERSION >= 6030000

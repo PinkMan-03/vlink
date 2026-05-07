@@ -116,10 +116,10 @@ bool ShmClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chr
       ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
     };
 
-    return ack_manager_.process(ack_request, timeout.count() - elapsed,
-                                [this, &req_data, ack_function = std::move(ack_function)]() {
-                                  return object_->call(static_cast<uint64_t>(conf_.hash_code), req_data, ack_function);
-                                });
+    return ack_manager_.process(
+        ack_request, timeout.count() - elapsed, [this, &req_data, ack_function = std::move(ack_function)]() mutable {
+          return object_->call(static_cast<uint64_t>(conf_.hash_code), req_data, std::move(ack_function));
+        });
   }
 
   return object_->call(static_cast<uint64_t>(conf_.hash_code), req_data, std::move(callback));

@@ -413,7 +413,7 @@ MessageLoop& MqttFactory::get_message_loop() { return message_loop_; }
 
 void MqttFactory::subscribe_topic(void* owner, int32_t domain, const std::string& fragment,
                                   const Conf::PropertiesMap& properties, const std::string& topic, int qos,
-                                  vlink::Function<void(const std::string&, const uint8_t*, size_t)> callback) {
+                                  vlink::Function<void(const std::string&, const uint8_t*, size_t)>&& callback) {
   MqttSessionID session_id = MqttSessionID{domain, fragment, properties};
   MqttSubscriptionID subscription_id = MqttSubscriptionID{session_id, topic};
   int target_qos = qos;
@@ -536,7 +536,7 @@ bool MqttFactory::publish_topic(int32_t domain, const std::string& fragment, con
 
 void MqttFactory::register_connection_callback(void* owner, int32_t domain, const std::string& fragment,
                                                const Conf::PropertiesMap& properties,
-                                               vlink::Function<void(bool)> callback) {
+                                               vlink::Function<void(bool)>&& callback) {
   std::lock_guard lock(connection_mtx_);
   connection_callbacks_[owner] = {MqttSessionID{domain, fragment, properties}, std::move(callback)};
 }

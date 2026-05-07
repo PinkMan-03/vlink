@@ -81,8 +81,12 @@ class VLINK_EXPORT ThreadPool {
  public:
   /**
    * @brief Callback type for tasks submitted to the pool.
+   *
+   * @details
+   * Move-only (`vlink::MoveFunction<void()>`); see @c MessageLoop::Callback for
+   * the rationale.
    */
-  using Callback = vlink::Function<void()>;
+  using Callback = vlink::MoveFunction<void()>;
 
   /**
    * @brief Queue implementation type.
@@ -242,12 +246,12 @@ class VLINK_EXPORT ThreadPool {
 
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> ThreadPool::invoke_task(FunctionT&& function, ArgsT&&... args) {
-  auto task = std::make_shared<std::packaged_task<ResultT()>>(
+  std::packaged_task<ResultT()> task(
       std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
 
-  std::future<ResultT> res = task->get_future();
+  std::future<ResultT> res = task.get_future();
 
-  std::invoke(&ThreadPool::post_task, this, [task]() { (*task.get())(); });
+  post_task([t = std::move(task)]() mutable { t(); });
 
   return res;
 }

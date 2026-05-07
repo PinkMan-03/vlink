@@ -108,8 +108,14 @@ class VLINK_EXPORT MessageLoop {
  public:
   /**
    * @brief Callback type for tasks and event handlers.
+   *
+   * @details
+   * Move-only (`vlink::MoveFunction<void()>`).  Posting and storage paths only
+   * require move semantics; using a move-only wrapper allows targets such as
+   * @c std::packaged_task and lambdas with @c std::unique_ptr captures to be
+   * scheduled directly without a @c std::shared_ptr trampoline.
    */
-  using Callback = vlink::Function<void()>;
+  using Callback = vlink::MoveFunction<void()>;
 
   /**
    * @brief Queue implementation type.
@@ -613,14 +619,12 @@ Schedule::RetStatus MessageLoop::exec_task(const Schedule::Config& config, Callb
 
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> MessageLoop::invoke_task(FunctionT&& function, ArgsT&&... args) {
-  auto task = std::make_shared<std::packaged_task<ResultT()>>(
+  std::packaged_task<ResultT()> task(
       std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
 
-  std::future<ResultT> res = task->get_future();
+  std::future<ResultT> res = task.get_future();
 
-  using TaskFunction = bool (MessageLoop::*)(Callback&&);
-
-  std::invoke(static_cast<TaskFunction>(&MessageLoop::post_task), this, [task]() { (*task.get())(); });
+  post_task([t = std::move(task)]() mutable { t(); });
 
   return res;
 }
@@ -628,15 +632,12 @@ inline std::future<ResultT> MessageLoop::invoke_task(FunctionT&& function, ArgsT
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> MessageLoop::invoke_task_with_priority(FunctionT&& function, uint16_t priority,
                                                                    ArgsT&&... args) {
-  auto task = std::make_shared<std::packaged_task<ResultT()>>(
+  std::packaged_task<ResultT()> task(
       std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
 
-  std::future<ResultT> res = task->get_future();
+  std::future<ResultT> res = task.get_future();
 
-  using TaskFunction = bool (MessageLoop::*)(Callback&&, uint16_t);
-
-  std::invoke(
-      static_cast<TaskFunction>(&MessageLoop::post_task_with_priority), this, [task]() { (*task.get())(); }, priority);
+  post_task_with_priority([t = std::move(task)]() mutable { t(); }, priority);
 
   return res;
 }

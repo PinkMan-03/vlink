@@ -115,16 +115,23 @@ void DdscClientImpl::process_message(dds_entity_t reader) {
       continue;
     }
 
-    std::lock_guard param_lock(param_mtx_);
-    auto iter = callbacks_.find(msg.id);
+    NodeImpl::MsgCallback cb;
+    {
+      std::lock_guard param_lock(param_mtx_);
+      auto iter = callbacks_.find(msg.id);
 
-    if VUNLIKELY (iter == callbacks_.end()) {
-      DdscFactory::release_data(reader, msg);
-      continue;
+      if VUNLIKELY (iter == callbacks_.end()) {
+        DdscFactory::release_data(reader, msg);
+        continue;
+      }
+
+      cb = std::move(iter->second);
+      callbacks_.erase(iter);
     }
 
-    iter->second(msg.bytes);
-    callbacks_.erase(iter);
+    if VLIKELY (cb) {
+      cb(msg.bytes);
+    }
 
     DdscFactory::release_data(reader, msg);
   }

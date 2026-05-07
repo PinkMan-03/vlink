@@ -129,10 +129,11 @@ bool MqttClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
       object_timeout = static_cast<int>(remaining);
     }
 
-    return ack_manager_.process(
-        ack_request, object_timeout, [this, &req_data, ack_function = std::move(ack_function), object_timeout]() {
-          return object_->call(this, static_cast<uint64_t>(conf_.hash_code), req_data, ack_function, object_timeout);
-        });
+    return ack_manager_.process(ack_request, object_timeout,
+                                [this, &req_data, ack_function = std::move(ack_function), object_timeout]() mutable {
+                                  return object_->call(this, static_cast<uint64_t>(conf_.hash_code), req_data,
+                                                       std::move(ack_function), object_timeout);
+                                });
   }
 
   return object_->call(this, static_cast<uint64_t>(conf_.hash_code), req_data, std::move(callback), timeout.count());

@@ -150,7 +150,7 @@ Schedule::RetStatus& Schedule::RetStatus::on_then(RetCallback&& callback) {
 
 // Schedule
 Schedule::Status Schedule::process(const Config& config, Callback&& callback, Callback& wrapper_callback) {
-  RetCallback adapted_callback = [callback = std::move(callback)]() -> bool {
+  RetCallback adapted_callback = [callback = std::move(callback)]() mutable -> bool {
     if VLIKELY (callback) {
       callback();
     }
@@ -172,7 +172,7 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
 
   auto submit_time = std::chrono::steady_clock::now();
 
-  wrapper_callback = [callback = std::move(callback), config, submit_time, impl = status.impl_]() {
+  wrapper_callback = [callback = std::move(callback), config, submit_time, impl = status.impl_]() mutable {
     std::lock_guard lock(impl->mtx);
 
     if VUNLIKELY (!impl->is_valid) {
@@ -193,7 +193,7 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
       }
     }
 
-    auto run_with_timeout = [&](const Schedule::RetCallback& exe_callback) -> std::optional<bool> {
+    auto run_with_timeout = [&](Schedule::RetCallback& exe_callback) -> std::optional<bool> {
       if VUNLIKELY (!exe_callback) {
         return std::nullopt;
       }

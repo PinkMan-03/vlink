@@ -84,7 +84,7 @@ class VLINK_EXPORT Timer final {
   /**
    * @brief Callback type invoked on each timer tick.
    */
-  using Callback = vlink::Function<void()>;
+  using Callback = vlink::MoveFunction<void()>;
 
   /**
    * @brief Sentinel loop count meaning repeat indefinitely.

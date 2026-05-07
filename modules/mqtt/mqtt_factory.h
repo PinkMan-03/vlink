@@ -26,7 +26,6 @@
 #include <MQTTClient.h>
 
 #include <atomic>
-#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -85,7 +84,7 @@ class MqttFactory final : public AbstractFactory<MqttID> {
 
   void subscribe_topic(void* owner, int32_t domain, const std::string& fragment, const Conf::PropertiesMap& properties,
                        const std::string& topic, int qos,
-                       vlink::Function<void(const std::string&, const uint8_t*, size_t)> callback);
+                       vlink::Function<void(const std::string&, const uint8_t*, size_t)>&& callback);
 
   void unsubscribe_topic(void* owner, int32_t domain, const std::string& fragment,
                          const Conf::PropertiesMap& properties, const std::string& topic);
@@ -94,7 +93,7 @@ class MqttFactory final : public AbstractFactory<MqttID> {
                      const std::string& topic, const uint8_t* payload, size_t payload_size, int qos);
 
   void register_connection_callback(void* owner, int32_t domain, const std::string& fragment,
-                                    const Conf::PropertiesMap& properties, vlink::Function<void(bool)> callback);
+                                    const Conf::PropertiesMap& properties, vlink::Function<void(bool)>&& callback);
 
   void unregister_connection_callback(void* owner);
 

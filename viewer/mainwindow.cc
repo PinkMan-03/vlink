@@ -4006,7 +4006,7 @@ bool MainWindow::get_flatbuffers_property_list(QTreeWidget* widget, const std::s
   }
 
   auto update_scalar_item = [this](QTreeWidgetItem* item, const reflection::Field& field, const QString& value_text,
-                                   int analyze_type, const std::function<void()>& analyze_func) {
+                                   int analyze_type, const vlink::Function<void()>& analyze_func) {
     (void)field;
     item->setText(3, value_text);
     item->setData(1, Qt::UserRole, analyze_type);

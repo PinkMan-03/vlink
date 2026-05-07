@@ -126,16 +126,22 @@ void DdsClientImpl::process_message(dds::DataReader* reader) {
         continue;
       }
 
-      std::lock_guard param_lock(param_mtx_);
-      auto iter = cdr_callbacks_.find(msg.info.related_sample_identity);
+      NodeImpl::MsgCallback cb;
+      {
+        std::lock_guard param_lock(param_mtx_);
+        auto iter = cdr_callbacks_.find(msg.info.related_sample_identity);
 
-      if VUNLIKELY (iter == cdr_callbacks_.end()) {
-        continue;
+        if VUNLIKELY (iter == cdr_callbacks_.end()) {
+          continue;
+        }
+
+        cb = std::move(iter->second);
+        cdr_callbacks_.erase(iter);
       }
 
-      iter->second(msg.bytes);
-
-      cdr_callbacks_.erase(iter);
+      if VLIKELY (cb) {
+        cb(msg.bytes);
+      }
     }
 
     type_support_resp_.delete_data(msg.sample);
@@ -151,15 +157,22 @@ void DdsClientImpl::process_message(dds::DataReader* reader) {
         continue;
       }
 
-      std::lock_guard param_lock(param_mtx_);
-      auto iter = callbacks_.find(msg.id);
+      NodeImpl::MsgCallback cb;
+      {
+        std::lock_guard param_lock(param_mtx_);
+        auto iter = callbacks_.find(msg.id);
 
-      if VUNLIKELY (iter == callbacks_.end()) {
-        continue;
+        if VUNLIKELY (iter == callbacks_.end()) {
+          continue;
+        }
+
+        cb = std::move(iter->second);
+        callbacks_.erase(iter);
       }
 
-      iter->second(msg.bytes);
-      callbacks_.erase(iter);
+      if VLIKELY (cb) {
+        cb(msg.bytes);
+      }
     }
   }
 }

@@ -101,8 +101,8 @@ bool IntraClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::c
     };
 
     return ack_manager_.process(ack_request, timeout.count() - elapsed,
-                                [this, &req_data, ack_function = std::move(ack_function)]() {
-                                  return object_->call(type_, conf_.hash_code, req_data, ack_function);
+                                [this, &req_data, ack_function = std::move(ack_function)]() mutable {
+                                  return object_->call(type_, conf_.hash_code, req_data, std::move(ack_function));
                                 });
   }
 

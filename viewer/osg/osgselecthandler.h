@@ -46,8 +46,8 @@
 
 class OsgSelectHandler : public osgGA::GUIEventHandler {
  public:
-  using SelectCallback = std::function<void(double xMin, double xMax, double yMin, double yMax)>;
-  using CtrlCallback = std::function<bool()>;
+  using SelectCallback = vlink::MoveFunction<void(double xMin, double xMax, double yMin, double yMax)>;
+  using CtrlCallback = vlink::MoveFunction<bool()>;
 
   OsgSelectHandler(osg::ref_ptr<osg::Camera> spHudCamera);
 

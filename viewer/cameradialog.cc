@@ -166,8 +166,8 @@ static bool resolve_flatbuffers_field_path(const FlatbuffersObjectView& root_vie
 
 class CameraLabel : public QLabel {
  public:
-  using PathCallback = std::function<void(const std::string& path, bool whole_label)>;
-  using SizeCallback = std::function<void(int w, int h)>;
+  using PathCallback = vlink::MoveFunction<void(const std::string& path, bool whole_label)>;
+  using SizeCallback = vlink::MoveFunction<void(int w, int h)>;
 
   explicit CameraLabel(const QString& title, CameraDialog* camera_dialog, QWidget* parent = nullptr)
       : QLabel(parent), title_(title), camera_dialog_(camera_dialog) {

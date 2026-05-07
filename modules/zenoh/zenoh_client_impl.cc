@@ -136,10 +136,11 @@ bool ZenohClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::c
       ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
     };
 
-    return ack_manager_.process(
-        ack_request, remaining_timeout, [this, &req_data, ack_function = std::move(ack_function), remaining_timeout]() {
-          return object_->call(this, static_cast<uint64_t>(conf_.hash_code), req_data, ack_function, remaining_timeout);
-        });
+    return ack_manager_.process(ack_request, remaining_timeout,
+                                [this, &req_data, ack_function = std::move(ack_function), remaining_timeout]() mutable {
+                                  return object_->call(this, static_cast<uint64_t>(conf_.hash_code), req_data,
+                                                       std::move(ack_function), remaining_timeout);
+                                });
   }
 
   return object_->call(this, static_cast<uint64_t>(conf_.hash_code), req_data, std::move(callback), timeout.count());

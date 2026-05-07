@@ -313,7 +313,7 @@ GraphTask::GraphTask(const std::string& name, ConditionCallback&& callback, int 
 
 GraphTask::~GraphTask() = default;
 
-void GraphTask::process_and_traverse(const FindTaskCallback& callback) {
+void GraphTask::process_and_traverse(FindTaskCallback&& callback) {
   uint32_t recursion_count = 0;
 
   std::stack<std::shared_ptr<GraphTask>> task_stack;

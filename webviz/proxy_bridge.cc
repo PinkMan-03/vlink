@@ -25,6 +25,7 @@
 
 //
 #include <vlink/base/elapsed_timer.h>
+#include <vlink/base/functional.h>
 #include <vlink/base/helpers.h>
 #include <vlink/base/logger.h>
 #include <vlink/base/message_loop.h>
@@ -64,6 +65,8 @@ struct ProxyBridge::Impl final {
   MessageLoop* data_callback_loop{nullptr};
   ProxyBridge::DataCallbackMode data_callback_mode{ProxyBridge::kQueued};
   ProxyBridge::DataCallback data_callback;
+  // Protects data_callback against concurrent register vs dispatch.
+  mutable std::shared_mutex data_callback_mtx;
 };
 
 ProxyBridge::ProxyBridge(const Config& config, MessageLoop* data_callback_loop) : impl_(std::make_unique<Impl>()) {
@@ -92,7 +95,9 @@ bool ProxyBridge::parse_data_callback_mode(std::string_view value, DataCallbackM
 }
 
 void ProxyBridge::register_data_callback(DataCallback&& callback) {
-  if (!callback) {
+  std::unique_lock lock(impl_->data_callback_mtx);
+
+  if VUNLIKELY (!callback) {
     impl_->data_callback = nullptr;
     return;
   }
@@ -101,21 +106,30 @@ void ProxyBridge::register_data_callback(DataCallback&& callback) {
 }
 
 void ProxyBridge::dispatch_data_callback(const ProxyAPI::Data& data) {
-  if (!impl_->data_callback) {
-    return;
+  {
+    std::shared_lock lock(impl_->data_callback_mtx);
+
+    if VUNLIKELY (!impl_->data_callback) {
+      return;
+    }
   }
 
   if (impl_->data_callback_mode == ProxyBridge::kDirect || impl_->data_callback_loop == nullptr) {
-    impl_->data_callback(data);
+    std::shared_lock lock(impl_->data_callback_mtx);
+
+    if VLIKELY (impl_->data_callback) {
+      impl_->data_callback(data);
+    }
+
     return;
   }
 
   impl_->data_callback_loop->post_task([this, queued_data = data]() {
-    if (!impl_->data_callback) {
-      return;
-    }
+    std::shared_lock lock(impl_->data_callback_mtx);
 
-    impl_->data_callback(queued_data);
+    if VLIKELY (impl_->data_callback) {
+      impl_->data_callback(queued_data);
+    }
   });
 }
 
@@ -373,32 +387,67 @@ class ProxyServerBridge final : public ProxyBridge {
   }
 
   void register_connect_callback(ConnectCallback&& callback) override {
-    connect_callback_ = std::move(callback);
+    bool fire_now = false;
 
-    if (connect_callback_ && connected_.load()) {
-      connect_callback_(true);
+    {
+      std::unique_lock lock(callback_mtx_);
+      connect_callback_ = std::move(callback);
+      fire_now = connect_callback_ && connected_.load();
+    }
+
+    if (fire_now) {
+      std::shared_lock lock(callback_mtx_);
+
+      if VLIKELY (connect_callback_) {
+        connect_callback_(true);
+      }
     }
   }
 
   void register_error_callback(ErrorCallback&& callback) override {
-    error_callback_ = std::move(callback);
+    bool fire_now = false;
+    ProxyAPI::Error error = ProxyAPI::kNoError;
 
-    const auto error = current_error_.load();
+    {
+      std::unique_lock lock(callback_mtx_);
+      error_callback_ = std::move(callback);
+      error = current_error_.load();
+      fire_now = error_callback_ && error != ProxyAPI::kNoError;
+    }
 
-    if (error_callback_ && error != ProxyAPI::kNoError) {
-      error_callback_(error);
+    if (fire_now) {
+      std::shared_lock lock(callback_mtx_);
+
+      if VLIKELY (error_callback_) {
+        error_callback_(error);
+      }
     }
   }
 
   void register_time_callback(TimeCallback&& callback) override {
-    time_callback_ = std::move(callback);
+    bool fire_now = false;
 
-    if (time_callback_ && connected_.load()) {
-      time_callback_(ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMicro, false), ProxyServerBridge::steady_now_us());
+    {
+      std::unique_lock lock(callback_mtx_);
+      time_callback_ = std::move(callback);
+      fire_now = time_callback_ && connected_.load();
+    }
+
+    if (fire_now) {
+      std::shared_lock lock(callback_mtx_);
+
+      if VLIKELY (time_callback_) {
+        time_callback_(ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMicro, false),
+                       ProxyServerBridge::steady_now_us());
+      }
     }
   }
 
-  void register_info_callback(InfoCallback&& callback) override { info_callback_ = std::move(callback); }
+  void register_info_callback(InfoCallback&& callback) override {
+    std::unique_lock lock(callback_mtx_);
+
+    info_callback_ = std::move(callback);
+  }
 
   bool send_control(const ProxyAPI::Control& control, bool async) override {
     if VUNLIKELY (!started_.load() || !can_control()) {
@@ -486,6 +535,8 @@ class ProxyServerBridge final : public ProxyBridge {
   }
 
   void dispatch_connected(bool connected) {
+    std::shared_lock lock(callback_mtx_);
+
     if (connect_callback_) {
       connect_callback_(connected);
     }
@@ -495,6 +546,8 @@ class ProxyServerBridge final : public ProxyBridge {
     if VUNLIKELY (current_error_.exchange(error) == error) {
       return;
     }
+
+    std::shared_lock lock(callback_mtx_);
 
     if (error_callback_) {
       error_callback_(error);
@@ -506,6 +559,8 @@ class ProxyServerBridge final : public ProxyBridge {
       return;
     }
 
+    std::shared_lock lock(callback_mtx_);
+
     if VUNLIKELY (!time_callback_) {
       return;
     }
@@ -514,6 +569,8 @@ class ProxyServerBridge final : public ProxyBridge {
   }
 
   void dispatch_info(const std::vector<ProxyAPI::Info>& info_list) {
+    std::shared_lock lock(callback_mtx_);
+
     if (info_callback_) {
       info_callback_(info_list);
     }
@@ -1096,6 +1153,8 @@ class ProxyServerBridge final : public ProxyBridge {
   bool has_intra_bind_{false};
   bool shm_runtime_inited_{false};
 
+  // Protects connect/error/time/info callbacks against concurrent register vs dispatch.
+  mutable std::shared_mutex callback_mtx_;
   ConnectCallback connect_callback_;
   ErrorCallback error_callback_;
   std::atomic<ProxyAPI::Error> current_error_{ProxyAPI::kNoError};

@@ -200,30 +200,51 @@ ProxyAPI::~ProxyAPI() {
 }
 
 void ProxyAPI::register_connect_callback(ConnectCallback&& callback) {
+  bool fire_now = false;
+
+  if (callback) {
+    std::lock_guard lock(impl_->connect_mtx);
+    fire_now = impl_->is_connected;
+  }
+
+  if (fire_now) {
+    callback(true);
+  }
+
   std::lock_guard lock(impl_->connect_mtx);
   impl_->connect_callback = std::move(callback);
-
-  if (impl_->is_connected) {
-    impl_->connect_callback(true);
-  }
 }
 
 void ProxyAPI::register_error_callback(ErrorCallback&& callback) {
+  Error fire_error = kNoError;
+
+  if (callback) {
+    std::lock_guard lock(impl_->error_mtx);
+    fire_error = impl_->error;
+  }
+
+  if (fire_error != kNoError) {
+    callback(fire_error);
+  }
+
   std::lock_guard lock(impl_->error_mtx);
   impl_->error_callback = std::move(callback);
-
-  if (impl_->error != kNoError) {
-    impl_->error_callback(impl_->error);
-  }
 }
 
 void ProxyAPI::register_time_callback(TimeCallback&& callback) {
+  bool fire_now = false;
+
+  if (callback) {
+    std::lock_guard lock(impl_->time_mtx);
+    fire_now = impl_->sys_elapsed_timer.is_active() && impl_->boot_elapsed_timer.is_active();
+  }
+
+  if (fire_now) {
+    callback(get_current_sys_time(), get_current_boot_time());
+  }
+
   std::lock_guard lock(impl_->time_mtx);
   impl_->time_callback = std::move(callback);
-
-  if (impl_->sys_elapsed_timer.is_active() && impl_->boot_elapsed_timer.is_active()) {
-    impl_->time_callback(get_current_sys_time(), get_current_boot_time());
-  }
 }
 
 void ProxyAPI::register_info_callback(InfoCallback&& callback) {

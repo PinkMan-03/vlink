@@ -67,7 +67,7 @@ FoxgloveRpc::~FoxgloveRpc() {
 
 bool FoxgloveRpc::has_rpcs() const { return has_rpcs({}); }
 
-bool FoxgloveRpc::has_rpcs(std::function<bool(std::string_view)>&& allow_url) const {
+bool FoxgloveRpc::has_rpcs(vlink::MoveFunction<bool(std::string_view)>&& allow_url) const {
   std::shared_lock lock(rpc_mtx_);
 
   for (const auto& rpc_entry : rpcs_) {
@@ -83,7 +83,7 @@ bool FoxgloveRpc::has_rpcs(std::function<bool(std::string_view)>&& allow_url) co
 
 std::vector<Json> FoxgloveRpc::get_rpcs() const { return get_rpcs({}); }
 
-std::vector<Json> FoxgloveRpc::get_rpcs(std::function<bool(std::string_view)>&& allow_url) const {
+std::vector<Json> FoxgloveRpc::get_rpcs(vlink::MoveFunction<bool(std::string_view)>&& allow_url) const {
   std::vector<Json> rpcs;
   std::shared_lock lock(rpc_mtx_);
 
@@ -146,7 +146,7 @@ std::vector<Json> FoxgloveRpc::get_rpcs(std::function<bool(std::string_view)>&& 
   return rpcs;
 }
 
-bool FoxgloveRpc::is_rpc_allowed(uint32_t rpc_id, std::function<bool(std::string_view)>&& allow_url) const {
+bool FoxgloveRpc::is_rpc_allowed(uint32_t rpc_id, vlink::MoveFunction<bool(std::string_view)>&& allow_url) const {
   if (!allow_url) {
     return true;
   }

@@ -63,7 +63,7 @@ bool IntraSetterImpl::detach() {
 void IntraSetterImpl::write(const Bytes& value_data) { object_->publish(type_, conf_.hash_code, value_data); }
 
 void IntraSetterImpl::sync(SyncCallback&& callback) {
-  object_->register_sub_connect_callback(this, [callback = std::move(callback)](bool connected) {
+  object_->register_sub_connect_callback(this, [callback = std::move(callback)](bool connected) mutable {
     if (connected) {
       callback();
     }

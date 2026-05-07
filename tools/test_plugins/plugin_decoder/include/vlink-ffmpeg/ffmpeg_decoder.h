@@ -31,9 +31,10 @@
 
 class FFmpegDecoder : protected vlink::MessageLoop {
  public:
-  using DataCallback = std::function<void(int channel, int seq, int width, int height, const vlink::Bytes& img_data)>;
+  using DataCallback =
+      vlink::MoveFunction<void(int channel, int seq, int width, int height, const vlink::Bytes& img_data)>;
 
-  using ErrorCallback = std::function<void(int channel, int seq)>;
+  using ErrorCallback = vlink::MoveFunction<void(int channel, int seq)>;
 
   enum class InType : uint8_t {
     kUnknown = 0,

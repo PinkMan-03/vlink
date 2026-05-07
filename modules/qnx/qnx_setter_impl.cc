@@ -59,7 +59,7 @@ bool QnxSetterImpl::detach() {
 void QnxSetterImpl::write(const Bytes& msg_data) { object_->publish(conf_.hash_code, msg_data); }
 
 void QnxSetterImpl::sync(SyncCallback&& callback) {
-  object_->register_sub_connect_callback(this, [callback = std::move(callback)](bool connected) {
+  object_->register_sub_connect_callback(this, [callback = std::move(callback)](bool connected) mutable {
     if (connected) {
       callback();
     }

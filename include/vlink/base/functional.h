@@ -23,74 +23,82 @@
 
 /**
  * @file functional.h
- * @brief Type-erased callable wrapper with a 64 byte small-buffer optimisation backed
- *        by @c vlink::MemoryPool for the heap-fallback path.
+ * @brief Type-erased callable wrappers: @c vlink::Function tracks the public
+ *        surface of @c std::function (C++11) and @c vlink::MoveFunction tracks
+ *        @c std::move_only_function (C++23). Storage uses a 64-byte SBO and a
+ *        @c vlink::MemoryPool-backed heap fallback.
  *
  * @details
- * @c vlink::Function<R(Args...)> is a drop-in @c std::function -style wrapper tuned
- * for VLink hot paths.  Three design choices shape its behaviour:
+ * @par Storage predicate (kIsInline)
+ * A target @c FunctorT is held inline iff @b all three conditions hold:
+ * @c sizeof(FunctorT) @c <= @c 64 (one cache line), @c alignof(FunctorT) @c <=
+ * @c alignof(std::max_align_t), and @c FunctorT is nothrow move-constructible.
+ * Otherwise @c FunctorT is allocated through @c vlink::MemoryPool::global_instance();
+ * the original @c sizeof(FunctorT) and @c alignof(FunctorT) are passed back to
+ * @c deallocate so the block routes to its source tier. This predicate
+ * matches the @c __stored_locally rule used by libstdc++
+ * @c std::move_only_function. The 64-byte budget intentionally exceeds the
+ * typical @c std::function SBO (~16-24 B) so common VLink capture sets
+ * (a handful of @c shared_ptr / pointers / small POD) stay inline.
  *
- * - @b SBO @b size : @c kSboSize is fixed at @c 64 bytes (one cache line), large
- *   enough to host most realistic capture sets (a handful of @c shared_ptr , a few
- *   pointers, a few small structs) without ever calling into the heap.  @c sizeof
- *   @c (Function) lands at ~72 bytes which is bigger than @c std::function but still
- *   tight enough for typical task-queue use.
+ * @par Empty-state propagation
+ * Constructing or assigning from any of the following yields an empty
+ * wrapper -- no stored target, no allocation, no installed vtable:
+ *  - an empty function-wrapper source: @c std::function /
+ *    @c vlink::Function (plus @c std::move_only_function and
+ *    @c vlink::MoveFunction when targeting @c MoveFunction);
+ *  - a null function pointer;
+ *  - a null pointer-to-member.
+ * Invoking an empty wrapper throws @c std::bad_function_call. This matches
+ * @c std::function; for @c MoveFunction it is a deliberate divergence from
+ * @c std::move_only_function (which leaves the empty call as UB) so misuse
+ * is diagnosable.
  *
- * - @b std::function @b interop : because the converting constructor accepts any
- *   callable that meets @c is_invocable_r , a @c std::function value can be wrapped
- *   into a @c Function (and vice-versa) without explicit casts.  Direct assignment in
- *   either direction is supported.
+ * @par Exception safety
+ * Copy construction and copy assignment provide the strong guarantee via
+ * copy-and-swap. @c swap, the move constructor, and move assignment are
+ * @c noexcept -- the @c kIsInline predicate guarantees the underlying
+ * FunctorT-move never throws on the inline path, and the heap path moves only a
+ * pointer. Inline construction of @c FunctorT uses placement-new directly into the
+ * SBO; heap construction uses a @c try/@c catch so the pool block is
+ * returned on a constructor exception.
  *
- * - @b Pooled @b heap : when the target does not fit inline, the storage is allocated
- *   from @c vlink::MemoryPool::global_instance() and released back to the same pool.
- *   This avoids stepping on @c ::operator @c new / @c ::operator @c delete on the hot
- *   path and lets the application benefit from VLink's tiered free-list reuse.
+ * @par Object-lifetime model
+ * Inline targets are placed into the SBO via @c ::new(&storage_) @c FunctorT(...).
+ * Heap-mode storage holds an @c FunctorT*; its lifetime is started explicitly
+ * via @c ::new(dst) @c FunctorT*(p) at every site that introduces a new slot
+ * (@c construct_from, @c HeapVTable::copy_construct, @c
+ * HeapVTable::move_construct (dst)) -- this avoids relying on C++20
+ * @c [intro.object]/10 implicit object creation, so the same source is
+ * well-defined under both C++17 and C++20. All subsequent accesses to
+ * the placement-new'd target -- whether the inline @c FunctorT or the heap @c FunctorT*
+ * slot -- go through @c std::launder to obtain a pointer with provenance
+ * matching the live object, satisfying @c [basic.life]/8 strictly.
+ * After @c destroy / move-out the heap slot is set to @c nullptr but its
+ * @c FunctorT* object lifetime continues until the wrapper itself is destroyed.
  *
- * Storage layout (per instance):
- * - 64 byte aligned inline buffer (@c kSboSize).
- * - One @c VTable pointer (4 functions: invoke / copy / move / destroy).
+ * @par RTTI surface
+ * When @c __cpp_rtti is defined, both wrappers expose @c target_type() and
+ * @c target<FunctorT>() with @c std::function semantics. For @c MoveFunction this
+ * is an extension -- @c std::move_only_function omits target inspection.
  *
- * Performance notes:
- * - Invocation is one indirect call through the cached vtable pointer.  Inline targets
- *   incur zero pointer chasing beyond the vtable; pooled targets add one extra load.
- * - Heap fallback is used only when the target's @c sizeof exceeds @c kSboSize, when
- *   its @c alignof exceeds @c alignof(std::max_align_t) , or when its move constructor
- *   may throw.
- * - The vtable is a per-target singleton instantiated once per @c F at link time.
- * - Pool allocations remember exactly the byte count and alignment used at allocation
- *   time so @c MemoryPool::deallocate routes back to the same tier (no free-list
- *   corruption).
+ * @par Limitations
+ * Only the unqualified @c ReturnT(ArgsT...) signature is specialized; the
+ * @c std::move_only_function cv / ref / @c noexcept qualified forms are
+ * not supported and select the undefined primary template (hard error).
  *
- * Semantics tracked from @c std::function:
- * - @c R operator()(Args...) const re-throws @c std::bad_function_call when empty.
- * - @c operator bool reports non-emptiness.
- * - Copy and move follow the underlying target's constructors.  A target lacking a
- *   public copy constructor is rejected at @c Function's converting constructor.
- * - Function-pointer / member-pointer targets equal to @c nullptr produce an empty
- *   @c Function (no allocation, no vtable).
- *
- * @par Example
- * @code
- * vlink::Function<int(int, int)> add = [](int a, int b) { return a + b; };
- * int x = add(1, 2);                                // 3
- *
- * vlink::Function<void()> noop;                     // empty
- * if (noop) { noop(); }                             // skipped
- *
- * vlink::Function<void()> heavy = [big_capture]() { ... };   // pooled if > 64 B
- *
- * // std::function interop -- both directions supported via converting constructors:
- * std::function<void(int)> stdfn = [](int x) { ... };
- * vlink::Function<void(int)> wrapped = stdfn;       // wrap a std::function
- * std::function<void(int)> back = wrapped;          // unwrap into a std::function
- * @endcode
+ * @note
+ * - @c Function requires copy-constructible targets and is itself copyable.
+ * - @c MoveFunction accepts move-only targets and is itself move-only.
+ * - Class template declarations precede the @c Details section;
+ *   out-of-class member definitions follow it.
  */
 
 #pragma once
 
 #include <functional>
 
-#if !defined(VLINK_ENABLE_BASE_FUNCTIONAL) && defined(__unix__) && !defined(__CYGWIN__)
+#if !defined(VLINK_ENABLE_BASE_FUNCTIONAL)
 #define VLINK_ENABLE_BASE_FUNCTIONAL
 #endif
 
@@ -98,6 +106,7 @@
 #include <cstddef>
 #include <new>
 #include <type_traits>
+#include <typeinfo>
 #include <utility>
 
 #include "./macros.h"
@@ -108,361 +117,1168 @@ namespace vlink {
 template <typename SignatureT>
 class Function;
 
+template <typename SignatureT>
+class MoveFunction;
+
+namespace detail {
+
+template <typename TypeT>
+struct IsStdFunction : std::false_type {};
+
+template <typename SignatureT>
+struct IsStdFunction<std::function<SignatureT>> : std::true_type {};
+
+template <typename TypeT>
+struct IsVlinkFunction : std::false_type {};
+
+template <typename SignatureT>
+struct IsVlinkFunction<Function<SignatureT>> : std::true_type {};
+
+template <typename TypeT>
+struct IsVlinkMoveFunction : std::false_type {};
+
+template <typename SignatureT>
+struct IsVlinkMoveFunction<MoveFunction<SignatureT>> : std::true_type {};
+
+#if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+template <typename TypeT>
+struct IsStdMoveOnlyFunction : std::false_type {};
+
+template <typename SignatureT>
+struct IsStdMoveOnlyFunction<std::move_only_function<SignatureT>> : std::true_type {};
+#endif
+
+}  // namespace detail
+
 /**
  * @class Function
- * @brief Type-erased callable wrapper, partial @c std::function replacement.
+ * @brief Copyable type-erased callable wrapper -- @c std::function analogue
+ *        with a 64-byte SBO and @c vlink::MemoryPool-backed heap fallback.
  *
- * @tparam R     Return type of the wrapped callable.
- * @tparam Args  Parameter types of the wrapped callable.
+ * @details
+ * @c Function<ReturnT(ArgsT...)> stores any copy-constructible callable that is
+ * invocable as @c ReturnT(ArgsT...). The observable contract mirrors
+ * @c std::function:
+ *  - @c operator() is @c const (the @c std::function "logical const"
+ *    convention -- the placement-newed target is non-const, so the standard
+ *    @c const_cast pattern in the invoker is well-defined);
+ *  - empty construction is supported via the default constructor and from
+ *    @c nullptr;
+ *  - invoking an empty wrapper throws @c std::bad_function_call;
+ *  - @c target_type() and @c target<FunctorT>() expose the stored target when
+ *    @c __cpp_rtti is defined.
+ *
+ * Copy construction and copy assignment provide the strong exception
+ * guarantee through copy-and-swap. The move constructor, move assignment,
+ * and @c swap are @c noexcept.
  */
-template <typename R, typename... Args>
-class Function<R(Args...)> {
+template <typename ReturnT, typename... ArgsT>
+class Function<ReturnT(ArgsT...)> {
  public:
   /**
-   * @brief Inline-storage byte budget (one cache line).
-   *
-   * @details
-   * Set to @c 64 so most realistic capture sets (several @c shared_ptr , a few
-   * pointers / small POD members) live entirely inline and never touch the heap
-   * fallback path.
-   *
-   * Targets whose @c sizeof, @c alignof, or noexcept-move properties do not satisfy
-   * the inline criteria fall back to a @c vlink::MemoryPool -backed heap path.
+   * @brief Inline storage budget before falling back to @c MemoryPool.
    */
   static constexpr std::size_t kSboSize = 64U;
 
-  using result_type = R;
+  /**
+   * @brief Result type alias, matching @c std::function.
+   */
+  using result_type = ReturnT;
 
   /**
-   * @brief Constructs an empty @c Function.
+   * @brief Constructs an empty function wrapper.
    */
   Function() noexcept = default;
 
   /**
-   * @brief Constructs an empty @c Function from @c nullptr.
+   * @brief Constructs an empty function wrapper from @c nullptr.
    */
-  Function(std::nullptr_t) noexcept {}  // NOLINT(google-explicit-constructor)
+  Function(std::nullptr_t) noexcept;  // NOLINT(google-explicit-constructor)
 
   /**
-   * @brief Copy-constructs from @p other.
+   * @brief Copy-constructs the stored callable, or remains empty.
+   */
+  Function(const Function& other);
+
+  /**
+   * @brief Move-constructs the stored callable and leaves @p other empty.
+   */
+  Function(Function&& other) noexcept;
+
+  /**
+   * @brief Constructs from a compatible copy-constructible callable.
    *
    * @details
-   * If @p other holds a target, the target's copy constructor is invoked into
-   * inline storage or via @c vlink::MemoryPool, mirroring @p other's storage strategy.
-   */
-  Function(const Function& other) { copy_from(other); }
-
-  /**
-   * @brief Move-constructs from @p other and leaves @p other empty.
-   */
-  Function(Function&& other) noexcept { move_from(std::move(other)); }
-
-  /**
-   * @brief Constructs a @c Function from any compatible callable @p f.
+   * Empty function-wrapper sources and null callable pointers produce an empty
+   * wrapper instead of storing a null target.
    *
-   * @details
-   * @p f must be invocable with @c Args... and return a value convertible to @c R.
-   * It must also be copy-constructible (matching @c std::function's contract); the
-   * trait is enforced at compile time so move-only callables are rejected here.
+   * @tparam FunctorT  Callable type accepted by @c std::invoke.
    */
   template <
-      typename F, typename DecayF = std::decay_t<F>,
-      typename = std::enable_if_t<!std::is_same_v<DecayF, Function> && !std::is_same_v<DecayF, std::nullptr_t> &&
-                                  std::is_copy_constructible_v<DecayF> && std::is_invocable_r_v<R, DecayF&, Args...>>>
-  Function(F&& f) {  // NOLINT(google-explicit-constructor)
-    if constexpr (kIsPointerLike<DecayF>) {
-      if VUNLIKELY (f == nullptr) {
-        return;
-      }
-    }
-
-    construct_from<DecayF>(std::forward<F>(f));
-  }
+      typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
+      typename = std::enable_if_t<
+          !std::is_same_v<DecayFunctorT, Function> && !std::is_same_v<DecayFunctorT, std::nullptr_t> &&
+          std::is_copy_constructible_v<DecayFunctorT> && std::is_invocable_r_v<ReturnT, DecayFunctorT&, ArgsT...>>>
+  Function(FunctorT&& f);  // NOLINT(google-explicit-constructor)
 
   /**
-   * @brief Copy assignment via copy-and-swap.
+   * @brief Replaces the target with a copy of @p other.
    */
-  Function& operator=(const Function& other) {
-    if VLIKELY (this != &other) {
-      Function tmp(other);
-      swap(tmp);
-    }
-
-    return *this;
-  }
+  Function& operator=(const Function& other);
 
   /**
-   * @brief Move assignment.  Resets @c *this to empty and steals from @p other.
+   * @brief Replaces the target by moving from @p other.
    */
-  Function& operator=(Function&& other) noexcept {
-    if VLIKELY (this != &other) {
-      reset();
-      move_from(std::move(other));
-    }
-
-    return *this;
-  }
+  Function& operator=(Function&& other) noexcept;
 
   /**
-   * @brief Resets to empty state.
+   * @brief Clears the stored callable.
    */
-  Function& operator=(std::nullptr_t) noexcept {
-    reset();
-    return *this;
-  }
+  Function& operator=(std::nullptr_t) noexcept;
 
   /**
-   * @brief Replaces the wrapped target with @p f via copy-and-swap.
+   * @brief Replaces the target with a compatible copy-constructible callable.
    */
-  template <typename F, typename DecayF = std::decay_t<F>,
-            typename = std::enable_if_t<!std::is_same_v<DecayF, Function> && std::is_copy_constructible_v<DecayF> &&
-                                        std::is_invocable_r_v<R, DecayF&, Args...>>>
-  Function& operator=(F&& f) {
-    Function tmp(std::forward<F>(f));
-    swap(tmp);
-    return *this;
-  }
+  template <
+      typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
+      typename = std::enable_if_t<
+          !std::is_same_v<DecayFunctorT, Function> && !std::is_same_v<DecayFunctorT, std::nullptr_t> &&
+          std::is_copy_constructible_v<DecayFunctorT> && std::is_invocable_r_v<ReturnT, DecayFunctorT&, ArgsT...>>>
+  Function& operator=(FunctorT&& f);
 
   /**
-   * @brief Destructor.
+   * @brief Destroys the stored callable.
+   */
+  ~Function();
+
+  /**
+   * @brief Invokes the stored callable.
    *
-   * @details
-   * If the @c Function holds a target, runs that target's destructor.  For pool-allocated
-   * targets the underlying memory is then returned to @c vlink::MemoryPool .
-   * Empty @c Function instances are destroyed at zero cost.
+   * @throws std::bad_function_call if the wrapper is empty.
    */
-  ~Function() { reset(); }
+  ReturnT operator()(ArgsT... args) const;
 
   /**
-   * @brief Invokes the wrapped target with @p args.
-   *
-   * @throws std::bad_function_call if the @c Function is empty.
+   * @brief Returns whether a callable target is stored.
    */
-  R operator()(Args... args) const {
-    if VUNLIKELY (vtable_ == nullptr) {
-      throw std::bad_function_call();
-    }
+  explicit operator bool() const noexcept;
 
-    return vtable_->invoke(&storage_, std::forward<Args>(args)...);
-  }
+#if defined(__cpp_rtti)
+  /**
+   * @brief Returns the stored callable type, or @c typeid(void) when empty.
+   */
+  const std::type_info& target_type() const noexcept;
 
   /**
-   * @brief Returns @c true iff the @c Function wraps a target.
+   * @brief Returns the stored target when its type is exactly @c FunctorT.
    */
-  explicit operator bool() const noexcept { return vtable_ != nullptr; }
+  template <typename FunctorT>
+  FunctorT* target() noexcept;
 
   /**
-   * @brief Exchanges the wrapped target with @p other.
+   * @brief Returns the stored target when its type is exactly @c FunctorT.
    */
-  void swap(Function& other) noexcept {
-    if VUNLIKELY (this == &other) {
-      return;
-    }
+  template <typename FunctorT>
+  const FunctorT* target() const noexcept;
+#endif
 
-    Function tmp(std::move(*this));
-    *this = std::move(other);
-    other = std::move(tmp);
-  }
+  /**
+   * @brief Swaps this wrapper with @p other.
+   */
+  void swap(Function& other) noexcept;
 
  private:
-  template <typename F>
-  static constexpr bool kIsPointerLike =
-      std::is_pointer_v<F> || std::is_member_pointer_v<F> || std::is_function_v<std::remove_pointer_t<F>>;
+  template <typename FunctorT>
+  static constexpr bool kIsPointerLike = std::is_pointer_v<FunctorT> || std::is_member_pointer_v<FunctorT> ||
+                                         std::is_function_v<std::remove_pointer_t<FunctorT>>;
 
-  template <typename F>
-  static constexpr bool kIsInline =
-      sizeof(F) <= kSboSize && alignof(F) <= alignof(std::max_align_t) && std::is_nothrow_move_constructible_v<F>;
+  template <typename FunctorT>
+  static constexpr bool kIsFunctionWrapper =
+      detail::IsStdFunction<FunctorT>::value || detail::IsVlinkFunction<FunctorT>::value;
+
+  template <typename FunctorT>
+  static constexpr bool kIsInline = sizeof(FunctorT) <= kSboSize && alignof(FunctorT) <= alignof(std::max_align_t) &&
+                                    std::is_nothrow_move_constructible_v<FunctorT>;
 
   struct VTable final {
-    R (*invoke)(const void* storage, Args... args);
+    ReturnT (*invoke)(const void* storage, ArgsT... args);
     void (*copy_construct)(void* dst, const void* src);
     void (*move_construct)(void* dst, void* src) noexcept;
     void (*destroy)(void* storage) noexcept;
+#if defined(__cpp_rtti)
+    const std::type_info& (*target_type)() noexcept;
+    void* (*target)(void* storage) noexcept;
+    const void* (*target_const)(const void* storage) noexcept;
+#endif
   };
 
-  template <typename F>
+  template <typename FunctorT>
   struct InlineVTable {
-    static R invoke(const void* storage, Args... args) {
-      auto* f = reinterpret_cast<F*>(const_cast<void*>(storage));
-
-      if constexpr (std::is_void_v<R>) {
-        std::invoke(*f, std::forward<Args>(args)...);
-      } else {
-        return std::invoke(*f, std::forward<Args>(args)...);
-      }
-    }
-
-    static void copy_construct(void* dst, const void* src) {
-      const auto* src_f = reinterpret_cast<const F*>(src);
-      ::new (dst) F(*src_f);
-    }
-
-    static void move_construct(void* dst, void* src) noexcept {
-      auto* src_f = reinterpret_cast<F*>(src);
-      ::new (dst) F(std::move(*src_f));
-      src_f->~F();
-    }
-
-    static void destroy(void* storage) noexcept {
-      auto* f = reinterpret_cast<F*>(storage);
-      f->~F();
-    }
+    static ReturnT invoke(const void* storage, ArgsT... args);
+    static void copy_construct(void* dst, const void* src);
+    static void move_construct(void* dst, void* src) noexcept;
+    static void destroy(void* storage) noexcept;
+#if defined(__cpp_rtti)
+    static const std::type_info& target_type() noexcept;
+    static void* target(void* storage) noexcept;
+    static const void* target_const(const void* storage) noexcept;
+#endif
   };
 
-  template <typename F>
+  template <typename FunctorT>
   struct HeapVTable {
-    static R invoke(const void* storage, Args... args) {
-      F* f = *static_cast<F* const*>(storage);
-
-      if constexpr (std::is_void_v<R>) {
-        std::invoke(*f, std::forward<Args>(args)...);
-      } else {
-        return std::invoke(*f, std::forward<Args>(args)...);
-      }
-    }
-
-    static void copy_construct(void* dst, const void* src) {
-      F* src_f = *static_cast<F* const*>(src);
-
-      static auto& pool = MemoryPool::global_instance();
-
-      void* mem = pool.allocate(sizeof(F), alignof(F));
-
-      if VUNLIKELY (mem == nullptr) {
-        throw std::bad_alloc();
-      }
-
-      try {
-        F* new_f = ::new (mem) F(*src_f);
-        *static_cast<F**>(dst) = new_f;
-      } catch (...) {
-        pool.deallocate(mem, sizeof(F), alignof(F));
-        throw;
-      }
-    }
-
-    static void move_construct(void* dst, void* src) noexcept {
-      F* src_f = *static_cast<F**>(src);
-      *static_cast<F**>(dst) = src_f;
-      *static_cast<F**>(src) = nullptr;
-    }
-
-    static void destroy(void* storage) noexcept {
-      F** slot = static_cast<F**>(storage);
-      F* f = *slot;
-
-      if VLIKELY (f != nullptr) {
-        f->~F();
-
-        static auto& pool = MemoryPool::global_instance();
-
-        pool.deallocate(f, sizeof(F), alignof(F));
-
-        *slot = nullptr;
-      }
-    }
+    static ReturnT invoke(const void* storage, ArgsT... args);
+    static void copy_construct(void* dst, const void* src);
+    static void move_construct(void* dst, void* src) noexcept;
+    static void destroy(void* storage) noexcept;
+#if defined(__cpp_rtti)
+    static const std::type_info& target_type() noexcept;
+    static void* target(void* storage) noexcept;
+    static const void* target_const(const void* storage) noexcept;
+#endif
   };
 
-  template <typename F>
-  static const VTable* get_vtable() noexcept {
-    if constexpr (kIsInline<F>) {
-      static constexpr VTable kVTable = {
-          &InlineVTable<F>::invoke,
-          &InlineVTable<F>::copy_construct,
-          &InlineVTable<F>::move_construct,
-          &InlineVTable<F>::destroy,
-      };
-      return &kVTable;
-    } else {
-      static constexpr VTable kVTable = {
-          &HeapVTable<F>::invoke,
-          &HeapVTable<F>::copy_construct,
-          &HeapVTable<F>::move_construct,
-          &HeapVTable<F>::destroy,
-      };
-      return &kVTable;
-    }
-  }
+  template <typename FunctorT>
+  static const VTable* get_vtable() noexcept;
 
-  template <typename F, typename Source>
-  void construct_from(Source&& src) {
-    if constexpr (kIsInline<F>) {
-      ::new (&storage_) F(std::forward<Source>(src));
-    } else {
-      static auto& pool = MemoryPool::global_instance();
+  template <typename FunctorT, typename SourceT>
+  void construct_from(SourceT&& src);
 
-      void* mem = pool.allocate(sizeof(F), alignof(F));
-
-      if VUNLIKELY (mem == nullptr) {
-        throw std::bad_alloc();
-      }
-
-      try {
-        F* new_f = ::new (mem) F(std::forward<Source>(src));
-        *reinterpret_cast<F**>(&storage_) = new_f;
-      } catch (...) {
-        pool.deallocate(mem, sizeof(F), alignof(F));
-        throw;
-      }
-    }
-
-    vtable_ = get_vtable<F>();
-  }
-
-  void copy_from(const Function& other) {
-    if VLIKELY (other.vtable_ != nullptr) {
-      other.vtable_->copy_construct(&storage_, &other.storage_);
-      vtable_ = other.vtable_;
-    }
-  }
-
-  void move_from(Function&& other) noexcept {
-    if VLIKELY (other.vtable_ != nullptr) {
-      other.vtable_->move_construct(&storage_, &other.storage_);
-      vtable_ = other.vtable_;
-      other.vtable_ = nullptr;
-    }
-  }
-
-  void reset() noexcept {
-    if (vtable_ != nullptr) {
-      vtable_->destroy(&storage_);
-      vtable_ = nullptr;
-    }
-  }
+  void copy_from(const Function& other);
+  void move_from(Function&& other) noexcept;
+  void reset() noexcept;
 
   alignas(std::max_align_t) std::byte storage_[kSboSize]{};
   const VTable* vtable_{nullptr};
 };
 
 /**
- * @brief Free-function @c swap for ADL.
+ * @brief Swaps two function wrappers.
  */
-template <typename R, typename... Args>
-inline void swap(Function<R(Args...)>& lhs, Function<R(Args...)>& rhs) noexcept {
+template <typename ReturnT, typename... ArgsT>
+void swap(Function<ReturnT(ArgsT...)>& lhs, Function<ReturnT(ArgsT...)>& rhs) noexcept;
+
+/**
+ * @brief Returns whether @p cb is empty.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator==(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+
+/**
+ * @brief Returns whether @p cb is empty.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator==(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept;
+
+/**
+ * @brief Returns whether @p cb stores a callable target.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator!=(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+
+/**
+ * @brief Returns whether @p cb stores a callable target.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept;
+
+/**
+ * @class MoveFunction
+ * @brief Move-only type-erased callable wrapper -- @c std::move_only_function
+ *        analogue sharing the 64-byte SBO and @c MemoryPool fallback used by
+ *        @c Function.
+ *
+ * @details
+ * @c MoveFunction<ReturnT(ArgsT...)> stores any move-constructible callable that
+ * is invocable as @c ReturnT(ArgsT...). It mirrors @c std::move_only_function with
+ * two deliberate divergences and one extension:
+ *  - @b Divergence: invoking an empty wrapper throws
+ *    @c std::bad_function_call (matching @c Function and @c std::function);
+ *    @c std::move_only_function leaves it as UB.
+ *  - @b Divergence: only the unqualified @c ReturnT(ArgsT...) signature is
+ *    specialized; cv / ref / @c noexcept qualified forms are unsupported.
+ *  - @b Extension: @c target_type() / @c target<FunctorT>() are provided when
+ *    @c __cpp_rtti is defined.
+ *
+ * @c operator() is non-@c const, so @c MoveFunction can carry mutating /
+ * @c std::packaged_task -style targets without the @c std::function
+ * "logical const" workaround. Move construction, move assignment, and
+ * @c swap are @c noexcept; copy operations are @c =delete.
+ */
+template <typename ReturnT, typename... ArgsT>
+class MoveFunction<ReturnT(ArgsT...)> {
+ public:
+  /**
+   * @brief Inline storage budget before falling back to @c MemoryPool.
+   */
+  static constexpr std::size_t kSboSize = 64U;
+
+  /**
+   * @brief Result type alias.
+   */
+  using result_type = ReturnT;
+
+  /**
+   * @brief Constructs an empty move-only function wrapper.
+   */
+  MoveFunction() noexcept = default;
+
+  /**
+   * @brief Constructs an empty move-only function wrapper from @c nullptr.
+   */
+  MoveFunction(std::nullptr_t) noexcept;  // NOLINT(google-explicit-constructor)
+
+  MoveFunction(const MoveFunction&) = delete;
+  MoveFunction& operator=(const MoveFunction&) = delete;
+
+  /**
+   * @brief Move-constructs the stored callable and leaves @p other empty.
+   */
+  MoveFunction(MoveFunction&& other) noexcept;
+
+  /**
+   * @brief Constructs from a compatible move-constructible callable.
+   *
+   * @details
+   * Empty function-wrapper sources and null callable pointers produce an empty
+   * wrapper instead of storing a null target.
+   *
+   * @tparam FunctorT  Callable type accepted by @c std::invoke.
+   */
+  template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
+            typename = std::enable_if_t<
+                !std::is_same_v<DecayFunctorT, MoveFunction> && !std::is_same_v<DecayFunctorT, std::nullptr_t> &&
+                std::is_constructible_v<DecayFunctorT, FunctorT> && std::is_move_constructible_v<DecayFunctorT> &&
+                std::is_invocable_r_v<ReturnT, DecayFunctorT&, ArgsT...>>>
+  MoveFunction(FunctorT&& f);  // NOLINT(google-explicit-constructor)
+
+  /**
+   * @brief Replaces the target by moving from @p other.
+   */
+  MoveFunction& operator=(MoveFunction&& other) noexcept;
+
+  /**
+   * @brief Clears the stored callable.
+   */
+  MoveFunction& operator=(std::nullptr_t) noexcept;
+
+  /**
+   * @brief Replaces the target with a compatible move-constructible callable.
+   */
+  template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
+            typename = std::enable_if_t<
+                !std::is_same_v<DecayFunctorT, MoveFunction> && !std::is_same_v<DecayFunctorT, std::nullptr_t> &&
+                std::is_constructible_v<DecayFunctorT, FunctorT> && std::is_move_constructible_v<DecayFunctorT> &&
+                std::is_invocable_r_v<ReturnT, DecayFunctorT&, ArgsT...>>>
+  MoveFunction& operator=(FunctorT&& f);
+
+  /**
+   * @brief Destroys the stored callable.
+   */
+  ~MoveFunction();
+
+  /**
+   * @brief Invokes the stored callable.
+   *
+   * @throws std::bad_function_call if the wrapper is empty.
+   */
+  ReturnT operator()(ArgsT... args);
+
+  /**
+   * @brief Returns whether a callable target is stored.
+   */
+  explicit operator bool() const noexcept;
+
+#if defined(__cpp_rtti)
+  /**
+   * @brief Returns the stored callable type, or @c typeid(void) when empty.
+   */
+  const std::type_info& target_type() const noexcept;
+
+  /**
+   * @brief Returns the stored target when its type is exactly @c FunctorT.
+   */
+  template <typename FunctorT>
+  FunctorT* target() noexcept;
+
+  /**
+   * @brief Returns the stored target when its type is exactly @c FunctorT.
+   */
+  template <typename FunctorT>
+  const FunctorT* target() const noexcept;
+#endif
+
+  /**
+   * @brief Swaps this wrapper with @p other.
+   */
+  void swap(MoveFunction& other) noexcept;
+
+ private:
+  template <typename FunctorT>
+  static constexpr bool kIsPointerLike = std::is_pointer_v<FunctorT> || std::is_member_pointer_v<FunctorT> ||
+                                         std::is_function_v<std::remove_pointer_t<FunctorT>>;
+
+  template <typename FunctorT>
+  static constexpr bool kIsFunctionWrapper =
+      detail::IsStdFunction<FunctorT>::value || detail::IsVlinkFunction<FunctorT>::value ||
+#if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+      detail::IsVlinkMoveFunction<FunctorT>::value || detail::IsStdMoveOnlyFunction<FunctorT>::value;
+#else
+      detail::IsVlinkMoveFunction<FunctorT>::value;
+#endif
+
+  template <typename FunctorT>
+  static constexpr bool kIsInline = sizeof(FunctorT) <= kSboSize && alignof(FunctorT) <= alignof(std::max_align_t) &&
+                                    std::is_nothrow_move_constructible_v<FunctorT>;
+
+  struct VTable final {
+    ReturnT (*invoke)(void* storage, ArgsT... args);
+    void (*move_construct)(void* dst, void* src) noexcept;
+    void (*destroy)(void* storage) noexcept;
+#if defined(__cpp_rtti)
+    const std::type_info& (*target_type)() noexcept;
+    void* (*target)(void* storage) noexcept;
+    const void* (*target_const)(const void* storage) noexcept;
+#endif
+  };
+
+  template <typename FunctorT>
+  struct InlineVTable {
+    static ReturnT invoke(void* storage, ArgsT... args);
+    static void move_construct(void* dst, void* src) noexcept;
+    static void destroy(void* storage) noexcept;
+#if defined(__cpp_rtti)
+    static const std::type_info& target_type() noexcept;
+    static void* target(void* storage) noexcept;
+    static const void* target_const(const void* storage) noexcept;
+#endif
+  };
+
+  template <typename FunctorT>
+  struct HeapVTable {
+    static ReturnT invoke(void* storage, ArgsT... args);
+    static void move_construct(void* dst, void* src) noexcept;
+    static void destroy(void* storage) noexcept;
+#if defined(__cpp_rtti)
+    static const std::type_info& target_type() noexcept;
+    static void* target(void* storage) noexcept;
+    static const void* target_const(const void* storage) noexcept;
+#endif
+  };
+
+  template <typename FunctorT>
+  static const VTable* get_vtable() noexcept;
+
+  template <typename FunctorT, typename SourceT>
+  void construct_from(SourceT&& src);
+
+  void move_from(MoveFunction&& other) noexcept;
+  void reset() noexcept;
+
+  alignas(std::max_align_t) std::byte storage_[kSboSize]{};
+  const VTable* vtable_{nullptr};
+};
+
+/**
+ * @brief Swaps two move-only function wrappers.
+ */
+template <typename ReturnT, typename... ArgsT>
+void swap(MoveFunction<ReturnT(ArgsT...)>& lhs, MoveFunction<ReturnT(ArgsT...)>& rhs) noexcept;
+
+/**
+ * @brief Returns whether @p cb is empty.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator==(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+
+/**
+ * @brief Returns whether @p cb is empty.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator==(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept;
+
+/**
+ * @brief Returns whether @p cb stores a callable target.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator!=(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+
+/**
+ * @brief Returns whether @p cb stores a callable target.
+ */
+template <typename ReturnT, typename... ArgsT>
+bool operator!=(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept;
+
+////////////////////////////////////////////////////////////////
+/// Details
+////////////////////////////////////////////////////////////////
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>::Function(std::nullptr_t) noexcept {}
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>::Function(const Function& other) {
+  copy_from(other);
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>::Function(Function&& other) noexcept {
+  move_from(std::move(other));
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT, typename DecayFunctorT, typename>
+inline Function<ReturnT(ArgsT...)>::Function(FunctorT&& f) {
+  if constexpr (kIsFunctionWrapper<DecayFunctorT>) {
+    if VUNLIKELY (!f) {
+      return;
+    }
+  } else if constexpr (kIsPointerLike<DecayFunctorT>) {
+    if VUNLIKELY (f == nullptr) {
+      return;
+    }
+  }
+
+  construct_from<DecayFunctorT>(std::forward<FunctorT>(f));
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(const Function& other) {
+  if VLIKELY (this != &other) {
+    Function tmp(other);
+    swap(tmp);
+  }
+
+  return *this;
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(Function&& other) noexcept {
+  if VLIKELY (this != &other) {
+    reset();
+    move_from(std::move(other));
+  }
+
+  return *this;
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(std::nullptr_t) noexcept {
+  reset();
+  return *this;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT, typename DecayFunctorT, typename>
+inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(FunctorT&& f) {
+  Function tmp(std::forward<FunctorT>(f));
+  swap(tmp);
+  return *this;
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>::~Function() {
+  reset();
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline ReturnT Function<ReturnT(ArgsT...)>::operator()(ArgsT... args) const {
+  if VUNLIKELY (vtable_ == nullptr) {
+    throw std::bad_function_call();
+  }
+
+  return vtable_->invoke(&storage_, std::forward<ArgsT>(args)...);
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline Function<ReturnT(ArgsT...)>::operator bool() const noexcept {
+  return vtable_ != nullptr;
+}
+
+#if defined(__cpp_rtti)
+template <typename ReturnT, typename... ArgsT>
+inline const std::type_info& Function<ReturnT(ArgsT...)>::target_type() const noexcept {
+  if VLIKELY (vtable_ != nullptr) {
+    return vtable_->target_type();
+  }
+
+  return typeid(void);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline FunctorT* Function<ReturnT(ArgsT...)>::target() noexcept {
+  if constexpr (std::is_object_v<FunctorT>) {
+    if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
+      return static_cast<FunctorT*>(vtable_->target(&storage_));
+    }
+  }
+
+  return nullptr;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const FunctorT* Function<ReturnT(ArgsT...)>::target() const noexcept {
+  if constexpr (std::is_object_v<FunctorT>) {
+    if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
+      return static_cast<const FunctorT*>(vtable_->target_const(&storage_));
+    }
+  }
+
+  return nullptr;
+}
+#endif
+
+template <typename ReturnT, typename... ArgsT>
+inline void Function<ReturnT(ArgsT...)>::swap(Function& other) noexcept {
+  if VUNLIKELY (this == &other) {
+    return;
+  }
+
+  Function tmp(std::move(*this));
+  *this = std::move(other);
+  other = std::move(tmp);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline ReturnT Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::invoke(const void* storage, ArgsT... args) {
+  auto* f = std::launder(reinterpret_cast<FunctorT*>(const_cast<void*>(storage)));
+
+  if constexpr (std::is_void_v<ReturnT>) {
+    std::invoke(*f, std::forward<ArgsT>(args)...);
+  } else {
+    return std::invoke(*f, std::forward<ArgsT>(args)...);
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::copy_construct(void* dst, const void* src) {
+  const auto* src_f = std::launder(reinterpret_cast<const FunctorT*>(src));
+  ::new (dst) FunctorT(*src_f);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+  auto* src_f = std::launder(reinterpret_cast<FunctorT*>(src));
+  ::new (dst) FunctorT(std::move(*src_f));
+  src_f->~FunctorT();
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::destroy(void* storage) noexcept {
+  auto* f = std::launder(reinterpret_cast<FunctorT*>(storage));
+  f->~FunctorT();
+}
+
+#if defined(__cpp_rtti)
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const std::type_info& Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_type() noexcept {
+  return typeid(FunctorT);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void* Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target(void* storage) noexcept {
+  return storage;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const void* Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_const(const void* storage) noexcept {
+  return storage;
+}
+#endif
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline ReturnT Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::invoke(const void* storage, ArgsT... args) {
+  FunctorT* f = *std::launder(static_cast<FunctorT* const*>(storage));
+
+  if constexpr (std::is_void_v<ReturnT>) {
+    std::invoke(*f, std::forward<ArgsT>(args)...);
+  } else {
+    return std::invoke(*f, std::forward<ArgsT>(args)...);
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::copy_construct(void* dst, const void* src) {
+  FunctorT* src_f = *std::launder(static_cast<FunctorT* const*>(src));
+
+  auto& pool = MemoryPool::global_instance();
+  void* mem = pool.allocate(sizeof(FunctorT), alignof(FunctorT));
+
+  if VUNLIKELY (mem == nullptr) {
+    throw std::bad_alloc();
+  }
+
+  try {
+    auto* new_f = ::new (mem) FunctorT(*src_f);
+    ::new (dst) FunctorT*(new_f);
+  } catch (...) {
+    pool.deallocate(mem, sizeof(FunctorT), alignof(FunctorT));
+    throw;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+  FunctorT** src_slot = std::launder(static_cast<FunctorT**>(src));
+  FunctorT* src_f = *src_slot;
+  ::new (dst) FunctorT*(src_f);
+  *src_slot = nullptr;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::destroy(void* storage) noexcept {
+  FunctorT** slot = std::launder(static_cast<FunctorT**>(storage));
+  FunctorT* f = *slot;
+
+  if VLIKELY (f != nullptr) {
+    f->~FunctorT();
+
+    auto& pool = MemoryPool::global_instance();
+    pool.deallocate(f, sizeof(FunctorT), alignof(FunctorT));
+
+    *slot = nullptr;
+  }
+}
+
+#if defined(__cpp_rtti)
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const std::type_info& Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_type() noexcept {
+  return typeid(FunctorT);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void* Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target(void* storage) noexcept {
+  return *std::launder(static_cast<FunctorT**>(storage));
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const void* Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_const(const void* storage) noexcept {
+  return *std::launder(static_cast<FunctorT* const*>(storage));
+}
+#endif
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const typename Function<ReturnT(ArgsT...)>::VTable* Function<ReturnT(ArgsT...)>::get_vtable() noexcept {
+  if constexpr (kIsInline<FunctorT>) {
+    static constexpr VTable kVTable = {
+        &InlineVTable<FunctorT>::invoke,         &InlineVTable<FunctorT>::copy_construct,
+        &InlineVTable<FunctorT>::move_construct, &InlineVTable<FunctorT>::destroy,
+#if defined(__cpp_rtti)
+        &InlineVTable<FunctorT>::target_type,    &InlineVTable<FunctorT>::target,
+        &InlineVTable<FunctorT>::target_const,
+#endif
+    };
+    return &kVTable;
+  } else {
+    static constexpr VTable kVTable = {
+        &HeapVTable<FunctorT>::invoke,         &HeapVTable<FunctorT>::copy_construct,
+        &HeapVTable<FunctorT>::move_construct, &HeapVTable<FunctorT>::destroy,
+#if defined(__cpp_rtti)
+        &HeapVTable<FunctorT>::target_type,    &HeapVTable<FunctorT>::target,
+        &HeapVTable<FunctorT>::target_const,
+#endif
+    };
+    return &kVTable;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT, typename SourceT>
+inline void Function<ReturnT(ArgsT...)>::construct_from(SourceT&& src) {
+  if constexpr (kIsInline<FunctorT>) {
+    ::new (&storage_) FunctorT(std::forward<SourceT>(src));
+  } else {
+    auto& pool = MemoryPool::global_instance();
+    auto* mem = pool.allocate(sizeof(FunctorT), alignof(FunctorT));
+
+    if VUNLIKELY (mem == nullptr) {
+      throw std::bad_alloc();
+    }
+
+    try {
+      auto* new_f = ::new (mem) FunctorT(std::forward<SourceT>(src));
+      ::new (static_cast<void*>(&storage_)) FunctorT*(new_f);
+    } catch (...) {
+      pool.deallocate(mem, sizeof(FunctorT), alignof(FunctorT));
+      throw;
+    }
+  }
+
+  vtable_ = get_vtable<FunctorT>();
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline void Function<ReturnT(ArgsT...)>::copy_from(const Function& other) {
+  if VLIKELY (other.vtable_ != nullptr) {
+    other.vtable_->copy_construct(&storage_, &other.storage_);
+    vtable_ = other.vtable_;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline void Function<ReturnT(ArgsT...)>::move_from(Function&& other) noexcept {
+  if VLIKELY (other.vtable_ != nullptr) {
+    other.vtable_->move_construct(&storage_, &other.storage_);
+    vtable_ = other.vtable_;
+    other.vtable_ = nullptr;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline void Function<ReturnT(ArgsT...)>::reset() noexcept {
+  if VLIKELY (vtable_ != nullptr) {
+    vtable_->destroy(&storage_);
+    vtable_ = nullptr;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline void swap(Function<ReturnT(ArgsT...)>& lhs, Function<ReturnT(ArgsT...)>& rhs) noexcept {
   lhs.swap(rhs);
 }
 
-/**
- * @brief Equality with @c nullptr -- empty if and only if the @c Function holds no target.
- */
-template <typename R, typename... Args>
-inline bool operator==(const Function<R(Args...)>& cb, std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT>
+inline bool operator==(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
   return !cb;
 }
 
-template <typename R, typename... Args>
-inline bool operator==(std::nullptr_t, const Function<R(Args...)>& cb) noexcept {
+template <typename ReturnT, typename... ArgsT>
+inline bool operator==(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept {
   return !cb;
 }
 
-template <typename R, typename... Args>
-inline bool operator!=(const Function<R(Args...)>& cb, std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT>
+inline bool operator!=(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
   return static_cast<bool>(cb);
 }
 
-template <typename R, typename... Args>
-inline bool operator!=(std::nullptr_t, const Function<R(Args...)>& cb) noexcept {
+template <typename ReturnT, typename... ArgsT>
+inline bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept {
+  return static_cast<bool>(cb);
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline MoveFunction<ReturnT(ArgsT...)>::MoveFunction(std::nullptr_t) noexcept {}
+
+template <typename ReturnT, typename... ArgsT>
+inline MoveFunction<ReturnT(ArgsT...)>::MoveFunction(MoveFunction&& other) noexcept {
+  move_from(std::move(other));
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT, typename DecayFunctorT, typename>
+inline MoveFunction<ReturnT(ArgsT...)>::MoveFunction(FunctorT&& f) {
+  if constexpr (kIsFunctionWrapper<DecayFunctorT>) {
+    if VUNLIKELY (!f) {
+      return;
+    }
+  } else if constexpr (kIsPointerLike<DecayFunctorT>) {
+    if VUNLIKELY (f == nullptr) {
+      return;
+    }
+  }
+
+  construct_from<DecayFunctorT>(std::forward<FunctorT>(f));
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline MoveFunction<ReturnT(ArgsT...)>& MoveFunction<ReturnT(ArgsT...)>::operator=(MoveFunction&& other) noexcept {
+  if VLIKELY (this != &other) {
+    reset();
+    move_from(std::move(other));
+  }
+
+  return *this;
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline MoveFunction<ReturnT(ArgsT...)>& MoveFunction<ReturnT(ArgsT...)>::operator=(std::nullptr_t) noexcept {
+  reset();
+  return *this;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT, typename DecayFunctorT, typename>
+inline MoveFunction<ReturnT(ArgsT...)>& MoveFunction<ReturnT(ArgsT...)>::operator=(FunctorT&& f) {
+  MoveFunction tmp(std::forward<FunctorT>(f));
+  swap(tmp);
+  return *this;
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline MoveFunction<ReturnT(ArgsT...)>::~MoveFunction() {
+  reset();
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline ReturnT MoveFunction<ReturnT(ArgsT...)>::operator()(ArgsT... args) {
+  if VUNLIKELY (vtable_ == nullptr) {
+    throw std::bad_function_call();
+  }
+
+  return vtable_->invoke(&storage_, std::forward<ArgsT>(args)...);
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline MoveFunction<ReturnT(ArgsT...)>::operator bool() const noexcept {
+  return vtable_ != nullptr;
+}
+
+#if defined(__cpp_rtti)
+template <typename ReturnT, typename... ArgsT>
+inline const std::type_info& MoveFunction<ReturnT(ArgsT...)>::target_type() const noexcept {
+  if VLIKELY (vtable_ != nullptr) {
+    return vtable_->target_type();
+  }
+
+  return typeid(void);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline FunctorT* MoveFunction<ReturnT(ArgsT...)>::target() noexcept {
+  if constexpr (std::is_object_v<FunctorT>) {
+    if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
+      return static_cast<FunctorT*>(vtable_->target(&storage_));
+    }
+  }
+
+  return nullptr;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const FunctorT* MoveFunction<ReturnT(ArgsT...)>::target() const noexcept {
+  if constexpr (std::is_object_v<FunctorT>) {
+    if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
+      return static_cast<const FunctorT*>(vtable_->target_const(&storage_));
+    }
+  }
+
+  return nullptr;
+}
+#endif
+
+template <typename ReturnT, typename... ArgsT>
+inline void MoveFunction<ReturnT(ArgsT...)>::swap(MoveFunction& other) noexcept {
+  if VUNLIKELY (this == &other) {
+    return;
+  }
+
+  MoveFunction tmp(std::move(*this));
+  *this = std::move(other);
+  other = std::move(tmp);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline ReturnT MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::invoke(void* storage, ArgsT... args) {
+  auto* f = std::launder(reinterpret_cast<FunctorT*>(storage));
+
+  if constexpr (std::is_void_v<ReturnT>) {
+    std::invoke(*f, std::forward<ArgsT>(args)...);
+  } else {
+    return std::invoke(*f, std::forward<ArgsT>(args)...);
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+  auto* src_f = std::launder(reinterpret_cast<FunctorT*>(src));
+  ::new (dst) FunctorT(std::move(*src_f));
+  src_f->~FunctorT();
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::destroy(void* storage) noexcept {
+  auto* f = std::launder(reinterpret_cast<FunctorT*>(storage));
+  f->~FunctorT();
+}
+
+#if defined(__cpp_rtti)
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const std::type_info& MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_type() noexcept {
+  return typeid(FunctorT);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void* MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target(void* storage) noexcept {
+  return storage;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const void* MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_const(const void* storage) noexcept {
+  return storage;
+}
+#endif
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline ReturnT MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::invoke(void* storage, ArgsT... args) {
+  FunctorT* f = *std::launder(static_cast<FunctorT**>(storage));
+
+  if constexpr (std::is_void_v<ReturnT>) {
+    std::invoke(*f, std::forward<ArgsT>(args)...);
+  } else {
+    return std::invoke(*f, std::forward<ArgsT>(args)...);
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+  FunctorT** src_slot = std::launder(static_cast<FunctorT**>(src));
+  FunctorT* src_f = *src_slot;
+  ::new (dst) FunctorT*(src_f);
+  *src_slot = nullptr;
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::destroy(void* storage) noexcept {
+  FunctorT** slot = std::launder(static_cast<FunctorT**>(storage));
+  FunctorT* f = *slot;
+
+  if VLIKELY (f != nullptr) {
+    f->~FunctorT();
+
+    auto& pool = MemoryPool::global_instance();
+    pool.deallocate(f, sizeof(FunctorT), alignof(FunctorT));
+
+    *slot = nullptr;
+  }
+}
+
+#if defined(__cpp_rtti)
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const std::type_info& MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_type() noexcept {
+  return typeid(FunctorT);
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline void* MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target(void* storage) noexcept {
+  return *std::launder(static_cast<FunctorT**>(storage));
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const void* MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_const(const void* storage) noexcept {
+  return *std::launder(static_cast<FunctorT* const*>(storage));
+}
+#endif
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT>
+inline const typename MoveFunction<ReturnT(ArgsT...)>::VTable* MoveFunction<ReturnT(ArgsT...)>::get_vtable() noexcept {
+  if constexpr (kIsInline<FunctorT>) {
+    static constexpr VTable kVTable = {
+        &InlineVTable<FunctorT>::invoke,       &InlineVTable<FunctorT>::move_construct,
+        &InlineVTable<FunctorT>::destroy,
+#if defined(__cpp_rtti)
+        &InlineVTable<FunctorT>::target_type,  &InlineVTable<FunctorT>::target,
+        &InlineVTable<FunctorT>::target_const,
+#endif
+    };
+    return &kVTable;
+  } else {
+    static constexpr VTable kVTable = {
+        &HeapVTable<FunctorT>::invoke,      &HeapVTable<FunctorT>::move_construct, &HeapVTable<FunctorT>::destroy,
+#if defined(__cpp_rtti)
+        &HeapVTable<FunctorT>::target_type, &HeapVTable<FunctorT>::target,         &HeapVTable<FunctorT>::target_const,
+#endif
+    };
+    return &kVTable;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+template <typename FunctorT, typename SourceT>
+inline void MoveFunction<ReturnT(ArgsT...)>::construct_from(SourceT&& src) {
+  if constexpr (kIsInline<FunctorT>) {
+    ::new (&storage_) FunctorT(std::forward<SourceT>(src));
+  } else {
+    auto& pool = MemoryPool::global_instance();
+    auto* mem = pool.allocate(sizeof(FunctorT), alignof(FunctorT));
+
+    if VUNLIKELY (mem == nullptr) {
+      throw std::bad_alloc();
+    }
+
+    try {
+      auto* new_f = ::new (mem) FunctorT(std::forward<SourceT>(src));
+      ::new (static_cast<void*>(&storage_)) FunctorT*(new_f);
+    } catch (...) {
+      pool.deallocate(mem, sizeof(FunctorT), alignof(FunctorT));
+      throw;
+    }
+  }
+
+  vtable_ = get_vtable<FunctorT>();
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline void MoveFunction<ReturnT(ArgsT...)>::move_from(MoveFunction&& other) noexcept {
+  if VLIKELY (other.vtable_ != nullptr) {
+    other.vtable_->move_construct(&storage_, &other.storage_);
+    vtable_ = other.vtable_;
+    other.vtable_ = nullptr;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline void MoveFunction<ReturnT(ArgsT...)>::reset() noexcept {
+  if VLIKELY (vtable_ != nullptr) {
+    vtable_->destroy(&storage_);
+    vtable_ = nullptr;
+  }
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline void swap(MoveFunction<ReturnT(ArgsT...)>& lhs, MoveFunction<ReturnT(ArgsT...)>& rhs) noexcept {
+  lhs.swap(rhs);
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline bool operator==(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
+  return !cb;
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline bool operator==(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept {
+  return !cb;
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline bool operator!=(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
+  return static_cast<bool>(cb);
+}
+
+template <typename ReturnT, typename... ArgsT>
+inline bool operator!=(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept {
   return static_cast<bool>(cb);
 }
 
@@ -474,6 +1290,12 @@ namespace vlink {
 
 template <typename SignatureT>
 using Function = std::function<SignatureT>;
-}
+
+#if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+template <typename SignatureT>
+using MoveFunction = std::move_only_function<SignatureT>;
+#endif
+
+}  // namespace vlink
 
 #endif

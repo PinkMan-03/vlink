@@ -47,7 +47,7 @@
 
 class OsgManipulator : public osgGA::OrbitManipulator {
  public:
-  using FlyCompletedCallback = std::function<void(int)>;
+  using FlyCompletedCallback = vlink::MoveFunction<void(int)>;
 
   OsgManipulator();
 

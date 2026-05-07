@@ -151,7 +151,7 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    * The @c before parameter of @c register_split_callback() controls whether the
    * callback fires before or after the new file is opened.
    */
-  using SplitCallback = vlink::Function<void(int split_index, const std::string& split_filename)>;
+  using SplitCallback = vlink::MoveFunction<void(int split_index, const std::string& split_filename)>;
 
   /**
    * @brief Callback that resolves a serialisation type string to a @c SchemaData.
@@ -162,7 +162,7 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    * @c schema_type hint lets callers distinguish schema families that share
    * the same concrete type name.
    */
-  using SchemaCallback = vlink::Function<SchemaData(const std::string& ser_type, SchemaType schema_type)>;
+  using SchemaCallback = vlink::MoveFunction<SchemaData(const std::string& ser_type, SchemaType schema_type)>;
 
   /**
    * @brief System clock type used for file-name timestamp generation.
