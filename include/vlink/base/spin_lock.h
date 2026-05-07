@@ -194,11 +194,12 @@ class SpinLockGuard final {
 inline void SpinLock::lock() noexcept {
   constexpr static uint32_t kMaxSpinCount = 50000U;
 
+  constexpr static uint16_t kInitialBackoff = 8U;
   constexpr static uint16_t kMaxBackoff = 1024U;
 
   uint32_t total_spin = 0;
   uint16_t spin_count = 0;
-  uint16_t backoff = 1;
+  uint16_t backoff = kInitialBackoff;
   bool warned = false;
 
   for (;;) {

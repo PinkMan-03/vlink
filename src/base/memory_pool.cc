@@ -176,7 +176,7 @@ struct alignas(64) MemoryTierState final {
   alignas(64) std::atomic<uint64_t> deallocate_count{0};
 
   alignas(64) std::atomic<uint64_t> chunk_count{0};
-  std::atomic<uint64_t> upstream_alloc_count{0};
+  alignas(64) std::atomic<uint64_t> upstream_alloc_count{0};
   std::atomic<uint64_t> upstream_alloc_bytes{0};
 };
 
@@ -574,6 +574,18 @@ void MemoryPool::clear() noexcept {
     MemoryChunk stack_to_delete[kStackSlots];
 
     std::vector<size_t> heap_free_counts;
+    std::vector<MemoryChunk> heap_to_delete;
+
+    const size_t chunks_hint = state->chunk_count.load(std::memory_order_relaxed);
+
+    if VUNLIKELY (chunks_hint > kStackSlots) {
+      try {
+        heap_free_counts.reserve(chunks_hint);
+        heap_to_delete.reserve(chunks_hint);
+      } catch (std::exception&) {
+        // best-effort: in-lock fallback below may still succeed.
+      }
+    }
 
     MemoryChunk* to_delete = nullptr;
     size_t to_delete_count = 0U;
@@ -658,7 +670,11 @@ void MemoryPool::clear() noexcept {
           if VLIKELY (!spill_to_heap) {
             stack_to_delete[released] = state->chunks[read];
           } else {
-            ::operator delete(state->chunks[read].ptr, state->chunks[read].bytes, std::align_val_t{kBlockAlignment});
+            try {
+              heap_to_delete.push_back(state->chunks[read]);
+            } catch (std::exception&) {
+              ::operator delete(state->chunks[read].ptr, state->chunks[read].bytes, std::align_val_t{kBlockAlignment});
+            }
           }
 
           ++released;
@@ -679,6 +695,9 @@ void MemoryPool::clear() noexcept {
       if VLIKELY (!spill_to_heap) {
         to_delete = stack_to_delete;
         to_delete_count = released;
+      } else {
+        to_delete = heap_to_delete.data();
+        to_delete_count = heap_to_delete.size();
       }
     }
 
