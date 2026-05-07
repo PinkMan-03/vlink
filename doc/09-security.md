@@ -106,7 +106,7 @@ vlink::SecurityPublisher<MyMsg> pub("shm://topic");
 ```cpp
 class Security final {
  public:
-  using Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>;
+  using Callback = vlink::MoveFunction<bool(const Bytes& in, Bytes& out)>;
 
   Security();
   ~Security();
@@ -167,7 +167,7 @@ sub.listen([](const MyMsg& msg) { /* 已自动解密 */ });
 回调签名：
 
 ```cpp
-using Security::Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>;
+using Security::Callback = vlink::MoveFunction<bool(const Bytes& in, Bytes& out)>;
 ```
 
 - 发送端：`in` 为明文，实现写入 `out` 作为密文。

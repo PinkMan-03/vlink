@@ -309,7 +309,7 @@ pub.set_security_callbacks(enc_cb, dec_cb);     // 自定义算法
 
 **Callback 签名**：
 ```cpp
-using Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>;
+using Callback = vlink::MoveFunction<bool(const Bytes& in, Bytes& out)>;
 ```
 
 **SSL / TLS**（ddsc / mqtt / zenoh 的 TCP 通道适用）：通过 `SslOptions` 或 env 变量 `VLINK_SSL_VERIFY / _CA / _CERT / _KEY / _KEY_PASS / _SNI / _CIPHERS` 配置。

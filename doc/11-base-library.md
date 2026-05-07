@@ -663,17 +663,16 @@ std::function<void(int)> back     = wrapped;         // 解包到 std::function
 
 ### 在 VLink 中的使用位置
 
-`vlink::Function` 是框架内部所有回调类型的实际承载（公共别名仍以
-`MsgCallback / RespCallback / ReqCallback / Security::Callback / OutputCallback /
-StatusCallback / FinishCallback / Timer::Callback / ThreadPool::Callback /
-WheelTimer::Callback` 等具体名字暴露）。其在事件、方法、字段三种通信模型，以
-及定时器、线程池、Schedule、GraphTask、BagWriter / BagReader 的回调注册路径中
-全面替换 `std::function`，避免了热路径上对全局 `operator new` 的依赖。
-
-> 部分回调已迁移到下文的 `vlink::MoveFunction`（move-only 版本，调用语义与
-> `std::move_only_function` 对齐）。完整迁移清单见 §11.4.3 的"在 VLink 中的实
-> 际迁移落点"。继续保留 `Function` 的回调通常出于需要 lock-then-copy snapshot
-> 或返回-by-value 等无法用 move-only 表达的语义。
+`vlink::Function` 在事件、方法、字段三种通信模型中作为公共回调载体，典型公共别名
+包括 `Subscriber<T>::MsgCallback / Client<...>::RespCallback / Server<...>::ReqCallback /
+ReqRespCallback / ReqAsyncRespCallback / Getter<T>::MsgCallback / WheelTimer::Callback /
+Process::ErrorCallback / FinishedCallback / ReadyReadCallback / StateChangedCallback /
+ObjectPool<T>::FactoryCallback / ResetCallback` 等。这些场景因为 lock-then-copy
+snapshot、`std::map` 返回-by-value、`const&` 遍历或公共模板 ABI 等约束，承载方
+必须可拷贝，统一以 `Function` 表达。其余热路径回调（定时器、线程池、Schedule、
+GraphTask、BagWriter / BagReader、Security 等）由 `vlink::MoveFunction` 承载（详
+见 §11.4.3）。两者共同覆盖框架内部所有回调类型，避免热路径上对全局 `operator
+new` 的依赖。
 
 ---
 
@@ -687,10 +686,9 @@ move-only 可调用对象**（捕获了 `std::unique_ptr` 的 lambda、`std::pac
 
 适用场景：
 
-- `std::packaged_task<ReturnT()>` 等本身 move-only 的目标，原本必须用
-  `shared_ptr<packaged_task>` 包一层才能塞进 `Function`，使用 `MoveFunction`
-  后可直接 `[t = std::move(task)]() mutable { t(); }`，少一次堆分配 + 原子
-  refcount。
+- `std::packaged_task<ReturnT()>` 等本身 move-only 的目标，可直接以
+  `[t = std::move(task)]() mutable { t(); }` 的形式塞入 `MoveFunction`，
+  避免 `shared_ptr<packaged_task>` 桥接层带来的额外堆分配 + 原子 refcount。
 - 捕获 `unique_ptr` / `promise` / 大块 move-only buffer 的 lambda。
 - 设计上明确不需要拷贝、希望在编译期约束生命周期的回调。
 
@@ -801,40 +799,39 @@ vlink::Function<int()> f = [] { return 7; };
 vlink::MoveFunction<int()> mf = std::move(f);
 ```
 
-### 在 VLink 中的实际迁移落点
+### 在 VLink 中的使用位置
 
-下表列出当前已切到 `MoveFunction` 的回调类型；其余回调因为 lock-then-copy
-snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性等约束保留为
-`Function`。
+下表列出由 `MoveFunction` 承载的回调类型。其余回调因为 lock-then-copy
+snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性等约束需要可
+拷贝语义，由 `Function` 承载。
 
-| 域 | 回调类型 | 迁移层级 |
-| --- | --- | --- |
-| `base/timer` | `Timer::Callback` | TIER 1 |
-| `base/logger` | `Logger::Callback` | TIER 1 |
-| `base/schedule` | `Schedule::Callback`, `RetCallback`, `CatchCallback` | TIER 1 / TIER 2 |
-| `base/graph_task` | `GraphTask::Callback`, `ConditionCallback`, `StatusCallback`, `FindTaskCallback` | TIER 1 / TIER 2 |
-| `base/utils` | `register_terminate_signal` / `register_crash_signal` / `start_detect_keyboard` 参数 | TIER 1 |
-| `base/message_loop` | `MessageLoop::Callback` | TIER 2 |
-| `base/thread_pool` | `ThreadPool::Callback` | TIER 2 |
-| `impl/ack_manager` | `AckManager::ProcessCallback`, `NotifyCallback` | TIER 1 |
-| `extension/security` | `Security::Callback` | TIER 1 |
-| `extension/bag_reader` | `OutputCallback`, `StatusCallback`, `ReadyCallback`, `FinishCallback` | TIER 1 |
-| `extension/bag_writer` | `SplitCallback`, `SchemaCallback` | TIER 1 |
-| `extension/bag_reader_processor`, `bag_reader_plugin_interface` | `OutputCallback` | TIER 1 |
-| `external/proxy_api` | `ConnectCallback`, `ErrorCallback`, `TimeCallback`, `InfoCallback`, `DataCallback` | TIER 1 |
+| 域 | 回调类型 |
+| --- | --- |
+| `base/timer` | `Timer::Callback` |
+| `base/logger` | `Logger::Callback` |
+| `base/schedule` | `Schedule::Callback`, `RetCallback`, `CatchCallback` |
+| `base/graph_task` | `GraphTask::Callback`, `ConditionCallback`, `StatusCallback`, `FindTaskCallback` |
+| `base/utils` | `register_terminate_signal` / `register_crash_signal` / `start_detect_keyboard` 参数 |
+| `base/message_loop` | `MessageLoop::Callback` |
+| `base/thread_pool` | `ThreadPool::Callback` |
+| `impl/ack_manager` | `AckManager::ProcessCallback`, `NotifyCallback` |
+| `extension/security` | `Security::Callback` |
+| `extension/bag_reader` | `OutputCallback`, `StatusCallback`, `ReadyCallback`, `FinishCallback` |
+| `extension/bag_writer` | `SplitCallback`, `SchemaCallback` |
+| `extension/bag_reader_processor`, `bag_reader_plugin_interface` | `OutputCallback` |
+| `external/proxy_api` | `ConnectCallback`, `ErrorCallback`, `TimeCallback`, `InfoCallback`, `DataCallback` |
 
-随之带来的变化：
+由此带来的设计取舍：
 
 - `MessageLoop::invoke_task / invoke_task_with_priority` 与
-  `ThreadPool::invoke_task` 不再用 `std::shared_ptr<std::packaged_task>` 桥接，
-  直接以移动捕获包装 `std::packaged_task`，每次调用省一次 heap 分配 + 一次
-  原子 refcount。
-- `Schedule::process_with_ret` 内部的 `run_with_timeout` 形参改为非-const ref，
-  外层 wrapper lambda 与 `Schedule::process` 中的适配 lambda 加 `mutable`。
-- `GraphTask::process_and_traverse` 形参由 `const FindTaskCallback&` 改为
-  `FindTaskCallback&&`。
+  `ThreadPool::invoke_task` 直接以移动捕获包装 `std::packaged_task`，无需
+  `std::shared_ptr<std::packaged_task>` 桥接，每次调用省一次 heap 分配 +
+  一次原子 refcount。
+- `Schedule::process_with_ret` 内部的 `run_with_timeout` 形参为非-const ref，
+  外层 wrapper lambda 与 `Schedule::process` 中的适配 lambda 标 `mutable`。
+- `GraphTask::process_and_traverse` 形参为 `FindTaskCallback&&`。
 
-仍保留为 `Function` 的回调（出于真实 copy / 公共模板 / const-ref 遍历约束）：
+由 `Function` 承载的回调（出于真实 copy / 公共模板 / const-ref 遍历约束）：
 
 - `WheelTimer::Callback`（`wheel_timer.cc` 重复 tick lvalue copy）。
 - `Process::ErrorCallback / FinishedCallback / ReadyReadCallback / StateChangedCallback`
