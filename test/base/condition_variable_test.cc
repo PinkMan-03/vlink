@@ -25,7 +25,7 @@
 
 #include "./base/condition_variable.h"
 
-#if defined(VLINK_ENABLE_CONDITION)
+#if defined(VLINK_ENABLE_BASE_CONDITION)
 
 #include <doctest/doctest.h>
 

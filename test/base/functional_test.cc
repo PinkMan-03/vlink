@@ -37,7 +37,7 @@
 //
 #include "../common_test.h"
 
-#ifdef VLINK_ENABLE_CALLBACK
+#ifdef VLINK_ENABLE_BASE_FUNCTIONAL
 
 // ---------------------------------------------------------------------------
 TEST_SUITE("base-Function - construction & emptiness") {
