@@ -400,11 +400,12 @@ void ShmFactory::init_runtime(std::string name, bool same_process_from_roudi) {
 
 void ShmFactory::deinit_runtime() {
   static auto& global_instance = ShmGlobal::get();
-  static auto& factory = ShmFactory::get();
 
   bool expected = true;
 
   if VLIKELY (global_instance.has_runtime_inited.compare_exchange_strong(expected, false)) {
+    static auto& factory = ShmFactory::get();
+
     {
       std::lock_guard lock(factory.listener_mtx_);
       factory.listener_map_.clear();
