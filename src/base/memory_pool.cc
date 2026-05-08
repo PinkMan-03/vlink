@@ -209,25 +209,26 @@ static constexpr size_t round_up(size_t value, size_t alignment) noexcept {
 }
 
 static constexpr bool default_tier_table_well_formed() noexcept {
-  for (const auto& row : kDefaultTierTable) {
-    if (row[0].max_size == 0U) {
-      continue;
-    }
+  // NOLINTNEXTLINE(modernize-loop-convert)
+  for (size_t level = 0; level < kMaxLevelCount; ++level) {
+    size_t prev_max_size = 0U;
 
     for (size_t t = 0; t < kMaxTierCount; ++t) {
-      const auto& tier = row[t];
+      const size_t max_size = kDefaultTierTable[level][t].max_size;
 
-      if (tier.max_size == 0U) {
+      if (max_size == 0U) {
         break;
       }
 
-      if (tier.max_size < sizeof(MemoryFreeNode)) {
+      if (max_size < sizeof(MemoryFreeNode)) {
         return false;
       }
 
-      if (t > 0U && tier.max_size <= row[t - 1U].max_size) {
+      if (t > 0U && max_size <= prev_max_size) {
         return false;
       }
+
+      prev_max_size = max_size;
     }
   }
 

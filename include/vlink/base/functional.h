@@ -684,6 +684,7 @@ inline Function<ReturnT(ArgsT...)>::Function(FunctorT&& f) {
 }
 
 template <typename ReturnT, typename... ArgsT>
+// NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
 inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(const Function& other) {
   if VLIKELY (this != &other) {
     Function tmp(other);
@@ -919,21 +920,27 @@ template <typename FunctorT>
 inline const typename Function<ReturnT(ArgsT...)>::VTable* Function<ReturnT(ArgsT...)>::get_vtable() noexcept {
   if constexpr (kIsInline<FunctorT>) {
     static constexpr VTable kVTable = {
-        &InlineVTable<FunctorT>::invoke,         &InlineVTable<FunctorT>::copy_construct,
-        &InlineVTable<FunctorT>::move_construct, &InlineVTable<FunctorT>::destroy,
+      &InlineVTable<FunctorT>::invoke,
+      &InlineVTable<FunctorT>::copy_construct,
+      &InlineVTable<FunctorT>::move_construct,
+      &InlineVTable<FunctorT>::destroy,
 #if defined(__cpp_rtti)
-        &InlineVTable<FunctorT>::target_type,    &InlineVTable<FunctorT>::target,
-        &InlineVTable<FunctorT>::target_const,
+      &InlineVTable<FunctorT>::target_type,
+      &InlineVTable<FunctorT>::target,
+      &InlineVTable<FunctorT>::target_const,
 #endif
     };
     return &kVTable;
   } else {
     static constexpr VTable kVTable = {
-        &HeapVTable<FunctorT>::invoke,         &HeapVTable<FunctorT>::copy_construct,
-        &HeapVTable<FunctorT>::move_construct, &HeapVTable<FunctorT>::destroy,
+      &HeapVTable<FunctorT>::invoke,
+      &HeapVTable<FunctorT>::copy_construct,
+      &HeapVTable<FunctorT>::move_construct,
+      &HeapVTable<FunctorT>::destroy,
 #if defined(__cpp_rtti)
-        &HeapVTable<FunctorT>::target_type,    &HeapVTable<FunctorT>::target,
-        &HeapVTable<FunctorT>::target_const,
+      &HeapVTable<FunctorT>::target_type,
+      &HeapVTable<FunctorT>::target,
+      &HeapVTable<FunctorT>::target_const,
 #endif
     };
     return &kVTable;
@@ -1237,19 +1244,25 @@ template <typename FunctorT>
 inline const typename MoveFunction<ReturnT(ArgsT...)>::VTable* MoveFunction<ReturnT(ArgsT...)>::get_vtable() noexcept {
   if constexpr (kIsInline<FunctorT>) {
     static constexpr VTable kVTable = {
-        &InlineVTable<FunctorT>::invoke,       &InlineVTable<FunctorT>::move_construct,
-        &InlineVTable<FunctorT>::destroy,
+      &InlineVTable<FunctorT>::invoke,
+      &InlineVTable<FunctorT>::move_construct,
+      &InlineVTable<FunctorT>::destroy,
 #if defined(__cpp_rtti)
-        &InlineVTable<FunctorT>::target_type,  &InlineVTable<FunctorT>::target,
-        &InlineVTable<FunctorT>::target_const,
+      &InlineVTable<FunctorT>::target_type,
+      &InlineVTable<FunctorT>::target,
+      &InlineVTable<FunctorT>::target_const,
 #endif
     };
     return &kVTable;
   } else {
     static constexpr VTable kVTable = {
-        &HeapVTable<FunctorT>::invoke,      &HeapVTable<FunctorT>::move_construct, &HeapVTable<FunctorT>::destroy,
+      &HeapVTable<FunctorT>::invoke,
+      &HeapVTable<FunctorT>::move_construct,
+      &HeapVTable<FunctorT>::destroy,
 #if defined(__cpp_rtti)
-        &HeapVTable<FunctorT>::target_type, &HeapVTable<FunctorT>::target,         &HeapVTable<FunctorT>::target_const,
+      &HeapVTable<FunctorT>::target_type,
+      &HeapVTable<FunctorT>::target,
+      &HeapVTable<FunctorT>::target_const,
 #endif
     };
     return &kVTable;

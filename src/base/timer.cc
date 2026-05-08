@@ -116,7 +116,7 @@ bool Timer::call_once(MessageLoop* message_loop, uint32_t interval_ms, Callback&
   if (ret) {
     timer->start();
     timer.release();  // NOLINT(bugprone-unused-return-value)
-    return true;
+    return true;      // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
   }
 
   return false;

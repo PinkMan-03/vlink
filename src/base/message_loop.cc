@@ -106,7 +106,7 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
   std::atomic<std::thread::id> thread_id;
 
 #ifdef _WIN32
-  std::atomic<HANDLE> thread_handle{NULL};
+  std::atomic<HANDLE> thread_handle{nullptr};
 #endif
 
   std::string name;
@@ -177,8 +177,8 @@ MessageLoop::~MessageLoop() {
 #ifdef _WIN32
   {
     std::unique_lock lock(impl_->mtx);
-    HANDLE thread_handle = impl_->thread_handle.exchange(NULL);
-    if (thread_handle != NULL) {
+    HANDLE thread_handle = impl_->thread_handle.exchange(nullptr);
+    if (thread_handle != nullptr) {
       ::CloseHandle(thread_handle);
     }
   }
@@ -255,8 +255,8 @@ bool MessageLoop::run() {
 #ifdef _WIN32
   {
     std::unique_lock lock(impl_->mtx);
-    HANDLE thread_handle = impl_->thread_handle.exchange(NULL);
-    if (thread_handle != NULL) {
+    HANDLE thread_handle = impl_->thread_handle.exchange(nullptr);
+    if (thread_handle != nullptr) {
       ::CloseHandle(thread_handle);
     }
   }
@@ -285,8 +285,8 @@ bool MessageLoop::async_run() {
 #ifdef _WIN32
   {
     std::unique_lock lock(impl_->mtx);
-    HANDLE thread_handle = impl_->thread_handle.exchange(NULL);
-    if (thread_handle != NULL) {
+    HANDLE thread_handle = impl_->thread_handle.exchange(nullptr);
+    if (thread_handle != nullptr) {
       ::CloseHandle(thread_handle);
     }
   }
@@ -348,7 +348,7 @@ bool MessageLoop::wait_for_idle(int ms, bool check) {
 
 #ifdef _WIN32
   HANDLE thread_handle = impl_->thread_handle.load();
-  if (thread_handle != NULL) {
+  if (thread_handle != nullptr) {
     DWORD thread_status = STILL_ACTIVE;
     if (::GetExitCodeThread(thread_handle, &thread_status) && thread_status != STILL_ACTIVE) {
       impl_->is_running = false;
@@ -396,7 +396,7 @@ bool MessageLoop::wait_for_quit(int ms, bool check) {
 
 #ifdef _WIN32
   HANDLE thread_handle = impl_->thread_handle.load();
-  if (thread_handle != NULL) {
+  if (thread_handle != nullptr) {
     DWORD thread_status = STILL_ACTIVE;
     if (::GetExitCodeThread(thread_handle, &thread_status) && thread_status != STILL_ACTIVE) {
       impl_->is_running = false;

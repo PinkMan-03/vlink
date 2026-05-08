@@ -901,7 +901,7 @@ std::string get_interface_name_by_ipv4(const std::string& ipv4) noexcept {
         }
 
         std::string name(len - 1, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, &name[0], len, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, name.data(), len, nullptr, nullptr);
 
         return name;
       }
@@ -980,7 +980,7 @@ std::string get_interface_name_by_ipv6(const std::string& ipv6) noexcept {
         }
 
         std::string name(len - 1, '\0');
-        WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, &name[0], len, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, name.data(), len, nullptr, nullptr);
 
         return name;
       }

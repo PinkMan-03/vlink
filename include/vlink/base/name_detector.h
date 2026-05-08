@@ -62,14 +62,14 @@
 #pragma clang diagnostic ignored "-Wenum-constexpr-conversion"
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wstringop-overflow"  // Missing terminating nul 'kEnumName'.
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
 #elif defined(_MSC_VER)
 #pragma warning(push)
-#pragma warning(disable : 26495)  // Variable 'CString<SizeT>::chars_' is uninitialized.
-#pragma warning(disable : 28020)  // Arithmetic overflow: Using operator '-' on a 4 byte value and then casting the
-                                  // result to a 8 byte value.
-#pragma warning(disable : 26451)  // The expression '0<=_Param_(1)&&_Param_(1)<=1-1' is not true at this call.
-#pragma warning(disable : 4514)   // Unreferenced inline function has been removed.
+#pragma warning(disable : 26495)
+#pragma warning(disable : 28020)
+
+#pragma warning(disable : 26451)
+#pragma warning(disable : 4514)
 #endif
 
 #if defined(__clang__) && __clang_major__ >= 5 || defined(__GNUC__) && __GNUC__ >= 7 || \
@@ -235,19 +235,19 @@ class [[nodiscard]] CString {
 
 constexpr std::string_view pretty_name(std::string_view name, bool remove_suffix = true) noexcept {
   if (!name.empty() && (name[0] == '"' || name[0] == '\'')) {
-    return {};  // Narrow multibyte string literal.
+    return {};
   } else if (name.size() >= 2 && name[0] == 'R' && (name[1] == '"' || name[1] == '\'')) {
-    return {};  // Raw string literal.
+    return {};
   } else if (name.size() >= 2 && name[0] == 'L' && (name[1] == '"' || name[1] == '\'')) {
-    return {};  // Wide string literal.
+    return {};
   } else if (name.size() >= 2 && name[0] == 'U' && (name[1] == '"' || name[1] == '\'')) {
-    return {};  // UTF-32 encoded string literal.
+    return {};
   } else if (name.size() >= 2 && name[0] == 'u' && (name[1] == '"' || name[1] == '\'')) {
-    return {};  // UTF-16 encoded string literal.
+    return {};
   } else if (name.size() >= 3 && name[0] == 'u' && name[1] == '8' && (name[2] == '"' || name[2] == '\'')) {
-    return {};  // UTF-8 encoded string literal.
+    return {};
   } else if (!name.empty() && (name[0] >= '0' && name[0] <= '9')) {
-    return {};  // Invalid name.
+    return {};
   }
 
   for (size_t i = name.size(), h = 0, s = 0; i > 0; --i) {
@@ -305,7 +305,7 @@ constexpr std::string_view pretty_name(std::string_view name, bool remove_suffix
     return name;
   }
 
-  return {};  // Invalid name.
+  return {};
 }
 
 #if defined(__cpp_lib_array_constexpr) && __cpp_lib_array_constexpr >= 201603L

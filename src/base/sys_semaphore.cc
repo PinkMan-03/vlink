@@ -188,8 +188,8 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
     for (; n > 0; --n) {
       const auto elapsed =
           std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
-      const DWORD remaining_timeout = static_cast<DWORD>(elapsed >= timeout_ms ? 0 : timeout_ms - elapsed);
-      const DWORD wait_result = ::WaitForSingleObjectEx(impl_->handle, remaining_timeout, FALSE);
+      const auto remaining_timeout = static_cast<DWORD>(elapsed >= timeout_ms ? 0 : timeout_ms - elapsed);
+      const auto wait_result = ::WaitForSingleObjectEx(impl_->handle, remaining_timeout, FALSE);
 
       if VLIKELY (wait_result == WAIT_OBJECT_0) {
         ++acquired;
