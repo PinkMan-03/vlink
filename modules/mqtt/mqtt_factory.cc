@@ -57,7 +57,15 @@ static uint64_t decode_u64be(const uint8_t* buf) {
 }
 
 // MqttFactory
-MqttFactory::MqttFactory() { init(); }
+MqttFactory::MqttFactory() {
+  Bytes::init_memory_pool();
+
+  if VUNLIKELY (MqttConf::get_thread_count() != 1) {
+    VLOG_W("MqttConf: Mqtt does not support setting thread count.");
+  }
+
+  init();
+}
 
 MqttFactory::~MqttFactory() { deinit(); }
 

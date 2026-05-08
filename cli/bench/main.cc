@@ -994,12 +994,7 @@ int main(int argc, char** argv) {
   vlink::Logger::init("vlink-bench");
 
   vlink::bench::Bench::reset_stop();
-  vlink::Utils::register_terminate_signal(
-      [](int) {
-        vlink::bench::Bench::request_stop();
-        vlink::Utils::stop_detect_keyboard();
-      },
-      true);
+  vlink::Utils::register_terminate_signal([](int) { vlink::bench::Bench::request_stop(); });
 
   const std::string command_line = join_command_line(argc, argv);
 

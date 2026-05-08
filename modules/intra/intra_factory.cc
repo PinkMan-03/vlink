@@ -47,6 +47,8 @@ IntraPipeline& IntraFactory::get_pipeline(int32_t pipeline) {
 }
 
 IntraFactory::IntraFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (IntraConf::get_thread_count() != 1) {
     VLOG_W("IntraFactory: Intra does not support setting thread count.");
   }

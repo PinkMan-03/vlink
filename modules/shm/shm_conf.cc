@@ -62,16 +62,24 @@ void ShmConf::init_runtime(const std::string& name, bool same_process_from_roudi
     return;
   }
 
+  Bytes::init_memory_pool();
+
   ShmFactory::init_runtime(name, same_process_from_roudi);
 }
 
 void ShmConf::deinit_runtime() { ShmFactory::deinit_runtime(); }
 
 void ShmConf::init_roudi(const std::string& config_path, int memory_strategy, bool monitoring_enable) {
+  Bytes::init_memory_pool();
+
   ShmFactory::init_roudi(config_path, memory_strategy, monitoring_enable);
 }
 
-void ShmConf::global_init() { ShmFactory::get(); }
+void ShmConf::global_init() {
+  Bytes::init_memory_pool();
+
+  ShmFactory::get();
+}
 
 bool ShmConf::parse_protocol(struct Protocol* protocol) {
   if VUNLIKELY (get_impl_type() == kUnknownImplType) {

@@ -41,6 +41,8 @@ namespace vlink {
 
 // DdscFactory
 DdscFactory::DdscFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (DdscConf::get_thread_count() != 1) {
     VLOG_W("DdscFactory: Ddsc does not support setting thread count.");
   }

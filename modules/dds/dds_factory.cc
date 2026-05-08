@@ -39,6 +39,8 @@ namespace vlink {
 
 // DdsFactory
 DdsFactory::DdsFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (DdsConf::get_thread_count() != 1) {
     VLOG_W("DdsFactory: Dds does not support setting thread count.");
   }

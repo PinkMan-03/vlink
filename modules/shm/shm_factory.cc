@@ -102,6 +102,8 @@ class ShmRuntime final : public shm::runtime::PoshRuntimeImpl {
 ShmFactory::ShmFactory() {
   static auto& global_instance = ShmGlobal::get();
 
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (ShmConf::get_thread_count() != 1) {
     VLOG_W("ShmFactory: Shm does not support setting thread count.");
   }
@@ -183,6 +185,8 @@ bool ShmFactory::has_roudi_running() {
 }
 
 bool ShmFactory::auto_init_roudi(bool same_process_from_roudi) {
+  Bytes::init_memory_pool();
+
   struct RoudiManager final {
     explicit RoudiManager(bool same_process_from_roudi) {
       bool roudi_running = ShmFactory::has_roudi_running();
@@ -265,6 +269,8 @@ void ShmFactory::init_log_level(bool wait_roudi) {
 }
 
 void ShmFactory::init_roudi(const std::string& config_path, int memory_strategy, bool monitoring_enable) {
+  Bytes::init_memory_pool();
+
 #ifdef VLINK_SUPPORT_SHM_ROUDI
 
 #if __QNX__
@@ -365,6 +371,8 @@ void ShmFactory::init_roudi(const std::string& config_path, int memory_strategy,
 }
 
 void ShmFactory::init_runtime(std::string name, bool same_process_from_roudi) {
+  Bytes::init_memory_pool();
+
   static auto& global_instance = ShmGlobal::get();
 
   bool expected = false;

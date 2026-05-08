@@ -34,6 +34,8 @@ namespace vlink {
 
 // FdbusFactory
 FdbusFactory::FdbusFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (FdbusConf::get_thread_count() == 0) {
     VLOG_W("FdbusFactory: Fdbus does not support zero thread count.");
 

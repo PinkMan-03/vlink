@@ -40,6 +40,8 @@
 #include "./base/spin_lock.h"
 #include "./base/utils.h"
 
+#define MEMORY_POOL_NERVER_DELETE 0
+
 namespace vlink {
 
 static constexpr int kMinMemoryLevel = 0;
@@ -800,9 +802,18 @@ MemoryPool::Config MemoryPool::get_default_config() {
 }
 
 MemoryPool& MemoryPool::global_instance(bool use_env_level) {
+#if MEMORY_POOL_NERVER_DELETE
+  alignas(MemoryPool) static char buf[sizeof(MemoryPool)];
+
+  static auto* instance =
+      new (buf) MemoryPool(use_env_level ? get_default_config() : create_memory_config(kDefaultMemoryLevel, false));
+
+  return *instance;
+#else
   static MemoryPool instance(use_env_level ? get_default_config() : create_memory_config(kDefaultMemoryLevel, false));
 
   return instance;
+#endif
 }
 
 size_t MemoryPool::find_tier(size_t bytes) const noexcept {

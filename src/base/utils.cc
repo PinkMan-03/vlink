@@ -1727,11 +1727,11 @@ void start_detect_keyboard(vlink::MoveFunction<void(const std::string& key)>&& c
 void stop_detect_keyboard() noexcept {
   static auto& instance = KeyboardHelper::get();
 
-  if VUNLIKELY (!instance.has_detect) {
+  bool expected = true;
+
+  if VUNLIKELY (!instance.has_detect.compare_exchange_strong(expected, false)) {
     return;
   }
-
-  instance.has_detect = false;
 
   {
     std::lock_guard lock(instance.mtx);

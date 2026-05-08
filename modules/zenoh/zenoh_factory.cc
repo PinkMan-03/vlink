@@ -524,6 +524,8 @@ bool ZenohShmSupport::build_payload(z_owned_bytes_t* payload, const Bytes& bytes
 
 // ZenohFactory
 ZenohFactory::ZenohFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (ZenohConf::get_thread_count() != 1) {
     VLOG_W("ZenohFactory: Zenoh does not support setting thread count.");
   }

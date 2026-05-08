@@ -70,6 +70,8 @@ static bool open_or_create_event_service(iox2_node_h_ref node, const std::string
 
 // Shm2Factory
 Shm2Factory::Shm2Factory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (Shm2Conf::get_thread_count() != 1) {
     VLOG_W("Shm2Factory: Shm2 does not support setting thread count.");
   }

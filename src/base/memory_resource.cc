@@ -25,6 +25,8 @@
 
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
 
+#define MEMORY_RESOURCE_NERVER_DELETE 0
+
 #include <new>
 
 #include "./base/macros.h"
@@ -48,9 +50,17 @@ MemoryPool& MemoryResource::get_memory_pool() noexcept { return *pool_; }
 void MemoryResource::trim() noexcept { pool_->trim(); }
 
 MemoryResource& MemoryResource::global_instance(bool use_env_level) {
+#if MEMORY_RESOURCE_NERVER_DELETE
+  alignas(MemoryResource) static char buf[sizeof(MemoryResource)];
+
+  static auto* instance = new (buf) MemoryResource(MemoryPool::global_instance(use_env_level));
+
+  return *instance;
+#else
   static MemoryResource instance(MemoryPool::global_instance(use_env_level));
 
   return instance;
+#endif
 }
 
 void* MemoryResource::do_allocate(size_t bytes, size_t alignment) {

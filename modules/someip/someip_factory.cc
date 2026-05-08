@@ -34,6 +34,8 @@ namespace vlink {
 
 // SomeipFactory
 SomeipFactory::SomeipFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (SomeipConf::get_thread_count() == 0) {
     VLOG_W("SomeipFactory: Someip does not support zero thread count.");
 

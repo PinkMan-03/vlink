@@ -38,6 +38,8 @@ namespace vlink {
 
 // DdsrFactory
 DdsrFactory::DdsrFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (DdsrConf::get_thread_count() != 1) {
     VLOG_W("DdsrFactory: Ddsr does not support setting thread count.");
   }

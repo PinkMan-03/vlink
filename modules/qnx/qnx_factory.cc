@@ -71,6 +71,8 @@ union QnxHeader {
 
 // QnxFactory
 QnxFactory::QnxFactory() {
+  Bytes::init_memory_pool();
+
   if VUNLIKELY (QnxConf::get_thread_count() == 0) {
     VLOG_W("QnxFactory: Qnx does not support zero thread count.");
     QnxConf::set_thread_count(1);
