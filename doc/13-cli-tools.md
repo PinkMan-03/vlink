@@ -601,7 +601,7 @@ Version:       2.0.0
 Storage Type:  sqlite
 Compression:   lzav (Ratio: 50%)
 Process Name:  my_node
-Meta Flags:    completed | idx_elapsed | schema_data
+Meta Flags:    completed | idx_elapsed | idx_url | schema
 Date Time:     2026-03-17 10:00:00 (Timezone: +08:00:00)
 Duration:      00:00:00.500 ~ 00:05:30.123
 Message Count: 33120
@@ -1049,7 +1049,7 @@ vlink-efbs pub dds://test/msg --fbs_dir /home/fbs_schemas/ -s TestMsg \
 - 带结论、评分、交互式折线图（滚轮缩放 / 拖拽平移 / 悬浮 tooltip / legend 开关）的单文件离线报告：`html`（亮色主题，运行时支持中英文切换）
 - 适合终端快速翻页、搜索、导出的交互式表格报告：`terminal`
 
-默认内建 URL 会按当前编译宏已启用的 transport 生成，并在运行前做有限的前置条件过滤。普通默认集合包含 `intra`、`shm`、`shm2`、DDS 系列、`zenoh`、`someip`、`mqtt`、`fdbus`、`qnx` 中当前构建可用的项；`shm` / `shm2` 默认带 `?depth=10`，DDS 系列默认带 `?qos=sensor`，例如 `shm://bench/perf_shm?depth=10`、`dds://bench/perf_dds?qos=sensor`。除 SOME/IP 使用固定 service/event URL 外，内建 URL 使用 `scheme://bench/perf_<scheme>` 格式，避免不同 transport 复用同一 topic 路径产生干扰。showcase 默认 URL 集合只选跨进程 transport（不含 `intra`），按 `shm`、`shm2`、DDS 系列、`zenoh`、`someip`、`mqtt`、`fdbus`、`qnx` 的顺序加入所有可运行项。
+默认内建 URL 会按当前编译宏已启用的 transport 生成，并在运行前做有限的前置条件过滤。普通默认集合包含 `intra`、`shm`、`shm2`、DDS 系列、`zenoh`、`someip`、`mqtt`、`fdbus`、`qnx` 中当前构建可用的项；`shm` / `shm2` 默认带 `?depth=10`，DDS 系列与 `zenoh` 默认带 `?qos=better`，例如 `shm://bench/perf_shm?depth=10`、`dds://bench/perf_dds?qos=better`、`zenoh://bench/perf_zenoh?qos=better`。除 SOME/IP 使用固定 service/event URL 外，内建 URL 使用 `scheme://bench/perf_<scheme>` 格式，避免不同 transport 复用同一 topic 路径产生干扰。showcase 默认 URL 集合只选跨进程 transport（不含 `intra`），按 `shm`、`shm2`、DDS 系列、`zenoh`、`someip`、`mqtt`、`fdbus`、`qnx` 的顺序加入所有可运行项。
 直接执行 `vlink-bench run` 时（无 `--preset`），会走 showcase 默认矩阵，重点覆盖 `throughput` + `latency` 主通信 suite、当前构建可用的跨进程 transport、`bytes` payload，全部在 `process` 模式下测量真实 cross-process IPC 性能。两个 suite 各有自己的 payload 档位（不混用）：**throughput** 用 3 档（16KiB / 256KiB / 1MiB，专挑大消息容易出差异的中大档）；**latency** 用 6 档（128B / 1KiB / 8KiB / 64KiB / 512KiB / 2MiB，覆盖控制消息 → OS 页 → MTU → DDS 分片 → 多 MiB 等性能拐点）。
 
 所有报告文件（`json` / `csv` / `html`）都通过 `.tmp` 临时文件 + `rename` 原子落盘，磁盘满或写入中断不会留下半成品。Worker 子进程异常退出会被主进程校验 exit code + exit status 捕获，不再被静默误判成功。
@@ -1099,7 +1099,6 @@ vlink-bench run [options]
 | `--drain` | 每个 scenario 的 drain 毫秒数；省略时由 preset 决定（showcase / `full` 基线 `300`，并按 payload 大小自动加长：`drain = base + payload_kib / 4`，封顶 1500ms，保证大消息队列能完全排空） |
 | `--repeat` | 每个 scenario 的重复次数；showcase 默认 `1`（单次跑，duration 已 2500ms 给足统计置信度），`full` 默认 `3`，需要 worst-of-N 抗噪时显式传 `--repeat 2` 或更多 |
 | `--serialization-duration` | serialization suite 的单 case 毫秒数；省略时由 preset 决定（showcase 默认值 `800`，但默认矩阵不启用 serialization；`full` `1200`） |
-| `--repeat` | 每个 scenario 的重复次数，必须 > 0，默认 `1` |
 | `--report` | 输出目标：`html` `json` `csv` `terminal` `both`；可重复，也可用逗号分隔；默认输出 `html` 和 `terminal` |
 | `--no-pager` | 关闭终端分页的交互式视图，直接打印表格摘要；可与任意 `--report` 组合使用，不再强制要求 `terminal` |
 | `-o` / `--output` | 输出文件前缀，不带扩展名；省略时默认生成 `vlink-bench-YYYYMMDD-HHMMSS`（在当前目录绝对化） |

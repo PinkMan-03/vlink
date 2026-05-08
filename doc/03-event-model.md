@@ -110,7 +110,7 @@ dds://vehicle/speed?domain=1&depth=10&qos=sensor
 
 ## 消息类型支持
 
-VLink 通过 `Serializer::get_type_of<T>()` 在编译期自动推导序列化方式。共 14 种类型（含 `kUnknownType`）—— 详见 [序列化](06-serialization.md)。事件模型常用的类型：
+VLink 通过 `Serializer::get_type_of<T>()` 在编译期自动推导序列化方式。共 15 种枚举值（含 `kUnknownType`，14 种被 `Serializer::is_supported()` 接受）—— 详见 [序列化](06-serialization.md)。事件模型常用的类型：
 
 | 类别             | 类型示例                                             | 序列化器 (值)          |
 | ---------------- | ---------------------------------------------------- | ---------------------- |
@@ -704,7 +704,7 @@ sub.listen([&sub](const Bytes& data) {
 
 > 其他消息类型（如 POD、Proto）使用手动模式时，需自行从回调参数还原 `Bytes` 句柄；多数情况下使用默认自动归还即可。
 
-### 5. 安全退出（safe_quit）
+### 5. 安全退出（safety_quit）
 
 当节点在多线程环境中可能在回调执行期间被销毁时，开启安全退出：
 

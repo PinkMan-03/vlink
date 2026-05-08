@@ -278,10 +278,8 @@ set(VLINK_ENABLE_TEST ${ENABLE_TEST})
 
 # thirdparty(headeronly)
 add_subdirectory(thirdparty/lzav)
-add_subdirectory(thirdparty/crc)
 add_subdirectory(thirdparty/argparse)
 add_subdirectory(thirdparty/doctest)
-add_subdirectory(thirdparty/dylib)
 add_subdirectory(thirdparty/json)
 add_subdirectory(thirdparty/mcap)
 add_subdirectory(thirdparty/eigen3)
@@ -369,9 +367,8 @@ endif()
 target_link_libraries(${PROJECT_NAME} PUBLIC Threads::Threads)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${VLINK_PLATFORM_LIBS})
 target_link_libraries(
-  ${PROJECT_NAME}
-  PRIVATE $<BUILD_INTERFACE:thirdparty::lzav> $<BUILD_INTERFACE:thirdparty::mcap> $<BUILD_INTERFACE:thirdparty::json>
-          $<BUILD_INTERFACE:thirdparty::crc> $<BUILD_INTERFACE:thirdparty::dylib>
+  ${PROJECT_NAME} PRIVATE $<BUILD_INTERFACE:thirdparty::lzav> $<BUILD_INTERFACE:thirdparty::mcap>
+                          $<BUILD_INTERFACE:thirdparty::json>
 )
 if(ENABLE_SECURITY)
   target_link_libraries(${PROJECT_NAME} PRIVATE OpenSSL::Crypto)

@@ -115,8 +115,8 @@ int main(int argc, char* argv[]) {
 
   // Print usage instructions
   VLOG_I("Usage:");
-  VLOG_I(" example_helloworld_client [sub]");
-  VLOG_I(" example_helloworld_client [set] [left_num] [right_num]");
+  VLOG_I(" sample_helloworld_client [sub]");
+  VLOG_I(" sample_helloworld_client [set] [left_num] [right_num]");
 
   return 1;
 }

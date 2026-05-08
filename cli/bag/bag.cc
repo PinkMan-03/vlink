@@ -1359,7 +1359,7 @@ int bag_play(const std::string& path, const std::vector<std::string>& urls, cons
     return -1;
   }
 
-  vlink::BagReader::Status last_status = vlink::BagReader::kStoped;
+  vlink::BagReader::Status last_status = vlink::BagReader::kStopped;
 
   auto total_time = player->get_info().total_duration;
 
@@ -1423,11 +1423,11 @@ int bag_play(const std::string& path, const std::vector<std::string>& urls, cons
       [player_ptr = player.get(), begin_time, total_time, date_time, &last_status](vlink::BagReader::Status status) {
         split_count = player_ptr->get_info().split_count;
 
-        if (last_status == vlink::BagReader::kStoped) {
+        if (last_status == vlink::BagReader::kStopped) {
           ++play_loop_index;
         }
 
-        if (status == vlink::BagReader::kStoped) {
+        if (status == vlink::BagReader::kStopped) {
           pause_to_next_flag = false;
           is_paused = false;
 
@@ -1452,10 +1452,10 @@ int bag_play(const std::string& path, const std::vector<std::string>& urls, cons
           if (!quiet_flag && !detail_flag) {
             if (skip_blank && begin_time == 0) {
               start_print(player_ptr->get_info().blank_duration, total_time, target_date_time,
-                          (last_status == vlink::BagReader::kStoped && !player_ptr->is_ready_to_quit()));
+                          (last_status == vlink::BagReader::kStopped && !player_ptr->is_ready_to_quit()));
             } else {
               start_print(begin_time, total_time, target_date_time,
-                          (last_status == vlink::BagReader::kStoped && !player_ptr->is_ready_to_quit()));
+                          (last_status == vlink::BagReader::kStopped && !player_ptr->is_ready_to_quit()));
             }
           }
         }

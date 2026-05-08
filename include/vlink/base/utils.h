@@ -297,7 +297,8 @@ VLINK_EXPORT bool set_thread_stick(uint32_t core_mask, std::thread* thread = nul
  * @brief Registers a callback for graceful termination signals (SIGTERM, SIGINT, etc.).
  *
  * @details
- * On POSIX, installs a @c sigaction handler for @c SIGTERM and @c SIGINT.
+ * On POSIX, installs a @c sigaction handler for @c SIGINT, @c SIGTERM and @c SIGHUP.
+ * On Windows, hooks @c SIGINT and @c SIGTERM via @c ::signal.
  * The callback receives the signal number as its argument.
  *
  * @param callback      Callback invoked when a termination signal arrives.

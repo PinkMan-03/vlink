@@ -23,15 +23,36 @@
 
 #include "./base/plugin.h"
 
-#include <dylib.hpp>
-//
 #include <deque>
 #include <filesystem>
 #include <memory>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
+
+#if defined(_WIN32) || defined(_WIN64)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#define VLINK_PLUGIN_UNDEFINE_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#define VLINK_PLUGIN_UNDEFINE_NOMINMAX
+#endif
+#include <windows.h>
+#ifdef VLINK_PLUGIN_UNDEFINE_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#undef VLINK_PLUGIN_UNDEFINE_LEAN_AND_MEAN
+#endif
+#ifdef VLINK_PLUGIN_UNDEFINE_NOMINMAX
+#undef NOMINMAX
+#undef VLINK_PLUGIN_UNDEFINE_NOMINMAX
+#endif
+#else
+#include <dlfcn.h>
+#endif
 
 #include "./base/logger.h"
 #include "./base/utils.h"
@@ -54,9 +75,146 @@ namespace vlink {
   }
 }
 
+// DynamicLibrary
+class DynamicLibrary final {
+ public:
+#if defined(_WIN32) || defined(_WIN64)
+  static constexpr const char* kFilenamePrefix = "";
+  static constexpr const char* kFilenameSuffix = ".dll";
+  using NativeHandle = HINSTANCE;
+  using NativeSymbol = FARPROC;
+#elif defined(__APPLE__)
+  static constexpr const char* kFilenamePrefix = "lib";
+  static constexpr const char* kFilenameSuffix = ".dylib";
+  using NativeHandle = void*;
+  using NativeSymbol = void*;
+#else
+  static constexpr const char* kFilenamePrefix = "lib";
+  static constexpr const char* kFilenameSuffix = ".so";
+  using NativeHandle = void*;
+  using NativeSymbol = void*;
+#endif
+
+  static_assert(std::is_pointer_v<NativeHandle>, "Expecting native handle to be a pointer.");
+  static_assert(std::is_pointer_v<NativeSymbol>, "Expecting native symbol to be a pointer.");
+
+  class Exception : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+  };
+
+  class LoadError : public Exception {
+    using Exception::Exception;
+  };
+
+  class SymbolError : public Exception {
+    using Exception::Exception;
+  };
+
+  explicit DynamicLibrary(const std::string& path) {
+    handle_ = open_library(path.c_str());
+
+    if VUNLIKELY (!handle_) {
+      throw LoadError("Could not load library \"" + path + "\"\n" + get_error_description());
+    }
+  }
+
+  ~DynamicLibrary() {
+    if (handle_) {
+      close_library(handle_);
+    }
+  }
+
+  DynamicLibrary(DynamicLibrary&& other) noexcept : handle_(other.handle_) { other.handle_ = nullptr; }
+
+  DynamicLibrary& operator=(DynamicLibrary&& other) noexcept {
+    if (this != &other) {
+      std::swap(handle_, other.handle_);
+    }
+    return *this;
+  }
+
+  template <typename SignatureT>
+  SignatureT* get_function(const std::string& name) const {
+    if VUNLIKELY (!handle_) {
+      throw std::logic_error("The dynamic library handle is null. This object may have been moved from.");
+    }
+
+    auto* symbol = locate_symbol(handle_, name.c_str());
+
+    if VUNLIKELY (!symbol) {
+      throw SymbolError("Could not get symbol \"" + name + "\"\n" + get_error_description());
+    }
+
+#if defined(__GNUC__) && __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
+
+    return reinterpret_cast<SignatureT*>(symbol);
+
+#if defined(__GNUC__) && __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
+  }
+
+  NativeHandle native_handle() const noexcept { return handle_; }
+
+ private:
+  static NativeHandle open_library(const char* path) noexcept {
+#if defined(_WIN32) || defined(_WIN64)
+    return ::LoadLibraryA(path);
+#else
+    return ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+  }
+
+  static NativeSymbol locate_symbol(NativeHandle lib, const char* name) noexcept {
+#if defined(_WIN32) || defined(_WIN64)
+    return ::GetProcAddress(lib, name);
+#else
+    return ::dlsym(lib, name);
+#endif
+  }
+
+  static void close_library(NativeHandle lib) noexcept {
+#if defined(_WIN32) || defined(_WIN64)
+    ::FreeLibrary(lib);
+#else
+    ::dlclose(lib);
+#endif
+  }
+
+  static std::string get_error_description() noexcept {
+#if defined(_WIN32) || defined(_WIN64)
+    constexpr size_t kBufferSize = 512;
+    const auto error_code = ::GetLastError();
+
+    if (!error_code) {
+      return "No error reported by GetLastError";
+    }
+
+    char description[kBufferSize];
+
+    const auto language = MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
+    const DWORD length =
+        ::FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, nullptr, error_code, language, description, kBufferSize, nullptr);
+
+    return (length == 0) ? "Unknown error (FormatMessage failed)" : description;
+#else
+    const auto* description = ::dlerror();
+
+    return (description == nullptr) ? "No error reported by dlerror" : description;
+#endif
+  }
+
+  NativeHandle handle_{nullptr};
+
+  VLINK_DISALLOW_COPY_AND_ASSIGN(DynamicLibrary)
+};
+
 // PluginEntry
 struct PluginEntry final {
-  std::unique_ptr<dylib> loader;
+  std::unique_ptr<DynamicLibrary> loader;
   std::string plugin_complex_id;
   Logger::Level log_level{Logger::kTrace};
 };
@@ -121,6 +279,7 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
     if (impl_->log_level <= Logger::kError) {
       VLOG_E("Plugin: Lib name is empty.");
     }
+
     return nullptr;
   }
 
@@ -130,13 +289,14 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
     if (impl_->log_level <= Logger::kError) {
       VLOG_E("Plugin: Already loaded (", plugin_complex_id, ").");
     }
+
     return nullptr;
   }
 
   std::string plugin_path;
 
   {
-    std::string plugin_name = dylib::filename_components::prefix + lib_name + dylib::filename_components::suffix;
+    std::string plugin_name = DynamicLibrary::kFilenamePrefix + lib_name + DynamicLibrary::kFilenameSuffix;
     std::string check_path;
 
     for (const auto& path : search_paths) {
@@ -161,6 +321,7 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
     if (impl_->log_level <= Logger::kError) {
       VLOG_E("Plugin: Cannot find plugin (", plugin_complex_id, ").");
     }
+
     return handle;
   }
 
@@ -170,7 +331,7 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
 
   try {
     auto entry = std::make_shared<PluginEntry>();
-    entry->loader = std::make_unique<dylib>(std::move(plugin_path), false);
+    entry->loader = std::make_unique<DynamicLibrary>(std::move(plugin_path));
     entry->plugin_complex_id = plugin_complex_id;
     entry->log_level = impl_->log_level;
 
@@ -181,6 +342,7 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
       if (impl_->log_level <= Logger::kError) {
         VLOG_E("Plugin: Cannot find symbol function to create (", plugin_complex_id, ").");
       }
+
       return handle;
     }
 
@@ -190,6 +352,7 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
       if (impl_->log_level <= Logger::kError) {
         VLOG_E("Plugin: Failed to create handle (", plugin_complex_id, ").");
       }
+
       return handle;
     }
 
@@ -207,10 +370,11 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
     }
 
     return handle;
-  } catch (const dylib::exception& e) {
+  } catch (const DynamicLibrary::Exception& e) {
     if (impl_->log_level <= Logger::kError) {
       VLOG_E("Plugin: Failed to load plugin (", plugin_complex_id, "): ", e.what(), ".");
     }
+
     return handle;
   }
 }
@@ -220,6 +384,7 @@ bool Plugin::unload(const std::string& plugin_complex_id) {
     if (impl_->log_level <= Logger::kError) {
       VLOG_E("Plugin: Plugin id is empty.");
     }
+
     return false;
   }
 
@@ -227,6 +392,7 @@ bool Plugin::unload(const std::string& plugin_complex_id) {
     if (impl_->log_level <= Logger::kError) {
       VLOG_E("Plugin: Not loaded (", plugin_complex_id, ").");
     }
+
     return false;
   }
 
@@ -254,6 +420,7 @@ bool Plugin::destroy(std::shared_ptr<PluginEntry> plugin_entry, Handle handle, c
     if (plugin_entry->log_level <= Logger::kError) {
       VLOG_E("Plugin: Cannot find symbol function to destroy (", plugin_entry->plugin_complex_id, ").");
     }
+
     return false;
   }
 
@@ -261,6 +428,7 @@ bool Plugin::destroy(std::shared_ptr<PluginEntry> plugin_entry, Handle handle, c
     if (plugin_entry->log_level <= Logger::kError) {
       VLOG_E("Plugin: Failed to destroy handle (", plugin_entry->plugin_complex_id, ").");
     }
+
     return false;
   }
 
@@ -279,6 +447,7 @@ bool Plugin::process_plugin_internal(const std::string& lib_name, const std::str
     if (log_level <= Logger::kError) {
       VLOG_E("Plugin: Plugin id mismatch: expected '", local_plugin_id, "', got '", target_plugin_id, "'.");
     }
+
     return false;
   }
 
@@ -287,6 +456,7 @@ bool Plugin::process_plugin_internal(const std::string& lib_name, const std::str
       VLOG_E("Plugin: Version mismatch: local ", local_version_major, ".", local_version_minor, ", required ",
              target_version_major, ".", target_version_minor, ".");
     }
+
     return false;
   }
 

@@ -221,7 +221,7 @@ RecordDialog::~RecordDialog() {
 
   {
     std::unique_lock select_lock(select_mtx_);
-    status_ = kStoped;
+    status_ = kStopped;
     select_urls_.clear();
   }
 
@@ -495,7 +495,7 @@ void RecordDialog::on_pushButton_stop_clicked() {
   std::shared_ptr<vlink::BagWriter> recorder;
   {
     std::lock_guard select_lock(select_mtx_);
-    status_ = kStoped;
+    status_ = kStopped;
     select_urls_.clear();
     recorder = recorder_;
   }
@@ -566,7 +566,7 @@ void RecordDialog::update_status() {
   } else if (ui->lineEdit_save->text().isEmpty()) {
     status_ = kDisable;
   } else if (status_ == kDisable) {
-    status_ = kStoped;
+    status_ = kStopped;
   }
 
   switch (status_) {
@@ -590,7 +590,7 @@ void RecordDialog::update_status() {
       ui->label_progress->clear();
       progress_index_ = 0;
       break;
-    case kStoped:
+    case kStopped:
       ui->pushButton_start->setEnabled(true);
       ui->pushButton_pause->setEnabled(false);
       ui->pushButton_resume->setEnabled(false);
@@ -670,7 +670,7 @@ void RecordDialog::set_record_loss() {
 }
 
 void RecordDialog::closeEvent(QCloseEvent* event) {
-  if (!window_->proxy_->is_connected() || status_ == kDisable || status_ == kStoped) {
+  if (!window_->proxy_->is_connected() || status_ == kDisable || status_ == kStopped) {
     QDialog::closeEvent(event);
     return;
   }

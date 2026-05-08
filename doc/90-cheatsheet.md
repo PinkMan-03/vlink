@@ -192,10 +192,10 @@ auto sp = Publisher<T>::create_shared(url_str);
 
 | Transport | 关键 query | 默认 |
 |---|---|---|
-| `intra://` | `event=<name>`、`pipeline=<int>`（pipeline depth） | `event=""`、`pipeline=1` |
-| `shm://` | `domain=<int>`、`depth=<int>`、`history=<int>`、`wait=0\|1` | `0 / 1 / 1 / 0` |
+| `intra://` | `event=<name>`、`pipeline=<int>`（pipeline depth） | `event=""`、`pipeline=0` |
+| `shm://` | `domain=<int>`、`depth=<int>`、`history=<int>`、`wait=0\|1` | `0 / 0 / 0（field 默认 1） / 0` |
 | `shm2://` | 与 `shm://` 相同；额外通过 `VLINK_SHM2_CONFIG` 指定 TOML | 同上 |
-| `dds://` / `ddsc://` / `ddsr://` / `ddst://` | `domain=<int>`、`depth=<int>`、`qos=<profile>`；保留 `part/topic/pub/sub/writer/reader` 作 QoS 扩展键 | `0 / 1 / ""` |
+| `dds://` / `ddsc://` / `ddsr://` / `ddst://` | `domain=<int>`、`depth=<int>`、`qos=<profile>`；保留 `part/topic/pub/sub/writer/reader` 作 QoS 扩展键 | `0 / 0 / ""` |
 | `zenoh://` | `domain=<int>`、`event=<name>`、`qos=<profile>`、`depth=<int>`（覆盖 session 级 TX 队列深度）、`shm=<0\|1>`、`shm_mode=init\|lazy`、`shm_size=<bytes>`（支持 `K`/`M`/`G`）、`shm_threshold=<bytes>`、`shm_loan_threshold=<bytes>`（用户 `loan()` 最小尺寸阈值，默认 `8K`）、`shm_blocking=<0\|1>`；`#fragment` = 模式提示（`tcp`/`udp`/`unix`/`shm` 或带地址的 `tcp/host:port`） | `0 / "" / "" / 0` |
 | `someip://` | `service=<hex>`、`instance=<hex>`、`method=<hex>` 或 `event=<hex>` | `0 / 0 / 0` |
 | `mqtt://` | `domain=<int>`、`qos=<0\|1\|2>`、`event=<name>`；`#fragment` = broker URI 提示 | `0 / 1 / ""` |
@@ -220,7 +220,7 @@ struct Qos {
   PublishMode publish_mode;          // kind=kSync（或 kASync）
   Liveliness liveliness;             // kind=kAutomatic, duration=-1ms (infinite)
   DestinationOrder destination_order;// kind=kReceptionTimestamp（或 kSourceTimestamp）
-  Ownership ownership;               // kind=kShared（或 kExClusive）
+  Ownership ownership;               // kind=kShared（或 kExclusive）
   Deadline deadline;                 // period=-1ms (no constraint)
   Lifespan lifespan;                 // duration=-1ms (infinite)
   LatencyBudget latency_budget;      // duration=0ms (best-effort)
@@ -251,15 +251,23 @@ struct Qos {
 | `kBest` | Reliable | KeepLast(200) | Volatile | Sync | RealTime | 高吞吐 reliable（同步发送）|
 | `kLarge` | Reliable | KeepLast(500) | Volatile | Sync | Low | 大负载（延长心跳） |
 
-**运行时用法**：
+**运行时用法**（QoS 通过 URL `?qos=name` 引用，无 `set_qos()` 方法）：
 ```cpp
+// 1) 直接用 URL 引用预设：?qos=sensor / ?qos=event / ...
+vlink::Publisher<Imu> pub("dds://sensor/imu?qos=sensor");
+
+// 2) 用自定义 Qos：先 register_qos，再 URL 引用
+vlink::Qos my_qos = vlink::QosProfile::kSensor;
+my_qos.history.depth = 50;
+// my_qos.valid 由 QosProfile::kXxx 已置 true；自构造时必须显式设
+vlink::DdsConf::register_qos("my_sensor", my_qos);  // 各 transport 的 Conf 都有
+vlink::Publisher<Imu> pub2("dds://sensor/imu?qos=my_sensor");
+
+// 3) 仅查询所有可用预设
 auto& m = vlink::QosProfile::get_available_qos_map();
-if (auto it = m.find("sensor"); it != m.end()) pub->set_qos(it->second);
-// 或直接：
-pub->set_qos(vlink::QosProfile::kSensor);
 ```
 
-**自定义 Qos**：构造 `vlink::Qos`，逐个设置子策略，**必须把 `valid = true`** 才会应用。
+**自定义 Qos**：构造 `vlink::Qos`，逐个设置子策略，**必须把 `valid = true`** 才会应用，然后通过 `XxxConf::register_qos()` 注册再用 `?qos=` 引用。
 
 ---
 
@@ -334,7 +342,7 @@ sub.listen([&](const Bytes& b){
 ```
 
 **数据容器**（`include/vlink/zerocopy/`）：
-- `RawData`（64 B）· `CameraFrame`（80 B）· `PointCloud`（256 B）· `ProxyData`
+- `RawData`（64 B）· `CameraFrame`（80 B）· `PointCloud`（256 B）· `ProxyData`（80 B）
 - 都内嵌 40 B `Header`：`frame_id[16] + seq[4] + reserved[4] + time_meas[8] + time_pub[8]`
 
 **Bytes 五种所有权模式**（源：`base/bytes.h:42-48`）：
@@ -424,11 +432,11 @@ cfg.rate = 2.0;                 // 2× 倍速
 cfg.times = -1;                 // 无限循环
 cfg.filter_urls = {"dds://sensor/imu"};
 r->play(cfg);
-r->seek(ts_ms);                 // 跳转
-// 后台维护：
-r->check();     // → std::future<bool>
+r->jump(ts_ms, /*rate=*/1.0, /*times=*/1);   // 跳转并恢复播放（ms，相对录制起点）
+// 后台维护（均返回 std::future<bool>）：
+r->check();
 r->reindex();
-r->fix();
+r->fix();                                     // 可选 r->fix(/*rebuild=*/true)
 ```
 
 **Config 字段**（`extension/bag_reader.h:181-191`）：
@@ -447,7 +455,7 @@ r->fix();
 auto viewer = std::make_shared<vlink::DiscoveryViewer>(
     vlink::DiscoveryViewer::kFilterNative);  // 仅本机
 viewer->register_callback([](const std::vector<DiscoveryViewer::Info>& infos){
-  for (auto& i : infos) { /* i.url, i.type, i.type_flags, i.processes */ }
+  for (auto& i : infos) { /* i.url, i.type, i.ser_type, i.schema_type, i.process_list */ }
 });
 ```
 
@@ -757,10 +765,10 @@ sub.listen([&](const Bytes& b){
 
 **⑤ 预设 QoS + 自定义覆盖**：
 ```cpp
-vlink::Qos qos = vlink::QosProfile::kSensor;
+vlink::Qos qos = vlink::QosProfile::kSensor;   // valid 已为 true
 qos.history.depth = 50;
-qos.valid = true;
-pub.set_qos(qos);
+vlink::DdsConf::register_qos("my_sensor", qos);
+vlink::Publisher<Imu> pub("dds://sensor/imu?qos=my_sensor");
 ```
 
 **⑥ 延迟 init + 显式初始化**：

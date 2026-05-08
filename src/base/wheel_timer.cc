@@ -34,6 +34,7 @@
 
 #include "./base/condition_variable.h"
 #include "./base/logger.h"
+#include "./base/memory_resource.h"
 
 namespace vlink {
 
@@ -67,7 +68,13 @@ struct WheelTimer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
 
   uint32_t slots{0};
   uint32_t interval_ms{5};
-  std::vector<std::list<Handler>> wheels;
+
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  std::optional<std::pmr::vector<std::pmr::list<Handler>>> wheels;
+#else
+  std::optional<std::vector<std::list<Handler>>> wheels;
+#endif
+
   uint32_t current_slot{0};
 
   std::thread worker_thread;
@@ -87,12 +94,21 @@ WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(std::make_s
     VLOG_F("WheelTimer: Slots and interval_ms must be greater than 0.");
   }
 
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  impl_->wheels.emplace(&MemoryResource::global_instance());
+#else
+  impl_->wheels.emplace();
+#endif
+
   impl_->slots = (slots == 0) ? 1U : slots;
   impl_->interval_ms = (interval_ms == 0) ? 1U : interval_ms;
-  impl_->wheels.resize(impl_->slots);
+  impl_->wheels->resize(impl_->slots);
 }
 
-WheelTimer::~WheelTimer() { stop(); }
+WheelTimer::~WheelTimer() {
+  stop();
+  impl_->wheels.reset();
+}
 
 void WheelTimer::start() {
   std::lock_guard lifecycle_lock(impl_->lifecycle_mtx);
@@ -239,7 +255,7 @@ WheelTimer::Key WheelTimer::add(uint32_t timeout_ms, Callback&& callback, uint32
     return -1;
   }
 
-  auto& slot_list = impl_->wheels[slot];
+  auto& slot_list = (*impl_->wheels)[slot];
   slot_list.emplace_back(key, rounds, std::move(callback), repeat_ms);
 
   auto it = std::prev(slot_list.end());
@@ -260,7 +276,7 @@ bool WheelTimer::remove(WheelTimer::Key key) {
       return false;
     }
 
-    auto& slot_list = impl_->wheels[it->second.first];
+    auto& slot_list = (*impl_->wheels)[it->second.first];
     slot_list.erase(it->second.second);
     impl_->timer_index.erase(it);
   }
@@ -294,7 +310,12 @@ uint32_t WheelTimer::get_remaining_time(Key key) const {
 void WheelTimer::set_catchup_limit(uint32_t max_slots_to_catch_up) { impl_->catchup_limit = max_slots_to_catch_up; }
 
 void WheelTimer::Impl::run() {
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  std::pmr::vector<std::pair<WheelTimer::Key, WheelTimer::Callback>> callbacks_to_execute(
+      &MemoryResource::global_instance());
+#else
   std::vector<std::pair<WheelTimer::Key, WheelTimer::Callback>> callbacks_to_execute;
+#endif
 
   auto interval = std::chrono::milliseconds(interval_ms);
 
@@ -331,7 +352,7 @@ void WheelTimer::Impl::run() {
     uint32_t catchup_limit_snapshot = catchup_limit.load();
 
     while (now >= next_tick && !stop_flag && !paused_flag) {
-      auto& timers = wheels[current_slot];
+      auto& timers = (*wheels)[current_slot];
 
       for (auto it = timers.begin(); it != timers.end();) {
         if VLIKELY (it->remaining_rounds > 0) {
@@ -363,7 +384,7 @@ void WheelTimer::Impl::run() {
             auto new_slot = (current_slot + repeat_ticks_mod) % slots;
 
             Handler new_handler(it->key, new_rounds, std::move(it->callback), it->repeat_interval_ms);
-            auto& new_list = wheels[new_slot];
+            auto& new_list = (*wheels)[new_slot];
 
             new_list.emplace_back(std::move(new_handler));
 
@@ -398,7 +419,12 @@ void WheelTimer::Impl::run() {
       next_tick = now + interval;
     }
 
-    std::vector<std::pair<WheelTimer::Key, WheelTimer::Callback>> pending_callbacks;
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+    decltype(callbacks_to_execute) pending_callbacks(&MemoryResource::global_instance());
+#else
+    decltype(callbacks_to_execute) pending_callbacks;
+#endif
+
     pending_callbacks.swap(callbacks_to_execute);
 
     lock.unlock();
@@ -413,7 +439,15 @@ void WheelTimer::Impl::run() {
     is_running = false;
     paused_flag = false;
     current_slot = 0;
-    wheels = std::vector<std::list<Handler>>(slots);
+
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+    wheels.emplace(&MemoryResource::global_instance());
+#else
+    wheels.emplace();
+#endif
+
+    wheels->resize(slots);
+
     timer_index.clear();
   }
 

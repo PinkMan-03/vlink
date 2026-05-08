@@ -79,7 +79,7 @@ class TestBagReader : public BagReader {
 
   int64_t get_real_timestamp() const override { return 0; }
 
-  Status get_status() const override { return kStoped; }
+  Status get_status() const override { return kStopped; }
 
   const Info& get_info() const override { return info_; }
 
@@ -113,7 +113,7 @@ class TestBagReader : public BagReader {
 
 TEST_SUITE("extension-BagReader - Status") {
   TEST_CASE("enum values are correct") {
-    CHECK(static_cast<uint8_t>(BagReader::kStoped) == 0);
+    CHECK(static_cast<uint8_t>(BagReader::kStopped) == 0);
     CHECK(static_cast<uint8_t>(BagReader::kPaused) == 1);
     CHECK(static_cast<uint8_t>(BagReader::kPlaying) == 2);
   }
@@ -276,7 +276,7 @@ TEST_SUITE("extension-BagReader - convert_action") {
 TEST_SUITE("extension-BagReader - construction") {
   TEST_CASE("TestBagReader construction does not crash") {
     TestBagReader reader;
-    CHECK(reader.get_status() == BagReader::kStoped);
+    CHECK(reader.get_status() == BagReader::kStopped);
     CHECK(reader.get_timestamp() == 0);
     CHECK(reader.get_real_timestamp() == 0);
     CHECK(reader.is_split_mode() == false);

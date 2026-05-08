@@ -38,7 +38,7 @@
  * @par Loading a logger plugin
  * @code
  * vlink::Plugin plugin;
- * auto logger_backend = plugin.load<vlink::LoggerPluginInterface>("my_logger_plugin.so");
+ * auto logger_backend = plugin.load<vlink::LoggerPluginInterface>("my_logger_plugin", 1, 0);
  *
  * if (logger_backend) {
  *     logger_backend->init("my_app");
@@ -59,7 +59,7 @@
  *         return true;
  *     }
  * };
- * VLINK_PLUGIN_DECLARE(MyLogger)
+ * VLINK_PLUGIN_DECLARE(MyLogger, 1, 0)
  * @endcode
  *
  * @note

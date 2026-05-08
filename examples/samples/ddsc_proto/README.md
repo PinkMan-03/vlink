@@ -55,5 +55,5 @@ cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径>
 cmake --build .
 
 # 运行（单进程内完成）
-./example_ddsc_proto
+./sample_ddsc_proto
 ```

@@ -88,7 +88,8 @@ class MemoryPool final {
   MemoryPool();
 
   // 按 level 从内置 10 行表（L0..L9，L0 = bypass）取一行。越界值钳到 [0, 9]。
-  explicit MemoryPool(int level);
+  // prealloc=true 时构造期为每个 tier 一次性预分配满额 blocks_per_chunk。
+  explicit MemoryPool(int level, bool prealloc = false);
 
   [[nodiscard]] void* allocate(size_t bytes,
                                size_t alignment = alignof(std::max_align_t)) noexcept;

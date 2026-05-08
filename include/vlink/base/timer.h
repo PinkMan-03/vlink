@@ -35,7 +35,8 @@
  * - Optional strict mode: if the loop is busy and the next tick is missed, strict mode
  *   fires the missed callbacks immediately to maintain the schedule.
  * - Priority support for @c kPriorityType message loops.
- * - Minimum timer resolution is @c kMinInterval (10000) to prevent busy-wait overhead.
+ * - When @c interval_ms is zero, the internal tick interval falls back to @c kMinInterval (10000 ns = 10 us)
+ *   to prevent busy-wait overhead from a zero interval.
  * - A detached @c Timer does not fire until attached to a loop via @c attach().
  *
  * Lifecycle:
@@ -46,7 +47,6 @@
  * -# Destruction automatically calls @c stop() and @c detach().
  *
  * @note
- * - When @c interval_ms is zero, the interval falls back to @c kMinInterval (10000).
  * - A timer is automatically stopped when its @c MessageLoop is destroyed.
  * - @c call_once() is a convenience factory for fire-and-forget one-shot timers.
  *
@@ -111,7 +111,8 @@ class VLINK_EXPORT Timer final {
    * @brief Constructs and fully configures a timer attached to a loop.
    *
    * @param message_loop  The @c MessageLoop to deliver callbacks on.
-   * @param interval_ms   Tick interval in milliseconds.  When zero, falls back to @c kMinInterval (10000).
+   * @param interval_ms   Tick interval in milliseconds.  When zero, the internal tick interval falls back
+   *                      to @c kMinInterval (10000 ns = 10 us).
    * @param loop_count    Number of times to fire (@c kInfinite for indefinite repeat).  Default: @c kInfinite.
    * @param callback      Callback to invoke on each tick.  Default: nullptr.
    */
@@ -251,7 +252,8 @@ class VLINK_EXPORT Timer final {
    * @brief Resets the countdown to zero and continues firing.
    *
    * @details
-   * Equivalent to @c stop() followed by @c start() but also resets @c get_invoke_count().
+   * Resets the remaining loop count to the configured @c loop_count, clears
+   * @c get_invoke_count() to zero, and re-arms timing as if newly started.
    */
   void restart();
 
@@ -279,7 +281,7 @@ class VLINK_EXPORT Timer final {
    *
    * @details
    * Takes effect on the next @c start() or @c restart() call.
-   * When set to zero, the interval falls back to @c kMinInterval (10000).
+   * When set to zero, the internal tick interval falls back to @c kMinInterval (10000 ns = 10 us).
    *
    * @param interval_ms  New interval in milliseconds.
    */

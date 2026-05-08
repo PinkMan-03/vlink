@@ -122,7 +122,7 @@ using OutputCallback = vlink::MoveFunction<void(
 ### StatusCallback
 ```cpp
 using StatusCallback = vlink::MoveFunction<void(Status status)>;
-// Status: kStoped(0), kPaused(1), kPlaying(2)
+// Status: kStopped(0), kPaused(1), kPlaying(2)
 ```
 
 ### FinishCallback

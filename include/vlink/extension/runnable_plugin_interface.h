@@ -44,13 +44,13 @@
  *         // stop timers, unsubscribe
  *     }
  * };
- * VLINK_PLUGIN_DECLARE(MyPlugin)
+ * VLINK_PLUGIN_DECLARE(MyPlugin, 1, 0)
  * @endcode
  *
  * @par Host usage
  * @code
  * vlink::Plugin plugin;
- * auto instance = plugin.load<vlink::RunablePluginInterface>("my_plugin.so");
+ * auto instance = plugin.load<vlink::RunablePluginInterface>("my_plugin.so", 1, 0);
  * instance->async_run();
  * instance->on_init();
  * // ... run ...

@@ -36,7 +36,7 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 | 分类              | 目录                         | 示例数量 | 说明                                        |
 | ----------------- | ---------------------------- | -------- | ------------------------------------------- |
 | quickstart        | `examples/quickstart/`       | 3        | 最小化入门示例（PubSub、RPC、Field）        |
-| base              | `examples/base/`             | 19       | 基础库（Logger、Timer、Bytes、线程池等）    |
+| base              | `examples/base/`             | 20       | 基础库（Logger、Timer、Bytes、内存池、线程池等）|
 | communication     | `examples/communication/`    | 7        | 三种通信模型的基础和进阶用法                |
 | serialization     | `examples/serialization/`    | 7        | 各序列化类型的独立演示                      |
 | url_guide         | `examples/url_guide/`        | 9        | URL 格式与各传输后端配置指南                |
@@ -80,7 +80,7 @@ examples/
 │   ├── hello_pubsub/
 │   ├── hello_rpc/
 │   └── hello_field/
-├── base/                       # 基础库示例（19 个项目）
+├── base/                       # 基础库示例（20 个项目）
 │   ├── logger_basic/
 │   ├── logger_advanced/
 │   ├── timer_basic/
@@ -97,6 +97,7 @@ examples/
 │   ├── spin_lock/
 │   ├── graph_task/
 │   ├── object_pool/
+│   ├── memory_pool/
 │   ├── process/
 │   ├── schedule/
 │   └── utils/
@@ -252,6 +253,7 @@ ls build/output/bin/
 | `spin_lock`              | 自旋锁使用                                        |
 | `graph_task`             | DAG 任务图调度                                    |
 | `object_pool`            | 对象池                                            |
+| `memory_pool`            | 内存池（`MemoryPool` 多档分级、预分配）            |
 | `process`                | 进程信息查询                                      |
 | `schedule`               | 调度器                                            |
 | `utils`                  | 工具函数（路径、线程、信号等）                    |

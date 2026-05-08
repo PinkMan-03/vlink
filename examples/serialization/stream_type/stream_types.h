@@ -65,7 +65,8 @@ static_assert(vlink::Serializer::get_type_of<Size2D>() == vlink::Serializer::kSt
               "Size2D must be detected as kStreamType");
 
 /// A hybrid type with BOTH stream and Bytes operators.
-/// Demonstrates that kCustomType (position 9) takes priority over kStreamType (position 12).
+/// Demonstrates that kCustomType is checked before kStreamType in the detection chain,
+/// so Bytes operators take priority over stringstream operators.
 struct Hybrid {
   int value = 0;  // The stored integer value
 
@@ -86,6 +87,6 @@ struct Hybrid {
   }
 };
 
-// Hybrid is kCustomType because Bytes operators are checked first (position 9 vs 12)
+// Hybrid is kCustomType because Bytes operators are checked before stringstream operators
 static_assert(vlink::Serializer::get_type_of<Hybrid>() == vlink::Serializer::kCustomType,
               "Hybrid must be kCustomType (Bytes operators take priority)");

@@ -544,7 +544,7 @@ enum class ConvertTarget : uint8_t {
 | `can_convert(vlink_ser, target)`                                     | 告知是否处理某 VLink 序列化类型 + 目标         |
 | `get_schema_info(vlink_ser, target, type_name, encoding, schema_encoding, schema_data)` | 注册通道时返回 schema 元数据    |
 | `convert(vlink_ser, raw, target, payload)`                           | 每条消息调用一次，把 `raw` 转换为目标格式      |
-| `extract_timestamp(vlink_ser, raw, target)`（默认实现返回 0）         | 可选：从消息提取时间戳                         |
+| `extract_timestamp(vlink_ser, raw, target)`（默认实现返回 -1，表示不可用） | 可选：从消息提取时间戳（纳秒）            |
 | `can_convert_frontend` / `get_publish_info` / `convert_frontend`      | 可选：支持从浏览器 publish 到 VLink 反向通道    |
 
 ### Rerun JSON payload 约定示例

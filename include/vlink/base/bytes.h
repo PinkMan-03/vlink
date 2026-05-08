@@ -55,6 +55,7 @@
  * Utility helpers:
  * - Base-64 encode/decode (@c encode_to_base64 / @c decode_from_base64)
  * - CRC-32 checksum (@c get_crc_32)
+ * - CRC-64 checksum (@c get_crc_64) -- ECMA-182 variant
  * - Byte-order reversal (@c reverse_order)
  * - Hex-string conversion (@c convert_to_hex_str)
  * - User-input parsing from hex/binary string literals (@c from_user_input)
@@ -65,10 +66,12 @@
  *   in-place without re-allocation.
  * - @c is_loaned() is set by @c loan_internal(), which is used exclusively for iceoryx
  *   zero-copy payloads that must @b not be freed by VLink.
- * - @c is_ptr() returns @c true when size == 0 and offset == 0 and the object is not an owner,
- *   meaning the buffer holds only an opaque pointer created via @c shallow_copy_ptr().
- * - @c init_memory_pool() may be called explicitly at application
- *   startup/shutdown if the memory pool is desired.  They are no-ops when the pool is unavailable.
+ * - @c is_ptr() returns @c true when @c data_ is non-null, size == 0, offset == 0 and the
+ *   object is not an owner, meaning the buffer holds only an opaque pointer created via
+ *   @c shallow_copy_ptr().
+ * - @c init_memory_pool() may be called explicitly at application startup to eagerly
+ *   construct the global @c MemoryPool; @c release_memory_pool() trims fully-free chunks.
+ *   Both are no-ops when the pool is unavailable.
  *
  * @par Example
  * @code
@@ -334,12 +337,20 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   [[nodiscard]] static Bytes decode_from_base64(const std::string& target) noexcept;
 
   /**
-   * @brief Computes the CRC-32 checksum of a @c Bytes buffer.
+   * @brief Computes the CRC-32 (ISO-HDLC) checksum of a @c Bytes buffer.
    *
    * @param target  Buffer to checksum.
    * @return 32-bit CRC value.
    */
   [[nodiscard]] static uint32_t get_crc_32(const Bytes& target) noexcept;
+
+  /**
+   * @brief Computes the CRC-64 (ECMA-182) checksum of a @c Bytes buffer.
+   *
+   * @param target  Buffer to checksum.
+   * @return 64-bit CRC value.
+   */
+  [[nodiscard]] static uint64_t get_crc_64(const Bytes& target) noexcept;
 
   /**
    * @brief Constructs an empty, unallocated @c Bytes object.
@@ -630,11 +641,13 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   [[nodiscard]] const uint8_t* real_end() const noexcept;
 
   /**
-   * @brief Returns @c true if the object holds only an opaque pointer (size == 0 and not owner).
+   * @brief Returns @c true if the object holds only an opaque pointer
+   *        (non-null @c data_, size == 0, offset == 0, not owner).
    *
    * @details
-   * An object created via @c shallow_copy_ptr() has @c size_ == 0, @c offset_ == 0 and
-   * @c is_owner_ == false.  Use @c to_ptr<T>() to retrieve the wrapped pointer.
+   * An object created via @c shallow_copy_ptr() has @c data_ != nullptr,
+   * @c size_ == 0, @c offset_ == 0 and @c is_owner_ == false.  Use
+   * @c to_ptr<T>() to retrieve the wrapped pointer.
    *
    * @return @c true if this is a pointer-only wrapper.
    */

@@ -37,9 +37,10 @@ target_link_libraries(analysis_plugin vlink::all)
 
 ```cpp
 ProxyServer::Config cfg;
-cfg.runnable_list = {
-  {"analysis_plugin", 1, 0},
-};
+cfg.runnable_list = {"analysis_plugin"};   // 只填插件名，不带前缀和扩展名
+cfg.runnable_version_major = 1;            // 必填，与插件 VLINK_PLUGIN_DECLARE 中的 major 匹配
+cfg.runnable_version_minor = 0;            // 必填，与插件 VLINK_PLUGIN_DECLARE 中的 minor 匹配
+cfg.runnable_prefix = "";                  // 可选，库名前缀（默认空）
 ```
 
 ## ProxyServer 自动管理生命周期

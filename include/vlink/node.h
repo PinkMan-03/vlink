@@ -160,9 +160,9 @@ class Node {
    * @details
    * Signals the internal interrupted flag and wakes the condition variable so
    * that calls such as @c wait_for_subscribers(), @c wait_for_connected(), and
-   * @c wait_for_value() return immediately with @c false.  Subclasses such as
-   * @c Getter, @c Publisher, and @c Client override this to also wake their
-   * own blocking condition variables.
+   * @c wait_for_value() return immediately with @c false.  @c Getter overrides
+   * this to additionally wake its own blocking condition variable used by
+   * @c wait_for_value().
    */
   virtual void interrupt();
 
@@ -323,7 +323,7 @@ class Node {
    * one.  The handler is invoked with a @c Status::BasePtr describing the new
    * state (e.g. connected, disconnected, error).
    *
-   * @param callback  Callable @c void(Status::BasePtr) invoked on status changes.
+   * @param callback  Callable @c void(const Status::BasePtr&) invoked on status changes.
    */
   void register_status_handler(StatusCallback&& callback);
 

@@ -41,6 +41,7 @@
  * @code
  *   // In your plugin shared library:
  *   struct MyTransportPlugin final : public vlink::ConfPluginInterface {
+ *     VLINK_PLUGIN_REGISTER(ConfPluginInterface)
  *     vlink::TransportType get_transport_type() const override {
  *       return vlink::TransportType::kMyCustomTransport;
  *     }
@@ -48,11 +49,12 @@
  *       return std::make_unique<MyTransportConf>();
  *     }
  *   };
- *   VLINK_PLUGIN_EXPORT(MyTransportPlugin)
+ *   VLINK_PLUGIN_DECLARE(MyTransportPlugin, 1, 0)
  * @endcode
  *
- * @note The @c VLINK_PLUGIN_EXPORT macro (from @c base/plugin.h) injects the
- *       symbol needed for the plugin loader to locate and instantiate this type.
+ * @note The @c VLINK_PLUGIN_DECLARE macro (from @c base/plugin.h) exports the
+ *       create/destroy entry points needed for the plugin loader to locate and
+ *       instantiate this type.
  *
  * @note Implementations must be stateless; @c create() may be called multiple times
  *       to produce independent @c Conf objects for different @c Url instances.
@@ -73,9 +75,11 @@ namespace vlink {
  *
  * @details
  * Each VLink transport plugin exports exactly one concrete subclass of this
- * interface.  The VLink runtime loads the plugin shared library, locates the
- * registered instance via @c VLINK_PLUGIN_REGISTER, and queries it for the
- * supported transport backend and new @c Conf objects.
+ * interface.  @c VLINK_PLUGIN_REGISTER tags the base type with a stable plugin
+ * id; the concrete subclass exports its create/destroy entry points via
+ * @c VLINK_PLUGIN_DECLARE in its translation unit.  The VLink runtime then
+ * loads the plugin shared library, instantiates the concrete subclass and
+ * queries it for the supported transport backend and new @c Conf objects.
  */
 struct ConfPluginInterface {
   VLINK_PLUGIN_REGISTER(ConfPluginInterface)

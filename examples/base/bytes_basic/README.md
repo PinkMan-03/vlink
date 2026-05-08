@@ -228,5 +228,4 @@ if (!buf.reserve(1000000000)) {
 
 - [bytes_advanced](../bytes_advanced/) -- 压缩、Base64、CRC-32、十六进制转换
 - [bytes_zerocopy](../bytes_zerocopy/) -- 所有权模型：shallow_copy、deep_copy、loan_internal
--  -- 基于 Bytes 的零分配流式输出
 - [zerocopy 示例](../../zerocopy/) -- Bytes 在零拷贝传输中的实际应用

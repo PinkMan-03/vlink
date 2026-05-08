@@ -85,8 +85,6 @@
 
 #include "./macros.h"
 
-// NOLINTBEGIN
-
 namespace vlink {
 
 /**
@@ -97,25 +95,24 @@ namespace format {
 
 namespace detail {
 
-template <typename T>
-using RemoveCvref = typename std::remove_cv_t<std::remove_reference_t<T>>;
+template <typename TypeT>
+using RemoveCvref = typename std::remove_cv_t<std::remove_reference_t<TypeT>>;
 
-template <typename T, typename = void>
+template <typename TypeT, typename = void>
 struct IsOutputIteratorImpl : std::false_type {};
 
-template <typename T>
-struct IsOutputIteratorImpl<T, std::enable_if_t<std::is_assignable_v<decltype(*std::declval<T&>()++), char>>>
+template <typename TypeT>
+struct IsOutputIteratorImpl<TypeT, std::enable_if_t<std::is_assignable_v<decltype(*std::declval<TypeT&>()++), char>>>
     : std::true_type {};
 
 template <>
 struct IsOutputIteratorImpl<char*> : std::true_type {};
 
-// 数组全部排除
-template <typename T, size_t N>
-struct IsOutputIteratorImpl<T[N]> : std::false_type {};
+template <typename TypeT, size_t NumT>
+struct IsOutputIteratorImpl<TypeT[NumT]> : std::false_type {};
 
-template <typename T>
-inline constexpr bool kIsOutputIterator = IsOutputIteratorImpl<T>::value;
+template <typename TypeT>
+inline constexpr bool kIsOutputIterator = IsOutputIteratorImpl<TypeT>::value;
 
 enum class Type : uint8_t {
   kNone,
@@ -132,6 +129,7 @@ enum class Type : uint8_t {
   kPointer
 };
 
+// NOLINTBEGIN
 template <typename T>
 struct TypeConstant : std::integral_constant<Type, Type::kNone> {};
 
@@ -189,14 +187,15 @@ struct TypeConstant<std::string_view> : std::integral_constant<Type, Type::kStri
 template <>
 struct TypeConstant<std::string> : std::integral_constant<Type, Type::kString> {};
 
-template <size_t N>
-struct TypeConstant<char[N]> : std::integral_constant<Type, Type::kCstring> {};
+template <size_t NumT>
+struct TypeConstant<char[NumT]> : std::integral_constant<Type, Type::kCstring> {};
 
-template <size_t N>
-struct TypeConstant<const char[N]> : std::integral_constant<Type, Type::kCstring> {};
+template <size_t NumT>
+struct TypeConstant<const char[NumT]> : std::integral_constant<Type, Type::kCstring> {};
 
 template <typename T>
 struct TypeConstant<T*> : std::integral_constant<Type, Type::kPointer> {};
+// NOLINTEND
 
 template <typename UIntT>
 inline int count_digits(UIntT n) {
@@ -215,7 +214,7 @@ inline CharT* write_int_digits(CharT* buf, UIntT value, int num_digits) {
   CharT* end = buf + num_digits;
 
   while (value >= 10) {
-    unsigned digit = static_cast<unsigned>(value % 10);
+    auto digit = static_cast<unsigned>(value % 10);
     *--end = static_cast<CharT>('0' + digit);
     value /= 10;
   }
@@ -246,7 +245,7 @@ class StringWriter {
   inline void write(const char* s, size_t count) {
     total_size_ += count;
 
-    size_t avail = static_cast<size_t>(end_ - ptr_);
+    auto avail = static_cast<size_t>(end_ - ptr_);
     size_t n = (count <= avail) ? count : avail;
 
     if (n > 0) {
@@ -296,6 +295,7 @@ class IteratorWriter {
 template <typename CharT>
 class Value {
  public:
+  // NOLINTBEGIN
   union {
     int int_value;
     unsigned uint_value;
@@ -312,68 +312,69 @@ class Value {
 
   constexpr Value() : int_value(0) {}
 
-  constexpr Value(signed char val) : int_value(static_cast<int>(val)) {}
+  constexpr explicit Value(signed char val) : int_value(static_cast<int>(val)) {}
 
-  constexpr Value(unsigned char val) : uint_value(static_cast<unsigned>(val)) {}
+  constexpr explicit Value(unsigned char val) : uint_value(static_cast<unsigned>(val)) {}
 
-  constexpr Value(short val) : int_value(static_cast<int>(val)) {}
+  constexpr explicit Value(short val) : int_value(static_cast<int>(val)) {}
 
-  constexpr Value(unsigned short val) : uint_value(static_cast<unsigned>(val)) {}
+  constexpr explicit Value(unsigned short val) : uint_value(static_cast<unsigned>(val)) {}
 
-  constexpr Value(int val) : int_value(val) {}
+  constexpr explicit Value(int val) : int_value(val) {}
 
-  constexpr Value(unsigned val) : uint_value(val) {}
+  constexpr explicit Value(unsigned val) : uint_value(val) {}
 
-  constexpr Value(long val) : long_long_value(val) {}
+  constexpr explicit Value(long val) : long_long_value(val) {}
 
-  constexpr Value(unsigned long val) : ulong_long_value(val) {}
+  constexpr explicit Value(unsigned long val) : ulong_long_value(val) {}
 
-  constexpr Value(long long val) : long_long_value(val) {}
+  constexpr explicit Value(long long val) : long_long_value(val) {}
 
-  constexpr Value(unsigned long long val) : ulong_long_value(val) {}
+  constexpr explicit Value(unsigned long long val) : ulong_long_value(val) {}
 
-  constexpr Value(bool val) : bool_value(val) {}
+  constexpr explicit Value(bool val) : bool_value(val) {}
 
-  constexpr Value(CharT val) : char_value(val) {}
+  constexpr explicit Value(CharT val) : char_value(val) {}
 
-  constexpr Value(float val) : float_value(val) {}
+  constexpr explicit Value(float val) : float_value(val) {}
 
-  constexpr Value(double val) : double_value(val) {}
+  constexpr explicit Value(double val) : double_value(val) {}
 
-  constexpr Value(const CharT* val) : string_value(val) {}
+  constexpr explicit Value(const CharT* val) : string_value(val) {}
 
-  constexpr Value(CharT* val) : string_value(val) {}
+  constexpr explicit Value(CharT* val) : string_value(val) {}
 
-  constexpr Value(std::string_view val) : string_view_value(val) {}
+  constexpr explicit Value(std::string_view val) : string_view_value(val) {}
 
-  constexpr Value(const std::string& val) : string_view_value(val) {}
+  constexpr explicit Value(const std::string& val) : string_view_value(val) {}
 
-  template <size_t N>
-  constexpr Value(const CharT (&val)[N]) : string_value(val) {}
+  template <size_t NumT>
+  constexpr explicit Value(const CharT (&val)[NumT]) : string_value(val) {}
 
-  template <size_t N>
-  constexpr Value(CharT (&val)[N]) : string_value(val) {}
+  template <size_t NumT>
+  constexpr explicit Value(CharT (&val)[NumT]) : string_value(val) {}
 
-  template <typename T>
-  constexpr Value(T* val) : pointer_value(static_cast<const void*>(val)) {}
+  template <typename TypeT>
+  constexpr explicit Value(TypeT* val) : pointer_value(static_cast<const void*>(val)) {}
+  // NOLINTEND
 };
 
 template <typename CharT>
 class FormatArg {
  public:
-  constexpr FormatArg() {}
+  constexpr FormatArg() = default;
 
-  template <typename T>
-  constexpr FormatArg(const T& val) {
-    if constexpr (std::is_enum_v<T>) {
-      using U = std::underlying_type_t<T>;
-      value_ = Value<CharT>(static_cast<U>(val));
-      type_ = TypeConstant<U>::value;
-    } else if constexpr (TypeConstant<RemoveCvref<T>>::value != Type::kNone) {
+  template <typename TypeT>
+  constexpr explicit FormatArg(const TypeT& val) {
+    if constexpr (std::is_enum_v<TypeT>) {
+      using UnderlyingT = std::underlying_type_t<TypeT>;
+      value_ = Value<CharT>(static_cast<UnderlyingT>(val));
+      type_ = TypeConstant<UnderlyingT>::value;
+    } else if constexpr (TypeConstant<RemoveCvref<TypeT>>::value != Type::kNone) {
       value_ = Value<CharT>(val);
-      type_ = TypeConstant<RemoveCvref<T>>::value;
+      type_ = TypeConstant<RemoveCvref<TypeT>>::value;
     } else {
-      static_assert(!sizeof(T),
+      static_assert(!sizeof(TypeT),
                     "[vlink::format] unsupported type for format_to/MLOG, "
                     "convert to string first");
     }
@@ -392,8 +393,8 @@ struct FormatArgStore {
   static constexpr size_t kNumArgs = sizeof...(ArgsT);
   FormatArg<CharT> args[kNumArgs > 0 ? kNumArgs : 1];
 
-  template <typename... T>
-  constexpr FormatArgStore(const T&... values) : args{FormatArg<CharT>(values)...} {}
+  template <typename... ValuesT>
+  constexpr explicit FormatArgStore(const ValuesT&... values) : args{FormatArg<CharT>(values)...} {}
 };
 
 template <typename CharT>
@@ -402,7 +403,7 @@ class BasicFormatArgs {
   constexpr BasicFormatArgs() : args_(nullptr), size_(0) {}
 
   template <typename... ArgsT>
-  constexpr BasicFormatArgs(const FormatArgStore<CharT, ArgsT...>& store)
+  constexpr explicit BasicFormatArgs(const FormatArgStore<CharT, ArgsT...>& store)
       : args_(store.args), size_(sizeof...(ArgsT)) {}
 
   constexpr FormatArg<CharT> get(size_t id) const { return id < size_ ? args_[id] : FormatArg<CharT>(); }
@@ -498,14 +499,15 @@ class FormatWriter {
 
   inline auto out() const { return writer_.out(); }
 
-  template <typename W = WriterT>
-  inline auto total_size() const -> decltype(std::declval<W>().total_size()) {
+  template <typename WriterImplT = WriterT>
+  inline auto total_size() const -> decltype(std::declval<WriterImplT>().total_size()) {
     return writer_.total_size();
   }
 
   inline size_t size() const { return writer_.size(); }
 
  private:
+  // NOLINTBEGIN
   void write_int(int value) {
     if (value < 0) {
       writer_.write('-');
@@ -593,6 +595,7 @@ class FormatWriter {
       writer_.write(buf, static_cast<size_t>(len));
     }
   }
+  // NOLINTEND
 
   void write_arg(const FormatArg<CharT>& arg) {
     switch (arg.type()) {
@@ -647,19 +650,25 @@ class FormatWriter {
  * Acts as a thin @c std::string_view wrapper tagged with the argument type list.
  * This enables type-safe format_to_n / format_to calls without dynamic dispatch.
  *
- * @tparam T  Argument types (unused at runtime but encode the expected argument list).
+ * @tparam ArgsT  Argument types (unused at runtime but encode the expected argument list).
  */
-template <typename... T>
+template <typename... ArgsT>
 struct FString {
   std::string_view str;
   using t = FString;
 
-  template <size_t N>
-  constexpr FString(const char (&s)[N]) : str(s, N - 1) {}
+  // Implicit ctors are intentional: lets format-string parameters accept string literals directly,
+  // e.g. @c format_to_n(buf, n, "x={}", val).
+  template <size_t NumT>
+  // NOLINTNEXTLINE(runtime/explicit,google-explicit-constructor,hicpp-explicit-conversions)
+  constexpr FString(const char (&s)[NumT]) : str(s, NumT - 1) {}
 
+  // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename StrT, std::enable_if_t<std::is_convertible_v<const StrT&, std::string_view>, int> = 0>
+  // NOLINTNEXTLINE(runtime/explicit,google-explicit-constructor,hicpp-explicit-conversions)
   constexpr FString(const StrT& s) : str(s) {}
 
+  // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
   inline operator std::string_view() const { return str; }
   std::string_view get() const { return str; }
 };
@@ -671,22 +680,10 @@ struct FString {
  * @c format_string<ArgsT...> is the type of the format argument in @c format_to_n
  * and @c format_to.  Constructed implicitly from string literals.
  *
- * @tparam T  Expected argument types (for documentation; not enforced at runtime).
- */
-template <typename... T>
-using format_string = typename FString<T...>::t;
-
-/**
- * @brief Creates a type-erased argument store from a variadic argument list.
- *
- * @tparam ArgsT  Argument types.
- * @param args    Arguments to capture.
- * @return @c FormatArgStore containing the erased argument values.
+ * @tparam ArgsT  Expected argument types (for documentation; not enforced at runtime).
  */
 template <typename... ArgsT>
-inline detail::FormatArgStore<char, detail::RemoveCvref<ArgsT>...> make_format_args(const ArgsT&... args) {
-  return {args...};
-}
+using format_string = typename FString<ArgsT...>::t;
 
 /**
  * @struct FormatToNResult
@@ -700,6 +697,30 @@ struct FormatToNResult {
   size_t size{0};         ///< Total number of characters that would have been written (may exceed n).
   bool truncated{false};  ///< @c true if the output was truncated because @c size > n.
 };
+
+/**
+ * @struct FormatToResult
+ * @brief Result type for the fixed-array overload of @c format_to.
+ */
+struct FormatToResult {
+  char* out;       ///< Pointer one past the last written character.
+  size_t size;     ///< Total characters that would have been written.
+  bool truncated;  ///< @c true if output was truncated.
+};
+
+////////////////////////////////////////////////////////////////
+/// Public API
+////////////////////////////////////////////////////////////////
+
+/**
+ * @brief Creates a type-erased argument store from a variadic argument list.
+ *
+ * @tparam ArgsT  Argument types.
+ * @param args    Arguments to capture.
+ * @return @c FormatArgStore containing the erased argument values.
+ */
+template <typename... ArgsT>
+inline detail::FormatArgStore<char, detail::RemoveCvref<ArgsT>...> make_format_args(const ArgsT&... args);
 
 /**
  * @brief Formats arguments into a @c char* buffer, writing at most @p n characters.
@@ -717,27 +738,7 @@ struct FormatToNResult {
  * @return @c FormatToNResult with the end pointer, total size and truncation flag.
  */
 template <typename... ArgsT>
-inline FormatToNResult<char*> format_to_n(char* out, size_t n, format_string<ArgsT...> fmt, const ArgsT&... args) {
-  detail::FormatArgStore<char, detail::RemoveCvref<ArgsT>...> arg_store{args...};
-
-  detail::FormatArgs fargs(arg_store);
-  detail::StringWriter sw(out, n);
-  detail::FormatWriter<char, detail::StringWriter> writer(sw);
-  writer.format(fmt.get(), fargs);
-
-  size_t total = writer.total_size();
-  return {writer.out(), total, total > n};
-}
-
-/**
- * @struct FormatToResult
- * @brief Result type for the fixed-array overload of @c format_to.
- */
-struct FormatToResult {
-  char* out;       ///< Pointer one past the last written character.
-  size_t size;     ///< Total characters that would have been written.
-  bool truncated;  ///< @c true if output was truncated.
-};
+inline FormatToNResult<char*> format_to_n(char* out, size_t n, format_string<ArgsT...> fmt, const ArgsT&... args);
 
 /**
  * @brief Formats arguments into a fixed-size char array.
@@ -746,18 +747,15 @@ struct FormatToResult {
  * The array size @p N is deduced automatically.  Equivalent to
  * @c format_to_n(out, N, fmt, args...).
  *
- * @tparam N      Array size (deduced).
+ * @tparam NumT   Array size (deduced).
  * @tparam ArgsT  Argument types.
  * @param out     Destination char array.
  * @param fmt     Format string.
  * @param args    Format arguments.
  * @return @c FormatToResult with end pointer, total size and truncation flag.
  */
-template <size_t N, typename... ArgsT>
-inline FormatToResult format_to(char (&out)[N], format_string<ArgsT...> fmt, const ArgsT&... args) {
-  auto result = ::vlink::format::format_to_n(out, N, fmt, args...);
-  return {result.out, result.size, result.truncated};
-}
+template <size_t NumT, typename... ArgsT>
+inline FormatToResult format_to(char (&out)[NumT], format_string<ArgsT...> fmt, const ArgsT&... args);
 
 /**
  * @brief Formats arguments to an output iterator.
@@ -774,21 +772,57 @@ inline FormatToResult format_to(char (&out)[N], format_string<ArgsT...> fmt, con
  * @return The iterator one past the last written character.
  */
 template <typename OutputItT, typename... ArgsT,
+          // NOLINTNEXTLINE(modernize-use-constraints)
           std::enable_if_t<detail::kIsOutputIterator<detail::RemoveCvref<OutputItT>> &&
                                !std::is_array_v<std::remove_reference_t<OutputItT>>,
                            int> = 0>
-inline detail::RemoveCvref<OutputItT> format_to(OutputItT&& out, format_string<ArgsT...> fmt, const ArgsT&... args) {
-  using ItT = detail::RemoveCvref<OutputItT>;
+inline detail::RemoveCvref<OutputItT> format_to(OutputItT&& out, format_string<ArgsT...> fmt, const ArgsT&... args);
+
+}  // namespace format
+
+////////////////////////////////////////////////////////////////
+/// Details
+////////////////////////////////////////////////////////////////
+
+template <typename... ArgsT>
+inline format::detail::FormatArgStore<char, format::detail::RemoveCvref<ArgsT>...> format::make_format_args(
+    const ArgsT&... args) {
+  return format::detail::FormatArgStore<char, format::detail::RemoveCvref<ArgsT>...>{args...};
+}
+
+template <typename... ArgsT>
+inline format::FormatToNResult<char*> format::format_to_n(char* out, size_t n, format_string<ArgsT...> fmt,
+                                                          const ArgsT&... args) {
+  format::detail::FormatArgStore<char, format::detail::RemoveCvref<ArgsT>...> arg_store{args...};
+
+  format::detail::FormatArgs fargs(arg_store);
+  format::detail::StringWriter sw(out, n);
+  format::detail::FormatWriter<char, format::detail::StringWriter> writer(sw);
+  writer.format(fmt.get(), fargs);
+
+  size_t total = writer.total_size();
+  return {writer.out(), total, total > n};
+}
+
+template <size_t NumT, typename... ArgsT>
+inline format::FormatToResult format::format_to(char (&out)[NumT], format_string<ArgsT...> fmt, const ArgsT&... args) {
+  auto result = ::vlink::format::format_to_n(out, NumT, fmt, args...);
+  return {result.out, result.size, result.truncated};
+}
+
+template <typename OutputItT, typename... ArgsT,
+          std::enable_if_t<format::detail::kIsOutputIterator<format::detail::RemoveCvref<OutputItT>> &&
+                               !std::is_array_v<std::remove_reference_t<OutputItT>>,
+                           int>>
+inline format::detail::RemoveCvref<OutputItT> format::format_to(OutputItT&& out, format_string<ArgsT...> fmt,
+                                                                const ArgsT&... args) {
+  using ItT = format::detail::RemoveCvref<OutputItT>;
   auto arg_store = ::vlink::format::make_format_args(args...);
-  detail::FormatArgs fargs(arg_store);
-  detail::IteratorWriter<ItT> iter_writer(out);
-  detail::FormatWriter<char, detail::IteratorWriter<ItT>> writer(iter_writer);
+  format::detail::FormatArgs fargs(arg_store);
+  format::detail::IteratorWriter<ItT> iter_writer(out);
+  format::detail::FormatWriter<char, format::detail::IteratorWriter<ItT>> writer(iter_writer);
   writer.format(fmt.get(), fargs);
   return writer.out();
 }
 
-}  // namespace format
-
 }  // namespace vlink
-
-// NOLINTEND

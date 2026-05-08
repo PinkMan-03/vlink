@@ -107,9 +107,12 @@ class VLINK_EXPORT CachedTimestamp final {
    *
    * The default format produces strings of the form @c "MM-DD HH:MM:SS.mmm".
    *
-   * @param format   A @c snprintf-compatible format string.  Must include exactly
-   *                 one @c %03d placeholder for milliseconds.  The resulting string
-   *                 must fit within 31 characters.
+   * @param format   A @c snprintf-compatible format string consuming exactly six
+   *                 @c int arguments in this order: month (1-12), day, hour, minute,
+   *                 second, milliseconds (0-999).  Must end with a 3-digit milliseconds
+   *                 field (e.g., @c %03d) because the cached buffer is patched
+   *                 in-place at the last three characters of the formatted string.
+   *                 The resulting string must fit within 31 characters.
    *                 Default: @c "%02d-%02d %02d:%02d:%02d.%03d"
    * @param use_utc  If @c true, formats in UTC; if @c false (default), in local time.
    * @return A @c std::string_view into the internal buffer with the current timestamp.

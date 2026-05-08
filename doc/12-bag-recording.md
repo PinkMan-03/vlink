@@ -206,14 +206,14 @@ if (gw) {
 固定为默认值（不读取 `VLINK_BAG_TAG` 作为 `Config::tag_name`）；
 `VLINK_BAG_TAG` 仅作为所有 Writer 在 `Config::tag_name` 为空时的兜底。
 
-### 查找已创建的 Writer
+### 按路径取共享 Writer（filter_get）
 
 ```cpp
-// 通过文件路径查找已创建的 Writer
-auto existing = vlink::BagWriter::filter_get("/data/recording.vdb");
-if (existing) {
-    existing->push(...);
-}
+// 按路径在全局表中获取/创建一个 Writer。
+// 若已存在则直接返回；不存在时会用默认 Config 创建并自动 async_run()，
+// 因此返回的 shared_ptr 永远非空。最后一个引用释放时自动从全局表注销。
+auto writer = vlink::BagWriter::filter_get("/data/recording.vdb");
+writer->push(...);
 ```
 
 ---
@@ -279,7 +279,7 @@ reader->register_output_callback(
     });
 
 // 状态变化回调
-// 枚举值：kStoped=0, kPaused=1, kPlaying=2（kStoped 是源码中的实际拼写）
+// 枚举值：kStopped=0, kPaused=1, kPlaying=2
 reader->register_status_callback([](vlink::BagReader::Status s) {
     const char* names[] = {"stopped", "paused", "playing"};
     VLOG_I("playback status: ", names[(int)s]);
@@ -851,9 +851,8 @@ int main(int argc, char* argv[]) {
                m.freq, " Hz, ser=", m.ser_type);
     }
 
-    // 注意：枚举值为 kStoped（源码中的拼写）
     reader->register_status_callback([](vlink::BagReader::Status s) {
-        if (s == vlink::BagReader::kStoped) {
+        if (s == vlink::BagReader::kStopped) {
             VLOG_I("playback complete");
         }
     });

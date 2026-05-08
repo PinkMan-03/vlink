@@ -408,7 +408,7 @@ class VLINK_EXPORT Logger final {
    * @brief Returns @c true if a message at @p level would be written to at least one sink.
    *
    * @details
-   * Checks both the console and file sink levels.  @c kFatal always returns @c true.
+   * Returns @c true iff @p level is >= the console sink level or >= the file sink level.
    * Call this before constructing expensive log arguments to avoid unnecessary work.
    *
    * @param level  Level to test.

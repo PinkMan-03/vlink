@@ -36,7 +36,7 @@
  * -# Use @c acquire() / @c release() for P/V operations.
  * -# Call @c detach(force) to close the handle.  If @p force is @c true the
  *    semaphore is also removed from the OS namespace.
- * -# The destructor calls @c detach() automatically.
+ * -# The destructor calls @c detach(false) automatically.
  *
  * @note
  * - The initial count passed to the constructor is only used when the
@@ -100,7 +100,7 @@ class VLINK_EXPORT SysSemaphore final {
   explicit SysSemaphore(size_t count = 0);
 
   /**
-   * @brief Destructor.  Calls @c detach() if the semaphore is still attached.
+   * @brief Destructor.  Calls @c detach(false) if the semaphore is still attached.
    */
   ~SysSemaphore();
 

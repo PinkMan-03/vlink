@@ -270,8 +270,8 @@ struct GlobalQosProfile final {
 
             if (pkind == "Shared" || pkind == "kShared") {
               qos.ownership.kind = Qos::Ownership::kShared;
-            } else if (pkind == "ExClusive" || pkind == "kExClusive") {
-              qos.ownership.kind = Qos::Ownership::kExClusive;
+            } else if (pkind == "Exclusive" || pkind == "kExclusive" || pkind == "ExClusive") {
+              qos.ownership.kind = Qos::Ownership::kExclusive;
             } else {
               qos.ownership.kind = pkind;
             }

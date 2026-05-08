@@ -77,7 +77,7 @@ cmake .. && make example_qos_basics
 - `intra://` 对 QoS 参数的支持有限
 - DDS 传输完整支持所有 QoS 策略
 - `set_property` 必须在 `init()` 之前调用
-- Qos 名称字段最多 32 字节
+- Qos 名称字段最多 20 字节（19 字符 + NUL）
 
 ## 相关文档
 

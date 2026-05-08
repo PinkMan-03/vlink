@@ -164,24 +164,24 @@ cmake -DCMAKE_BUILD_TYPE=Release -B build -S .
 cmake --build build -j$(nproc)
 
 # 运行 Pong 端（终端 1）
-./build/output/bin/example_pong
+./build/output/bin/sample_pong
 
 # 运行 Ping 端（终端 2，默认 1024 字节负载）
-./build/output/bin/example_ping
+./build/output/bin/sample_ping
 
 # 自定义负载大小
-./build/output/bin/example_ping 64        # 64 字节（最小延迟测试）
-./build/output/bin/example_ping 65536     # 64KB（中等负载）
-./build/output/bin/example_ping 1048576   # 1MB（大数据量）
+./build/output/bin/sample_ping 64        # 64 字节（最小延迟测试）
+./build/output/bin/sample_ping 65536     # 64KB（中等负载）
+./build/output/bin/sample_ping 1048576   # 1MB（大数据量）
 
 # 使用共享内存传输测量零拷贝延迟
 iox-roudi &
-PING_TRANSPORT=shm PONG_TRANSPORT=shm ./build/output/bin/example_pong
-PING_TRANSPORT=shm PONG_TRANSPORT=shm ./build/output/bin/example_ping 4096
+PING_TRANSPORT=shm PONG_TRANSPORT=shm ./build/output/bin/sample_pong
+PING_TRANSPORT=shm PONG_TRANSPORT=shm ./build/output/bin/sample_ping 4096
 
 # 对比不同传输后端的延迟
-PING_TRANSPORT=ddsc PONG_TRANSPORT=ddsc ./build/output/bin/example_pong &
-PING_TRANSPORT=ddsc PONG_TRANSPORT=ddsc ./build/output/bin/example_ping
+PING_TRANSPORT=ddsc PONG_TRANSPORT=ddsc ./build/output/bin/sample_pong &
+PING_TRANSPORT=ddsc PONG_TRANSPORT=ddsc ./build/output/bin/sample_ping
 ```
 
 ---

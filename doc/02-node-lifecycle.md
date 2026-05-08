@@ -23,19 +23,19 @@
 ### 2.1 模板参数
 
 ```cpp
-template <typename ImplT, SecurityType SecT = SecurityType::kWithoutSecurity>
+template <typename ImplT, SecurityType SecT>
 class Node;
 ```
 
 | 模板参数 | 含义                         | 约束                                                 |
 | -------- | ---------------------------- | ---------------------------------------------------- |
 | `ImplT`  | 传输后端实现类               | 必须继承 `NodeImpl`；构造时由 `static_assert` 校验   |
-| `SecT`   | 编译期安全模式               | 默认 `SecurityType::kWithoutSecurity`；可显式为 `kWithSecurity` |
+| `SecT`   | 编译期安全模式               | 由派生类（Publisher / Subscriber / ...）提供默认值 `kWithoutSecurity`，可显式为 `kWithSecurity` |
 
 `Node` 构造函数中的静态断言：
 
 ```cpp
-static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must base of NodeImpl.");
+static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must be derived from NodeImpl.");
 ```
 
 ### 2.2 ImplType 节点角色
@@ -123,7 +123,7 @@ Publisher<MyMsg> pub(conf);
 编译期使用 `static_assert` 检查 `ConfT` 是否支持当前节点角色：
 
 ```cpp
-static_assert(ConfT::get_allow_impl_type() & kImplType, "Conf not support publisher mode.");
+static_assert(ConfT::get_allow_impl_type() & kImplType, "Conf does not support publisher mode.");
 ```
 
 **方式三：延迟初始化构造**

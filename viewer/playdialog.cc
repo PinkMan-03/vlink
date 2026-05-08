@@ -508,8 +508,8 @@ void PlayDialog::on_checkBox_blank_toggled(bool checked) {
 
 void PlayDialog::update_status_for_player(int status) {
   switch (status) {
-    case vlink::BagReader::kStoped:
-      status_ = kStoped;
+    case vlink::BagReader::kStopped:
+      status_ = kStopped;
       break;
     case vlink::BagReader::kPaused:
       status_ = kPaused;
@@ -547,7 +547,7 @@ void PlayDialog::update_status() {
   } else if (ui->lineEdit_load->text().isEmpty()) {
     status_ = kDisable;
   } else if (status_ == kDisable) {
-    status_ = kStoped;
+    status_ = kStopped;
   }
 
   switch (status_) {
@@ -570,7 +570,7 @@ void PlayDialog::update_status() {
       ui->groupBox_state->setEnabled(false);
       ui->groupBox_info->setEnabled(false);
       break;
-    case kStoped:
+    case kStopped:
       ui->pushButton_start->setEnabled(true);
       ui->pushButton_pause->setEnabled(false);
       ui->pushButton_resume->setEnabled(false);
@@ -631,7 +631,7 @@ void PlayDialog::update_status() {
 }
 
 void PlayDialog::closeEvent(QCloseEvent* event) {
-  if (!window_->proxy_->is_connected() || status_ == kDisable || status_ == kStoped) {
+  if (!window_->proxy_->is_connected() || status_ == kDisable || status_ == kStopped) {
     QDialog::closeEvent(event);
     return;
   }

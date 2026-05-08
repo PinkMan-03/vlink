@@ -169,7 +169,7 @@ class Uint128 final {
    * @param other  Divisor.
    * @return New @c Uint128 equal to @c *this / @p other.
    *
-   * @throws std::domain_error (or similar) if @p other is zero.
+   * @throws std::domain_error if @p other is zero.
    */
   Uint128 operator/(const Uint128& other) const;
 
@@ -179,7 +179,7 @@ class Uint128 final {
    * @param other  Divisor.
    * @return New @c Uint128 equal to @c *this % @p other.
    *
-   * @throws std::domain_error (or similar) if @p other is zero.
+   * @throws std::domain_error if @p other is zero.
    */
   Uint128 operator%(const Uint128& other) const;
 
@@ -213,7 +213,7 @@ class Uint128 final {
    * @param other  Divisor.
    * @return Reference to @c *this.
    *
-   * @throws std::domain_error (or similar) if @p other is zero.
+   * @throws std::domain_error if @p other is zero.
    */
   Uint128& operator/=(const Uint128& other);
 
@@ -223,7 +223,7 @@ class Uint128 final {
    * @param other  Divisor.
    * @return Reference to @c *this.
    *
-   * @throws std::domain_error (or similar) if @p other is zero.
+   * @throws std::domain_error if @p other is zero.
    */
   Uint128& operator%=(const Uint128& other);
 

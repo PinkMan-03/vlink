@@ -53,7 +53,7 @@ class RecordDialog : public QDialog {
 
   enum Status : uint8_t {
     kDisable,
-    kStoped,
+    kStopped,
     kRecording,
     kPaused,
   };

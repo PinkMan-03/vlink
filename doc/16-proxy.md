@@ -286,7 +286,7 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 | `role`          | `Role`         | `kController` | 客户端角色                                                    |
 | `domain_id`     | `int`          | `0`           | DDS 域 ID，必须与服务器一致                                   |
 | `dds_impl`      | `std::string`  | `"dds"`       | DDS 实现选择                                                  |
-| `security_key`  | `std::string`  | `""`          | 安全密钥，必须与服务器 `key` 一致                             |
+| `security_key`  | `std::string`  | `""`          | 安全密钥，必须与服务器 `security_key` 一致                    |
 | `native`        | `bool`         | `false`       | 是否限制 DDS 流量到 127.0.0.1                                 |
 | `reliable`      | `bool`         | `false`       | 数据通道 QoS，必须与服务器一致                                |
 | `direct`        | `bool`         | `false`       | 是否使用 SHM 直连，必须与服务器一致                           |
@@ -319,7 +319,7 @@ cfg.domain_id    = 0;
 cfg.reliable     = false;           // 与服务器一致
 cfg.enable_tcp   = false;           // 与服务器一致
 cfg.direct       = false;           // 与服务器一致
-cfg.security_key = "my_secret_key"; // 与服务器 key 一致
+cfg.security_key = "my_secret_key"; // 与服务器 security_key 一致
 cfg.match_version = true;
 ```
 
@@ -758,7 +758,7 @@ target_link_libraries(my_server PRIVATE vlink::proxy_server)
 
 2. **同一 DDS 域内只能运行一个 ProxyServer**，否则 ProxyAPI 会检测到 `kMultiProxyError`。每个域需要独立使用不同的 `domain_id`。
 
-3. **`DataCallback` 中的 `Data::raw` 是浅拷贝**，仅在回调执行期间有效。若需在回调外使用数据，必须进行深拷贝（`data.raw.deep_copy(...)` 或使用 `std::vector<uint8_t>`）。
+3. **`DataCallback` 中的 `Data::raw` 是浅拷贝**，仅在回调执行期间有效。若需在回调外使用数据，必须进行深拷贝（`vlink::Bytes::deep_copy(data.raw.data(), data.raw.size())`、`data.raw.deep_copy_self()` 或使用 `std::vector<uint8_t>`）。
 
 4. **`send_data()` 返回 `false` 不一定是链路故障**，也可能是对端暂时没有订阅者，或者调用方没有显式传入完整的 `ser + schema` 路由元数据。
 

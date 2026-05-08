@@ -28,6 +28,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 
 namespace cloud_builder {
 

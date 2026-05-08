@@ -23,7 +23,6 @@
 
 #include "./base/bytes.h"
 
-#include <crc/CRC.h>
 #include <lzav/lzav.h>
 
 #include <array>
@@ -40,6 +39,10 @@
 #define VLINK_BYTES_MEM_RESET 0
 
 namespace vlink {
+
+static constexpr uint32_t kCrc32Polynomial = 0xEDB88320U;
+
+static constexpr uint64_t kCrc64Polynomial = 0x42F0E1EBA9EA3693ULL;
 
 static constexpr const char kBase64Table[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -365,7 +368,55 @@ Bytes Bytes::decode_from_base64(const std::string& target) noexcept {
 }
 
 uint32_t Bytes::get_crc_32(const Bytes& target) noexcept {
-  return CRC::Calculate(target.data(), target.size(), CRC::CRC_32());
+  uint32_t crc = 0xFFFFFFFFU;
+
+  static constexpr auto kCrc32Table = []() {
+    std::array<uint32_t, 256> table{};
+
+    for (uint32_t i = 0; i < 256; ++i) {
+      uint32_t crc = i;
+
+      for (uint32_t bit = 0; bit < 8; ++bit) {
+        crc = (crc & 1U) ? (kCrc32Polynomial ^ (crc >> 1U)) : (crc >> 1U);
+      }
+
+      table[i] = crc;
+    }
+
+    return table;
+  }();
+
+  for (auto u : target) {
+    crc = kCrc32Table[(crc ^ u) & 0xFFU] ^ (crc >> 8U);
+  }
+
+  return crc ^ 0xFFFFFFFFU;
+}
+
+uint64_t Bytes::get_crc_64(const Bytes& target) noexcept {
+  uint64_t crc = 0x0000000000000000ULL;
+
+  static constexpr auto kCrc64Table = []() {
+    std::array<uint64_t, 256> table{};
+
+    for (uint64_t i = 0; i < 256; ++i) {
+      uint64_t crc = i << 56U;
+
+      for (uint64_t bit = 0; bit < 8; ++bit) {
+        crc = (crc & 0x8000000000000000ULL) ? (kCrc64Polynomial ^ (crc << 1U)) : (crc << 1U);
+      }
+
+      table[i] = crc;
+    }
+
+    return table;
+  }();
+
+  for (auto u : target) {
+    crc = kCrc64Table[((crc >> 56U) ^ u) & 0xFFU] ^ (crc << 8U);
+  }
+
+  return crc ^ 0x0000000000000000ULL;
 }
 
 Bytes::Bytes() noexcept = default;

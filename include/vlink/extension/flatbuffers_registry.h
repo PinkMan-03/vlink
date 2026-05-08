@@ -247,4 +247,4 @@ inline SchemaData FlatbuffersRegistry::build_data(const std::string& name, const
   }                                                                    \
   /* NOLINTEND */
 
-#endif  // VLINK_REGISTER_FLATBUFFERS_MACROS_INCLUDED
+#endif  // VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS

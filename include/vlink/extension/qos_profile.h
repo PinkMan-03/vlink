@@ -50,19 +50,20 @@
  *
  * @par Lookup by name
  * @c get_available_qos_map() returns an @c unordered_map from profile name string to @c Qos,
- * enabling runtime profile selection:
+ * enabling runtime profile selection.  Built-in profile names are accepted directly in URLs
+ * (e.g. @c "?qos=sensor"); custom @c Qos values must first be registered with the transport
+ * via @c register_qos before being referenced from a URL:
  * @code
  * auto& qos_map = vlink::QosProfile::get_available_qos_map();
  * auto it = qos_map.find("sensor");
  * if (it != qos_map.end()) {
- *     pub->set_qos(it->second);
+ *     vlink::DdsConf::register_qos("my_sensor", it->second);
  * }
  * @endcode
  *
  * @par Direct usage
  * @code
- * auto pub = vlink::Publisher<MyMsg>::create("dds://sensor_data");
- * pub->set_qos(vlink::QosProfile::kSensor);
+ * auto pub = vlink::Publisher<MyMsg>::create_unique("dds://sensor_data?qos=sensor");
  * @endcode
  */
 

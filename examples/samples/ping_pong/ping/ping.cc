@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
     }
   } else if (argc != 1) {
     VLOG_I("Usage:");
-    VLOG_I(" example_ping [payload_size]");
+    VLOG_I(" sample_ping [payload_size]");
     return 1;
   }
 

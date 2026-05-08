@@ -217,16 +217,16 @@ TEST_SUITE("extension-BagReader - kInfinite") {
 // ---------------------------------------------------------------------------
 
 TEST_SUITE("extension-BagReader::Status") {
-  TEST_CASE("kStoped == 0") { CHECK(static_cast<int>(BagReader::kStoped) == 0); }
+  TEST_CASE("kStopped == 0") { CHECK(static_cast<int>(BagReader::kStopped) == 0); }
 
   TEST_CASE("kPaused == 1") { CHECK(static_cast<int>(BagReader::kPaused) == 1); }
 
   TEST_CASE("kPlaying == 2") { CHECK(static_cast<int>(BagReader::kPlaying) == 2); }
 
   TEST_CASE("all values are distinct") {
-    CHECK(BagReader::kStoped != BagReader::kPaused);
+    CHECK(BagReader::kStopped != BagReader::kPaused);
     CHECK(BagReader::kPaused != BagReader::kPlaying);
-    CHECK(BagReader::kStoped != BagReader::kPlaying);
+    CHECK(BagReader::kStopped != BagReader::kPlaying);
   }
 }
 

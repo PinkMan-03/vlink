@@ -37,9 +37,10 @@
  *   enabling zero-copy hand-off to the logger sink without an extra copy.
  * - @c write_raw() bypasses @c std::ostream formatting and writes bytes directly
  *   into the underlying buffer, suitable for pre-formatted C-strings.
- * - Default capacity is 256 bytes; the buffer grows automatically in 8 KiB
- *   increments up to any size.  @c shrink_to_fit() can reclaim excess memory
- *   after an unusually long message.
+ * - Default capacity is 256 bytes; the buffer grows by doubling until it
+ *   exceeds 8 KiB (@c kMaxExpandSize), after which growth is linear in
+ *   @c kMaxExpandSize-sized increments.  @c shrink_to_fit() can reclaim
+ *   excess memory after an unusually long message.
  *
  * @note
  * - @c FastStream is @b not thread-safe.  Each thread should own its own instance,

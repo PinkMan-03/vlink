@@ -84,11 +84,11 @@ test/
 ├── CMakeLists.txt           # 测试构建配置
 ├── common_test.h            # 公共头文件（vlink 全量 include + 常用类型）
 ├── idl/                     # IDL 定义文件（.proto / .fbs / .idl）
-├── base/                    # base 库测试
-├── extension/               # bag / discovery / qos / schema / security 等扩展测试
-├── impl/                    # NodeImpl / URL / SSL / AckManager 等实现层测试
-├── modules/                 # 各 transport Conf 解析测试
-├── zerocopy/                # CameraFrame / PointCloud / ProxyData 等测试
+├── base/                    # base 库测试（logger/bytes/timer/message_loop/thread_pool/spin_lock/mpmc_queue/graph_task/memory_pool/memory_resource/functional/... ）
+├── extension/               # bag / discovery / qos / schema / security / dynamic_data / status / terminal_stream / url_remap 等扩展测试
+├── impl/                    # NodeImpl / Url / Ssl / AckManager / *Impl 等实现层测试
+├── modules/                 # 各 transport Conf 解析测试（dds/ddsc/ddsr/ddst/intra/shm/shm2/zenoh/someip/mqtt/fdbus/qnx）
+├── zerocopy/                # CameraFrame / PointCloud / ProxyData / Header / RawData 等测试
 ├── serializer_test.cc       # Serializer 单元测试
 ├── intra_test.cc            # intra:// 传输后端
 ├── shm_test.cc              # shm:// 传输后端（iceoryx）
@@ -176,32 +176,42 @@ cmake --build build --target vlink-test -j$(nproc)
 # 运行时需设置 LD_LIBRARY_PATH 指向构建输出的 lib 目录
 LD_LIBRARY_PATH=build/output/lib ./build/output/bin/vlink-test
 
-# SOMEIP 测试在无 vsomeip daemon 时会挂起，需排除
-LD_LIBRARY_PATH=build/output/lib ./build/output/bin/vlink-test -tce="someip-*"
+# SOMEIP 测试在无 vsomeip daemon 时会挂起，需排除整个 suite
+LD_LIBRARY_PATH=build/output/lib ./build/output/bin/vlink-test -tse="someip-*"
 
 # 如有 ASAN 抑制文件，可通过以下方式指定
 # export ASAN_OPTIONS=suppressions=path/to/asan_suppressions.txt
 ```
 
-> **注意**：`-tce` 是 doctest 的 test case exclude 标志（不是 `-e`，后者为 exit 标志）。
+> **注意**：`-tse` 是 doctest 的 test suite exclude 标志，`-tce` 是 test case exclude 标志（都不是 `-e`，后者为 exit 标志）。
 
 ### 3.4 doctest 命令行参数
 
+VLink 测试同时使用 `TEST_SUITE` 与 `TEST_CASE` 两层标签：传输后端相关测试以 `TEST_SUITE("<transport>-<aspect>")` 分组，base 目录下的多数测试只用 `TEST_CASE`。
+按模块/后端筛选时优先使用 `--test-suite=` / `-ts=`，按具体用例名筛选用 `--test-case=` / `-tc=`。
+
 ```bash
-# 只运行名称包含 "base" 的测试用例
-./build/output/bin/vlink-test --test-case="base*"
+# 只运行 dds 后端的全部 suite
+./build/output/bin/vlink-test --test-suite="dds-*"
 
-# 只运行名称包含 "Logger" 的测试
-./build/output/bin/vlink-test --test-case="*Logger*"
+# 只运行 dds-event suite 内的所有 case
+./build/output/bin/vlink-test --test-suite="dds-event"
 
-# 排除指定测试用例（-tce = test case exclude）
-./build/output/bin/vlink-test -tce="someip-*"
+# 按 case 名筛选（base 目录下的 case 是英文短句）
+./build/output/bin/vlink-test --test-case="*SpinLock*"
 
-# 排除多个测试用例
-./build/output/bin/vlink-test -tce="someip-*" -tce="shm-*"
+# 排除指定 suite（-tse = test suite exclude）
+./build/output/bin/vlink-test -tse="someip-*"
 
-# 列出所有测试用例名称（不运行）
+# 排除指定 case（-tce = test case exclude）
+./build/output/bin/vlink-test -tce="*Logger*"
+
+# 同时排除多个 suite
+./build/output/bin/vlink-test -tse="someip-*" -tse="shm-*"
+
+# 列出所有测试用例 / suite（不运行）
 ./build/output/bin/vlink-test --list-test-cases
+./build/output/bin/vlink-test --list-test-suites
 
 # 输出更详细的信息
 ./build/output/bin/vlink-test --success
@@ -210,7 +220,7 @@ LD_LIBRARY_PATH=build/output/lib ./build/output/bin/vlink-test -tce="someip-*"
 ./build/output/bin/vlink-test --minimal
 ```
 
-> **注意**：doctest 的 `-tce` 标志用于排除测试用例（test case exclude），不要与 `-e` 标志混淆——`-e` 是退出标志（exit），不是排除标志。
+> **注意**：`-tce` 排除 test case，`-tse` 排除 test suite。两者都不要与 `-e` 标志混淆——`-e` 是 exit 标志，不是排除。
 
 ### 3.5 通过 ctest 运行
 
@@ -239,57 +249,70 @@ ctest --output-on-failure
 
 ### 4.1 Base 库测试
 
-| 测试文件                     | 测试用例名                | 测试内容                                         |
-| ---------------------------- | ------------------------- | ------------------------------------------------ |
-| `base/logger_test.cc`        | `base-Logger`             | 日志级别、格式化输出、handler 回调、backtrace    |
-| `base/bytes_test.cc`         | `base-Bytes`              | 空 Bytes、浅拷贝/深拷贝、移动语义、用户输入解析  |
-| `base/timer_test.cc`         | `base-Timer`              | 定时触发、循环次数、restart、call_once            |
-| `base/wheel_timer_test.cc`   | `base-WheelTimer`         | 定时触发、重复定时、暂停/恢复、删除定时器         |
-| `base/elapsed_timer_test.cc` | `base-ElapsedTimer`       | 计时启动、restart、get 精度                       |
-| `base/deadline_timer_test.cc`| `base-DeadlineTimer`      | 截止时间检测                                     |
-| `base/message_loop_test.cc`  | `base-MessageLoop`        | 优先级任务队列、async_run、wait_for_quit          |
-| `base/thread_pool_test.cc`   | `base-ThreadPool`         | 任务提交、shutdown、任务计数                      |
-| `base/multi_loop_test.cc`    | `base-MultiLoop`          | 多事件循环并发调度                                |
-| `base/graph_task_test.cc`    | `base-GraphTask`          | DAG 任务图构建、条件节点、执行顺序                |
-| `base/mpmc_queue_test.cc`    | `base-MpmcQueue`          | 空队列、push/pop、满队列、多线程生产消费           |
-| `base/spin_lock_test.cc`     | `base-SpinLock`           | 单线程加锁/解锁、多线程互斥、压力测试             |
-| `base/semaphore_test.cc`     | `base-Semaphore`          | 信号量 wait/post、超时                           |
-| `base/sys_semaphore_test.cc` | `base-SysSemaphore`       | 系统级信号量操作                                 |
-| `base/sys_sharemem_test.cc`  | `base-SysSharemem`        | 共享内存创建/读写/释放                           |
-| `base/process_test.cc`       | `base-Process`            | 进程信息查询                                     |
-| `base/utils_test.cc`         | `base-Utils`              | 工具函数（路径、字符串等）                       |
-| `base/cached_timestamp_test.cc` | `base-CachedTimestamp` | 缓存时间戳性能优化                               |
-| `base/condition_variable_test.cc` | `base-ConditionVariable` | 条件变量封装                                |
-| `base/cpu_profiler_test.cc`  | `base-CpuProfiler`       | CPU 性能分析器                                   |
-| `base/cpu_profiler_guard_test.cc` | `base-CpuProfilerGuard` | CPU Profiler RAII 守卫                       |
-| `base/exception_test.cc`    | `base-Exception`          | 异常处理工具                                     |
-| `base/fast_stream_test.cc`  | `base-FastStream`         | 高性能流式输出                                   |
-| `base/format_test.cc`       | `base-Format`             | 字符串格式化工具                                 |
-| `base/helpers_test.cc`      | `base-Helpers`            | 辅助工具函数（类型转换等）                       |
-| `base/macros_test.cc`       | `base-Macros`             | 宏定义测试                                       |
-| `base/name_detector_test.cc`| `base-NameDetector`       | 编译期类型名提取                                 |
-| `base/object_pool_test.cc`  | `base-ObjectPool`         | 对象池（预分配复用）                             |
-| `base/plugin_test.cc`       | `base-Plugin`             | 动态插件加载器                                   |
-| `base/schedule_test.cc`     | `base-Schedule`           | 调度器                                           |
-| `base/traits_test.cc`       | `base-Traits`             | 类型特征检测工具                                 |
-| `base/uint128_test.cc`      | `base-Uint128`            | 128 位无符号整数                                 |
+> 实际测试在源文件里以 `TEST_SUITE("xxx") { TEST_CASE("descriptive name") { ... } }` 双层结构组织：
+> 顶层 suite 名形如 `dds-init` / `intra-event`（kebab-case 模块标签），
+> 内部 case 名是英文短句（如 `"conf-defaults"`、`"url-parse-success"`、`"concurrent increments with SpinLock produce correct total"`）。
+> 下表的 “Suite 标签” 列对应可被 `--test-suite=` 过滤匹配的字符串；
+> base 目录下的多数测试文件未使用 `TEST_SUITE` 包裹，只能按文件名 / case 名定位。
+
+| 测试文件                          | Suite / Case 标签风格                     | 测试内容                                        |
+| --------------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| `base/logger_test.cc`             | 多个 case 名（句子风格）                   | 日志级别、格式化输出、handler 回调、backtrace    |
+| `base/bytes_test.cc`              | 多个 case 名                               | 空 Bytes、浅拷贝/深拷贝、移动语义、用户输入解析  |
+| `base/timer_test.cc`              | 多个 case 名                               | 定时触发、循环次数、restart、call_once            |
+| `base/wheel_timer_test.cc`        | 多个 case 名                               | 定时触发、重复定时、暂停/恢复、删除定时器         |
+| `base/elapsed_timer_test.cc`      | 多个 case 名                               | 计时启动、restart、get 精度                       |
+| `base/deadline_timer_test.cc`     | 多个 case 名                               | 截止时间检测                                     |
+| `base/message_loop_test.cc`       | 多个 case 名                               | 优先级任务队列、async_run、wait_for_quit          |
+| `base/thread_pool_test.cc`        | 多个 case 名                               | 任务提交、shutdown、任务计数                      |
+| `base/multi_loop_test.cc`         | 多个 case 名                               | 多事件循环并发调度                                |
+| `base/graph_task_test.cc`         | 多个 case 名                               | DAG 任务图构建、条件节点、执行顺序                |
+| `base/mpmc_queue_test.cc`         | 多个 case 名                               | 空队列、push/pop、满队列、多线程生产消费           |
+| `base/spin_lock_test.cc`          | 多个 case 名                               | 单线程加锁/解锁、多线程互斥、压力测试             |
+| `base/semaphore_test.cc`          | 多个 case 名                               | 信号量 wait/post、超时                           |
+| `base/sys_semaphore_test.cc`      | 多个 case 名                               | 系统级信号量操作                                 |
+| `base/sys_sharemem_test.cc`       | 多个 case 名                               | 共享内存创建/读写/释放                           |
+| `base/process_test.cc`            | 多个 case 名                               | 进程信息查询                                     |
+| `base/utils_test.cc`              | 多个 case 名                               | 工具函数（路径、字符串等）                       |
+| `base/cached_timestamp_test.cc`   | 多个 case 名                               | 缓存时间戳性能优化                               |
+| `base/condition_variable_test.cc` | 多个 case 名                               | 条件变量封装                                     |
+| `base/cpu_profiler_test.cc`       | 多个 case 名                               | CPU 性能分析器                                   |
+| `base/cpu_profiler_guard_test.cc` | 多个 case 名                               | CPU Profiler RAII 守卫                          |
+| `base/exception_test.cc`          | 多个 case 名                               | 异常处理工具                                     |
+| `base/fast_stream_test.cc`        | 多个 case 名                               | 高性能流式输出                                   |
+| `base/format_test.cc`             | 多个 case 名                               | 字符串格式化工具                                 |
+| `base/functional_test.cc`         | 多个 case 名                               | `vlink::Function` / `MoveFunction` 行为         |
+| `base/helpers_test.cc`            | 多个 case 名                               | 辅助工具函数（类型转换等）                       |
+| `base/macros_test.cc`             | 多个 case 名                               | 宏定义测试                                       |
+| `base/memory_pool_test.cc`        | 多个 case 名                               | 内存池行为                                       |
+| `base/memory_resource_test.cc`    | 多个 case 名                               | `pmr::memory_resource` 适配                      |
+| `base/name_detector_test.cc`      | 多个 case 名                               | 编译期类型名提取                                 |
+| `base/object_pool_test.cc`        | 多个 case 名                               | 对象池（预分配复用）                             |
+| `base/plugin_test.cc`             | 多个 case 名                               | 动态插件加载器                                   |
+| `base/schedule_test.cc`           | 多个 case 名                               | 调度器                                           |
+| `base/traits_test.cc`             | 多个 case 名                               | 类型特征检测工具                                 |
+| `base/uint128_test.cc`            | 多个 case 名                               | 128 位无符号整数                                 |
 
 ### 4.2 传输后端测试
 
-| 测试文件          | 前置宏                  | 典型测试用例                                               |
-| ----------------- | ----------------------- | ---------------------------------------------------------- |
-| `intra_test.cc`   | `VLINK_SUPPORT_INTRA`   | intra-init, intra-method, intra-event, intra-dynamic, intra-serialize |
-| `shm_test.cc`     | `VLINK_SUPPORT_SHM`     | shm-init, shm-method, shm-event, shm-field, shm-dynamic, shm-serialize |
-| `shm2_test.cc`    | `VLINK_SUPPORT_SHM2`    | shm2-init, shm2-method, shm2-event, shm2-field             |
-| `dds_test.cc`     | `VLINK_SUPPORT_DDS`     | dds-init, dds-method, dds-event, dds-field, dds-dynamic, dds-serialize |
-| `ddsc_test.cc`    | `VLINK_SUPPORT_DDSC`    | ddsc-init, ddsc-method, ddsc-event, ddsc-field             |
-| `ddsr_test.cc`    | `VLINK_SUPPORT_DDSR`    | ddsr-init, ddsr-method, ddsr-event                        |
-| `ddst_test.cc`    | `VLINK_SUPPORT_DDST`    | ddst-init, ddst-method, ddst-event                        |
-| `zenoh_test.cc`   | `VLINK_SUPPORT_ZENOH`   | zenoh-init, zenoh-method, zenoh-event, zenoh-field         |
-| `someip_test.cc`  | `VLINK_SUPPORT_SOMEIP`  | someip-init, someip-method, someip-event                   |
-| `mqtt_test.cc`    | `VLINK_SUPPORT_MQTT`    | mqtt-init, mqtt-method, mqtt-event                        |
-| `fdbus_test.cc`   | `VLINK_SUPPORT_FDBUS`   | fdbus-init, fdbus-method, fdbus-event                     |
-| `qnx_test.cc`     | `VLINK_SUPPORT_QNX`     | qnx-init, qnx-method, qnx-event（仅 QNX 平台）            |
+每个 transport test 文件用顶层 `TEST_SUITE("<transport>-<aspect>")` 组织子测试，
+常见 aspect：`init`、`method`、`event`、`field`、`dynamic`、`identity`、`latency`。
+具体哪些 aspect 存在因后端而异，序列化相关测试已统一移到独立的 `serializer_test.cc`。
+
+| 测试文件          | 前置宏                  | 实际包含的 TEST_SUITE                                                                                  |
+| ----------------- | ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| `intra_test.cc`   | `VLINK_SUPPORT_INTRA`   | intra-init, intra-method, intra-event, intra-dynamic, intra-identity, intra-latency                    |
+| `shm_test.cc`     | `VLINK_SUPPORT_SHM`     | shm-init, shm-method, shm-event, shm-field, shm-dynamic, shm-identity, shm-latency                     |
+| `shm2_test.cc`    | `VLINK_SUPPORT_SHM2`    | shm2-init, shm2-method, shm2-event, shm2-field, shm2-identity, shm2-latency                            |
+| `dds_test.cc`     | `VLINK_SUPPORT_DDS`     | dds-init, dds-method, dds-event, dds-field, dds-dynamic, dds-identity, dds-latency                     |
+| `ddsc_test.cc`    | `VLINK_SUPPORT_DDSC`    | ddsc-init, ddsc-method, ddsc-event, ddsc-field, ddsc-dynamic, ddsc-identity, ddsc-latency              |
+| `ddsr_test.cc`    | `VLINK_SUPPORT_DDSR`    | ddsr-init, ddsr-method, ddsr-event, ddsr-field, ddsr-identity, ddsr-latency                            |
+| `ddst_test.cc`    | `VLINK_SUPPORT_DDST`    | ddst-init, ddst-method, ddst-event, ddst-field, ddst-identity, ddst-latency                            |
+| `zenoh_test.cc`   | `VLINK_SUPPORT_ZENOH`   | zenoh-init, zenoh-method, zenoh-event, zenoh-field, zenoh-dynamic, zenoh-identity, zenoh-latency, zenoh-audit-fixes |
+| `someip_test.cc`  | `VLINK_SUPPORT_SOMEIP`  | someip-init, someip-method, someip-event, someip-field, someip-identity                                |
+| `mqtt_test.cc`    | `VLINK_SUPPORT_MQTT`    | mqtt-init, mqtt-method, mqtt-event, mqtt-field, mqtt-dynamic, mqtt-identity, mqtt-latency              |
+| `fdbus_test.cc`   | `VLINK_SUPPORT_FDBUS`   | fdbus-init, fdbus-method, fdbus-event, fdbus-field, fdbus-identity                                     |
+| `qnx_test.cc`     | `VLINK_SUPPORT_QNX`     | qnx-init, qnx-method, qnx-event, qnx-field, qnx-identity, qnx-latency（仅 QNX 平台）                  |
 
 ---
 
@@ -303,14 +326,13 @@ ctest --output-on-failure
 - 格式化日志输出（`MLOG_I`、带占位符）
 - 注册自定义 handler（`register_console_handler`、`register_file_handler`）
 - 各级别日志回调（Trace/Debug/Info/Warn/Error）：验证回调触发次数为 10（5 个级别 x 2 个 handler）
-- `VLOG_F` 抛出 `std::runtime_error`（Fatal 级别）
+- `VLOG_F` 抛出 `vlink::RuntimeError`（Fatal 级别）
 - backtrace 功能：`enable_backtrace`、循环记录、`dump_backtrace`、`disable_backtrace`
 - C 风格格式化日志宏（`CLOG_*`）和流式日志（`SLOG_W`）
 
 ```cpp
-// 验证 Fatal 级别抛异常
-auto fatal_func = [] { VLOG_F("test fatal log"); };
-CHECK_THROWS_AS(fatal_func(), std::runtime_error&);
+// 验证 Fatal 级别抛异常（实际代码使用 CHECK_THROWS，不绑定具体异常类型）
+CHECK_THROWS(VLOG_F("fatal test message"));
 ```
 
 ### 5.2 Bytes 测试
@@ -406,25 +428,31 @@ CHECK_THROWS_AS(fatal_func(), std::runtime_error&);
 
 ### 6.1 init 测试
 
-验证 URL 解析和 Conf 解析的正确性：
+每个传输后端的 `*-init` suite 内部拆分为多个 case，分别验证 URL 解析、Conf 解析、错误 transport 抛异常等：
 
 ```cpp
-TEST_CASE("dds-init") {
-    Url url("dds://hello_topic");
-    DdsConf conf("hello_topic", 0);
+TEST_SUITE("dds-init") {
+    TEST_CASE("conf-defaults") {
+        DdsConf conf("hello_topic", 0);
+        CHECK(conf.parse(kPublisher));
+        // ...
+    }
 
-    // 非法 ImplType 应抛出异常
-    CHECK_THROWS_AS(url.parse(kUnknownImplType), std::runtime_error&);
+    TEST_CASE("url-parse-all-impl-types") {
+        Url url("dds://hello_topic");
+        CHECK(url.parse(kPublisher));
+        // Url 解析出的 Conf 与手动构造的 Conf 相等
+        // CHECK(*static_cast<DdsConf*>(...) == conf);
+    }
 
-    // 合法解析
-    CHECK(url.parse(kPublisher));
-    CHECK(conf.parse(kPublisher));
-    // Url 解析出的 Conf 与手动构造的 Conf 相等
-    CHECK(*static_cast<DdsConf*>(const_cast<Conf*>(url.get_target())) == conf);
+    TEST_CASE("unknown-impl-type-throws") {
+        Url url("dds://hello_topic");
+        CHECK_THROWS_AS(url.parse(kUnknownImplType), std::runtime_error&);
+    }
 
-    // 错误 transport 应抛出异常
-    auto error1 = [] { Publisher<int> pub("dds1://hello_topic"); };
-    CHECK_THROWS_AS(error1(), std::runtime_error&);
+    TEST_CASE("invalid-transport-throws") {
+        CHECK_THROWS(Publisher<int>("dds1://bad/url"));
+    }
 }
 ```
 
@@ -488,12 +516,13 @@ sub1.listen([&count](const DynamicData& msg) {
 
 ### 7.1 命名规范
 
-| 元素         | 规范                                       | 示例                      |
-| ------------ | ------------------------------------------ | ------------------------- |
-| TEST_CASE    | `"模块名-功能名"`，全小写，连字符分隔      | `"base-Timer"`            |
-| SUBCASE      | 描述场景的简短短语                         | `"Single-threaded lock"`  |
-| 测试文件     | `模块名_test.cc`，下划线命名               | `wheel_timer_test.cc`     |
-| 原子计数器   | 使用 `std::atomic<int>` 而非普通 int       | `std::atomic<int> count{0}` |
+| 元素         | 规范                                                          | 示例                                                         |
+| ------------ | ------------------------------------------------------------- | ------------------------------------------------------------ |
+| TEST_SUITE   | `"模块-aspect"`，全小写、连字符分隔，按后端/特性分组          | `"dds-event"`、`"intra-init"`                                 |
+| TEST_CASE    | 英文短句描述行为，可使用空格、连字符；可选模块前缀            | `"conf-defaults"`、`"concurrent increments produce correct total"` |
+| SUBCASE      | 描述具体场景的简短短语                                        | `"queue full"`                                               |
+| 测试文件     | `模块名_test.cc`，下划线命名                                  | `wheel_timer_test.cc`                                         |
+| 原子计数器   | 使用 `std::atomic<int>` 而非普通 int                          | `std::atomic<int> count{0}`                                  |
 
 ### 7.2 新测试文件模板
 
@@ -510,7 +539,7 @@ sub1.listen([&count](const DynamicData& msg) {
 using namespace std::chrono_literals;
 using namespace vlink;
 
-TEST_CASE("base-MyModule") {
+TEST_CASE("MyModule basic operations") {
     // 1. 构造被测对象
     MyModule obj;
 
@@ -540,28 +569,32 @@ TEST_CASE("base-MyModule") {
 
 #if defined(VLINK_SUPPORT_MYBACKEND)
 
-TEST_CASE("mybackend-init") {
-    Url url("mybackend://test_topic");
-    // 验证 URL 解析...
+TEST_SUITE("mybackend-init") {
+    TEST_CASE("url-parse-success") {
+        Url url("mybackend://test_topic");
+        // 验证 URL 解析...
+    }
 }
 
-TEST_CASE("mybackend-event") {
-    std::atomic<int> count{0};
+TEST_SUITE("mybackend-event") {
+    TEST_CASE("pub-sub-basic") {
+        std::atomic<int> count{0};
 
-    Publisher<std::string> pub("mybackend://test_topic");
-    Subscriber<std::string> sub("mybackend://test_topic");
+        Publisher<std::string> pub("mybackend://test_topic");
+        Subscriber<std::string> sub("mybackend://test_topic");
 
-    sub.listen([&count](const std::string& msg) {
-        if (msg == "hello") {
-            ++count;
-        }
-    });
+        sub.listen([&count](const std::string& msg) {
+            if (msg == "hello") {
+                ++count;
+            }
+        });
 
-    CHECK(pub.wait_for_subscribers());
-    pub.publish("hello");
+        CHECK(pub.wait_for_subscribers());
+        pub.publish("hello");
 
-    std::this_thread::sleep_for(100ms);
-    CHECK(count.load() == 1);
+        std::this_thread::sleep_for(100ms);
+        CHECK(count.load() == 1);
+    }
 }
 
 #endif
@@ -687,7 +720,7 @@ SUBCASE("invalid transport throws") {
 对共享资源和并发操作的测试：
 
 ```cpp
-TEST_CASE("base-SpinLock-stress") {
+TEST_CASE("concurrent increments with SpinLock produce correct total") {
     SpinLock spinlock;
     std::atomic<int> shared = 0;
     constexpr int kThreads = 16;

@@ -131,7 +131,7 @@ int main() {
 
     auto root = task_graph_builder::build_pipeline_dag();
     std::string dot = root->export_to_dot();
-    VLOG_I("  DOT output:\n", dot);
+    MLOG_I("  DOT output:\n{}", dot);
   }
 
   VLOG_I("GraphTask example finished.");

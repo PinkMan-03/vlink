@@ -47,11 +47,11 @@
  * // In Publisher:
  * auto data = MyProtoIntra::create();
  * data->value.set_field(42);
- * pub.publish_intra(data);  // zero-copy path
+ * pub.publish(data);  // zero-copy path
  *
  * // In Subscriber:
  * sub.listen([](const MyProtoIntra& intra) {
- *   // use typed->value directly
+ *   // use intra->value directly
  * });
  * @endcode
  *
@@ -111,6 +111,7 @@ using IntraData = std::shared_ptr<IntraDataType>;
  *    - @c bool operator>>(Bytes&) const -- serialise @c value into @c Bytes.
  *    - @c size_t get_serialized_size() const -- byte count needed for serialisation.
  *    - @c static std::string get_serialized_type() -- type name string.
+ *    - @c static constexpr SchemaType get_schema_type() -- coarse schema family.
  *    - A @c static_assert ensuring @c target_type is a supported serialiser type.
  *
  * -# @c declare_name -- a @c std::shared_ptr<declare_nameType> subclass with:

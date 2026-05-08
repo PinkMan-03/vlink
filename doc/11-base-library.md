@@ -274,8 +274,11 @@ auto hi_compressed = vlink::Bytes::compress_data(raw.data(), raw.size(),
 std::string b64 = vlink::Bytes::encode_to_base64(buf);
 auto decoded = vlink::Bytes::decode_from_base64(b64);
 
-// CRC-32 校验
-uint32_t crc = vlink::Bytes::get_crc_32(buf);
+// CRC-32 校验（CRC-32/ISO-HDLC，与 ZIP / gzip / PNG / Ethernet 一致）
+uint32_t crc32 = vlink::Bytes::get_crc_32(buf);
+
+// CRC-64 校验（CRC-64/ECMA-182）
+uint64_t crc64 = vlink::Bytes::get_crc_64(buf);
 
 // Hex 字符串
 std::string hex = vlink::Bytes::convert_to_hex_str(buf.data(), buf.size());
@@ -610,6 +613,12 @@ class Function<ReturnT(ArgsT...)> {
   explicit operator bool() const noexcept;          // 是否持有目标
 
   void swap(Function& other) noexcept;
+
+#if defined(__cpp_rtti)
+  const std::type_info& target_type() const noexcept;
+  template <typename FunctorT> FunctorT*       target() noexcept;
+  template <typename FunctorT> const FunctorT* target() const noexcept;
+#endif
 };
 
 }  // namespace vlink
@@ -666,13 +675,12 @@ std::function<void(int)> back     = wrapped;         // 解包到 std::function
 `vlink::Function` 在事件、方法、字段三种通信模型中作为公共回调载体，典型公共别名
 包括 `Subscriber<T>::MsgCallback / Client<...>::RespCallback / Server<...>::ReqCallback /
 ReqRespCallback / ReqAsyncRespCallback / Getter<T>::MsgCallback / WheelTimer::Callback /
-Process::ErrorCallback / FinishedCallback / ReadyReadCallback / StateChangedCallback /
-ObjectPool<T>::FactoryCallback / ResetCallback` 等。这些场景因为 lock-then-copy
-snapshot、`std::map` 返回-by-value、`const&` 遍历或公共模板 ABI 等约束，承载方
-必须可拷贝，统一以 `Function` 表达。其余热路径回调（定时器、线程池、Schedule、
-GraphTask、BagWriter / BagReader、Security 等）由 `vlink::MoveFunction` 承载（详
-见 §11.4.3）。两者共同覆盖框架内部所有回调类型，避免热路径上对全局 `operator
-new` 的依赖。
+Process::ErrorCallback / FinishedCallback / ReadyReadCallback / StateChangedCallback`
+等。这些场景因为 lock-then-copy snapshot、`std::map` 返回-by-value、`const&` 遍
+历或公共模板 ABI 等约束，承载方必须可拷贝，统一以 `Function` 表达。其余热路径
+回调（定时器、线程池、Schedule、GraphTask、BagWriter / BagReader、Security、
+ObjectPool 工厂/重置等）由 `vlink::MoveFunction` 承载（详见 §11.4.3）。两者共同
+覆盖框架内部所有回调类型，避免热路径上对全局 `operator new` 的依赖。
 
 ---
 
@@ -814,6 +822,7 @@ snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性
 | `base/utils` | `register_terminate_signal` / `register_crash_signal` / `start_detect_keyboard` 参数 |
 | `base/message_loop` | `MessageLoop::Callback` |
 | `base/thread_pool` | `ThreadPool::Callback` |
+| `base/object_pool` | `ObjectPool<T>::FactoryCallback`, `ResetCallback` |
 | `impl/ack_manager` | `AckManager::ProcessCallback`, `NotifyCallback` |
 | `extension/security` | `Security::Callback` |
 | `extension/bag_reader` | `OutputCallback`, `StatusCallback`, `ReadyCallback`, `FinishCallback` |
@@ -844,8 +853,7 @@ snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性
 - `Subscriber<T>::MsgCallback / Server<...>::ReqCallback / ReqRespCallback /
   ReqAsyncRespCallback / Client<...>::RespCallback / Getter<T>::MsgCallback`
   （`internal/*-inl.h` 的 const-lambda 捕获 + 公共模板 ABI 限制）。
-- `AbstractFactory::Find*Callback`、`ObjectPool<T>::FactoryCallback / ResetCallback`
-  （前者为 const-ref 遍历约束，后者为公共模板 alias）。
+- `AbstractFactory::Find*Callback`（const-ref 遍历约束）。
 
 ---
 
@@ -873,13 +881,15 @@ snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性
 | `kLockfreeType`  | 无锁 MpmcQueue    | 10000      | 单生产者路径最快            |
 | `kPriorityType`  | 优先级队列        | 10000      | 支持任务优先级，数值大先执行|
 
-### 空闲策略
+### 入队策略（队列已满时）
 
-| 策略（Strategy）         | 行为                              | 适用场景                   |
-| ------------------------ | --------------------------------- | -------------------------- |
-| `kOptimizationStrategy`  | yield 平衡延迟与 CPU 使用率       | 默认，通用                 |
-| `kPopStrategy`           | 忙轮询，持续检测队列（最低延迟）  | 实时性要求极高             |
-| `kBlockStrategy`         | 条件变量阻塞等待任务（最低 CPU）  | 低频任务、省电场景         |
+`Strategy` 仅控制 `post_task` / `invoke_task` 在**有界队列已满**时的入队行为；空闲调度始终由条件变量驱动，与该枚举无关。
+
+| 策略（Strategy）         | 队列已满时的行为                                            | 适用场景                   |
+| ------------------------ | ----------------------------------------------------------- | -------------------------- |
+| `kOptimizationStrategy`  | 以 1ms sleep 重试 10 次；仍满则丢弃最旧任务并入队新任务      | 默认，通用                 |
+| `kPopStrategy`           | 立即丢弃最旧任务并入队新任务                                | 不能丢新任务的实时通路     |
+| `kBlockStrategy`         | 以 1ms sleep 无限重试，直到有空闲槽位                       | 必须保留所有任务的低频通路 |
 
 ### 运行模式
 
@@ -1598,18 +1608,20 @@ dt.reset();
 `vlink::ThreadPool` 维护固定数量的工作线程，用于**并行执行**任务。
 与 `MessageLoop` 的区别：无定时器支持，任务可并发执行，适合 CPU 密集型工作。
 
-### 队列类型与空闲策略
+### 队列类型与入队策略
 
 | 类型（Type）      | 内部队列             | 说明                  |
 | ----------------- | -------------------- | --------------------- |
 | `kNormalType`     | mutex + std::queue   | 默认，通用            |
 | `kLockfreeType`   | 无锁 MPMC 队列        | 低竞争延迟            |
 
-| 策略（Strategy）         | 行为                     |
-| ------------------------ | ------------------------ |
-| `kOptimizationStrategy`  | yield 平衡延迟与 CPU     |
-| `kPopStrategy`           | 忙轮询，最低延迟最高 CPU |
-| `kBlockStrategy`         | 条件变量阻塞，最低 CPU   |
+`Strategy` 仅在队列已满时影响 `post_task` / `invoke_task` 的入队行为：
+
+| 策略（Strategy）         | 队列已满时的行为                                       |
+| ------------------------ | ------------------------------------------------------ |
+| `kOptimizationStrategy`  | 以 1ms sleep 重试 10 次；仍满则丢弃最旧任务并入队新任务 |
+| `kPopStrategy`           | 立即丢弃最旧任务并入队新任务                           |
+| `kBlockStrategy`         | 以 1ms sleep 无限重试，直到有空闲槽位                  |
 
 ### 使用示例
 
@@ -2727,6 +2739,7 @@ worker.join();
 
 - `acquire()` 的超时使用毫秒为单位，`kInfinite`（-1）表示无限等待
 - `get_count()` 返回的是快照值，在并发环境下仅供调试参考
+- `release()` **不是 async-signal-safe**：内部会获取 `std::mutex`，不要在信号处理函数中直接调用
 - 这是进程内信号量；如需跨进程同步，请使用 `SysSemaphore`
 - `reset(true)` 是破坏性操作，仅在受控关闭时使用
 

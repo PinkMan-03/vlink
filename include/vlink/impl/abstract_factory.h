@@ -50,12 +50,12 @@
  *   // All Publisher<T> nodes on "dds://my_topic" share one AbstractObject:
  *   auto obj = factory.get_object<MyObject>("dds://my_topic");
  *   obj->add_impl(impl_ptr);
- *   obj->register_msg_callback(impl_ptr, [](NodeImpl*, const MsgCallback& cb) {
- *     cb(bytes);
+ *   obj->register_msg_callback(impl_ptr, [](const Bytes& bytes) {
+ *     // process the received bytes
  *   });
  *
  *   // When a message arrives, dispatch to all registered impls:
- *   obj->traverse_msg_callback([&](NodeImpl* impl, const MsgCallback& cb) {
+ *   obj->traverse_msg_callback([&](NodeImpl* impl, const NodeImpl::MsgCallback& cb) {
  *     cb(msg_data);
  *   });
  * @endcode

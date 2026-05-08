@@ -39,7 +39,7 @@ QoS（Quality of Service）是一组控制消息投递行为的策略参数。VL
 
 ![QoS 可靠性模式](images/qos-reliability.png)
 
-### QoS 的维度（13 项子策略）
+### QoS 的维度（12 项子策略）
 
 | 子策略              | 结构体                   | 关键字段                         |
 | ------------------- | ------------------------ | -------------------------------- |
@@ -294,7 +294,7 @@ struct DestinationOrder final {
 struct Ownership final {
     enum Kind : uint8_t {
         kShared    = 0,  // 共享：多个 Writer 均可写（默认）
-        kExClusive = 1,  // 独占：仅强度最高的 Writer 可写
+        kExclusive = 1,  // 独占：仅强度最高的 Writer 可写
     };
 
     Kind kind{kShared};
@@ -302,7 +302,7 @@ struct Ownership final {
 ```
 
 - `kShared`：多个 Publisher 可以向同一 topic 发布，Reader 会收到全部数据。
-- `kExClusive`：配合 OwnershipStrength 使用，强度最高的 Writer 独占该实例的写入权，
+- `kExclusive`：配合 OwnershipStrength 使用，强度最高的 Writer 独占该实例的写入权，
   常用于主备热切换场景。
 
 ---
@@ -471,7 +471,12 @@ DDS 家族与 Zenoh 的 Conf 提供静态 `register_qos(name, qos)`：
 - `DdstConf::register_qos()`
 - `ZenohConf::register_qos()`
 
-URL 上使用 `?qos=<name>` 后，Conf 会去各自的静态表里查找。保留键名 `part`、`topic`、`pub`、`sub`、`writer`、`reader`、`depth` 不能作为 profile 名（源码 `register_qos_internal` 检查后 fatal log 并拒绝）。同名重复注册也会被拒绝。
+URL 上使用 `?qos=<name>` 后，Conf 会去各自的静态表里查找。保留键名不能作为 profile 名（`register_qos()` 检查后 fatal log 并拒绝）：
+
+- DDS 家族（`DdsConf` / `DdscConf` / `DdsrConf` / `DdstConf`）：`part`、`topic`、`pub`、`sub`、`writer`、`reader`、`depth`
+- `ZenohConf`：`part`、`topic`、`pub`、`sub`、`writer`、`reader`（不含 `depth`）
+
+同名重复注册也会被拒绝。
 
 `ShmConf`、`Shm2Conf`、`IntraConf`、`MqttConf`、`SomeipConf`、`FdbusConf`、`QnxConf` **没有** `register_qos()` 接口。
 

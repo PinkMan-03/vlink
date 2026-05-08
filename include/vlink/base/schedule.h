@@ -262,8 +262,10 @@ struct VLINK_EXPORT Schedule final {
      * @brief Registers a callback chain element fired when the task returns @c true.
      *
      * @details
-     * Multiple @c on_then callbacks may be chained; each receives a @c bool return
-     * value from the previous callback in the chain.
+     * Multiple @c on_then callbacks may be chained; each is invoked in registration
+     * order only if the previous callback returned @c true.  As soon as any callback
+     * returns @c false, the registered @c on_else callback (if any) is invoked and
+     * the chain stops.
      *
      * @param callback  Callback taking no arguments and returning @c bool.
      * @return Reference to @c *this for further @c on_then chaining.

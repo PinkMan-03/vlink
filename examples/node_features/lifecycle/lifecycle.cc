@@ -85,39 +85,25 @@ int main() {
   }
 
   // ======== Section 4: Interrupt ========
+  // interrupt() unblocks any active blocking wait on the node (e.g.
+  // wait_for_subscribers / wait_for_connected / wait_for_value), causing
+  // them to return false immediately. It does NOT pause callback delivery.
   {
-    std::cout << "\n[4] Interrupt" << std::endl;
-
-    vlink::MessageLoop loop;
-    loop.set_name("lifecycle_loop");
-    loop.async_run();
-
-    vlink::Subscriber<std::string> sub("dds://lifecycle/interrupt_demo");
-    sub.attach(&loop);
-
-    int received = 0;
-    sub.listen([&received](const std::string& msg) {
-      received++;
-      VLOG_I("[Sub] Received:", msg);
-    });
+    std::cout << "\n[4] Interrupt unblocks pending waits" << std::endl;
 
     vlink::Publisher<std::string> pub("dds://lifecycle/interrupt_demo");
-    pub.wait_for_subscribers();
 
-    pub.publish("Before interrupt");
-    std::this_thread::sleep_for(50ms);
-    std::cout << "  Received before interrupt: " << received << std::endl;
+    // Schedule interrupt() from another thread to unblock wait_for_subscribers().
+    std::thread waker([&pub]() {
+      std::this_thread::sleep_for(50ms);
+      pub.interrupt();
+    });
 
-    // Interrupt the subscriber node -- pauses message delivery
-    sub.interrupt();
-    std::cout << "  Subscriber interrupted" << std::endl;
+    bool ok = pub.wait_for_subscribers(1000ms);
+    std::cout << "  wait_for_subscribers returned: " << std::boolalpha << ok
+              << " (false because interrupt() woke the wait)" << std::endl;
 
-    pub.publish("During interrupt (should not be received)");
-    std::this_thread::sleep_for(50ms);
-    std::cout << "  Received after interrupt:  " << received << std::endl;
-
-    loop.quit();
-    loop.wait_for_quit();
+    waker.join();
   }
 
   // ======== Section 5: Lifecycle Pattern for Configuration ========

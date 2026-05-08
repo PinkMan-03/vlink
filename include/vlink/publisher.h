@@ -212,9 +212,9 @@ class Publisher : public Node<PublisherImpl, SecT> {
    * enabled (@c kWithSecurity) because the encrypted payload size differs
    * from the serialized size.
    *
-   * By default (@p force = @c false) the call is a no-op when no subscribers
-   * are present; pass @c true to force-write regardless (useful for field-mode
-   * or recording-only scenarios).
+   * By default (@p force = @c false) the call is skipped (returns @c false)
+   * when no subscribers are present; pass @c true to force-write regardless
+   * (useful for field-mode or recording-only scenarios).
    *
    * For @c intra:// with a message type whose @c element_type derives from
    * @c IntraDataType (generated via @c VLINK_INTRA_DATA_DECLARE), the pointer

@@ -24,9 +24,9 @@
 #include "./base/thread_pool.h"
 
 #include <algorithm>
+#include <deque>
 #include <mutex>
 #include <optional>
-#include <queue>
 #include <string>
 #include <thread>
 #include <utility>
@@ -34,6 +34,7 @@
 
 #include "./base/condition_variable.h"
 #include "./base/logger.h"
+#include "./base/memory_resource.h"
 #include "./base/mpmc_queue.h"
 
 namespace vlink {
@@ -56,8 +57,13 @@ struct ThreadPoolGlobal final {
 
 // ThreadPool::Impl
 struct ThreadPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
-  using NormalQueue = std::queue<ThreadPool::Callback>;
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  using NormalQueue = std::pmr::deque<ThreadPool::Callback>;
   using LockfreeQueue = MpmcQueue<ThreadPool::Callback>;
+#else
+  using NormalQueue = std::deque<ThreadPool::Callback>;
+  using LockfreeQueue = MpmcQueue<ThreadPool::Callback>;
+#endif
 
   alignas(64) std::atomic_bool quit_flag{false};
 
@@ -121,10 +127,10 @@ bool ThreadPool::post_task(Callback&& callback) {
         is_full = impl_->normal_queue->size() >= get_max_task_count();
 
         if VLIKELY (!is_full) {
-          impl_->normal_queue->emplace(std::move(callback));
+          impl_->normal_queue->emplace_back(std::move(callback));
         } else if (impl_->strategy == kPopStrategy) {
-          impl_->normal_queue->pop();
-          impl_->normal_queue->emplace(std::move(callback));
+          impl_->normal_queue->pop_front();
+          impl_->normal_queue->emplace_back(std::move(callback));
           is_full = false;
           break;
         }
@@ -140,10 +146,10 @@ bool ThreadPool::post_task(Callback&& callback) {
               }
 
               if VLIKELY (!impl_->normal_queue->empty()) {
-                impl_->normal_queue->pop();
+                impl_->normal_queue->pop_front();
               }
 
-              impl_->normal_queue->emplace(std::move(callback));
+              impl_->normal_queue->emplace_back(std::move(callback));
               is_full = false;
             }
 
@@ -286,7 +292,7 @@ void ThreadPool::init() {
 
             task = std::move(impl_->normal_queue->front());
 
-            impl_->normal_queue->pop();
+            impl_->normal_queue->pop_front();
           }
 
           if VLIKELY (task) {

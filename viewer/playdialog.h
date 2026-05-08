@@ -52,7 +52,7 @@ class PlayDialog : public QDialog {
 
   enum Status : uint8_t {
     kDisable,
-    kStoped,
+    kStopped,
     kPlaying,
     kPaused,
   };

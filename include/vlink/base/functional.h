@@ -114,6 +114,8 @@
 
 namespace vlink {
 
+[[maybe_unused]] static constexpr bool kIsSupportMoveFunction = true;
+
 template <typename SignatureT>
 class Function;
 
@@ -302,12 +304,18 @@ class Function<ReturnT(ArgsT...)> {
 
   struct VTable final {
     ReturnT (*invoke)(const void* storage, ArgsT... args);
+
     void (*copy_construct)(void* dst, const void* src);
+
     void (*move_construct)(void* dst, void* src) noexcept;
+
     void (*destroy)(void* storage) noexcept;
+
 #if defined(__cpp_rtti)
     const std::type_info& (*target_type)() noexcept;
+
     void* (*target)(void* storage) noexcept;
+
     const void* (*target_const)(const void* storage) noexcept;
 #endif
   };
@@ -315,12 +323,18 @@ class Function<ReturnT(ArgsT...)> {
   template <typename FunctorT>
   struct InlineVTable {
     static ReturnT invoke(const void* storage, ArgsT... args);
+
     static void copy_construct(void* dst, const void* src);
+
     static void move_construct(void* dst, void* src) noexcept;
+
     static void destroy(void* storage) noexcept;
+
 #if defined(__cpp_rtti)
     static const std::type_info& target_type() noexcept;
+
     static void* target(void* storage) noexcept;
+
     static const void* target_const(const void* storage) noexcept;
 #endif
   };
@@ -328,12 +342,18 @@ class Function<ReturnT(ArgsT...)> {
   template <typename FunctorT>
   struct HeapVTable {
     static ReturnT invoke(const void* storage, ArgsT... args);
+
     static void copy_construct(void* dst, const void* src);
+
     static void move_construct(void* dst, void* src) noexcept;
+
     static void destroy(void* storage) noexcept;
+
 #if defined(__cpp_rtti)
     static const std::type_info& target_type() noexcept;
+
     static void* target(void* storage) noexcept;
+
     static const void* target_const(const void* storage) noexcept;
 #endif
   };
@@ -345,10 +365,13 @@ class Function<ReturnT(ArgsT...)> {
   void construct_from(SourceT&& src);
 
   void copy_from(const Function& other);
+
   void move_from(Function&& other) noexcept;
+
   void reset() noexcept;
 
   alignas(std::max_align_t) std::byte storage_[kSboSize]{};
+
   const VTable* vtable_{nullptr};
 };
 
@@ -429,6 +452,7 @@ class MoveFunction<ReturnT(ArgsT...)> {
   MoveFunction(std::nullptr_t) noexcept;  // NOLINT(google-explicit-constructor)
 
   MoveFunction(const MoveFunction&) = delete;
+
   MoveFunction& operator=(const MoveFunction&) = delete;
 
   /**
@@ -533,11 +557,16 @@ class MoveFunction<ReturnT(ArgsT...)> {
 
   struct VTable final {
     ReturnT (*invoke)(void* storage, ArgsT... args);
+
     void (*move_construct)(void* dst, void* src) noexcept;
+
     void (*destroy)(void* storage) noexcept;
+
 #if defined(__cpp_rtti)
     const std::type_info& (*target_type)() noexcept;
+
     void* (*target)(void* storage) noexcept;
+
     const void* (*target_const)(const void* storage) noexcept;
 #endif
   };
@@ -545,11 +574,16 @@ class MoveFunction<ReturnT(ArgsT...)> {
   template <typename FunctorT>
   struct InlineVTable {
     static ReturnT invoke(void* storage, ArgsT... args);
+
     static void move_construct(void* dst, void* src) noexcept;
+
     static void destroy(void* storage) noexcept;
+
 #if defined(__cpp_rtti)
     static const std::type_info& target_type() noexcept;
+
     static void* target(void* storage) noexcept;
+
     static const void* target_const(const void* storage) noexcept;
 #endif
   };
@@ -557,11 +591,16 @@ class MoveFunction<ReturnT(ArgsT...)> {
   template <typename FunctorT>
   struct HeapVTable {
     static ReturnT invoke(void* storage, ArgsT... args);
+
     static void move_construct(void* dst, void* src) noexcept;
+
     static void destroy(void* storage) noexcept;
+
 #if defined(__cpp_rtti)
     static const std::type_info& target_type() noexcept;
+
     static void* target(void* storage) noexcept;
+
     static const void* target_const(const void* storage) noexcept;
 #endif
   };
@@ -573,9 +612,11 @@ class MoveFunction<ReturnT(ArgsT...)> {
   void construct_from(SourceT&& src);
 
   void move_from(MoveFunction&& other) noexcept;
+
   void reset() noexcept;
 
   alignas(std::max_align_t) std::byte storage_[kSboSize]{};
+
   const VTable* vtable_{nullptr};
 };
 
@@ -1292,8 +1333,13 @@ template <typename SignatureT>
 using Function = std::function<SignatureT>;
 
 #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
+[[maybe_unused]] static constexpr bool kIsSupportMoveFunction = true;
 template <typename SignatureT>
 using MoveFunction = std::move_only_function<SignatureT>;
+#else
+[[maybe_unused]] static constexpr bool kIsSupportMoveFunction = false;
+template <typename SignatureT>
+using MoveFunction = std::function<SignatureT>;
 #endif
 
 }  // namespace vlink

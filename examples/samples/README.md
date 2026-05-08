@@ -117,17 +117,17 @@ ls build/output/bin/example_*
 
 | 示例 | 启动命令 | 前置操作 |
 |------|----------|----------|
-| helloworld (dds, 默认) | `./example_helloworld_server` + `./example_helloworld_client sub` | 无 |
-| helloworld (shm) | `METHOD_TRANSPORT=shm EVENT_TRANSPORT=shm ./example_helloworld_server` | `iox-roudi &` |
-| helloworld (someip) | `METHOD_TRANSPORT=someip EVENT_TRANSPORT=someip ./example_helloworld_server` | 启动 vsomeip routing manager |
-| ping_pong | `./example_pong` + `./example_ping [payload_size]` | 无（默认 dds） |
-| shm_raw | `./example_shm_raw` | `iox-roudi &` |
-| dds_dynamic | `./example_dds_dynamic` | 无 |
-| dds_idl | `./example_dds_idl` | 无（需手动启用构建） |
-| ddsc_proto | `./example_ddsc_proto` | 无 |
+| helloworld (dds, 默认) | `./sample_helloworld_server` + `./sample_helloworld_client sub` | 无 |
+| helloworld (shm) | `METHOD_TRANSPORT=shm EVENT_TRANSPORT=shm ./sample_helloworld_server` | `iox-roudi &` |
+| helloworld (someip) | `METHOD_TRANSPORT=someip EVENT_TRANSPORT=someip ./sample_helloworld_server` | 启动 vsomeip routing manager |
+| ping_pong | `./sample_pong` + `./sample_ping [payload_size]` | 无（默认 dds） |
+| shm_raw | `./sample_shm_raw` | `iox-roudi &` |
+| dds_dynamic | `./sample_dds_dynamic` | 无 |
+| dds_idl | `./sample_dds_idl` | 无（需手动启用构建） |
+| ddsc_proto | `./sample_ddsc_proto` | 无 |
 | pub_sub_fbs | `./build/output/bin/sample_pub_sub_fbs sub` + `./build/output/bin/sample_pub_sub_fbs pub` | 无 |
-| fdbus_proto | `./example_fdbus_proto` | `fdb_name_server &` |
-| someip_flat | `./example_someip_flat` | 启动 vsomeip routing manager |
+| fdbus_proto | `./sample_fdbus_proto` | `fdb_name_server &` |
+| someip_flat | `./sample_someip_flat` | 启动 vsomeip routing manager |
 
 ## 相关文档
 

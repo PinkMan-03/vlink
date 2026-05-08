@@ -602,6 +602,14 @@ NB_MODULE(_vlink_nanobind, m) {
           },
           "bytes"_a)
       .def_static(
+          "get_crc_64",
+          [](nb::handle data) {
+            PythonBufferView view(data);
+            auto b = vlink::Bytes::shallow_copy(view.data(), view.size());
+            return vlink::Bytes::get_crc_64(b);
+          },
+          "bytes"_a)
+      .def_static(
           "compress",
           [](nb::handle data, bool high_ratio) {
             PythonBufferView view(data);
@@ -1491,7 +1499,7 @@ NB_MODULE(_vlink_nanobind, m) {
   nb::class_<vlink::Qos::Ownership> qos_own(qos_cls, "Ownership");
   nb::enum_<vlink::Qos::Ownership::Kind>(qos_own, "Kind")
       .value("Shared", vlink::Qos::Ownership::kShared)
-      .value("Exclusive", vlink::Qos::Ownership::kExClusive);
+      .value("Exclusive", vlink::Qos::Ownership::kExclusive);
   qos_own.def(nb::init<>()).def_rw("kind", &vlink::Qos::Ownership::kind);
 
   nb::class_<vlink::Qos::Deadline>(qos_cls, "Deadline")
@@ -1815,7 +1823,7 @@ NB_MODULE(_vlink_nanobind, m) {
 
   nb::class_<vlink::BagReader> br(m, "BagReader", "Message playback");
   nb::enum_<vlink::BagReader::Status>(br, "Status")
-      .value("Stopped", vlink::BagReader::kStoped)
+      .value("Stopped", vlink::BagReader::kStopped)
       .value("Paused", vlink::BagReader::kPaused)
       .value("Playing", vlink::BagReader::kPlaying);
   nb::class_<vlink::BagReader::Info::UrlMeta>(br, "UrlMeta")

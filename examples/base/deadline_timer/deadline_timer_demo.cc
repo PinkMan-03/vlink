@@ -62,7 +62,7 @@ void demo_relative_deadline() {
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   VLOG_I("  After 250ms total:");
   VLOG_I("    has_expired: ", timer.has_expired() ? "true" : "false");
-  VLOG_I("    remaining_time: ", timer.remaining_time(), " ms (negative = overdue)");
+  VLOG_I("    remaining_time: ", timer.remaining_time(), " ms (0 = expired or invalid)");
 }
 
 // Demonstrate absolute deadline with set_deadline_abs().

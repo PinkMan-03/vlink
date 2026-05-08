@@ -49,7 +49,7 @@ int ret = vlink_get(getter, buf, &buf_size);
 |--------|------|
 | `VLINK_RET_NO_ERROR` | 成功，`*size` 更新为实际大小 |
 | `VLINK_RET_TRANSFER_ERROR` | 尚无值可用 |
-| `VLINK_RET_MEMORY_ERROR` | 缓冲区太小，`*size` 不变 |
+| `VLINK_RET_MEMORY_ERROR` | 缓冲区太小，`*size` 被回写为所需的字节数；调用方可据此扩容后重试 |
 | `VLINK_RET_INVALID_ERROR` | 无效参数 |
 
 ## 编译与运行

@@ -35,7 +35,8 @@
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-// No default initializers -- required for VLink POD serialization (kStandardType)
+// MyStruct provides operator>>/<<, so it is detected as kCustomType.
+// IntraData wrappers may target any supported Serializer::Type.
 struct MyStruct {
   int32_t id;
   float temperature;

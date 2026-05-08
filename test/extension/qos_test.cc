@@ -237,9 +237,9 @@ TEST_SUITE("extension-Qos::Ownership") {
     CHECK(o.kind == Qos::Ownership::kShared);
   }
 
-  TEST_CASE("kExClusive") {
-    Qos::Ownership o{Qos::Ownership::kExClusive};
-    CHECK(o.kind == Qos::Ownership::kExClusive);
+  TEST_CASE("kExclusive") {
+    Qos::Ownership o{Qos::Ownership::kExclusive};
+    CHECK(o.kind == Qos::Ownership::kExclusive);
   }
 }
 
@@ -393,7 +393,7 @@ TEST_SUITE("extension-Qos - field mutation") {
     a.liveliness.kind = Qos::Liveliness::kManualTopic;
     a.liveliness.duration = 3000;
     a.destination_order.kind = Qos::DestinationOrder::kSourceTimestamp;
-    a.ownership.kind = Qos::Ownership::kExClusive;
+    a.ownership.kind = Qos::Ownership::kExclusive;
     a.deadline.period = 500;
     a.lifespan.duration = 10000;
     a.latency_budget.duration = 50;
@@ -417,7 +417,7 @@ TEST_SUITE("extension-Qos - field mutation") {
     CHECK(b.liveliness.kind == Qos::Liveliness::kManualTopic);
     CHECK(b.liveliness.duration == 3000);
     CHECK(b.destination_order.kind == Qos::DestinationOrder::kSourceTimestamp);
-    CHECK(b.ownership.kind == Qos::Ownership::kExClusive);
+    CHECK(b.ownership.kind == Qos::Ownership::kExclusive);
     CHECK(b.deadline.period == 500);
     CHECK(b.lifespan.duration == 10000);
     CHECK(b.latency_budget.duration == 50);

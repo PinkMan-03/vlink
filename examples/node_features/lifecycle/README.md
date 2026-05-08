@@ -51,10 +51,12 @@ pub.init();     // 可以重新初始化
 ### interrupt()
 
 ```cpp
-sub.interrupt();  // 暂停消息投递
+pub.interrupt();  // 唤醒挂起的阻塞等待
 ```
 
-`interrupt()` 中断节点的消息处理。对于订阅者，中断后新到达的消息将不会触发回调。
+`interrupt()` 仅置位内部 `is_interrupted` 标志并唤醒条件变量，使
+`wait_for_subscribers()` / `wait_for_connected()` / `wait_for_value()` 等阻塞调用立即返回 `false`。
+它**不会**暂停消息投递、回调触发或释放传输资源——如需停止接收消息请使用 `deinit()`。
 
 ## 编译与运行
 
@@ -87,7 +89,7 @@ cmake .. && make example_lifecycle
 ## 注意事项
 
 - `deinit()` 后节点仍然存在，可以再次调用 `init()` 重新初始化
-- `interrupt()` 暂停消息处理，不释放传输资源
+- `interrupt()` 仅唤醒阻塞等待，不暂停回调，也不释放传输资源
 - 在未初始化的节点上调用 `publish()` 等操作会返回 `false`
 - `kWithoutInit` 适用于需要运行时配置的场景
 

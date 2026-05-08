@@ -38,8 +38,9 @@
  *
  * @note
  * - @c acquire() blocks the caller until at least @p n permits are available.
- * - @c release() is safe to call from any thread, including signal handlers
- *   (as long as the underlying @c std::mutex is signal-safe on the platform).
+ * - @c release() is safe to call from any thread.  It is NOT
+ *   async-signal-safe because it acquires @c std::mutex internally; do not
+ *   call it from a signal handler.
  * - @c reset() with @p interrupt_waiters == @c true is a disruptive operation
  *   that wakes all blocked @c acquire() callers and returns @c false to them.
  *   Use it only during controlled shutdown.
@@ -119,15 +120,15 @@ class VLINK_EXPORT Semaphore final {
    * @brief Increments the semaphore counter by @p n, waking blocked acquirers.
    *
    * @details
-   * If threads are blocked in @c acquire(), they are notified.
-   * The notification is delivered to at most @p n waiting threads.
+   * Increments the counter under the mutex and then broadcasts to all blocked
+   * @c acquire() callers; each will re-check whether enough permits are available.
    *
    * @param n  Number of permits to release (default: 1).
    */
   void release(size_t n = 1) noexcept;
 
   /**
-   * @brief Resets the semaphore counter to zero.
+   * @brief Resets the semaphore counter to its initial (constructor-provided) value.
    *
    * @details
    * If @p interrupt_waiters is @c true, all threads blocked in @c acquire()

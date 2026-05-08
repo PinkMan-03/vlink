@@ -235,16 +235,6 @@ Refs: #207
 ```
 
 ```
-fix(cli-bag): correct kStoped spelling in status check
-
-Previously the CLI was comparing against "kStopped" which never matched
-the header's "kStoped" (intentional spelling in extension/bag_reader.h).
-Consequence: `vlink-bag play` reported "finished" too early.
-
-Closes: #189
-```
-
-```
 docs: fix 8→9 CLI count across README and doc/00-overview
 
 vlink-bench was added in v2.0.0 but multiple docs still claimed 8 tools.
@@ -760,7 +750,7 @@ void old_function();
 ### 12.2 输入校验
 
 - 所有公共 API 必须**在入口**校验输入（不为空、边界范围、类型合法）
-- 从外部（URL、env、文件、网络）来的字符串长度要有上限（见 `discovery_reporter.cc:302` 的 url_length 检查）
+- 从外部（URL、env、文件、网络）来的字符串长度要有上限（见 `src/extension/discovery_reporter.cc:301` 的 `trim_url.size() > 300` 检查）
 - 反序列化前必须校验 size / CRC / 魔数头
 
 ### 12.3 加密
@@ -997,7 +987,7 @@ drawio --no-sandbox -x -f png -o <topic>.png <topic>.drawio
 10. **把 doc 里的中文 / 英文版本改得不对称**（本项目要求根 README、`doc/` 主要内容双语对齐）
 11. **commit 里包含构建产物**（`build/`、`.so`、`.exe`、`.a`）
 12. **把 `VLINK_LOG_LEVEL=0` 之类调试配置写进代码作为默认值**
-13. **在 ` `.h` 里用 `using namespace`**
+13. **在 `.h` 里用 `using namespace`**
 14. **在头文件里放函数定义（除非是 template / constexpr / inline）**
 15. **在热路径用 `std::regex` / `std::stringstream` / `boost::format`**
 16. **在 C++ / C / CMake / shell / python 源码里写中文注释**（见 [§6.2](#62-注释语言)；`.md` / `.txt` 文档不受此限）

@@ -143,7 +143,7 @@ Bytes::init_memory_pool();    // 启动时调用一次
 // 全局 MemoryPool 与进程生命周期一致
 ```
 
-`Bytes` 的堆分配走 `vlink::MemoryPool`（分级 free-list 池）。`init_memory_pool()` 以 `gen_by_env=true` 触发 `MemoryPool::global_instance()` 的首次构造，从而读取 `VLINK_MEMORY_LEVEL`（1..9，默认 3）以选择 tier 配置。
+`Bytes` 的堆分配走 `vlink::MemoryPool`（分级 free-list 池）。`init_memory_pool()` 以 `use_env_level=true` 触发 `MemoryPool::global_instance()` 的首次构造，从而读取 `VLINK_MEMORY_LEVEL`（0..9，默认 3；0 = bypass 模式）以选择 tier 配置。
 
 ## 注意事项
 

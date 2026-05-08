@@ -1677,8 +1677,9 @@ bool ZenohClient::call(NodeImpl* owner, uint64_t channel, const Bytes& req_data,
   z_owned_closure_reply_t reply_closure;
   std::shared_ptr<ZenohReplyContext> reply_context;
   std::shared_ptr<ZenohReplyContext>* reply_context_holder = nullptr;
+  const bool has_callback = static_cast<bool>(callback);
 
-  if VLIKELY (callback) {
+  if VLIKELY (has_callback) {
     reply_context = std::make_shared<ZenohReplyContext>();
     reply_context->instance = weak_from_this();
     reply_context->seq = seq_guid;
@@ -1703,7 +1704,7 @@ bool ZenohClient::call(NodeImpl* owner, uint64_t channel, const Bytes& req_data,
   z_result_t ret = z_get(z_loan(*session_), z_loan(keyexpr_), "", z_move(reply_closure), &opts);
 
   if VUNLIKELY (ret != Z_OK) {
-    if VLIKELY (callback) {
+    if VLIKELY (has_callback) {
       std::lock_guard lock(mtx_);
       callbacks_.erase(seq_guid);
     }

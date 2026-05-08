@@ -8,12 +8,12 @@
 
 | 预设 | 可靠性 | 历史 | 用途 |
 |------|--------|------|------|
-| kEvent | Reliable | KeepAll | 控制事件 |
-| kMethod | Reliable | KeepAll | RPC 调用 |
-| kField | Reliable | TransientLocal | 状态同步 |
+| kEvent | Reliable | KeepLast(10) | 控制事件 |
+| kMethod | Reliable | KeepAll(1) | RPC 调用 |
+| kField | Reliable | KeepLast(1) | 状态同步 |
 | kSensor | BestEffort | KeepLast(20) | 传感器数据 |
 | kParameter | Reliable | KeepLast(1000) | 配置参数 |
-| kService | Reliable | KeepAll | 服务通信 |
+| kService | Reliable | KeepLast(10) | 服务通信 |
 | kClock | BestEffort | KeepLast(1) | 时间同步 |
 | kLarge | Reliable | KeepLast(500) | 大数据（地图等） |
 

@@ -60,8 +60,8 @@
  * qos.history.depth     = 10;
  * qos.durability.kind   = vlink::Qos::Durability::kVolatile;
  *
- * auto pub = vlink::Publisher<MyMsg>::create("dds://my_topic");
- * pub->set_qos(qos);
+ * vlink::DdsConf::register_qos("my_qos", qos);
+ * auto pub = vlink::Publisher<MyMsg>::create_unique("dds://my_topic?qos=my_qos");
  * @endcode
  */
 
@@ -214,7 +214,7 @@ struct Qos final {
   struct Ownership final {
     enum Kind : uint8_t {
       kShared = 0,     ///< Multiple writers share ownership.
-      kExClusive = 1,  ///< Only the highest-strength writer has ownership.
+      kExclusive = 1,  ///< Only the highest-strength writer has ownership.
     };
 
     Kind kind{kShared};  ///< Ownership kind.

@@ -74,5 +74,5 @@ cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径>
 cmake --build .
 
 # 运行（单进程内完成）
-./example_fdbus_proto
+./sample_fdbus_proto
 ```

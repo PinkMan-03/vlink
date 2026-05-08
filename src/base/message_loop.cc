@@ -24,6 +24,7 @@
 #include "./base/message_loop.h"
 
 #include <atomic>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -37,6 +38,7 @@
 
 #include "./base/condition_variable.h"
 #include "./base/logger.h"
+#include "./base/memory_resource.h"
 #include "./base/mpmc_queue.h"
 #include "./base/utils.h"
 
@@ -85,9 +87,15 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
     }
   };
 
-  using NormalQueue = std::queue<NormalTaskTuple>;
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  using NormalQueue = std::pmr::deque<NormalTaskTuple>;
+  using LockfreeQueue = MpmcQueue<LockfreeTaskTuple>;
+  using PriorityQueue = std::priority_queue<PriorityTaskTuple, std::pmr::vector<PriorityTaskTuple>, PriorityCompare>;
+#else
+  using NormalQueue = std::deque<NormalTaskTuple>;
   using LockfreeQueue = MpmcQueue<LockfreeTaskTuple>;
   using PriorityQueue = std::priority_queue<PriorityTaskTuple, std::vector<PriorityTaskTuple>, PriorityCompare>;
+#endif
 
   alignas(64) std::atomic_bool is_running{false};
   alignas(64) std::atomic_bool quit_flag{false};
@@ -125,7 +133,11 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
 MessageLoop::MessageLoop() : impl_(std::make_unique<Impl>()) {
   impl_->name = "MessageLoop_" + std::to_string(MessageLoopGlobal::get().instance_index++);
 
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  impl_->normal_queue.emplace(&MemoryResource::global_instance());
+#else
   impl_->normal_queue.emplace();
+#endif
 }
 
 MessageLoop::MessageLoop(Type type) : impl_(std::make_unique<Impl>()) {
@@ -133,12 +145,20 @@ MessageLoop::MessageLoop(Type type) : impl_(std::make_unique<Impl>()) {
   impl_->type = type;
 
   if (impl_->type == kNormalType) {
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+    impl_->normal_queue.emplace(&MemoryResource::global_instance());
+#else
     impl_->normal_queue.emplace();
+#endif
   } else if (impl_->type == kLockfreeType) {
     size_t max_task_size = get_max_task_count();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
     impl_->lockfree_queue.emplace(max_task_size);
   } else if (impl_->type == kPriorityType) {
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+    impl_->priority_queue.emplace(&MemoryResource::global_instance());
+#else
     impl_->priority_queue.emplace();
+#endif
   }
 }
 
@@ -555,7 +575,7 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority) {
         if VLIKELY (!is_full) {
           push_normal_task(std::move(callback));
         } else if (impl_->strategy == kPopStrategy) {
-          impl_->normal_queue->pop();
+          impl_->normal_queue->pop_front();
           push_normal_task(std::move(callback));
           is_full = false;
           break;
@@ -572,7 +592,7 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority) {
               }
 
               if VLIKELY (!impl_->normal_queue->empty()) {
-                impl_->normal_queue->pop();
+                impl_->normal_queue->pop_front();
               }
 
               push_normal_task(std::move(callback));
@@ -715,7 +735,7 @@ void MessageLoop::push_normal_task(Callback&& callback) {
     start_time = get_current_time<std::chrono::steady_clock, std::chrono::milliseconds, uint32_t>();
   }
 
-  impl_->normal_queue->emplace(start_time, std::move(callback));
+  impl_->normal_queue->emplace_back(start_time, std::move(callback));
 }
 
 bool MessageLoop::push_lockfree_task(Callback&& callback) {
@@ -791,7 +811,11 @@ bool MessageLoop::process_normal_task(bool block) {
   [[maybe_unused]] bool is_timeout = true;
   int64_t sleep_time = -1;
 
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  Impl::NormalQueue temp_queue(&MemoryResource::global_instance());
+#else
   Impl::NormalQueue temp_queue;
+#endif
 
   std::unique_lock lock(impl_->mtx);
 
@@ -803,7 +827,7 @@ bool MessageLoop::process_normal_task(bool block) {
   while (!temp_queue.empty() && !impl_->force_quit_flag) {
     auto&& [start_time, task] = std::move(const_cast<Impl::NormalTaskTuple&>(temp_queue.front()));
     on_task_changed(std::move(task), start_time);
-    temp_queue.pop();
+    temp_queue.pop_front();
   }
 
   on_idle();
@@ -899,7 +923,11 @@ bool MessageLoop::process_priority_task(bool block) {
   [[maybe_unused]] bool is_timeout = true;
   int64_t sleep_time = -1;
 
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  Impl::PriorityQueue temp_queue(&MemoryResource::global_instance());
+#else
   Impl::PriorityQueue temp_queue;
+#endif
 
   std::unique_lock lock(impl_->mtx);
 
@@ -1025,7 +1053,7 @@ bool MessageLoop::process_timer_task(int64_t& next_sleep_time) {
       for (int64_t i = 0; timer->get_remain_loop_count() != 0 && i < remain_loop_count; ++i) {
         if (impl_->type == kNormalType) {
           if VUNLIKELY (impl_->normal_queue->size() >= get_max_task_count()) {
-            impl_->normal_queue->pop();
+            impl_->normal_queue->pop_front();
 
             CLOG_W("MessageLoop: Timer task is full, removed top data (%s).", impl_->name.c_str());
 

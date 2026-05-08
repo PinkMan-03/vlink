@@ -39,10 +39,12 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 ///   - The type supports both std::stringstream << t and std::stringstream >> t
 ///   - The type is NOT detected by any higher-priority serializer
 ///
-/// In the detection chain, kStreamType (position 12) ranks LOWER than kCustomType (position 9).
+/// In the detection chain, kStreamType is checked LAST (after Standard / StandardPtr).
 /// This means:
 ///   - If a type has BOTH Bytes operator>>/operator<< AND stream operators, it is kCustomType
-///   - kStreamType is only for types that have stringstream operators but NOT Bytes operators
+///   - If a type is trivial + standard-layout (e.g. int, double), it is kStandardType
+///   - kStreamType only matches non-pointer types that have stringstream operators
+///     and that did NOT match any earlier codec in the chain
 ///
 /// Typical kStreamType candidates are types that already provide iostream overloads,
 /// such as user-defined lightweight value types.
@@ -116,10 +118,10 @@ int main() {
 
   // ======== Priority comparison ========
   std::cout << "\n[Detection Priority]" << std::endl;
-  std::cout << "  Color      -> kStreamType  (position 12)" << std::endl;
-  std::cout << "  Hybrid     -> kCustomType  (position  9, Bytes ops take priority)" << std::endl;
-  std::cout << "  std::string -> kStringType (position 10, checked before stream)" << std::endl;
-  std::cout << "  int        -> kStandardType(position 13, trivial+standard_layout)" << std::endl;
+  std::cout << "  Color      -> kStreamType  (matched only after Standard fails)" << std::endl;
+  std::cout << "  Hybrid     -> kCustomType  (Bytes operators take priority)" << std::endl;
+  std::cout << "  std::string -> kStringType (checked before stream)" << std::endl;
+  std::cout << "  int        -> kStandardType(trivial + standard_layout)" << std::endl;
 
   std::cout << "\n[Summary] Colors=" << color_count << " Sizes=" << size_count << std::endl;
 

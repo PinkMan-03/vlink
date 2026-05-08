@@ -142,9 +142,9 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     CHECK(pool.get_tier_count() >= 4u);
   }
 
-  TEST_CASE("zero blocks_per_chunk triggers default-pyramid fallback") {
+  TEST_CASE("zero blocks_per_chunk is treated as a sentinel and stripped (bypass mode)") {
     MemoryPool pool(make_config({{64, 0}}));
-    CHECK(pool.get_tier_count() >= 4u);
+    CHECK(pool.get_tier_count() == 0u);
   }
 
   TEST_CASE("non-monotonic ordering triggers default-pyramid fallback") {
@@ -208,7 +208,7 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     }
   }
 
-  TEST_CASE("after exhausting the prealloc chunk, subsequent grows follow geometric (one-time semantics)") {
+  TEST_CASE("after exhausting the prealloc chunk, subsequent grows preserve the full-chunk policy") {
     constexpr size_t kBpc = 8;
     MemoryPool pool(make_config({{64, kBpc}}, /*prealloc=*/true));
 
@@ -224,14 +224,17 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
 
     auto stats = pool.get_stats();
     REQUIRE(stats.size() == 1u);
-    CHECK(stats[0].chunk_count == 2u);  // one prealloc + one geometric grow
+    CHECK(stats[0].chunk_count == 2u);
     CHECK(stats[0].upstream_alloc_count == 2u);
 
-    // Geometric growth must start from kInitialBlocksPerChunk (=1), not from blocks_per_chunk.
-    // The second chunk therefore holds exactly one block.
+    // After a successful prealloc the tier keeps next_chunk_blocks at
+    // blocks_per_chunk so the next lazy grow allocates another full quota
+    // chunk (matching the prealloc "always allocate full chunks" intent);
+    // the per-tier initial_chunk_blocks fallback only kicks in if prealloc
+    // itself failed.
     const size_t prealloc_bytes = stats[0].block_size * kBpc;
     const size_t total = stats[0].upstream_alloc_bytes;
-    CHECK(total == prealloc_bytes + stats[0].block_size);
+    CHECK(total == prealloc_bytes + stats[0].block_size * kBpc);
 
     for (void* p : blocks) {
       pool.deallocate(p, 64);
@@ -356,10 +359,12 @@ TEST_SUITE("base-MemoryPool - free list reuse") {
   }
 
   TEST_CASE("an additional alloc beyond the first chunk triggers a second chunk") {
+    // The first chunk fills to its initial_chunk_blocks (capped at bpc=4); the
+    // 5th allocation forces a second upstream chunk.
     MemoryPool pool(make_config({{64, 4}}));
 
     std::vector<void*> blocks;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 5; ++i) {
       blocks.push_back(pool.allocate(64));
     }
 
@@ -547,11 +552,13 @@ TEST_SUITE("base-MemoryPool - clear") {
   }
 
   TEST_CASE("clear leaves the surviving chunk's free nodes reusable") {
-    MemoryPool pool(make_config({{64, 4}}));
+    // bpc=2 forces the third allocation to land in a second chunk: chunk #1
+    // holds {a, b} and chunk #2 holds {c, free}.  Freeing 'c' empties chunk
+    // #2 fully while 'b' keeps chunk #1 partially used; clear() must
+    // therefore release chunk #2 and keep chunk #1 (with 'a's slot still
+    // available for reuse).
+    MemoryPool pool(make_config({{64, 2}}));
 
-    // Two blocks from the same first chunk (kInitialBlocksPerChunk == 1
-    // gives a 1-block chunk first, then a 2-block chunk; pin one block in
-    // the 2-block chunk and free the other so that chunk has 1 live + 1 free).
     void* a = pool.allocate(64);
     void* b = pool.allocate(64);
     void* c = pool.allocate(64);
@@ -559,9 +566,8 @@ TEST_SUITE("base-MemoryPool - clear") {
     REQUIRE(b != nullptr);
     REQUIRE(c != nullptr);
 
-    pool.deallocate(a, 64);  // free the 1-block chunk's only block (chunk fully free)
-    pool.deallocate(c, 64);  // free one of the 2-block chunk's blocks (chunk partially free)
-    // 'b' is still live in the 2-block chunk.
+    pool.deallocate(a, 64);  // chunk #1: 1 free, 1 live (b)
+    pool.deallocate(c, 64);  // chunk #2: 2 free, 0 live -> fully free
 
     const auto before = pool.get_stats();
     REQUIRE(before[0].chunk_count >= 2u);

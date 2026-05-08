@@ -218,24 +218,24 @@ cmake -DCMAKE_BUILD_TYPE=Release -B build -S .
 cmake --build build -j$(nproc)
 
 # 运行服务端（终端 1，默认使用 dds://）
-./build/output/bin/example_helloworld_server
+./build/output/bin/sample_helloworld_server
 
 # 订阅事件（终端 2）
-./build/output/bin/example_helloworld_client sub
+./build/output/bin/sample_helloworld_client sub
 
 # 发起 RPC 调用（终端 3）
-./build/output/bin/example_helloworld_client set 10 20
+./build/output/bin/sample_helloworld_client set 10 20
 # 预期输出：[Client] Receive sum: 30
 
 # 切换到共享内存传输
 iox-roudi &    # 先启动 Iceoryx 守护进程
-METHOD_TRANSPORT=shm EVENT_TRANSPORT=shm ./build/output/bin/example_helloworld_server
-EVENT_TRANSPORT=shm ./build/output/bin/example_helloworld_client sub
-METHOD_TRANSPORT=shm ./build/output/bin/example_helloworld_client set 3 4
+METHOD_TRANSPORT=shm EVENT_TRANSPORT=shm ./build/output/bin/sample_helloworld_server
+EVENT_TRANSPORT=shm ./build/output/bin/sample_helloworld_client sub
+METHOD_TRANSPORT=shm ./build/output/bin/sample_helloworld_client set 3 4
 
 # 切换到 CycloneDDS
-METHOD_TRANSPORT=ddsc EVENT_TRANSPORT=ddsc ./build/output/bin/example_helloworld_server
-EVENT_TRANSPORT=ddsc ./build/output/bin/example_helloworld_client sub
+METHOD_TRANSPORT=ddsc EVENT_TRANSPORT=ddsc ./build/output/bin/sample_helloworld_server
+EVENT_TRANSPORT=ddsc ./build/output/bin/sample_helloworld_client sub
 ```
 
 ---

@@ -35,8 +35,6 @@ cc_library_shared {
         "include",
         "include/vlink",
         "thirdparty/lzav/include",
-        "thirdparty/crc/include",
-        "thirdparty/dylib/include",
         "thirdparty/json/include",
         "thirdparty/mcap/include",
     ],

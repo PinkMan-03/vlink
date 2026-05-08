@@ -109,7 +109,7 @@ class VLINK_EXPORT SysSharemem final {
   SysSharemem();
 
   /**
-   * @brief Destructor.  Calls @c detach(true) if still attached.
+   * @brief Destructor.  Calls @c detach(false) if still attached.
    */
   ~SysSharemem();
 

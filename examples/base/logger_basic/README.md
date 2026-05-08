@@ -249,5 +249,3 @@ Logger::register_console_handler([](Logger::Level, std::string_view msg) {
 ## 相关示例
 
 - [logger_advanced](../logger_advanced/) -- 自定义 handler、backtrace、fatal 异常捕获
--  -- VLink format 库的独立使用
--  -- VLOG_* 底层使用的 FastStream 零分配流

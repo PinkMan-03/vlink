@@ -246,14 +246,25 @@ class VLINK_EXPORT ThreadPool {
 
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> ThreadPool::invoke_task(FunctionT&& function, ArgsT&&... args) {
-  std::packaged_task<ResultT()> task(
-      std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+  if constexpr (kIsSupportMoveFunction) {
+    std::packaged_task<ResultT()> task(
+        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
 
-  std::future<ResultT> res = task.get_future();
+    std::future<ResultT> res = task.get_future();
 
-  post_task([t = std::move(task)]() mutable { t(); });
+    post_task([t = std::move(task)]() mutable { t(); });
 
-  return res;
+    return res;
+  } else {
+    auto task = std::make_shared<std::packaged_task<ResultT()>>(
+        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+
+    std::future<ResultT> res = task->get_future();
+
+    std::invoke(&ThreadPool::post_task, this, [task]() { (*task.get())(); });
+
+    return res;
+  }
 }
 
 }  // namespace vlink

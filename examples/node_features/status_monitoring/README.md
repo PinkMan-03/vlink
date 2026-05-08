@@ -11,11 +11,13 @@
 ```cpp
 pub.register_status_handler([](Status::BasePtr status) {
   // 当节点状态变化时调用（如订阅者连接/断开）
-  VLOG_I("Status type:", static_cast<int>(status->type));
+  VLOG_I("Status type:", static_cast<int>(status->get_type()));
 });
 ```
 
-状态事件包括：订阅者连接、订阅者断开、服务器连接、发现更新等。
+DDS 兼容的状态枚举（`Status::Type`）包括 `kPublicationMatched`、`kSubscriptionMatched`、
+`kOfferedDeadlineMissed`、`kLivelinessLost`、`kSampleRejected`、`kSampleLost` 等。
+具体可用的事件类型取决于活动的传输后端。
 
 ### get_cpu_usage
 

@@ -39,9 +39,13 @@ def test_bytes():
     decoded = _vlink.Bytes.decode_from_base64(encoded)
     assert decoded.to_bytes() == b"hello world"
 
-    # CRC32
-    crc = _vlink.Bytes.get_crc_32(b)
-    assert isinstance(crc, int) and crc > 0
+    # CRC-32 (CRC-32/ISO-HDLC)
+    crc32 = _vlink.Bytes.get_crc_32(b)
+    assert isinstance(crc32, int) and crc32 > 0
+
+    # CRC-64 (CRC-64/ECMA-182)
+    crc64 = _vlink.Bytes.get_crc_64(b)
+    assert isinstance(crc64, int) and crc64 > 0
 
     # Compression
     big = _vlink.Bytes.from_bytes(b"A" * 10000)

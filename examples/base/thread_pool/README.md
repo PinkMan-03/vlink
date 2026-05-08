@@ -126,13 +126,13 @@ int result = future.get();  // 阻塞等待结果
 | `kNormalType` | mutex + FIFO queue（默认） | 通用场景 |
 | `kLockfreeType` | MPMC lock-free queue | 高竞争场景 |
 
-### 调度策略
+### 调度策略（控制队列已满时 `post_task` 的行为）
 
-| 策略 | 工作线程空闲时行为 | CPU 占用 |
-|------|------------------|---------|
-| `kOptimizationStrategy` | yield CPU（默认） | 低 |
-| `kPopStrategy` | 忙等轮询 | 最高 |
-| `kBlockStrategy` | 条件变量阻塞 | 最低 |
+| 策略 | 行为 | 适用场景 |
+|------|------|---------|
+| `kOptimizationStrategy` | 重试最多 10 次（每次 sleep 1 ms），仍满则丢弃最旧任务后入队（默认） | 平衡延迟与背压 |
+| `kPopStrategy` | 立即丢弃最旧任务后入队 | 实时场景 |
+| `kBlockStrategy` | 无限重试（每次 sleep 1 ms）直到有空位 | 不允许丢任务 |
 
 ### 状态查询
 
@@ -163,11 +163,11 @@ ThreadPool pool(n * 2);
 - **低竞争**（少量生产者）：`kNormalType` 足够
 - **高竞争**（多个线程频繁投递）：`kLockfreeType` 更优
 
-### 策略选择
+### 策略选择（仅影响队列已满时的入队行为；空闲时始终为条件变量等待）
 
-- **延迟敏感**：`kPopStrategy`（忙等，最低延迟）
-- **任务间隔长**：`kBlockStrategy`（节省 CPU）
-- **通用场景**：`kOptimizationStrategy`（平衡）
+- **实时优先（宁丢旧不丢新）**：`kPopStrategy`
+- **不允许丢任务**：`kBlockStrategy`（背压阻塞）
+- **通用场景**：`kOptimizationStrategy`（先重试再退化为丢弃最旧）
 
 ### 避免任务粒度过细
 
@@ -235,5 +235,4 @@ void enqueue(ThreadPool& pool) {
 - [message_loop_basic](../message_loop_basic/) -- 单线程串行替代方案
 - [graph_task](../graph_task/) -- 基于 DAG 的任务调度，可在 ThreadPool 上执行
 - [multi_loop](../multi_loop/) -- 多个 MessageLoop 协作
--  -- 低层同步原语
 - [spin_lock](../spin_lock/) -- 自旋锁用于极短临界区

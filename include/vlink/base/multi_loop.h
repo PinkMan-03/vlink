@@ -26,21 +26,27 @@
  * @brief Multi-threaded event loop backed by a pool of worker threads sharing one task queue.
  *
  * @details
- * @c MultiLoop extends @c MessageLoop by running @p thread_num worker threads that all
- * dequeue and execute tasks from the same queue.  This enables parallel task execution
- * without changing the posting API: callers still call @c post_task() and @c exec_task()
- * exactly as with a single-threaded @c MessageLoop.
+ * @c MultiLoop extends @c MessageLoop with an internal @c ThreadPool of @p thread_num workers.
+ * The base @c MessageLoop dispatcher thread continues to dequeue tasks from the loop's queue,
+ * but instead of running each task inline, it forwards the task to the internal @c ThreadPool
+ * for execution on one of the worker threads.  This enables parallel task execution without
+ * changing the posting API: callers still call @c post_task() and @c exec_task() exactly as
+ * with a single-threaded @c MessageLoop.
  *
  * Differences from @c MessageLoop:
- * - Tasks may run concurrently on multiple threads; they are @b not serialised.
- * - @c is_in_same_thread() returns @c true if the caller is any of the worker threads.
- * - @c on_begin() and @c on_end() are called once per worker thread.
- * - @c on_task_changed() is called from the executing worker thread.
+ * - Tasks may run concurrently on multiple worker threads; they are @b not serialised.
+ * - @c is_in_same_thread() returns @c true if the caller is one of the internal pool's worker
+ *   threads (not the dispatcher thread).
+ * - @c on_begin() / @c on_end() (overrides) are still invoked once on the dispatcher thread;
+ *   they are used to construct and tear down the internal @c ThreadPool.
+ * - The @c on_task_changed() override runs on the dispatcher thread and posts the task to
+ *   the pool; the base @c MessageLoop::on_task_changed() then runs on the executing worker.
  *
  * @note
  * - Shared state accessed inside task callbacks must be protected by its own synchronisation.
- * - Timers attached to a @c MultiLoop still fire on one of the worker threads (non-deterministic).
- * - The destructor waits for all worker threads to finish.
+ * - Timers attached to a @c MultiLoop fire as queue tasks on the dispatcher and execute on a
+ *   pool worker (non-deterministic which worker).
+ * - The destructor quits the loop and shuts down the internal pool, joining all workers.
  *
  * @par Example
  * @code
@@ -69,7 +75,9 @@ namespace vlink {
  * @brief Multi-threaded variant of @c MessageLoop running tasks on a worker-thread pool.
  *
  * @details
- * All threads share the same task queue.  Tasks are @b not guaranteed to execute in order.
+ * Tasks posted to the @c MultiLoop go through the inherited @c MessageLoop queue and are
+ * forwarded to an internal @c ThreadPool for execution.  Because pool workers run concurrently,
+ * task @b execution order is @b not guaranteed even though dequeueing is FIFO.
  */
 class VLINK_EXPORT MultiLoop : public MessageLoop {
  public:
@@ -89,7 +97,8 @@ class VLINK_EXPORT MultiLoop : public MessageLoop {
   explicit MultiLoop(size_t thread_num, Type type);
 
   /**
-   * @brief Destructor.  Quits the loop and joins all worker threads.
+   * @brief Destructor.  Quits the loop; the inherited @c MessageLoop destructor joins
+   *        the dispatcher thread and @c on_end() shuts down the internal @c ThreadPool.
    */
   ~MultiLoop() override;
 
@@ -102,26 +111,27 @@ class VLINK_EXPORT MultiLoop : public MessageLoop {
 
  protected:
   /**
-   * @brief Called once on each worker thread immediately after it starts.
-   *
-   * @details
-   * Override to perform per-thread initialisation (e.g., setting thread name or affinity).
+   * @brief Called once on the dispatcher thread when the loop starts; constructs the
+   *        internal @c ThreadPool.
    */
   void on_begin() override;
 
   /**
-   * @brief Called once on each worker thread just before it exits.
-   *
-   * @details
-   * Override to perform per-thread cleanup.
+   * @brief Called once on the dispatcher thread when the loop exits; shuts down the
+   *        internal @c ThreadPool and joins all worker threads.
    */
   void on_end() override;
 
   /**
-   * @brief Called on the worker thread executing the task, before the task runs.
+   * @brief Called on the dispatcher thread before a task is forwarded to the worker pool.
+   *
+   * @details
+   * Forwards @p callback (and @p start_time) onto the internal @c ThreadPool, where
+   * the base @c MessageLoop::on_task_changed() will subsequently run on the executing worker.
    *
    * @param callback    The task about to be executed.
-   * @param start_time  Millisecond timestamp at which the task was dequeued.
+   * @param start_time  Millisecond steady_clock timestamp captured when the task was
+   *                    enqueued (0 if elapsed-time tracking is disabled).
    */
   void on_task_changed(Callback&& callback, uint32_t start_time) override;
 

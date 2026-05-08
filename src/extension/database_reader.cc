@@ -60,7 +60,7 @@ namespace vlink {
 
 // DatabaseReader::Impl
 struct DatabaseReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
-  std::atomic<BagReader::Status> status{BagReader::kStoped};
+  std::atomic<BagReader::Status> status{BagReader::kStopped};
   std::atomic_bool stop_flag{false};
   std::atomic_bool pause_flag{false};
   std::atomic_bool pause_next_flag{false};
@@ -1164,9 +1164,9 @@ void DatabaseReader::on_end() { MessageLoop::on_end(); }
 void DatabaseReader::update_status(Status status) {
   bool has_changed = false;
 
-  if (status == kStoped) {
-    if (impl_->status != kStoped) {
-      impl_->status = kStoped;
+  if (status == kStopped) {
+    if (impl_->status != kStopped) {
+      impl_->status = kStopped;
       has_changed = true;
     }
   } else if (status == kPaused) {
@@ -2412,7 +2412,7 @@ void DatabaseReader::read(const Config& config) {
     if VUNLIKELY (start_index < 0 || start_index > static_cast<int>(impl_->file_list.size()) - 1) {
       VLOG_W("DatabaseReader: Cannot find any data for play.");
 
-      update_status(kStoped);
+      update_status(kStopped);
 
       if (config.auto_quit) {
         quit();
@@ -2435,7 +2435,7 @@ void DatabaseReader::read(const Config& config) {
 
     if (impl_->stop_flag) {
       is_interrupted = true;
-      update_status(kStoped);
+      update_status(kStopped);
       break;
     } else if (impl_->jump_flag) {
       break;
@@ -2596,14 +2596,14 @@ void DatabaseReader::read(const Config& config) {
 
     if (is_interrupted) {
       if (impl_->stop_flag) {
-        update_status(kStoped);
+        update_status(kStopped);
       }
 
       break;
     }
 
     if (!impl_->jump_flag) {
-      update_status(kStoped);
+      update_status(kStopped);
 
       if (config.skip_blank) {
         impl_->begin_time = std::max(config.begin_time, impl_->info.blank_duration);

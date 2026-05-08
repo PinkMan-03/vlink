@@ -51,8 +51,9 @@
  * Run modes:
  * - @c run() -- blocks the calling thread until @c quit() is called.
  * - @c async_run() -- launches a new background thread and returns immediately.
- * - @c spin() -- calls @c spin_once() in a loop; suitable for use in an existing event loop.
- * - @c spin_once() -- processes one batch of pending tasks (optionally blocking).
+ * - @c spin() -- alias for @c run() (blocks the calling thread until @c quit() is called).
+ * - @c spin_once() -- processes one batch of pending tasks on the calling thread (optionally blocking);
+ *   suitable for integration into an existing event loop.
  *
  * Task execution with scheduling:
  * @c exec_task() wraps a callback in a @c Schedule::Config (delay, priority, timeouts) and
@@ -130,10 +131,12 @@ class VLINK_EXPORT MessageLoop {
   };
 
   /**
-   * @brief Idle strategy controlling CPU and latency trade-offs.
+   * @brief Push-side back-pressure strategy applied when the bounded queue is full.
    *
    * @details
-   * See class documentation for a comparison table.
+   * Idle dispatch is unconditionally driven by a condition variable; this enum only
+   * affects how @c post_task / @c invoke_task react when the queue has reached its
+   * capacity.  See the class documentation for a comparison table.
    */
   enum Strategy : uint8_t {
     kOptimizationStrategy = 0,  ///< Balance: when full, retry; after 10 retries drop oldest and push.
@@ -250,12 +253,12 @@ class VLINK_EXPORT MessageLoop {
   bool async_run();
 
   /**
-   * @brief Runs the loop continuously in a spin mode (blocking; no background thread).
+   * @brief Alias for @c run().  Runs the loop on the calling thread (blocking).
    *
    * @details
-   * Calls @c spin_once() repeatedly until @c quit() is called.
+   * Equivalent to calling @c run().  Blocks the calling thread until @c quit() is called.
    *
-   * @return @c true on normal exit.
+   * @return Same return value as @c run().
    */
   bool spin();
 
@@ -267,7 +270,9 @@ class VLINK_EXPORT MessageLoop {
    *
    * @param block  If @c true and the queue is empty, blocks until a task arrives.
    *               If @c false, returns immediately if the queue is empty.  Default: @c true.
-   * @return @c true if at least one task was processed; @c false if the loop should quit.
+   * @return @c true after a normal processing cycle.
+   *         @c false if the loop has been signalled to quit, or if the call was made from
+   *         a thread other than the loop thread (when one has already been bound by @c run/async_run).
    */
   bool spin_once(bool block = true);
 
@@ -507,14 +512,19 @@ class VLINK_EXPORT MessageLoop {
   virtual void on_idle();
 
   /**
-   * @brief Called before each task is executed.
+   * @brief Dispatches a single ready task on the loop thread.
    *
    * @details
-   * Provides the task callback and the monotonic start timestamp (in milliseconds).
-   * Override to implement per-task tracing or accounting.
+   * The default implementation invokes @p callback directly (after optionally checking
+   * elapsed-time and forwarding overruns to @c on_task_timeout).  Subclasses override
+   * this to wrap or redirect dispatch -- e.g. @c MultiLoop posts the callback to an
+   * internal @c ThreadPool instead of running it inline.  An override that does not
+   * forward to the base implementation must arrange for @p callback to be invoked
+   * itself, or the task will be silently dropped.
    *
-   * @param callback    The task about to be executed.
-   * @param start_time  Millisecond timestamp at which the task was dequeued.
+   * @param callback    The task to dispatch.
+   * @param start_time  Millisecond steady_clock timestamp captured when the task was
+   *                    enqueued (0 if elapsed-time tracking is disabled).
    */
   virtual void on_task_changed(Callback&& callback, uint32_t start_time);
 
@@ -619,27 +629,55 @@ Schedule::RetStatus MessageLoop::exec_task(const Schedule::Config& config, Callb
 
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> MessageLoop::invoke_task(FunctionT&& function, ArgsT&&... args) {
-  std::packaged_task<ResultT()> task(
-      std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+  if constexpr (kIsSupportMoveFunction) {
+    std::packaged_task<ResultT()> task(
+        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
 
-  std::future<ResultT> res = task.get_future();
+    std::future<ResultT> res = task.get_future();
 
-  post_task([t = std::move(task)]() mutable { t(); });
+    post_task([t = std::move(task)]() mutable { t(); });
 
-  return res;
+    return res;
+  } else {
+    auto task = std::make_shared<std::packaged_task<ResultT()>>(
+        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+
+    std::future<ResultT> res = task->get_future();
+
+    using TaskFunction = bool (MessageLoop::*)(Callback&&);
+
+    std::invoke(static_cast<TaskFunction>(&MessageLoop::post_task), this, [task]() { (*task.get())(); });
+
+    return res;
+  }
 }
 
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> MessageLoop::invoke_task_with_priority(FunctionT&& function, uint16_t priority,
                                                                    ArgsT&&... args) {
-  std::packaged_task<ResultT()> task(
-      std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+  if constexpr (kIsSupportMoveFunction) {
+    std::packaged_task<ResultT()> task(
+        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
 
-  std::future<ResultT> res = task.get_future();
+    std::future<ResultT> res = task.get_future();
 
-  post_task_with_priority([t = std::move(task)]() mutable { t(); }, priority);
+    post_task_with_priority([t = std::move(task)]() mutable { t(); }, priority);
 
-  return res;
+    return res;
+  } else {
+    auto task = std::make_shared<std::packaged_task<ResultT()>>(
+        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+
+    std::future<ResultT> res = task->get_future();
+
+    using TaskFunction = bool (MessageLoop::*)(Callback&&, uint16_t);
+
+    std::invoke(
+        static_cast<TaskFunction>(&MessageLoop::post_task_with_priority), this, [task]() { (*task.get())(); },
+        priority);
+
+    return res;
+  }
 }
 
 }  // namespace vlink

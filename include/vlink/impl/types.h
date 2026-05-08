@@ -90,7 +90,7 @@ enum ImplType : uint8_t {
   kUnknownImplType = 0,  ///< Type not yet determined.
   kServer = 16,          ///< Method server (RPC responder).
   kClient = 32,          ///< Method client (RPC caller).
-  kPublisher = 1,        ///< Event publisher (N-to-N broadcast).
+  kPublisher = 1,        ///< Event publisher (1-to-many broadcast).
   kSubscriber = 2,       ///< Event subscriber (receive broadcast).
   kSetter = 4,           ///< Field setter (update latest value).
   kGetter = 8,           ///< Field getter (retrieve latest value).

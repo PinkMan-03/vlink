@@ -36,19 +36,19 @@ MessageLoop priority_loop(MessageLoop::kPriorityType);
 
 `kPriorityType` 支持 `post_task_with_priority(callback, priority)` 方法，数值越大的任务越先被执行。预定义的优先级包括 `kLowestPriority(1)`、`kTimerPriority(50)`、`kNormalPriority(100)` 和 `kHighestPriority(65535)`。
 
-### 2. 三种调度策略
+### 2. 三种调度策略（控制队列已满时的入队行为）
 
-| 策略 | 枚举值 | 行为 | 适用场景 |
+| 策略 | 枚举值 | 行为（仅在 `post_task` 时队列已满才生效） | 适用场景 |
 |------|--------|------|----------|
-| `kOptimizationStrategy` | 0 | 队列为空时 yield CPU | 平衡延迟与 CPU 使用（默认） |
-| `kPopStrategy` | 1 | 忙等轮询队列 | 最低延迟，最高 CPU 占用 |
-| `kBlockStrategy` | 2 | 队列为空时阻塞在条件变量 | 最低 CPU 占用 |
+| `kOptimizationStrategy` | 0 | 重试最多 10 次（每次 sleep 1 ms），仍满则丢弃最旧任务后入队（默认） | 平衡延迟与背压 |
+| `kPopStrategy` | 1 | 立即丢弃最旧任务后入队 | 实时场景，新数据优先 |
+| `kBlockStrategy` | 2 | 无限重试（每次 sleep 1 ms）直到有空位 | 不允许丢任务 |
 
 ```cpp
 loop.set_strategy(MessageLoop::kBlockStrategy);
 ```
 
-策略可以在运行时动态切换，在下一个空闲周期生效。
+策略可以在运行时动态切换。**注意**：空闲调度（队列为空时）始终为条件变量等待，不受策略影响。
 
 ### 3. exec_task 与 Schedule::Config
 
@@ -131,8 +131,8 @@ auto future = loop.invoke_task_with_priority(
 
 - `kLockfreeType` 在高频投递场景下开销最低
 - `kPriorityType` 有排序开销，但保证关键任务优先处理
-- `kBlockStrategy` 在任务间隔较长时节省 CPU 资源
-- `kPopStrategy` 适合对延迟极度敏感的场景
+- `kPopStrategy` 适合"宁可丢旧不丢新"的实时场景（队列满时直接丢弃最旧任务）
+- `kBlockStrategy` 适合不允许丢任务的场景（队列满时阻塞重试至成功）
 
 ## 注意事项
 

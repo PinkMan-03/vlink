@@ -1169,7 +1169,9 @@ int main() {
     // 清理：shm:// 后端注销进程
     vlink::ShmConf::deinit_runtime();
 
-    // 注意：MemoryPool 全局唯一且生命周期等同进程，没有对应的清理 API。
+    // 可选：触发 MemoryPool 的 trim（仅释放完全空闲的 chunk，含 live block 的 chunk 保留）。
+    // MemoryPool 自身随进程结束统一释放，无需也无法手动销毁。
+    vlink::Bytes::release_memory_pool();
 
     return 0;
 }

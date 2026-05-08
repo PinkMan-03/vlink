@@ -28,10 +28,11 @@
  * @details
  * @c MemoryPool partitions allocation requests across a fixed pyramid of size
  * tiers.  Each tier owns a singly-linked free list of fixed-size blocks plus a
- * vector of upstream chunks; chunk capacity grows geometrically up to the
- * configured @c blocks_per_chunk.  Requests larger than the biggest tier (or
- * with caller alignment above @c alignof(std::max_align_t)) bypass the pool
- * and go straight to @c ::operator @c new / @c ::operator @c delete.
+ * vector of upstream chunks; chunk capacity starts at a per-tier initial
+ * count chosen to target a roughly 64 KiB first chunk and then doubles up to
+ * the configured @c blocks_per_chunk.  Requests larger than the biggest tier
+ * (or with caller alignment above @c alignof(std::max_align_t)) bypass the
+ * pool and go straight to @c ::operator @c new / @c ::operator @c delete.
  *
  * Tier configuration:
  *
@@ -106,8 +107,9 @@ class VLINK_EXPORT MemoryPool final {
    * @brief Configuration of a single tier.
    */
   struct Tier final {
-    size_t max_size{0};          ///< Inclusive upper bound (in bytes) for this tier.
-    size_t blocks_per_chunk{0};  ///< Maximum blocks any single upstream chunk may hold.
+    size_t max_size{0};  ///< Inclusive byte upper bound for this tier.
+    size_t blocks_per_chunk{
+        0};  ///< Max blocks per upstream chunk; @c 0 marks the entry as a sentinel (stripped at construction).
   };
 
   /**
@@ -129,8 +131,8 @@ class VLINK_EXPORT MemoryPool final {
    *       continues with the rest.
    */
   struct Config final {
-    std::vector<Tier> tiers;  ///< Tier descriptors.  Empty = bypass mode.
-    bool prealloc{false};     ///< If @c true, eagerly fill each tier to its full @c blocks_per_chunk quota.
+    std::vector<Tier> tiers;  ///< Tier descriptors; empty or all-sentinel = bypass mode.
+    bool prealloc{false};     ///< If @c true, eagerly fill each managed tier to its full quota.
   };
 
   /**
@@ -141,17 +143,16 @@ class VLINK_EXPORT MemoryPool final {
    * fields are best-effort under concurrent traffic, not globally atomic.
    */
   struct TierStats final {
-    size_t max_size{0};                ///< Tier's @c max_size from the configuration.
-    size_t blocks_per_chunk{0};        ///< Tier's @c blocks_per_chunk from the configuration.
-    size_t block_size{0};              ///< Effective block size after alignment rounding.
-    uint64_t hit_count{0};             ///< Allocations dispatched to this tier (resettable).
-    uint64_t deallocate_count{0};      ///< Deallocations dispatched to this tier (resettable).
-    uint64_t in_use_blocks{0};         ///< Best-effort @c hit_count - @c deallocate_count.
-    uint64_t chunk_count{0};           ///< Currently owned chunks; @c clear decrements by released count.
-    uint64_t upstream_alloc_count{0};  ///< Lifetime successful @c ::operator @c new calls (incl.
-                                       ///< race-discarded and push_back-failed chunks); only OOM
-                                       ///< is excluded.  Never reset.
-    uint64_t upstream_alloc_bytes{0};  ///< Lifetime bytes returned by those calls.  Never reset.
+    size_t max_size{0};            ///< Tier's @c max_size from the configuration.
+    size_t blocks_per_chunk{0};    ///< Tier's @c blocks_per_chunk from the configuration.
+    size_t block_size{0};          ///< Effective block size after alignment rounding.
+    uint64_t hit_count{0};         ///< Allocations dispatched to this tier (resettable).
+    uint64_t deallocate_count{0};  ///< Deallocations dispatched to this tier (resettable).
+    uint64_t in_use_blocks{0};     ///< Best-effort @c hit_count - @c deallocate_count.
+    uint64_t chunk_count{0};       ///< Currently owned chunks; @c clear decrements by released count.
+    uint64_t upstream_alloc_count{
+        0};  ///< Lifetime chunks fully installed in this tier; OOM and push_back failures excluded.
+    uint64_t upstream_alloc_bytes{0};  ///< Lifetime bytes of those installed chunks.
   };
 
   /**
@@ -186,7 +187,8 @@ class VLINK_EXPORT MemoryPool final {
    * clamped to @c [0, 9] and a warning is logged.  Level @c 0 yields bypass
    * mode (no pool, every alloc goes through @c ::operator @c new); the
    * @p prealloc flag is ignored in bypass mode (no tiers to fill).
-   * At level @c 9 the fully-saturated resident footprint stays under 500 MiB.
+   * At level @c 9 the fully-saturated resident footprint is approximately
+   * 512 MiB.
    *
    * Equivalent to @c MemoryPool(Config{tiers_for(level), prealloc}); see the
    * @c Config-based constructor for the full validation, fallback, and
@@ -207,12 +209,15 @@ class VLINK_EXPORT MemoryPool final {
    * Empty @c config.tiers puts the pool in @b bypass mode -- every
    * @c allocate goes straight to @c ::operator @c new and every
    * @c deallocate to @c ::operator @c delete (equivalent to
-   * @c VLINK_MEMORY_LEVEL=0).  Malformed but non-empty input
-   * (non-monotonic ordering, duplicate @c max_size, zero @c max_size,
-   * zero @c blocks_per_chunk, or @c max_size below the minimum required
-   * block size) logs an error and silently falls back to the level-3
-   * default pyramid.  Validation never throws; @c std::bad_alloc may still
-   * propagate from the internal vector growths.
+   * @c VLINK_MEMORY_LEVEL=0).  Tier entries with @c blocks_per_chunk == 0
+   * are sentinels: they declare a size ceiling but are stripped at
+   * construction so allocations matching that range fall through to the
+   * upstream allocator (an all-sentinel list is therefore equivalent to
+   * bypass mode).  Malformed but non-empty input (non-monotonic ordering,
+   * duplicate @c max_size, zero @c max_size, or @c max_size below the
+   * minimum required block size) logs an error and silently falls back to
+   * the level-3 default pyramid.  Validation never throws; @c std::bad_alloc
+   * may still propagate from the internal vector growths.
    *
    * When @c config.prealloc is @c true, the constructor eagerly fills every
    * tier to its full @c blocks_per_chunk quota in a single upstream
@@ -266,8 +271,13 @@ class VLINK_EXPORT MemoryPool final {
   /**
    * @brief Returns the number of configured tiers.
    *
-   * @return Tier count.  @c 0 indicates bypass mode (level @c 0 or empty
-   *         caller-supplied tier list).  @c 1..8 for normal configurations.
+   * @return Tier count.  @c 0 indicates bypass mode (level @c 0, an empty
+   *         caller-supplied tier list, or a list whose every entry is a
+   *         @c blocks_per_chunk == 0 sentinel).  The count reflects only
+   *         live (managed) tiers: sentinel entries are stripped at
+   *         construction and do not appear here.  Built-in pyramid level
+   *         @c 1 yields @c 7 live tiers (its 12 MiB ceiling is a sentinel);
+   *         levels @c 2..9 each yield @c 8 live tiers.
    */
   [[nodiscard]] size_t get_tier_count() const noexcept;
 
@@ -316,8 +326,9 @@ class VLINK_EXPORT MemoryPool final {
    *
    * Per-call counters, lifetime upstream counters, @c next_chunk_blocks, and
    * oversized state are all preserved.  Per-tier work is
-   * @c O(N_freelist * N_chunks) under the spin lock; treat as a maintenance
-   * call, not a hot-path primitive.
+   * @c O(C @c log @c C @c + @c F @c log @c C) (chunks sorted by address once,
+   * free-list scanned twice with binary lookup) under the spin lock; treat
+   * as a maintenance call, not a hot-path primitive.
    *
    * @note
    * Safe to call concurrently with @c allocate / @c deallocate -- live blocks
@@ -344,12 +355,14 @@ class VLINK_EXPORT MemoryPool final {
    *
    * @details
    * Each level (0..9) maps to a hand-coded row of {max_size, blocks_per_chunk}
-   * pairs -- nothing is computed at runtime.  Level @c 0 returns an empty
-   * tier vector (bypass mode).  Levels @c 1..9 return up to 8 tiers spanning
-   * 128 B .. 12 MiB with monotonically growing @c blocks_per_chunk.
+   * pairs -- nothing is computed at runtime.  Level @c 0 returns an
+   * all-sentinel row (every entry has @c blocks_per_chunk == 0) which the
+   * constructor then strips into bypass mode.  Levels @c 1..9 return 8
+   * entries spanning 128 B .. 12 MiB; some entries (notably L1's 12 MiB
+   * ceiling) are sentinels and yield 7 live tiers post-construction.
    * Non-numeric or out-of-range @c VLINK_MEMORY_LEVEL values are clamped to
    * @c [0, 9] with a warning.  At level @c 9 the fully-saturated footprint
-   * stays under 500 MiB.
+   * is approximately 512 MiB.
    *
    * @c VLINK_MEMORY_PREALLOC populates the @c prealloc flag of the
    * returned config.  Only the literal value @c "1" enables preallocation;

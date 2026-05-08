@@ -187,7 +187,7 @@ ps aux | grep -E "iox-roudi|vlink-proxy"
 
 **修复**：
 - **首选**：起 `vlink-proxy -c`（内嵌 iox-roudi + 针对 VLink 载荷分级的 chunk 内存池：默认 `-l 2` Middle = 7 档 / `-l 3` High = 8 档 / `-l 1` Low = 6 档；自带远程监控能力）—— 详见 [§6.1](#61-shm-endpoint-报错启动不了)
-- 绑定网卡：`export VLINK_INTRA_BIND=eth0`；或直接在 URL 写 `shm://iface=eth0/topic`
+- 多播网卡：用 `VLINK_DDS_BIND=<ip>`（DDS 家族）或 `VLINK_ZENOH_MULTICAST_IF=<iface>`（zenoh）显式指定网卡；`VLINK_INTRA_BIND=<scheme>` 是把 `intra://` 重定向到其它后端（值是 scheme 名，如 `shm`/`dds`，不是网卡名），见 [21-environment-vars.md](21-environment-vars.md)
 - 改用 `InitType::kWithoutInit` + 显式 `init()` + 超时控制
 
 ### 3.3 `Failed to load plugin` / `Unsupported plugin module`
@@ -647,8 +647,8 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 ### 12.5 `vlink-info`
 
-- `Cannot find options for path [...]` → `vlink-options.txt` 不在默认搜索路径
-- `Cannot open options for path [...]` → 文件存在但无读权限
+- `Cannot find vlink-options.txt. Searched:` → `vlink-options.txt` 不在默认搜索路径（`cli/info/info.cc:76`），错误后随即列出所有候选路径
+- `Cannot open options for path [...]` → 文件存在但无读权限（`cli/info/info.cc:88`）
 
 ### 12.6 `vlink-proxy`（`proxy/proxy.cc`）
 
@@ -660,10 +660,10 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 ### 12.7 ProxyAPI 嵌入（`proxy/proxy_api/proxy_api.cc`）
 
-- `ProxyApi: Non-controller nodes cannot send control.` (L241)
-- `ProxyApi: Non-controller nodes cannot send data.` (L273)
-- `ProxyApi: send_data requires url, ser, and a known schema.` (L280)
-- `ProxyApi: send_data metadata does not match direct publisher.` (L302)
+- `ProxyApi: Non-controller nodes cannot send control.` (L262)
+- `ProxyApi: Non-controller nodes cannot send data.` (L294)
+- `ProxyApi: send_data requires url, ser, and a known schema.` (L301)
+- `ProxyApi: send_data metadata does not match direct publisher.` (L323)
 
 ---
 
@@ -764,7 +764,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 ### 14.2 Subscriber 热路径
 
-- `Failed to take sample, error: ...` (`shm_factory.cc:1248`) — ring buffer 损坏或空
+- `Failed to take sample, error: ...` (`shm_factory.cc:1250`) — ring buffer 损坏或空
 - `DdscFactory: Failed to take data.` — CycloneDDS 读失败（QoS 不匹配最常见）
 - `DatabaseReader: Is busy.` (`database_reader.cc:*`) — 并发读 VDB（不支持）
 
@@ -824,7 +824,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 **源码**：`discovery_reporter.cc:302, 307`。
 
-**原因**：URL 或 ser_type 超过 256 字符（Discovery 消息内 buffer 上限）。
+**原因**：URL 或 ser_type 超过 300 字符（Discovery 消息内 buffer 上限，见 `src/extension/discovery_reporter.cc:301-307`）。
 
 **修复**：缩短 URL；用 hash 替代长路径名。
 
@@ -881,13 +881,13 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 - `modules/ddst/ddst_publisher_impl.cc:60`
 - `modules/ddst/ddst_subscriber_impl.cc:105`
-- `modules/ddst/ddst_client_impl.cc:134`
+- `modules/ddst/ddst_client_impl.cc:141`
 - `modules/ddst/ddst_server_impl.cc:108`
 - `modules/ddst/ddst_setter_impl.cc:36`
 - `modules/ddst/ddst_getter_impl.cc:105`
 - `modules/dds/dds_publisher_impl.cc:60`
 - `modules/dds/dds_subscriber_impl.cc:152`
-- `modules/dds/dds_client_impl.cc:169`
+- `modules/dds/dds_client_impl.cc:182`
 - `modules/dds/dds_server_impl.cc:161`
 - `modules/dds/dds_setter_impl.cc:36`
 - `modules/dds/dds_getter_impl.cc:152`
@@ -1089,7 +1089,7 @@ static_assert(VLINK_VERSION_CHECK(2, 0, 0), "需要 VLink ≥ 2.0.0");
 - `WheelTimer: Timer is already running.` — 重复 start
 - `BagReaderProcessor: Cache size is full, waiting to consume.` — 回放太慢（源：`src/extension/bag_reader_processor.cc`）
 - `McapWriter: Compress is not supported without cache_size > 0.` — MCAP 压缩要 buffer
-- `DiscoveryReporter: Url is too long` — URL > 256 字符被截断
+- `DiscoveryReporter: Url is too long` — URL > 300 字符被截断
 
 ### 23.3 性能调试黄金三步
 
@@ -1150,6 +1150,6 @@ lsof /dev/shm/* | head              # 谁在用
 | `BagWriter force to quit.` | [§12.1](#cli-bag-errors) | writer 被强制终止 |
 | `The number of messages has reached the upper limit...` | [§8.7](#87-the-number-of-messages-has-reached-the-upper-limit) | bag 达到 max_row_count |
 | `ShmConf: Input string length is too long.` | [§6.5](#65-shmconf-input-string-length-is-too-long) | URL path > 128 |
-| `Url is too long [...]` / `Ser type is too long [...]` | [§15.4](#discovery-url-ser-type-too-long) | Discovery buffer 256 上限 |
+| `Url is too long [...]` / `Ser type is too long [...]` | [§15.4](#discovery-url-ser-type-too-long) | Discovery buffer 300 上限 |
 
 找不到？去 [§11 还没排出来？](#11-还没排出来) 走最后一步。

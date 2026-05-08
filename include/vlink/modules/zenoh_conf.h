@@ -115,7 +115,7 @@ struct VLINK_EXPORT ZenohConf final : public Conf {
    * @brief Returns @c true if all fields equal those of @p conf.
    *
    * @param conf  Configuration to compare.
-   * @return      @c true if @c address, @c event, @c domain, @c qos, and @c fragment all match.
+   * @return      @c true if all fields (including @c depth and the @c shm* options) match.
    */
   [[nodiscard]] bool operator==(const ZenohConf& conf) const noexcept;
 

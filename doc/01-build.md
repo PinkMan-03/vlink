@@ -162,7 +162,8 @@ output/
 │   ├── libvlink-intra.so # intra 模块
 │   └── ...
 └── etc/
-    └── vlink-options.txt # 编译配置摘要
+    └── vlink/
+        └── vlink-options.txt # 编译配置摘要
 ```
 
 ### 1.3.5 CMake 构建选项详解
@@ -218,7 +219,7 @@ cmake -B build -S . -LH
 
 | 选项名                 | 默认值  | 说明                                                          |
 | ---------------------- | ------- | ------------------------------------------------------------- |
-| `ENABLE_TEST`          | `ON`    | 编译单元测试（doctest 框架）；`ON` 时自动启用 `enable_testing()` |
+| `ENABLE_TEST`          | `OFF`   | 编译单元测试（doctest 框架）；`ON` 时自动启用 `enable_testing()` |
 | `ENABLE_TEST_WARN`     | `OFF`   | 在测试构建中开启额外编译警告（用于代码质量检查）              |
 | `ENABLE_TEST_SANITIZE` | `OFF`   | 启用地址检测（ASan）；仅 Linux/macOS + GCC/Clang 有效         |
 | `ENABLE_TEST_COVERAGE` | `OFF`   | 启用代码覆盖率统计（gcov/lcov）；需要 GCC 编译                |
@@ -552,11 +553,13 @@ Conan 选项名使用小写下划线命名，与 CMake 选项一一对应：
 | `enable_cli_dump`               | `ENABLE_CLI_DUMP`      | `True` / `ON`            |
 | `enable_cli_check`              | `ENABLE_CLI_CHECK`     | `True` / `ON`            |
 | —（Conan 未暴露）               | `ENABLE_CLI_BENCH`     | — / `ON`                 |
+| `enable_completions`            | `ENABLE_COMPLETIONS`   | `False` / `ON`           |
+| `install_config_dir`            | `INSTALL_CONFIG_DIR`   | `etc/vlink` / `etc/vlink`|
 | `enable_cpm_build`              | `ENABLE_CPM_BUILD`     | `False` / `OFF`          |
 | `enable_cpm_whole_build`        | `ENABLE_CPM_WHOLE_BUILD` | `False` / `OFF`        |
 | `enable_doc`                    | `ENABLE_DOC`           | `False` / `OFF`          |
 | `enable_examples`               | `ENABLE_EXAMPLES`      | `False` / `OFF`          |
-| `enable_test`                   | `ENABLE_TEST`          | `True` / `ON`            |
+| `enable_test`                   | `ENABLE_TEST`          | `False` / `OFF`          |
 | `enable_test_warn`              | `ENABLE_TEST_WARN`     | `False` / `OFF`          |
 | `enable_test_sanitize`          | `ENABLE_TEST_SANITIZE` | `False` / `OFF`          |
 | `enable_test_coverage`          | `ENABLE_TEST_COVERAGE` | `False` / `OFF`          |
@@ -1753,7 +1756,7 @@ source <build_dir>/output/vlink-setup.sh
 - `ERROR: Conflict in protobuf version: ...`：`conan graph info . --build=missing` 查看冲突，或 `--requires "protobuf/3.21.12"` 强制版本。
 - `conan cache clean`（慎用）或 `conan remove "vlink/*" --confirm` 可清除缓存。
 
-### 1.9.10 Conan cmake --preset 找不到 Preset
+### 1.9.9 Conan cmake --preset 找不到 Preset
 
 **现象**：
 
@@ -1777,13 +1780,13 @@ cmake -B conan \
 cmake --build conan
 ```
 
-### 1.9.11 交叉编译：找不到目标平台的库
+### 1.9.10 交叉编译：找不到目标平台的库
 
 **症状**：`Could not find package XXX` 或链接到了宿主机的 x86 库。
 
 **解决**：确认 `LINUX_INSTALL_PREFIX` 或 `CMAKE_FIND_ROOT_PATH` 指向目标平台的 sysroot，并检查工具链文件中 `CMAKE_FIND_ROOT_PATH_MODE_*` 是否设置为 `ONLY`。
 
-### 1.9.12 QNX 编译报错 `QNX_HOST not set`
+### 1.9.11 QNX 编译报错 `QNX_HOST not set`
 
 `qnx.toolchain.common.cmake` 强制检查 `$QNX_HOST` 和 `$QNX_TARGET`，需先 source SDP 环境脚本：
 
@@ -1791,11 +1794,11 @@ cmake --build conan
 source /opt/qnx800/qnxsdp-env.sh
 ```
 
-### 1.9.13 Android STL 链接错误
+### 1.9.12 Android STL 链接错误
 
 确认所有共享库（包括 vlink 和第三方库）都使用相同的 STL 类型（`c++_shared`）。混用 `c++_static` 会导致符号重复定义或运行时崩溃。
 
-### 1.9.14 Yocto 交叉编译时 CMake 找到了宿主工具
+### 1.9.13 Yocto 交叉编译时 CMake 找到了宿主工具
 
 Source 了 Yocto SDK 环境后，`CC`/`CXX` 已设为交叉编译器。若 CMake 仍选择宿主机编译器，检查是否有缓存覆盖了设置：
 
@@ -1804,7 +1807,7 @@ rm -rf build_yocto/CMakeCache.txt
 cmake ...  # 重新配置
 ```
 
-### 1.9.15 查看完整编译配置
+### 1.9.14 查看完整编译配置
 
 编译完成后，可在 `<build>/output/etc/vlink/vlink-options.txt` 中查看完整的编译选项摘要（路径由 `INSTALL_CONFIG_DIR` CMake 缓存变量决定，默认相对前缀为 `etc/vlink`）：
 

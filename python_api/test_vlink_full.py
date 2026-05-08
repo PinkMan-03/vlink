@@ -83,11 +83,25 @@ def test_bytes_extended():
     # bytes-like object compatibility
     assert _vlink.Bytes.from_bytes(memoryview(b"xyz")).to_bytes() == b"xyz"
 
-    crc_a = _vlink.Bytes.get_crc_32(b"hello")
-    crc_b = _vlink.Bytes.get_crc_32(bytearray(b"hello"))
-    crc_c = _vlink.Bytes.get_crc_32(memoryview(b"hello"))
-    crc_d = _vlink.Bytes.get_crc_32(_vlink.Bytes.from_bytes(b"hello"))
-    assert crc_a == crc_b == crc_c == crc_d
+    # CRC-32/ISO-HDLC: same payload, different buffer-protocol kinds must match.
+    crc32_a = _vlink.Bytes.get_crc_32(b"hello")
+    crc32_b = _vlink.Bytes.get_crc_32(bytearray(b"hello"))
+    crc32_c = _vlink.Bytes.get_crc_32(memoryview(b"hello"))
+    crc32_d = _vlink.Bytes.get_crc_32(_vlink.Bytes.from_bytes(b"hello"))
+    assert crc32_a == crc32_b == crc32_c == crc32_d
+    # Canonical reference vector for CRC-32/ISO-HDLC: "123456789" -> 0xCBF43926.
+    assert _vlink.Bytes.get_crc_32(b"123456789") == 0xCBF43926
+    assert _vlink.Bytes.get_crc_32(b"") == 0x00000000
+
+    # CRC-64/ECMA-182: same payload, different buffer-protocol kinds must match.
+    crc64_a = _vlink.Bytes.get_crc_64(b"hello")
+    crc64_b = _vlink.Bytes.get_crc_64(bytearray(b"hello"))
+    crc64_c = _vlink.Bytes.get_crc_64(memoryview(b"hello"))
+    crc64_d = _vlink.Bytes.get_crc_64(_vlink.Bytes.from_bytes(b"hello"))
+    assert crc64_a == crc64_b == crc64_c == crc64_d
+    # Canonical reference vector for CRC-64/ECMA-182: "123456789" -> 0x6C40DF5F0B497347.
+    assert _vlink.Bytes.get_crc_64(b"123456789") == 0x6C40DF5F0B497347
+    assert _vlink.Bytes.get_crc_64(b"") == 0x0000000000000000
 
     base64_a = _vlink.Bytes.encode_to_base64(b"raw-input")
     base64_b = _vlink.Bytes.encode_to_base64(_vlink.Bytes.from_bytes(b"raw-input"))

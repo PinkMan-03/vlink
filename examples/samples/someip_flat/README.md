@@ -84,7 +84,7 @@ cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径>
 cmake --build .
 
 # 运行（单进程内完成，但需要 vsomeip 守护进程）
-./example_someip_flat
+./sample_someip_flat
 ```
 
 ## 注意事项

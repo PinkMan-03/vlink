@@ -86,7 +86,7 @@ int main() {
     VLOG_I("[Server] Replied to req_id=", req_id, " ok=", ok);
   });
 
-  VLOG_I("[Server] Listening with deferred reply on dds://translate/service");
+  VLOG_I("[Server] Listening with deferred reply on zenoh://translate/service");
 
   // ---------------------------------------------------------------
   // Section 2: Client with detect_connected

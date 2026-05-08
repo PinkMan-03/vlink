@@ -1272,7 +1272,7 @@ void AnalyzerWindow::on_pushButton_interrupt_clicked() {
 
   player_->wait_for_idle();
 
-  status_ = vlink::BagReader::kStoped;
+  status_ = vlink::BagReader::kStopped;
 
   set_progress(0);
 }
@@ -1916,7 +1916,7 @@ bool AnalyzerWindow::load_bag(const QString& path) {
   });
 
   ready_to_start_ = true;
-  status_ = vlink::BagReader::kStoped;
+  status_ = vlink::BagReader::kStopped;
 
   update_status();
 
@@ -2556,7 +2556,7 @@ void AnalyzerWindow::update_status() {
     ui->pushButton_export->setEnabled(false);
 
     ui->statusBar->showMessage(tr("In progressing..."));
-  } else if (status_ == vlink::BagReader::kStoped) {
+  } else if (status_ == vlink::BagReader::kStopped) {
     ui->label_path->setEnabled(true);
     ui->label_config->setEnabled(true);
     ui->label_proto->setEnabled(true);

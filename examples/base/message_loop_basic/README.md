@@ -64,13 +64,15 @@ MessageLoop 内部维护：
 | `kLockfreeType` | MPMC lock-free queue | 高并发投递 | 高 | 低 |
 | `kPriorityType` | priority_queue | 需要优先级调度 | 中 | 中 |
 
-### 三种调度策略对比
+### 三种调度策略对比（队列已满时的入队行为）
 
-| 策略 | 队列为空时行为 | CPU 占用 | 唤醒延迟 |
-|------|--------------|---------|---------|
-| `kOptimizationStrategy` | yield CPU（默认） | 低 | ~1ms |
-| `kBlockStrategy` | 条件变量阻塞 | 最低 | ~数 us |
-| `kPopStrategy` | 忙等轮询 | 最高 | 最低 |
+策略只控制 `post_task` 在队列已满（达到 `kMaxTaskSize = 10000`）时如何处理；空闲调度恒为条件变量等待，不受策略影响。
+
+| 策略 | 队列已满时行为 | 适用场景 |
+|------|--------------|---------|
+| `kOptimizationStrategy` | 重试最多 10 次（每次 sleep 1 ms），仍满则丢弃最旧任务再入队（默认） | 平衡延迟与背压 |
+| `kPopStrategy` | 立即丢弃最旧任务并入队 | 实时场景（最新数据优先） |
+| `kBlockStrategy` | 无限重试（每次 sleep 1 ms）直到空位出现 | 不允许丢任务的场景 |
 
 ## 四种运行模式
 

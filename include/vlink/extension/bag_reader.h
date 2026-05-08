@@ -102,12 +102,12 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    *
    * | State    | Description                                   |
    * | -------- | --------------------------------------------- |
-   * | kStopped | Not playing; reset to beginning               |
+   * | kStopped  | Not playing; reset to beginning               |
    * | kPaused  | Playback suspended; can be resumed            |
    * | kPlaying | Actively delivering messages to the callback  |
    */
   enum Status : uint8_t {
-    kStoped = 0,   ///< Stopped (not playing).
+    kStopped = 0,  ///< Stopped (not playing).
     kPaused = 1,   ///< Paused mid-playback.
     kPlaying = 2,  ///< Actively playing.
   };

@@ -47,9 +47,9 @@ loop.is_in_same_thread();
 
 ### 生命周期回调
 
-- `on_begin()` 在每个工作线程启动时各调用一次
-- `on_end()` 在每个工作线程退出前各调用一次
-- `on_task_changed()` 在执行任务的工作线程上调用
+- `on_begin()` 在 dispatcher 线程上调用一次（用于构造内部 ThreadPool）
+- `on_end()` 在 dispatcher 线程上调用一次（用于关闭内部 ThreadPool 并 join 所有 worker）
+- `on_task_changed()` 由 dispatcher 线程把任务转发到 ThreadPool；基类 `MessageLoop::on_task_changed()` 随后在执行任务的 worker 线程上运行
 
 ## 代码执行流程
 
@@ -79,8 +79,8 @@ loop.wait_for_quit();                          // 等待完全退出
 ### MultiLoop 特有行为
 
 - `is_in_same_thread()` 在任意工作线程上返回 `true`
-- `on_begin()` 和 `on_end()` 在每个工作线程上各调用一次
-- `on_task_changed()` 在执行任务的工作线程上调用
+- `on_begin()` / `on_end()` 在 dispatcher 线程上各调用一次（用于初始化/关闭内部 ThreadPool）
+- 基类 `on_task_changed()` 在执行任务的工作线程上调用
 
 ### 使用建议
 
@@ -104,8 +104,8 @@ loop.wait_for_quit();                          // 等待完全退出
 ## 注意事项
 
 - 任务可能并发执行，共享状态必须通过外部同步保护（如 mutex、atomic）
-- 定时器回调在非确定性的工作线程上触发
+- 定时器回调在 dispatcher 线程上从队列取出后转发到 ThreadPool 的工作线程上执行（具体哪个 worker 不确定）
 - 析构函数等待所有工作线程完成
 - 任务执行顺序不保证与投递顺序一致
-- 所有的生命周期回调（on_begin/on_end）在每个工作线程上各调用一次
+- 生命周期回调 `on_begin` / `on_end` 在 dispatcher 线程上各调用一次（不是每个工作线程）
 - MultiLoop 支持与 MessageLoop 相同的三种队列类型和三种调度策略

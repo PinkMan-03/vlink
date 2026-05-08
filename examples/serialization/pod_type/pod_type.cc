@@ -62,9 +62,9 @@ int main() {
                 "CanFrame must be kStandardType");
 
   static_assert(vlink::Serializer::get_type_of<int>() == vlink::Serializer::kStandardType,
-                "int is kStreamType (has stringstream operators)");
+                "int must be kStandardType (trivial + standard-layout)");
   static_assert(vlink::Serializer::get_type_of<double>() == vlink::Serializer::kStandardType,
-                "double is kStreamType (has stringstream operators)");
+                "double must be kStandardType (trivial + standard-layout)");
 
   // Serialized size of a POD type is always sizeof(T)
   Point2D sample{1.0F, 2.0F};

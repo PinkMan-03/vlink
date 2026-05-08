@@ -23,6 +23,7 @@
 
 #include "./base/memory_pool.h"
 
+#include <algorithm>
 #include <atomic>
 #include <charconv>
 #include <cstddef>
@@ -31,6 +32,7 @@
 #include <new>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -47,106 +49,116 @@ static constexpr size_t kMaxTierCount = 8U;
 static constexpr size_t kMaxLevelCount = 10U;
 static constexpr size_t kInitialBlocksPerChunk = 1U;
 static constexpr size_t kInitialChunksReserve = 16U;
+static constexpr size_t kInitialChunkBytesTarget = 64U * 1024U;
 
 static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCount] = {
-    // L0
-    {},
-    // L1
+    // L0 ~ 0 MiB.
     {
-        {128U, 32U},
-        {512U, 16U},
-        {2U * 1024U, 8U},
-        {8U * 1024U, 4U},
-        {64U * 1024U, 2U},
+        {128U, 0U},
+        {512U, 0U},
+        {2U * 1024U, 0U},
+        {8U * 1024U, 0U},
+        {64U * 1024U, 0U},
+        {512U * 1024U, 0U},
+        {4U * 1024U * 1024U, 0U},
+        {12U * 1024U * 1024U, 0U},
+    },
+    // L1 ~ 5.875 MiB.
+    {
+        {128U, 1024U},
+        {512U, 512U},
+        {2U * 1024U, 128U},
+        {8U * 1024U, 32U},
+        {64U * 1024U, 8U},
         {512U * 1024U, 1U},
         {4U * 1024U * 1024U, 1U},
-        {12U * 1024U * 1024U, 1U},
+        {12U * 1024U * 1024U, 0U},
     },
-    // L2
+    // L2 ~ 19.750 MiB.
     {
-        {128U, 64U},
-        {512U, 32U},
-        {2U * 1024U, 16U},
-        {8U * 1024U, 8U},
-        {64U * 1024U, 4U},
+        {128U, 2U * 1024U},
+        {512U, 1024U},
+        {2U * 1024U, 256U},
+        {8U * 1024U, 64U},
+        {64U * 1024U, 16U},
         {512U * 1024U, 2U},
         {4U * 1024U * 1024U, 1U},
         {12U * 1024U * 1024U, 1U},
     },
-    // L3
+    // L3 ~ 35.500 MiB.  (Default).
     {
-        {128U, 128U},
-        {512U, 64U},
-        {2U * 1024U, 32U},
-        {8U * 1024U, 16U},
-        {64U * 1024U, 8U},
+        {128U, 4U * 1024U},
+        {512U, 2U * 1024U},
+        {2U * 1024U, 512U},
+        {8U * 1024U, 128U},
+        {64U * 1024U, 32U},
         {512U * 1024U, 4U},
-        {4U * 1024U * 1024U, 2U},
-        {12U * 1024U * 1024U, 1U},
-    },
-    // L4
-    {
-        {128U, 256U},
-        {512U, 128U},
-        {2U * 1024U, 64U},
-        {8U * 1024U, 32U},
-        {64U * 1024U, 16U},
-        {512U * 1024U, 8U},
         {4U * 1024U * 1024U, 4U},
         {12U * 1024U * 1024U, 1U},
     },
-    // L5
+    // L4 ~ 71.000 MiB.
     {
-        {128U, 512U},
-        {512U, 256U},
-        {2U * 1024U, 128U},
-        {8U * 1024U, 64U},
-        {64U * 1024U, 32U},
-        {512U * 1024U, 16U},
+        {128U, 8U * 1024U},
+        {512U, 4U * 1024U},
+        {2U * 1024U, 1024U},
+        {8U * 1024U, 256U},
+        {64U * 1024U, 64U},
+        {512U * 1024U, 8U},
         {4U * 1024U * 1024U, 8U},
         {12U * 1024U * 1024U, 2U},
     },
-    // L6
+    // L5 ~ 142.000 MiB.
     {
-        {128U, 512U},
-        {512U, 256U},
-        {2U * 1024U, 256U},
-        {8U * 1024U, 128U},
-        {64U * 1024U, 64U},
-        {512U * 1024U, 32U},
+        {128U, 16U * 1024U},
+        {512U, 8U * 1024U},
+        {2U * 1024U, 2U * 1024U},
+        {8U * 1024U, 512U},
+        {64U * 1024U, 128U},
+        {512U * 1024U, 16U},
         {4U * 1024U * 1024U, 16U},
         {12U * 1024U * 1024U, 4U},
     },
-    // L7
+    // L6 ~ 220.000 MiB.
     {
-        {128U, 2048U},
-        {512U, 1024U},
-        {2U * 1024U, 512U},
-        {8U * 1024U, 256U},
-        {64U * 1024U, 128U},
+        {128U, 32U * 1024U},
+        {512U, 16U * 1024U},
+        {2U * 1024U, 4U * 1024U},
+        {8U * 1024U, 1024U},
+        {64U * 1024U, 256U},
+        {512U * 1024U, 32U},
+        {4U * 1024U * 1024U, 16U},
+        {12U * 1024U * 1024U, 8U},
+    },
+    // L7 ~ 280.000 MiB.
+    {
+        {128U, 64U * 1024U},
+        {512U, 32U * 1024U},
+        {2U * 1024U, 8U * 1024U},
+        {8U * 1024U, 2U * 1024U},
+        {64U * 1024U, 512U},
         {512U * 1024U, 64U},
         {4U * 1024U * 1024U, 16U},
-        {12U * 1024U * 1024U, 6U},
+        {12U * 1024U * 1024U, 8U},
     },
-    // L8
+    // L8 ~ 400.000 MiB.
     {
-        {128U, 4096U},
-        {512U, 2048U},
-        {2U * 1024U, 1024U},
-        {8U * 1024U, 512U},
-        {64U * 1024U, 256U},
-        {512U * 1024U, 96U},
-        {4U * 1024U * 1024U, 24U},
-        {12U * 1024U * 1024U, 6U},
-    },
-    // L9
-    {
-        {128U, 8192U},
-        {512U, 4096U},
-        {2U * 1024U, 2048U},
-        {8U * 1024U, 1024U},
+        {128U, 128U * 1024U},
+        {512U, 64U * 1024U},
+        {2U * 1024U, 16U * 1024U},
+        {8U * 1024U, 4U * 1024U},
         {64U * 1024U, 512U},
-        {512U * 1024U, 128U},
+        {512U * 1024U, 64U},
+        {4U * 1024U * 1024U, 32U},
+        {12U * 1024U * 1024U, 8U},
+    },
+    // L9 ~ 512.000 MiB.
+    {
+        {128U, 256U * 1024U},
+        {512U, 128U * 1024U},
+        {2U * 1024U, 32U * 1024U},
+        {8U * 1024U, 8U * 1024U},
+        {64U * 1024U, 512U},
+        {512U * 1024U, 64U},
         {4U * 1024U * 1024U, 32U},
         {12U * 1024U * 1024U, 8U},
     },
@@ -167,6 +179,9 @@ struct alignas(64) MemoryTierState final {
   size_t block_size{0};
   size_t blocks_per_chunk{0};
   size_t next_chunk_blocks{0};
+  size_t initial_chunk_blocks{0};
+
+  bool growing{false};
 
   MemoryFreeNode* free_list_head{nullptr};
   std::vector<MemoryChunk> chunks;
@@ -184,6 +199,8 @@ struct alignas(64) MemoryAllocCounters final {
   std::atomic<uint64_t> count{0};
   std::atomic<uint64_t> bytes{0};
 };
+
+static constexpr bool is_power_of_two(size_t x) noexcept { return x != 0 && ((x & (x - 1U)) == 0U); }
 
 static constexpr size_t round_up(size_t value, size_t alignment) noexcept {
   return (value + alignment - 1U) & ~(alignment - 1U);
@@ -206,10 +223,6 @@ static constexpr bool default_tier_table_well_formed() noexcept {
         return false;
       }
 
-      if (tier.blocks_per_chunk == 0U) {
-        return false;
-      }
-
       if (t > 0U && tier.max_size <= row[t - 1U].max_size) {
         return false;
       }
@@ -221,7 +234,7 @@ static constexpr bool default_tier_table_well_formed() noexcept {
 
 static_assert(default_tier_table_well_formed(),
               "MemoryPool: kDefaultTierTable contains a malformed row "
-              "(zero field, undersized tier, or non-monotonic max_size)");
+              "(undersized tier or non-monotonic max_size)");
 
 static bool grow_tier_chunk(MemoryTierState& state) noexcept {
   size_t blocks = state.next_chunk_blocks;
@@ -250,35 +263,14 @@ static bool grow_tier_chunk(MemoryTierState& state) noexcept {
   state.upstream_alloc_bytes.fetch_add(chunk_bytes, std::memory_order_relaxed);
 
   auto* base = static_cast<std::byte*>(ptr);
-  MemoryFreeNode* local_head = nullptr;
+  auto* local_tail = ::new (base + (blocks - 1U) * block_size) MemoryFreeNode{nullptr};
+  MemoryFreeNode* local_head = local_tail;
 
-  for (size_t i = blocks; i > 0; --i) {
-    auto* node = reinterpret_cast<MemoryFreeNode*>(base + (i - 1U) * block_size);
-
-    node->next = local_head;
-    local_head = node;
+  for (size_t i = blocks - 1U; i > 0; --i) {
+    local_head = ::new (base + (i - 1U) * block_size) MemoryFreeNode{local_head};
   }
 
   state.mtx.lock();
-
-  const auto advance_next_chunk_blocks = [&]() noexcept {
-    const size_t doubled = blocks * 2U;
-    const size_t target = (doubled < blocks || doubled > state.blocks_per_chunk) ? state.blocks_per_chunk : doubled;
-
-    if (target > state.next_chunk_blocks) {
-      state.next_chunk_blocks = target;
-    }
-  };
-
-  if VUNLIKELY (state.free_list_head != nullptr) {
-    state.mtx.unlock();
-    ::operator delete(ptr, chunk_bytes, std::align_val_t{MemoryPool::kBlockAlignment});
-    state.mtx.lock();
-
-    advance_next_chunk_blocks();
-
-    return true;
-  }
 
   try {
     state.chunks.push_back(MemoryChunk{ptr, chunk_bytes});
@@ -292,24 +284,44 @@ static bool grow_tier_chunk(MemoryTierState& state) noexcept {
 
   state.chunk_count.fetch_add(1, std::memory_order_relaxed);
 
-  advance_next_chunk_blocks();
-
+  local_tail->next = state.free_list_head;
   state.free_list_head = local_head;
+
+  const size_t doubled = blocks * 2U;
+  const size_t target = (doubled < blocks || doubled > state.blocks_per_chunk) ? state.blocks_per_chunk : doubled;
+
+  if (target > state.next_chunk_blocks) {
+    state.next_chunk_blocks = target;
+  }
 
   return true;
 }
 
 static void* tier_allocate(MemoryTierState& state) noexcept {
-  SpinLockGuard lock(state.mtx);
+  state.mtx.lock();
 
   while (state.free_list_head == nullptr) {
-    if VUNLIKELY (!grow_tier_chunk(state)) {
+    if VUNLIKELY (state.growing) {
+      state.mtx.unlock();
+      std::this_thread::yield();
+      state.mtx.lock();
+
+      continue;
+    }
+
+    state.growing = true;
+    const bool ok = grow_tier_chunk(state);
+    state.growing = false;
+
+    if VUNLIKELY (!ok) {
+      state.mtx.unlock();
       return nullptr;
     }
   }
 
   MemoryFreeNode* node = state.free_list_head;
   state.free_list_head = node->next;
+  state.mtx.unlock();
 
   return node;
 }
@@ -317,17 +329,23 @@ static void* tier_allocate(MemoryTierState& state) noexcept {
 static void tier_deallocate(MemoryTierState& state, void* p) noexcept {
   SpinLockGuard lock(state.mtx);
 
-  auto* node = static_cast<MemoryFreeNode*>(p);
-  node->next = state.free_list_head;
+  auto* node = ::new (p) MemoryFreeNode{state.free_list_head};
+
   state.free_list_head = node;
 }
 
 static void prealloc_full_quota(MemoryTierState& state) noexcept {
   state.mtx.lock();
 
+  state.growing = true;
   state.next_chunk_blocks = state.blocks_per_chunk;
   const bool ok = grow_tier_chunk(state);
-  state.next_chunk_blocks = kInitialBlocksPerChunk;
+
+  if VUNLIKELY (!ok) {
+    state.next_chunk_blocks = state.initial_chunk_blocks;
+  }
+
+  state.growing = false;
 
   state.mtx.unlock();
 
@@ -364,11 +382,6 @@ static bool validate_tiers_log(const std::vector<MemoryPool::Tier>& tiers) noexc
       return false;
     }
 
-    if VUNLIKELY (tiers[i].blocks_per_chunk == 0) {
-      CLOG_E("MemoryPool: tier %zu has blocks_per_chunk == 0; falling back to default pyramid.", i);
-      return false;
-    }
-
     if VUNLIKELY (i > 0 && tiers[i].max_size <= tiers[i - 1].max_size) {
       CLOG_E("MemoryPool: tier %zu max_size is not strictly increasing; falling back to default pyramid.", i);
       return false;
@@ -400,12 +413,12 @@ static MemoryPool::Config create_memory_config(int level, bool prealloc) {
 
 struct MemoryPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) size_t tier_max_sizes[kMaxTierCount]{};
+
   MemoryTierState* tier_states[kMaxTierCount]{};
   size_t tier_count{0};
-
   std::vector<std::unique_ptr<MemoryTierState>> owned_states;
-
   MemoryAllocCounters oversized_alloc;
+
   alignas(64) std::atomic<uint64_t> oversized_dealloc_count{0};
 };
 
@@ -429,23 +442,42 @@ MemoryPool::MemoryPool(const Config& config) : impl_(std::make_unique<Impl>()) {
 
   const std::vector<Tier>& source = use_caller ? config.tiers : fallback;
 
-  impl_->tier_count = source.size();
   impl_->owned_states.reserve(source.size());
 
-  for (size_t i = 0; i < source.size(); ++i) {
-    const auto& cfg = source[i];
+  size_t live = 0;
+
+  for (const auto& cfg : source) {
+    if VUNLIKELY (cfg.blocks_per_chunk == 0U) {
+      continue;
+    }
 
     auto state = std::make_unique<MemoryTierState>();
     state->max_size = cfg.max_size;
     state->blocks_per_chunk = cfg.blocks_per_chunk;
-    state->next_chunk_blocks = kInitialBlocksPerChunk;
     state->chunks.reserve(kInitialChunksReserve);
     state->block_size = round_up(cfg.max_size, kBlockAlignment);
 
-    impl_->tier_max_sizes[i] = cfg.max_size;
-    impl_->tier_states[i] = state.get();
+    size_t initial = (state->block_size > 0U) ? (kInitialChunkBytesTarget / state->block_size) : kInitialBlocksPerChunk;
+
+    if (initial < kInitialBlocksPerChunk) {
+      initial = kInitialBlocksPerChunk;
+    }
+
+    if (initial > state->blocks_per_chunk) {
+      initial = state->blocks_per_chunk;
+    }
+
+    state->initial_chunk_blocks = initial;
+    state->next_chunk_blocks = initial;
+
+    impl_->tier_max_sizes[live] = cfg.max_size;
+    impl_->tier_states[live] = state.get();
     impl_->owned_states.emplace_back(std::move(state));
+
+    ++live;
   }
+
+  impl_->tier_count = live;
 
   if (config.prealloc) {
     for (auto& state : impl_->owned_states) {
@@ -456,6 +488,8 @@ MemoryPool::MemoryPool(const Config& config) : impl_(std::make_unique<Impl>()) {
 
 MemoryPool::~MemoryPool() {
   for (auto& state : impl_->owned_states) {
+    // SpinLockGuard lock(state->mtx);
+
     for (const MemoryChunk& chunk : state->chunks) {
       ::operator delete(chunk.ptr, chunk.bytes, std::align_val_t{kBlockAlignment});
     }
@@ -466,6 +500,11 @@ MemoryPool::~MemoryPool() {
 }
 
 void* MemoryPool::allocate(size_t bytes, size_t alignment) noexcept {
+  if VUNLIKELY (!is_power_of_two(alignment)) {
+    CLOG_E("MemoryPool::allocate: alignment %zu is not a power of two; returning nullptr.", alignment);
+    return nullptr;
+  }
+
   const size_t idx = find_tier(bytes);
 
   if VUNLIKELY (idx == kMaxTierCount || alignment > kBlockAlignment) {
@@ -494,6 +533,11 @@ void* MemoryPool::allocate(size_t bytes, size_t alignment) noexcept {
 }
 
 void MemoryPool::deallocate(void* p, size_t bytes, size_t alignment) noexcept {
+  if VUNLIKELY (!is_power_of_two(alignment)) {
+    CLOG_E("MemoryPool::deallocate: alignment %zu is not a power of two; leaking %p.", alignment, p);
+    return;
+  }
+
   if VUNLIKELY (p == nullptr) {
     return;
   }
@@ -583,7 +627,6 @@ void MemoryPool::clear() noexcept {
         heap_free_counts.reserve(chunks_hint);
         heap_to_delete.reserve(chunks_hint);
       } catch (std::exception&) {
-        // best-effort: in-lock fallback below may still succeed.
       }
     }
 
@@ -600,6 +643,7 @@ void MemoryPool::clear() noexcept {
       }
 
       size_t* free_counts = stack_free_counts;
+
       const bool spill_to_heap = (chunk_count > kStackSlots);
 
       if VUNLIKELY (spill_to_heap) {
@@ -614,21 +658,36 @@ void MemoryPool::clear() noexcept {
 
       const size_t block_size = state->block_size;
 
-      const auto in_chunk = [&](std::uintptr_t addr, size_t i) noexcept {
-        const auto chunk_start = reinterpret_cast<std::uintptr_t>(state->chunks[i].ptr);
-        const auto chunk_end = chunk_start + state->chunks[i].bytes;
+      std::sort(state->chunks.begin(), state->chunks.end(), [](const MemoryChunk& a, const MemoryChunk& b) noexcept {
+        return reinterpret_cast<std::uintptr_t>(a.ptr) < reinterpret_cast<std::uintptr_t>(b.ptr);
+      });
 
-        return addr >= chunk_start && addr < chunk_end;
+      const auto find_chunk_idx = [&](std::uintptr_t addr) noexcept -> size_t {
+        size_t lo = 0;
+        size_t hi = chunk_count;
+
+        while (lo < hi) {
+          const size_t mid = lo + (hi - lo) / 2U;
+          const auto cs = reinterpret_cast<std::uintptr_t>(state->chunks[mid].ptr);
+          const auto ce = cs + state->chunks[mid].bytes;
+
+          if (addr < cs) {
+            hi = mid;
+          } else if (addr >= ce) {
+            lo = mid + 1U;
+          } else {
+            return mid;
+          }
+        }
+
+        return SIZE_MAX;
       };
 
       for (MemoryFreeNode* node = state->free_list_head; node != nullptr; node = node->next) {
-        const auto node_addr = reinterpret_cast<std::uintptr_t>(node);
+        const size_t idx = find_chunk_idx(reinterpret_cast<std::uintptr_t>(node));
 
-        for (size_t i = 0; i < chunk_count; ++i) {
-          if (in_chunk(node_addr, i)) {
-            ++free_counts[i];
-            break;
-          }
+        if VLIKELY (idx != SIZE_MAX) {
+          ++free_counts[idx];
         }
       }
 
@@ -637,17 +696,13 @@ void MemoryPool::clear() noexcept {
 
       while (current != nullptr) {
         MemoryFreeNode* next = current->next;
-        const auto current_addr = reinterpret_cast<std::uintptr_t>(current);
+        const size_t idx = find_chunk_idx(reinterpret_cast<std::uintptr_t>(current));
 
         bool keep = false;
 
-        for (size_t i = 0; i < chunk_count; ++i) {
-          if (in_chunk(current_addr, i)) {
-            const size_t total_blocks = state->chunks[i].bytes / block_size;
-            keep = (free_counts[i] != total_blocks);
-
-            break;
-          }
+        if VLIKELY (idx != SIZE_MAX) {
+          const size_t total_blocks = state->chunks[idx].bytes / block_size;
+          keep = (free_counts[idx] != total_blocks);
         }
 
         if (keep) {

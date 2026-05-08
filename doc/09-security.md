@@ -208,11 +208,26 @@ auto xor_decrypt = [](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
 
 // Publisher 端
 vlink::SecurityPublisher<vlink::Bytes> pub("dds://secure/data");
-pub.set_security_callbacks(xor_encrypt, xor_decrypt);
+pub.set_security_callbacks(std::move(xor_encrypt), std::move(xor_decrypt));
 
-// Subscriber 端
+// Subscriber 端（注意：MoveFunction 已被 move 走，需要重新构造一份给 sub）
+auto xor_encrypt2 = [](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
+    out = vlink::Bytes::create(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        out[i] = in[i] ^ kXorKey;
+    }
+    return true;
+};
+auto xor_decrypt2 = [](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
+    out = vlink::Bytes::create(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        out[i] = in[i] ^ kXorKey;
+    }
+    return true;
+};
+
 vlink::SecuritySubscriber<vlink::Bytes> sub("dds://secure/data");
-sub.set_security_callbacks(xor_encrypt, xor_decrypt);
+sub.set_security_callbacks(std::move(xor_encrypt2), std::move(xor_decrypt2));
 sub.listen([](const vlink::Bytes& msg) {
     // msg 已经被 xor_decrypt 解密
 });
@@ -415,7 +430,7 @@ int main() {
 
     vlink::SecurityPublisher<vlink::Bytes> pub("dds://secure/channel");
     pub.set_security_callbacks(
-        make_sm4_encrypt(sm4_key),
+        make_sm4_encrypt(sm4_key),  // 函数返回 Callback 是右值，可直接传入
         make_sm4_decrypt(sm4_key)
     );
 

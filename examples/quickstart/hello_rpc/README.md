@@ -48,20 +48,17 @@
 ```cpp
 // calculator_types.h
 struct CalcRequest {
-  int a;        // Left operand
-  int b;        // Right operand
-  char op;      // '+', '-', '*', '/'
-  char pad[3];  // Padding for consistent layout
+  int a;    // Left operand
+  int b;    // Right operand
+  char op;  // '+', '-', '*', '/'
 };
 
 struct CalcResponse {
-  int result;   // Computation result
+  int result;  // Computation result
 };
 ```
 
 **重要**：POD 结构体不能使用默认成员初始化器（如 `int result{0};`）。VLink 使用 `kStandardType` 序列化器，通过 `memcpy` 直接传输 POD 数据，零序列化开销。
-
-`pad[3]` 字段是为了保证 `CalcRequest` 在不同编译器/平台上具有一致的内存布局。
 
 ## 关键代码逐步解析
 

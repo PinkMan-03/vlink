@@ -52,12 +52,17 @@ static_assert(Serializer::get_type_of<Hybrid>() == Serializer::kCustomType, "...
 
 检测顺序：`kCustomType`（位置 9）在 `kStreamType`（位置 12）之前。如果一个类型同时提供了 `Bytes` 运算符和 `stream` 运算符，VLink 会优先使用 `kCustomType`（二进制编码），而不是 `kStreamType`（文本编码）。
 
-完整检测链排序：
+完整检测链排序（数字为 `Type` 枚举值，位置为检测顺序）：
 ```
 Bytes(1) -> Dynamic(2) -> CDR(4) -> Proto(5) -> ProtoPtr(6)
 -> FlatTable(7) -> FlatPtr(8) -> FlatBuilder(9)
--> Custom(3,位置9) -> String(10) -> Chars(11) -> Stream(12) -> Standard(13) -> StandardPtr(14)
+-> Custom(3) -> String(10) -> Chars(11)
+-> Standard(13) -> StandardPtr(14) -> Stream(12)
 ```
+注意 `kStreamType` 在检测链中位列**最后**（Standard / StandardPtr 之后）。
+因此像 `int`、`double` 这类既是 POD 又支持 `stringstream` 的类型，会被识别为
+`kStandardType` 而不是 `kStreamType`。`kStreamType` 仅匹配那些**不**满足
+trivial+standard-layout 条件、但提供 `operator<<` / `operator>>` 的非指针类型。
 
 ### 文本格式的线路数据
 
@@ -96,6 +101,6 @@ cmake .. && make example_stream_type
 | 序列化类型 | `kStreamType`（编号 12） |
 | 检测条件 | 支持 `stringstream << t` 和 `stringstream >> t` |
 | 编码格式 | 文本（通过 stringstream 转换） |
-| 优先级 | 低于 kCustomType（位置 9），高于 kStandardType（位置 13） |
+| 优先级 | 检测链中位列最末，仅当类型不匹配 Custom / String / Chars / Standard / StandardPtr 时才落入此分支 |
 | 适用场景 | 已有 iostream 重载的轻量类型，调试友好 |
 | 性能 | 低于二进制编码方式（文本解析开销） |

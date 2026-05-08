@@ -632,8 +632,11 @@ if (vlink::Bytes::is_compress_data(compressed.data(), compressed.size())) {
 std::string b64 = vlink::Bytes::encode_to_base64(buf);
 auto decoded = vlink::Bytes::decode_from_base64(b64);
 
-// CRC32 校验
-uint32_t crc = vlink::Bytes::get_crc_32(buf);
+// CRC-32 校验（CRC-32/ISO-HDLC）
+uint32_t crc32 = vlink::Bytes::get_crc_32(buf);
+
+// CRC-64 校验（CRC-64/ECMA-182）
+uint64_t crc64 = vlink::Bytes::get_crc_64(buf);
 
 // 字节序反转
 auto reversed = vlink::Bytes::reverse_order(buf);

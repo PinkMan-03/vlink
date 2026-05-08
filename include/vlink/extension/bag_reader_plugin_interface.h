@@ -50,7 +50,7 @@
  *         if (output_callback_) output_callback_(ts, url, action, data);
  *     }
  * };
- * VLINK_PLUGIN_DECLARE(MyPlugin)
+ * VLINK_PLUGIN_DECLARE(MyPlugin, 1, 0)
  * @endcode
  */
 

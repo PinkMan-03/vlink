@@ -196,7 +196,9 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
  * @brief Splits a string at the first occurrence of a delimiter and returns a pair.
  *
  * @details
- * Returns @c {"", ""} if the delimiter is not found.
+ * Both halves are trimmed via @c trim_string.
+ * Returns @c {"", ""} if @p str is empty.
+ * If the delimiter is not found, returns @c {trim(str), ""}.
  *
  * @param str  Input string.
  * @param f    Delimiter character.

@@ -102,10 +102,10 @@ if (timer.has_expired()) {
 ```cpp
 int64_t left = timer.remaining_time();
 // 正数：还剩多少时间
-// 零/负数：已经过期，负值表示超时了多少
+// 0：无效（未设置）或已经过期
 ```
 
-计算方式：`deadline - 当前CPU时间戳`。无效 timer 返回 0。
+计算方式：`deadline - 当前CPU时间戳`。**已过期或未设置（is_valid==false）时均返回 0**，不会返回负值。判断过期请使用 `has_expired()`。
 
 ### reset - 重置为无效状态
 
@@ -276,7 +276,7 @@ bool has_expired() const {
 ## 注意事项
 
 - 默认构造的 timer 是无效的（`deadline=0`），`has_expired()` 返回 `false`，使用前必须调用 `set_deadline()`
-- `remaining_time()` 可能返回负值（表示已经过期了多长时间）
+- `remaining_time()` 在已过期或未设置时返回 0，不会返回负值；判定过期请使用 `has_expired()`
 - 对齐到 64 字节以防止嵌入多个 timer 时的伪共享
 - CPU 时间戳使用 `CLOCK_MONOTONIC_RAW`（Linux），不受 NTP 调整影响
 - 在跨进程场景中不可使用（不同进程的单调时钟不可比较）

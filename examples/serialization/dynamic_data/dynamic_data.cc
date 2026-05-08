@@ -39,7 +39,8 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 ///   2. Runtime type inspection via get_type()
 ///   3. Deferred deserialization -- transport the raw data first, deserialize later
 ///
-/// Internal layout: [type name (20 bytes max)] [serialized payload]
+/// Internal layout: [type name in the first kOffset = 20 bytes] [serialized payload]
+/// The literal length passed to load() (including NUL) must be < 20 (static_assert).
 ///
 /// Key API:
 ///   - load("TypeName", value)  -> serialize value with a type tag

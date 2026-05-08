@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -397,6 +398,96 @@ TEST_SUITE("base-Bytes") {
     Bytes b{0x01u, 0x02u, 0x04u};
 
     CHECK(Bytes::get_crc_32(a) != Bytes::get_crc_32(b));
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_32 - empty buffer is 0") { CHECK(Bytes::get_crc_32(Bytes{}) == 0x00000000u); }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_32 - canonical reference vectors (CRC-32/ISO-HDLC)") {
+    // Well-known CRC-32 (zip / gzip / PNG / Ethernet) test vectors.
+    auto crc_of = [](const std::string& s) {
+      return Bytes::get_crc_32(Bytes::deep_copy(reinterpret_cast<const uint8_t*>(s.data()), s.size()));
+    };
+
+    CHECK(crc_of("a") == 0xE8B7BE43u);
+    CHECK(crc_of("abc") == 0x352441C2u);
+    CHECK(crc_of("123456789") == 0xCBF43926u);
+    CHECK(crc_of("The quick brown fox jumps over the lazy dog") == 0x414FA339u);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_32 - zero-byte buffer returns 0") {
+    Bytes zeros = Bytes::create(32, 0);
+    std::memset(zeros.data(), 0, zeros.size());
+    CHECK(Bytes::get_crc_32(zeros) == 0x190A55ADu);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_64 - deterministic") {
+    Bytes a{0x01u, 0x02u, 0x03u};
+    Bytes b{0x01u, 0x02u, 0x03u};
+
+    CHECK(Bytes::get_crc_64(a) == Bytes::get_crc_64(b));
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_64 - different data yields different CRC") {
+    Bytes a{0x01u, 0x02u, 0x03u};
+    Bytes b{0x01u, 0x02u, 0x04u};
+
+    CHECK(Bytes::get_crc_64(a) != Bytes::get_crc_64(b));
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_64 - empty buffer is 0") { CHECK(Bytes::get_crc_64(Bytes{}) == 0x0000000000000000ull); }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_64 - canonical reference vector (CRC-64/ECMA-182)") {
+    // The canonical check value for CRC-64/ECMA-182 in the CRC catalog:
+    //   CRC of "123456789" = 0x6C40DF5F0B497347.
+    auto crc_of = [](const std::string& s) {
+      return Bytes::get_crc_64(Bytes::deep_copy(reinterpret_cast<const uint8_t*>(s.data()), s.size()));
+    };
+
+    CHECK(crc_of("123456789") == 0x6C40DF5F0B497347ull);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_64 - zero-byte buffer returns 0") {
+    // CRC-64/ECMA-182 has init=0, xorout=0, refin=false, refout=false; an
+    // all-zero input should leave the running CRC at 0 throughout.
+    Bytes zeros = Bytes::create(32, 0);
+    std::memset(zeros.data(), 0, zeros.size());
+    CHECK(Bytes::get_crc_64(zeros) == 0x0000000000000000ull);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("get_crc_64 - matches independent bit-by-bit reference on random data") {
+    // Independent reference: bit-by-bit CRC-64/ECMA-182 (no lookup table).
+    auto crc_64_reference = [](const uint8_t* data, size_t size) {
+      constexpr uint64_t kPoly = 0x42F0E1EBA9EA3693ull;
+      uint64_t crc = 0;
+      for (size_t i = 0; i < size; ++i) {
+        crc ^= static_cast<uint64_t>(data[i]) << 56u;
+        for (int b = 0; b < 8; ++b) {
+          crc = (crc & 0x8000000000000000ull) ? ((crc << 1) ^ kPoly) : (crc << 1);
+        }
+      }
+      return crc;
+    };
+
+    std::mt19937_64 rng(0xC0FFEEull);
+    std::uniform_int_distribution<int> byte_dist(0, 255);
+    std::uniform_int_distribution<size_t> size_dist(0, 1024);
+    for (int t = 0; t < 256; ++t) {
+      size_t len = size_dist(rng);
+      Bytes buf = Bytes::create(len, 0);
+      for (size_t i = 0; i < len; ++i) {
+        buf.data()[i] = static_cast<uint8_t>(byte_dist(rng));
+      }
+      CHECK(Bytes::get_crc_64(buf) == crc_64_reference(buf.data(), buf.size()));
+    }
   }
 
   // -------------------------------------------------------------------------

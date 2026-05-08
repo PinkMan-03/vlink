@@ -348,7 +348,7 @@ int vlink_get(const vlink_getter_handle_t handle, uint8_t* data, size_t* size);
 ```
 
 - `*size` 入参为缓冲区容量，出参为实际数据大小
-- 若 `*size` 不足，返回 `VLINK_RET_MEMORY_ERROR`，`*size` 不被修改
+- 若 `*size` 不足，返回 `VLINK_RET_MEMORY_ERROR`，并把所需大小写回 `*size`，`data` 缓冲区不被修改，调用方可据此扩容后重试
 - 若尚无值可用，返回 `VLINK_RET_TRANSFER_ERROR`
 
 ---

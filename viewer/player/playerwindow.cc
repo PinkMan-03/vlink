@@ -160,7 +160,7 @@ PlayerWindow::PlayerWindow(const QString& bag_path, QWidget* parent) : QMainWind
 
     play_timer_->stop();
 
-    if (!has_played_ && player_->get_status() == vlink::BagReader::kStoped) {
+    if (!has_played_ && player_->get_status() == vlink::BagReader::kStopped) {
       ui->toolButton_play->setEnabled(false);
       ui->toolButton_pause->setEnabled(false);
       ui->toolButton_close->setEnabled(false);
@@ -325,7 +325,7 @@ PlayerWindow::PlayerWindow(const QString& bag_path, QWidget* parent) : QMainWind
       return;
     }
 
-    if (!player_ || status_ == vlink::BagReader::kStoped || status_ < 0) {
+    if (!player_ || status_ == vlink::BagReader::kStopped || status_ < 0) {
       ui->lineEdit_proxy->setEnabled(true);
     }
   });
@@ -350,7 +350,7 @@ PlayerWindow::PlayerWindow(const QString& bag_path, QWidget* parent) : QMainWind
             ui->toolButton_proxy->setChecked(false);
             update_proxy_icon();
 
-            if (!player_ || status_ == vlink::BagReader::kStoped || status_ < 0) {
+            if (!player_ || status_ == vlink::BagReader::kStopped || status_ < 0) {
               ui->lineEdit_proxy->setEnabled(true);
             }
           });
@@ -946,7 +946,7 @@ void PlayerWindow::on_toolButton_play_clicked() {
     return;
   }
 
-  if (status_ != vlink::BagReader::kStoped || status_ < 0) {
+  if (status_ != vlink::BagReader::kStopped || status_ < 0) {
     player_->stop();
     main_timer_->stop();
     play_timer_->stop();
@@ -1675,7 +1675,7 @@ void PlayerWindow::update_status() {
     }
 
     wait_widget_->stop_wait();
-  } else if (status_ == vlink::BagReader::kStoped) {
+  } else if (status_ == vlink::BagReader::kStopped) {
     ui->toolButton_info->setEnabled(true);
     ui->toolButton_viewer->setEnabled(true);
     ui->toolButton_analyzer->setEnabled(true);
@@ -1894,7 +1894,7 @@ bool PlayerWindow::load_bag(const QString& path) {
 
   player_->register_begin_handler([this]() {
     pause_to_next_flag_ = false;
-    status_ = vlink::BagReader::kStoped;
+    status_ = vlink::BagReader::kStopped;
     QMetaObject::invokeMethod(this, "update_status", Qt::QueuedConnection);
   });
 
@@ -1967,10 +1967,10 @@ bool PlayerWindow::load_bag(const QString& path) {
 
     QMetaObject::invokeMethod(main_timer_, "stop", Qt::QueuedConnection);
 
-    status_ = vlink::BagReader::kStoped;
+    status_ = vlink::BagReader::kStopped;
   });
 
-  status_ = vlink::BagReader::kStoped;
+  status_ = vlink::BagReader::kStopped;
 
   player_->async_run();
 
