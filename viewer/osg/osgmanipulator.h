@@ -41,13 +41,14 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <functional>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 class OsgManipulator : public osgGA::OrbitManipulator {
  public:
-  using FlyCompletedCallback = vlink::MoveFunction<void(int)>;
+  using FlyCompletedCallback = std::function<void(int)>;
 
   OsgManipulator();
 
