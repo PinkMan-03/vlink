@@ -38,6 +38,11 @@ elseif(TARGET flatbuffers::flatbuffers)
   set(flatbuffers_libs flatbuffers::flatbuffers)
 endif()
 
+if(NOT protobuf_libs OR NOT flatbuffers_libs)
+  message(WARNING "Can not find proto and flatbuffers, skipped.")
+  return()
+endif()
+
 file(GLOB FOXGLOVE_FBS_FILES ${PROJECT_SOURCE_DIR}/fbs/*.fbs)
 vlink_generate_cpp(
   TARGET

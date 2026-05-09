@@ -38,6 +38,11 @@ elseif(TARGET flatbuffers::flatbuffers)
   set(flatbuffers_libs flatbuffers::flatbuffers)
 endif()
 
+if(NOT protobuf_libs OR NOT flatbuffers_libs)
+  message(WARNING "Can not find proto and flatbuffers, skipped.")
+  return()
+endif()
+
 if(NOT TARGET rerun_sdk)
   if(DEFINED ENV{RERUN_SDK_DIR})
     set(RERUN_SDK_DIR "$ENV{RERUN_SDK_DIR}")

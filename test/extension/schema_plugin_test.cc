@@ -170,7 +170,8 @@ TEST_SUITE("extension-SchemaPluginManager - with protobuf support") {
 
 #endif  // VLINK_TEST_SUPPORT_PROTOBUF
 
-#if !defined(_WIN32) && !defined(__CYGWIN__) && defined(VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF)
+#if !defined(_WIN32) && !defined(__CYGWIN__) && defined(VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF) && \
+    defined(VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS)
 TEST_SUITE("extension-SchemaPluginBase - linked schema registration") {
   TEST_CASE("registers protobuf schemas from linked generated descriptors") {
     TestSchemaPlugin plugin;
