@@ -311,7 +311,7 @@ pub.set_security_callbacks(enc_cb, dec_cb);     // 自定义算法
 ```
 
 - 两者互斥：设了 `set_security_key` 后不能再设回调，反之亦然
-- 默认 key = `"vlink"`；默认 IV 取自 `"thun.lu@zohomail.cn"` 的前 16 字节（仅当缺省时）
+- 内置默认 key/IV 均为 16 字节，仅用于演示；生产环境务必通过 `set_security_key()` 注入业务密钥
 - 不支持：`intra://`（无序列化流程）、`dds://` + CDR（CDR 直通 DDS，绕过 VLink 管道）
 - CMake：`ENABLE_SECURITY=ON`（默认 ON），依赖 OpenSSL
 

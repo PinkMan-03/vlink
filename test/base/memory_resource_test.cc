@@ -29,7 +29,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory_resource>
 #include <vector>
 
 #include "./base/bytes.h"
@@ -39,6 +38,8 @@
 #include "../common_test.h"
 
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+
+#include <memory_resource>
 
 // ---------------------------------------------------------------------------
 // TEST SUITE: construction

@@ -97,7 +97,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="note1" value="set_security_key(key)   -   default key: &quot;vlink&quot;    IV: &quot;thun.lu@zohomail.cn&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#bdbdbd;strokeWidth=1.2;fontSize=12;fontStyle=2;fontColor=#546e7a;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="note1" value="set_security_key(key)   -   built-in demo key/IV (16 bytes each); replace in production" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#bdbdbd;strokeWidth=1.2;fontSize=12;fontStyle=2;fontColor=#546e7a;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="140" y="580" width="900" height="26" as="geometry" />
         </mxCell>
 

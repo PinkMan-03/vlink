@@ -127,29 +127,29 @@ using DumpCallback = vlink::Function<void(int64_t timestamp, const std::string& 
 
 [[maybe_unused]] bool quiet_flag{false};
 [[maybe_unused]] bool detail_flag{false};
-[[maybe_unused]] [[maybe_unused]] vlink::ConditionVariable quit_cv;
+[[maybe_unused]] vlink::ConditionVariable quit_cv;
 [[maybe_unused]] std::mutex print_mtx;
 [[maybe_unused]] std::thread print_thread;
-[[maybe_unused]] [[maybe_unused]] bool dump_for_bag{false};
+[[maybe_unused]] bool dump_for_bag{false};
 [[maybe_unused]] DumpType dump_type{DumpType::kConsole};
-[[maybe_unused]] [[maybe_unused]] int64_t begin_time{0};
+[[maybe_unused]] int64_t begin_time{0};
 [[maybe_unused]] int64_t end_time{0};
 [[maybe_unused]] int max_count{0};
 [[maybe_unused]] double max_hz{0};
-[[maybe_unused]] [[maybe_unused]] std::shared_ptr<vlink::DiscoveryViewer> discovery_viewer;
+[[maybe_unused]] std::shared_ptr<vlink::DiscoveryViewer> discovery_viewer;
 [[maybe_unused]] std::shared_ptr<vlink::BagReader> bag_player;
 [[maybe_unused]] vlink::BagReader::Config bag_config;
 [[maybe_unused]] std::unordered_map<std::string, std::shared_ptr<RawSub>> sub_urls;
 [[maybe_unused]] std::mutex sub_urls_mtx;
 [[maybe_unused]] DumpCallback dump_callback;
 [[maybe_unused]] vlink::ElapsedTimer main_elapsed_timer{vlink::ElapsedTimer::kMicro};
-[[maybe_unused]] [[maybe_unused]] std::vector<DumpRecord> cache_buffer;
+[[maybe_unused]] std::vector<DumpRecord> cache_buffer;
 [[maybe_unused]] std::mutex cache_mtx;
-[[maybe_unused]] [[maybe_unused]] std::vector<std::string> field_specs;
+[[maybe_unused]] std::vector<std::string> field_specs;
 [[maybe_unused]] std::vector<std::vector<std::string>> field_paths;
-[[maybe_unused]] [[maybe_unused]] std::atomic<int64_t> output_count{0};
+[[maybe_unused]] std::atomic<int64_t> output_count{0};
 [[maybe_unused]] std::atomic<int64_t> last_output_us{0};
-[[maybe_unused]] [[maybe_unused]] std::vector<std::string> expr_strings;
+[[maybe_unused]] std::vector<std::string> expr_strings;
 [[maybe_unused]] std::vector<std::string> expr_var_names;
 
 #ifdef VLINK_HAS_EXPRTK

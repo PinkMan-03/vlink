@@ -147,6 +147,17 @@ class Setter : public Node<SetterImpl, SecT> {
   explicit Setter(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
+   * @brief Destroys the setter, calling @c deinit() to drain any in-flight transport
+   *        callbacks before this @c Setter's locked state is destroyed.
+   *
+   * @details
+   * Mirrors the lifecycle contract used by @c Client and @c Getter: without this
+   * destructor the @c sync() callback installed in @c init() can fire on the
+   * transport thread after @c mtx_ / @c value_ have already been destroyed.
+   */
+  ~Setter() override;
+
+  /**
    * @brief Initializes the setter transport and registers the late-getter sync callback.
    *
    * @details

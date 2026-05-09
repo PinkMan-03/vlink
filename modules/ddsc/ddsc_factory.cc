@@ -112,11 +112,14 @@ std::shared_ptr<ddsc::DomainParticipant> DdscFactory::create_participant(uint8_t
 
     part = std::shared_ptr<ddsc::DomainParticipant>(
         ptr, [id, domain = conf.domain, has_domain_ref](ddsc::DomainParticipant* part) {
-          static auto& factory = DdscFactory::get();
+          auto& factory = DdscFactory::get();
 
           {
             std::lock_guard lock(factory.mtx_);
-            factory.part_map_.erase(id);
+
+            if (auto iter = factory.part_map_.find(id); iter != factory.part_map_.end() && iter->second.expired()) {
+              factory.part_map_.erase(iter);
+            }
 
             delete part;
 

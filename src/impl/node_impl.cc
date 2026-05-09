@@ -236,13 +236,21 @@ void NodeImpl::set_discovery_enabled(bool enable) { is_discovery_enabled = enabl
 bool NodeImpl::get_discovery_enabled() const { return is_discovery_enabled; }
 
 void NodeImpl::set_record_path(const std::string& path) {
-  std::lock_guard lock(helper_->mtx);
+  std::shared_ptr<BagWriter> new_recorder;
 
-  if (path.empty()) {
-    helper_->data_recorder.reset();
-  } else {
-    helper_->data_recorder = BagWriter::filter_get(path);
+  if (!path.empty()) {
+    new_recorder = BagWriter::filter_get(path);
   }
+
+  std::shared_ptr<BagWriter> old_recorder;
+
+  {
+    std::lock_guard lock(helper_->mtx);
+    old_recorder = std::move(helper_->data_recorder);
+    helper_->data_recorder = std::move(new_recorder);
+  }
+
+  old_recorder.reset();
 }
 
 void NodeImpl::set_ssl_options(const SslOptions& options) {

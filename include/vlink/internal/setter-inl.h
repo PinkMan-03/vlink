@@ -87,6 +87,11 @@ inline Setter<ValueT, SecT>::Setter(const std::string& url_str, InitType type)
     : Setter<ValueT, SecT>(Url(url_str), type) {}
 
 template <typename ValueT, SecurityType SecT>
+inline Setter<ValueT, SecT>::~Setter() {
+  this->deinit();
+}
+
+template <typename ValueT, SecurityType SecT>
 inline bool Setter<ValueT, SecT>::init() {
   if VUNLIKELY ((!Node<SetterImpl, SecT>::init())) {
     return false;

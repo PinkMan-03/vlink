@@ -243,7 +243,8 @@ TEST_SUITE("base-Function - copy and move semantics") {
   // -------------------------------------------------------------------------
   TEST_CASE("self-copy-assignment is a no-op") {
     Function<int()> cb = []() { return 99; };
-    cb = cb;  // NOLINT(clang-diagnostic-self-assign-overloaded)
+    Function<int()>& ref = cb;  // alias to dodge -Wself-assign-overloaded while keeping the test intent
+    cb = ref;
     CHECK(cb() == 99);
   }
 
@@ -1282,12 +1283,14 @@ TEST_SUITE("base-Function - custom SBO size") {
     Function<int(), 256> cb = HeavyFunctor{42};
     CHECK(cb() == 42 + 'A');
 
+#if defined(__cpp_rtti)
     // Inline storage: no MemoryPool tier should have grown its in_use count
     // because of this functor (other tests may share the global pool, so we
     // only check the call site itself produces the right answer).  A direct
     // structural check: storage embeds the functor.
     CHECK(reinterpret_cast<const char*>(&cb) <= reinterpret_cast<const char*>(cb.target<HeavyFunctor>()));
     CHECK(reinterpret_cast<const char*>(cb.target<HeavyFunctor>()) < reinterpret_cast<const char*>(&cb) + sizeof(cb));
+#endif
 
     // Silence unused-variable warnings when stats inspection is uninteresting.
     (void)over_before;
@@ -1309,12 +1312,14 @@ TEST_SUITE("base-Function - custom SBO size") {
     Function<int(), 256> cb = GiantFunctor{7};
     CHECK(cb(/*intentionally invoked*/) == 7 + 'Z');
 
+#if defined(__cpp_rtti)
     // Heap path: target is *outside* the wrapper's storage.
     const auto* target_ptr = reinterpret_cast<const char*>(cb.target<GiantFunctor>());
     const auto* self_begin = reinterpret_cast<const char*>(&cb);
     const auto* self_end = self_begin + sizeof(cb);
     const bool target_outside_self = (target_ptr < self_begin) || (target_ptr >= self_end);
     CHECK(target_outside_self);
+#endif
   }
 
   // -------------------------------------------------------------------------
@@ -1415,12 +1420,14 @@ TEST_SUITE("base-MoveFunction - custom SBO size") {
       MoveFunction<int(), 256> cb = HeavyMoveOnly{99, destructions};
       CHECK(cb() == 99 + 'M');
 
+#if defined(__cpp_rtti)
       // Verify inline by checking target is inside the wrapper itself.
       const auto* target_ptr = reinterpret_cast<const char*>(cb.target<HeavyMoveOnly>());
       const auto* self_begin = reinterpret_cast<const char*>(&cb);
       const auto* self_end = self_begin + sizeof(cb);
       CHECK(target_ptr >= self_begin);
       CHECK(target_ptr < self_end);
+#endif
     }
     // Wrapper destruction must invoke the functor's destructor exactly once.
     CHECK(destructions->load() >= 1);
@@ -1498,11 +1505,13 @@ TEST_SUITE("base-LargeFunction / LargeMoveFunction aliases") {
     vlink::LargeFunction<int()> cb = HeavyFunctor{1};
     CHECK(cb() == 1 + 'L');
 
+#if defined(__cpp_rtti)
     // Inline check: target lives inside the wrapper.
     const auto* target_ptr = reinterpret_cast<const char*>(cb.target<HeavyFunctor>());
     const auto* self_begin = reinterpret_cast<const char*>(&cb);
     CHECK(target_ptr >= self_begin);
     CHECK(target_ptr < self_begin + sizeof(cb));
+#endif
   }
 
   // -------------------------------------------------------------------------

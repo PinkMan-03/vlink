@@ -103,7 +103,7 @@ bool SomeipClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::
                                       return object_->call(conf_.method, req_data, std::move(ack_function), &seq);
                                     });
 
-    if (!ret && seq != 0) {
+    if VUNLIKELY (!ret && seq != 0) {
       object_->remove_response_callback(seq);
     }
 

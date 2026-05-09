@@ -330,7 +330,7 @@ alignof(std::max_align_t)` 时走 oversized 直通路径，直接 `::operator ne
 | ----- | --------- | ------------ | ------------------------------------------------------------------------------------- |
 | `0`   | Bypass    | 0 MiB        | 完全不走池：每次 `allocate` 直接 `::operator new`、每次 `deallocate` 直接 `::operator delete`。oversized 计数照常增长，所有 tier 计数为 0 |
 | `1`   | Tiny      | 4 MiB        | 端侧/嵌入式：仅小/中 tier 生效，`4MB / 8MB / 16MB` 大 tier 全部 sentinel              |
-| `2`   | Small     | ~12 MiB      | 受限设备：启用 `4MB` tier，仍保留 `8MB / 16MB` sentinel（精确值 11.75 MiB）            |
+| `2`   | Small     | 12 MiB       | 受限设备：启用 `4MB` tier，仍保留 `8MB / 16MB` sentinel（精确值 12 MiB）              |
 | `3`   | Balanced  | 32 MiB       | **默认**：启用 `8MB` tier，`16MB` ceiling 仍 sentinel（4K 帧走 oversized 直通）        |
 | `4`   | Large     | 70 MiB       | 服务器/高吞吐：首次激活 `16MB` ceiling                                                |
 | `5`   | XLarge    | 124 MiB      | 大批量小消息                                                                          |

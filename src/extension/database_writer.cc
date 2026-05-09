@@ -709,9 +709,12 @@ void DatabaseWriter::open(const std::string& path) {
     finalize_stmt(impl_->update_url_meta_stmt);
     finalize_stmt(impl_->update_urls_stmt);
 
+    const char* err_ptr = ::sqlite3_errmsg(impl_->db);
+    std::string close_err = err_ptr ? err_ptr : std::string{};
     int close_ret = ::sqlite3_close_v2(impl_->db);
+
     if VUNLIKELY (close_ret != SQLITE_OK) {
-      CLOG_W("Failed to close database: %s.", ::sqlite3_errmsg(impl_->db));
+      CLOG_W("Failed to close database (rc=%d): %s.", close_ret, close_err.c_str());
     }
 
     impl_->db = nullptr;
@@ -1216,10 +1219,12 @@ void DatabaseWriter::close() {
   }
 
   if VLIKELY (impl_->db) {
+    const char* err_ptr = ::sqlite3_errmsg(impl_->db);
+    std::string close_err = err_ptr ? err_ptr : std::string{};
     int ret = ::sqlite3_close_v2(impl_->db);
 
     if VUNLIKELY (ret != SQLITE_OK) {
-      CLOG_W("Failed to close database: %s.", ::sqlite3_errmsg(impl_->db));
+      CLOG_W("Failed to close database (rc=%d): %s.", ret, close_err.c_str());
     }
 
     impl_->db = nullptr;

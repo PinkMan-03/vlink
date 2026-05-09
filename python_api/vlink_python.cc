@@ -1836,7 +1836,6 @@ NB_MODULE(_vlink_nanobind, m) {
       .value("RealTime", vlink::Qos::Additions::kPriorityRealTime)
       .value("High", vlink::Qos::Additions::kPriorityHigh)
       .value("Normal", vlink::Qos::Additions::kPriorityNormal)
-      .value("Normal_", vlink::Qos::Additions::kPriorityNormal)
       .value("Low", vlink::Qos::Additions::kPriorityLow)
       .value("Background", vlink::Qos::Additions::kPriorityBackground);
   qos_add.def(nb::init<>())

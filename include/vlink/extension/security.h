@@ -28,10 +28,9 @@
  * @details
  * @c Security provides message-level encryption and decryption for VLink transports.
  * When compiled with @c VLINK_ENABLE_SECURITY (requires OpenSSL), it uses
- * AES-128-CBC via the EVP API with PKCS7 padding.  The default AES key is
- * @c "vlink" and the IV is @c "thun.lu@zohomail.cn"; both are normalised to
- * exactly 16 bytes by the implementation (zero-padded if shorter, truncated
- * if longer) before being passed to OpenSSL.
+ * AES-128-CBC via the EVP API with PKCS7 padding.  Keys and IVs passed to
+ * @c set_key() are forwarded to OpenSSL as-is; callers are responsible for
+ * supplying exactly 16 bytes.
  *
  * Custom crypto implementations can replace the built-in algorithm by registering
  * a pair of @c Callback functions via @c set_callbacks().  When custom callbacks
@@ -112,11 +111,14 @@ class VLINK_EXPORT Security final {
    * @brief Sets the AES encryption key.
    *
    * @details
-   * The supplied key is normalised to exactly 16 bytes for AES-128: shorter
-   * keys are zero-padded, longer keys are truncated.  If @p key is empty, the
-   * default built-in key @c "vlink" is restored (also zero-padded to 16 bytes).
+   * The supplied key is forwarded to OpenSSL as-is.  Callers must provide
+   * exactly 16 bytes for AES-128; passing fewer bytes lets OpenSSL read past
+   * the end of the buffer (undefined behaviour), and passing more bytes
+   * silently ignores the trailing bytes.  If @p key is empty, the default
+   * built-in 16-byte key is restored.
    *
-   * @param key  Key string.  Pass an empty string to restore the default.
+   * @param key  Key string (must be exactly 16 bytes for AES-128).  Pass an
+   *             empty string to restore the default.
    */
   void set_key(const std::string& key);
 

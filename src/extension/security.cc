@@ -37,8 +37,8 @@
 
 namespace vlink {
 
-[[maybe_unused]] static constexpr const char* kDefaultAesKey = "vlink";
-[[maybe_unused]] static constexpr const char* kAesIV = "thun.lu@zohomail.cn";
+[[maybe_unused]] static constexpr const char* kDefaultAesKey = "vlink_default_16";
+[[maybe_unused]] static constexpr const char* kAesIV = "thun.lu@zohomail";
 
 // Security::Impl
 struct Security::Impl final {

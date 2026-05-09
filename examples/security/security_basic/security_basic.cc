@@ -23,7 +23,7 @@
 
 // Security Basic Example
 // Demonstrates SecurityPublisher/SecuritySubscriber with:
-//   1. Default encryption key ("vlink")
+//   1. Default encryption key (built-in 16-byte demo key)
 //   2. Custom encryption key via set_security_key()
 //   3. Key mismatch failure scenario
 // Uses AES-128-CBC encryption. Default IV: "thun.lu@zohomail.cn"
@@ -44,17 +44,18 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 
 int main() {
   // ======== Section 1: Default Key Encryption ========
-  // SecurityPublisher and SecuritySubscriber use AES-128-CBC encryption.
-  // The default key is "vlink" and the default IV is "thun.lu@zohomail.cn".
-  // Both sides must use the same key to communicate.
+  // SecurityPublisher and SecuritySubscriber use AES-128-CBC encryption with
+  // a built-in 16-byte demo key/IV.  Both sides must use the same key to
+  // communicate.  The demo key/IV are not safe for production -- always
+  // inject your own via set_security_key().
   {
-    std::cout << "\n[1] Default Key Encryption (key=\"vlink\")" << std::endl;
+    std::cout << "\n[1] Default Key Encryption (built-in demo key)" << std::endl;
 
     std::atomic<int> received{0};
 
     // SecuritySubscriber automatically decrypts incoming messages
     vlink::SecuritySubscriber<std::string> sub("dds://security_basic/default_key");
-    // No set_security_key() call => uses default key "vlink"
+    // No set_security_key() call => uses built-in demo key
     sub.listen([&received](const std::string& msg) {
       received++;
       VLOG_I("[Default Key] Received:", msg);
@@ -62,13 +63,13 @@ int main() {
 
     // SecurityPublisher automatically encrypts outgoing messages
     vlink::SecurityPublisher<std::string> pub("dds://security_basic/default_key");
-    // No set_security_key() call => uses default key "vlink"
+    // No set_security_key() call => uses built-in demo key
 
     pub.wait_for_subscribers();
 
     pub.publish("Hello with default encryption!");
     pub.publish("AES-128-CBC encrypted message");
-    pub.publish("Default key is 'vlink'");
+    pub.publish("Encrypted with the built-in demo key");
 
     std::this_thread::sleep_for(100ms);
     VLOG_I("Default key: received", received.load(), "messages");

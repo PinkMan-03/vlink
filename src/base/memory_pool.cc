@@ -92,7 +92,7 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {8U * 1024U * 1024U, 0U},
         {16U * 1024U * 1024U, 0U},
     },
-    // L2 ~ 11.75 MiB.
+    // L2 ~ 12 MiB.
     {
         {128U, 8U * 1024U},
         {256U, 4U * 1024U},

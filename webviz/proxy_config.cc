@@ -336,9 +336,9 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
     }
 
     if (!program.is_used("--proxy_iox_monitoring") && server.contains("iox_monitoring")) {
-      if VLIKELY (server["iox_monitoring"].is_boolean()) {
+      if (server["iox_monitoring"].is_boolean()) {
         config.server.iox_monitoring = server["iox_monitoring"].get<bool>();
-      } else if VLIKELY (server["iox_monitoring"].is_string()) {
+      } else if (server["iox_monitoring"].is_string()) {
         if VUNLIKELY (!parse_iox_monitoring(server["iox_monitoring"].get<std::string>(),
                                             config.server.iox_monitoring)) {
           error = "proxy.server.iox_monitoring must be true/false or 'on'/'off'";

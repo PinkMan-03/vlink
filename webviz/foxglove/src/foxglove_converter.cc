@@ -764,7 +764,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
       qz = cr * cp * sy - sr * sp * cy;
     }
 
-    if (qx == 0.0 && qy == 0.0 && qz == 0.0 && qw == 0.0) {
+    if VUNLIKELY (qx == 0.0 && qy == 0.0 && qz == 0.0 && qw == 0.0) {
       qw = 1.0;
     }
 
@@ -3143,7 +3143,7 @@ FoxgloveMessage FoxgloveConverter::convert_pose_in_frame(const FoxgloveMapping& 
     double qz = get_field("z");
     double qw = get_field("w");
 
-    if (qx == 0.0 && qy == 0.0 && qz == 0.0 && qw == 0.0) {
+    if VUNLIKELY (qx == 0.0 && qy == 0.0 && qz == 0.0 && qw == 0.0) {
       qw = 1.0;
     }
 

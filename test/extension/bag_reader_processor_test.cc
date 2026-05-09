@@ -27,11 +27,10 @@
 
 #include <doctest/doctest.h>
 
-#include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 //
@@ -114,35 +113,20 @@ TEST_SUITE("extension-BagReaderProcessor - ordering") {
     std::mutex mtx;
 
     BagReaderProcessor::Config cfg;
-    // 1 ms cache window: kept tiny so the test does not slow down CI runs.
-    cfg.min_cache_time = 1;
-    BagReaderProcessor processor(cfg);
+    cfg.min_cache_time = 100;
+    auto processor = std::make_unique<BagReaderProcessor>(cfg);
 
-    processor.register_output_callback([&](int64_t ts, const std::string& url, ActionType action, const Bytes& data) {
+    processor->register_output_callback([&](int64_t ts, const std::string& url, ActionType action, const Bytes& data) {
       std::lock_guard lock(mtx);
       received.push_back(Captured{ts, url, action, data.size()});
     });
 
     Bytes payload = Bytes::create(4U);
-    // Timestamps are in microseconds and pushed in ascending order, as the
-    // bag reader pipeline guarantees. on_check() compares back-front against
-    // min_cache_time, so back - front (5000us) >= 1ms triggers the flush.
-    processor.push(1, "intra://a", ActionType::kPublish, payload);
-    processor.push(2000, "intra://b", ActionType::kPublish, payload);
-    processor.push(5001, "intra://c", ActionType::kPublish, payload);
+    processor->push(1, "intra://a", ActionType::kPublish, payload);
+    processor->push(2000, "intra://b", ActionType::kPublish, payload);
+    processor->push(5001, "intra://c", ActionType::kPublish, payload);
 
-    // Poll for the worker thread to deliver all three messages.  The timeout
-    // is generous enough to absorb scheduler jitter on a busy CI host.
-    auto deadline = std::chrono::steady_clock::now() + 2s;
-    while (std::chrono::steady_clock::now() < deadline) {
-      {
-        std::lock_guard lock(mtx);
-        if (received.size() == 3U) {
-          break;
-        }
-      }
-      std::this_thread::sleep_for(5ms);
-    }
+    processor.reset();
 
     std::lock_guard lock(mtx);
     REQUIRE(received.size() == 3U);

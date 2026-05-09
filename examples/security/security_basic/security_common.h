@@ -29,18 +29,17 @@
 
 namespace security_common {
 
-// Default security parameters used by VLink.
-// WARNING: These defaults are for development only -- NOT safe for production.
-constexpr const char* kDefaultKey = "vlink";
-constexpr const char* kDefaultIv = "thun.lu@zohomail.cn";
+// Algorithm name only -- the actual default key/IV are not exposed by the
+// example to avoid leaking the demonstration values.  Use `set_security_key()`
+// to inject your own key in any real deployment.
 constexpr const char* kDefaultAlgorithm = "AES-128-CBC";
 
 // Print a summary of VLink security defaults.
 inline void print_security_defaults() {
   std::cout << "  VLink Security Defaults:" << std::endl;
   std::cout << "    Algorithm: " << kDefaultAlgorithm << std::endl;
-  std::cout << "    Key:       \"" << kDefaultKey << "\" (NOT safe for production)" << std::endl;
-  std::cout << "    IV:        \"" << kDefaultIv << "\" (first 16 bytes)" << std::endl;
+  std::cout << "    Key:       <built-in 16-byte default; replace via set_security_key()>" << std::endl;
+  std::cout << "    IV:        <built-in 16-byte default; replace by paired key rotation>" << std::endl;
 }
 
 // Print a summary of supported transports for security.
