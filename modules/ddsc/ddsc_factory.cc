@@ -112,8 +112,6 @@ std::shared_ptr<ddsc::DomainParticipant> DdscFactory::create_participant(uint8_t
 
     part = std::shared_ptr<ddsc::DomainParticipant>(
         ptr, [id, domain = conf.domain, has_domain_ref](ddsc::DomainParticipant* part) {
-          auto& factory = DdscFactory::get();
-
           {
             std::lock_guard lock(factory.mtx_);
 
