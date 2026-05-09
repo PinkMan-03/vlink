@@ -1115,7 +1115,9 @@ inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::MoveFunction(FunctorT&& f) {
       return;
     }
   } else if constexpr (kIsPointerLike<DecayFunctorT>) {
-    if VUNLIKELY (static_cast<DecayFunctorT>(f) == nullptr) {
+    auto p = static_cast<DecayFunctorT>(f);
+
+    if VUNLIKELY (p == nullptr) {
       return;
     }
   }

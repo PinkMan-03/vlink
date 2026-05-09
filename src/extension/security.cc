@@ -23,7 +23,6 @@
 
 #include "./extension/security.h"
 
-#include <cstring>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -40,30 +39,6 @@ namespace vlink {
 
 [[maybe_unused]] static constexpr const char* kDefaultAesKey = "vlink";
 [[maybe_unused]] static constexpr const char* kAesIV = "thun.lu@zohomail.cn";
-[[maybe_unused]] static constexpr size_t kAesKeyBytes = 16;
-[[maybe_unused]] static constexpr size_t kAesIVBytes = 16;
-
-[[maybe_unused]] static Bytes normalize_aes_key(const std::string& key) {
-  uint8_t buf[kAesKeyBytes]{};
-  const size_t n = key.size() < kAesKeyBytes ? key.size() : kAesKeyBytes;
-
-  if (n > 0) {
-    std::memcpy(buf, key.data(), n);
-  }
-
-  return Bytes::deep_copy(buf, kAesKeyBytes);
-}
-
-[[maybe_unused]] static Bytes normalize_aes_iv(const std::string& iv) {
-  uint8_t buf[kAesIVBytes]{};
-  const size_t n = iv.size() < kAesIVBytes ? iv.size() : kAesIVBytes;
-
-  if (n > 0) {
-    std::memcpy(buf, iv.data(), n);
-  }
-
-  return Bytes::deep_copy(buf, kAesIVBytes);
-}
 
 // Security::Impl
 struct Security::Impl final {
@@ -84,14 +59,10 @@ struct Security::Impl final {
 
 Security::Security() : impl_(std::make_unique<Impl>()) {
 #ifdef VLINK_ENABLE_SECURITY
-  impl_->key = normalize_aes_key(kDefaultAesKey);
-  impl_->iv = normalize_aes_iv(kAesIV);
+  impl_->key = Bytes::from_string(kDefaultAesKey);
+  impl_->iv = Bytes::from_string(kAesIV);
 
   impl_->evp_ctx = EVP_CIPHER_CTX_new();
-  if VUNLIKELY (impl_->evp_ctx == nullptr) {
-    VLOG_F("Security: EVP_CIPHER_CTX_new() returned null; encrypt/decrypt will fail.");
-    return;
-  }
   impl_->cipher = EVP_aes_128_cbc();
 
   EVP_CIPHER_CTX_set_padding(impl_->evp_ctx, 1);
@@ -117,9 +88,9 @@ Security::~Security() {
 void Security::set_key(const std::string& key) {
   std::lock_guard lock(impl_->mtx);
   if (key.empty()) {
-    impl_->key = normalize_aes_key(kDefaultAesKey);
+    impl_->key = Bytes::from_string(kDefaultAesKey);
   } else {
-    impl_->key = normalize_aes_key(key);
+    impl_->key = Bytes::from_string(key);
   }
 }
 

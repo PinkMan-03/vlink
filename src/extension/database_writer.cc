@@ -1339,9 +1339,9 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
 
   // split
   if (impl_->is_split_mode && !impl_->url_map.empty()) {
-    if (impl_->config.split_by_time > 0 && (microseconds_timestamp - impl_->config.begin_time * 1000) >
-                                               static_cast<int64_t>(impl_->config.split_by_time) * 1000 *
-                                                   static_cast<int64_t>(impl_->split_file_list.size())) {
+    if (impl_->config.split_by_time > 0 &&
+        (microseconds_timestamp - impl_->config.begin_time * 1000) >
+            impl_->config.split_by_time * 1000 * static_cast<int64_t>(impl_->split_file_list.size())) {
       do_split = true;
     } else if (impl_->config.split_by_time <= 0 && impl_->config.split_by_size > 0 &&
                (impl_->current_size + static_cast<int64_t>(data.size())) > impl_->config.split_by_size) {
