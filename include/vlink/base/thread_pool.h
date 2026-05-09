@@ -83,10 +83,10 @@ class VLINK_EXPORT ThreadPool {
    * @brief Callback type for tasks submitted to the pool.
    *
    * @details
-   * Move-only (`vlink::MoveFunction<void()>`); see @c MessageLoop::Callback for
+   * Move-only (`MoveFunction<void()>`); see @c MessageLoop::Callback for
    * the rationale.
    */
-  using Callback = vlink::MoveFunction<void()>;
+  using Callback = MoveFunction<void()>;
 
   /**
    * @brief Queue implementation type.

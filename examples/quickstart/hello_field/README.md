@@ -106,7 +106,7 @@ if (getter.wait_for_value(std::chrono::milliseconds(3000))) {
     // 有值了
 }
 ```
-阻塞调用线程，直到收到第一个值或超时。内部使用 `vlink::condition_variable` 实现。这是最适合初始化阶段的��取方式。
+阻塞调用线程，直到收到第一个值或超时。内部使用 `vlink::ConditionVariable` 实现。这是最适合初始化阶段的��取方式。
 
 **模式二：轮询 (get)**
 ```cpp

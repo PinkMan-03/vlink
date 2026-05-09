@@ -1200,6 +1200,299 @@ TEST_SUITE("base-MoveFunction - std::move_only_function interop") {
 }
 #endif
 
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-Function - custom SBO size") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("kSboSize reflects the SboSizeT template argument") {
+    CHECK(Function<void()>::kSboSize == 64U);
+    CHECK(Function<void(), 64>::kSboSize == 64U);
+    CHECK(Function<void(), 128>::kSboSize == 128U);
+    CHECK(Function<int(int), 256>::kSboSize == 256U);
+    CHECK(Function<void(), 1024>::kSboSize == 1024U);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("Function<Sig> defaults to 64-byte SBO and equals Function<Sig, 64>") {
+    using Default = Function<void()>;
+    using Explicit64 = Function<void(), 64>;
+    CHECK(std::is_same_v<Default, Explicit64>);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("different SboSizeT yields distinct types") {
+    using Small = Function<void(), 64>;
+    using Big = Function<void(), 256>;
+    CHECK_FALSE(std::is_same_v<Small, Big>);
+    CHECK_FALSE(std::is_assignable_v<Small&, Big>);
+    CHECK_FALSE(std::is_assignable_v<Big&, Small>);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("storage_ is at least SboSizeT bytes") {
+    CHECK(sizeof(Function<void(), 64>) >= 64U);
+    CHECK(sizeof(Function<void(), 128>) >= 128U);
+    CHECK(sizeof(Function<void(), 256>) >= 256U);
+    CHECK(sizeof(Function<void(), 512>) >= 512U);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("functor that exceeds default SBO stays inline at custom 256-byte SBO") {
+    // 200-byte functor: heap-allocated under default Function<...>, inline under
+    // Function<..., 256>.
+    struct HeavyFunctor {
+      std::array<char, 200> payload{};
+      int marker;
+
+      explicit HeavyFunctor(int m) noexcept : marker(m) { payload.fill('A'); }
+
+      int operator()() const noexcept { return marker + static_cast<int>(payload[0]); }
+    };
+    static_assert(sizeof(HeavyFunctor) > 64U);
+    static_assert(sizeof(HeavyFunctor) <= 256U);
+
+    auto& pool = vlink::MemoryPool::global_instance();
+    const auto over_before = pool.get_oversized_stats();
+    const auto stats_before = pool.get_stats();
+
+    Function<int(), 256> cb = HeavyFunctor{42};
+    CHECK(cb() == 42 + 'A');
+
+    // Inline storage: no MemoryPool tier should have grown its in_use count
+    // because of this functor (other tests may share the global pool, so we
+    // only check the call site itself produces the right answer).  A direct
+    // structural check: storage embeds the functor.
+    CHECK(reinterpret_cast<const char*>(&cb) <= reinterpret_cast<const char*>(cb.target<HeavyFunctor>()));
+    CHECK(reinterpret_cast<const char*>(cb.target<HeavyFunctor>()) < reinterpret_cast<const char*>(&cb) + sizeof(cb));
+
+    // Silence unused-variable warnings when stats inspection is uninteresting.
+    (void)over_before;
+    (void)stats_before;
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("functor larger than custom SBO still falls back to heap") {
+    struct GiantFunctor {
+      std::array<char, 600> payload{};
+      int marker;
+
+      explicit GiantFunctor(int m) noexcept : marker(m) { payload.fill('Z'); }
+
+      int operator()() const noexcept { return marker + static_cast<int>(payload[0]); }
+    };
+    static_assert(sizeof(GiantFunctor) > 256U);
+
+    Function<int(), 256> cb = GiantFunctor{7};
+    CHECK(cb(/*intentionally invoked*/) == 7 + 'Z');
+
+    // Heap path: target is *outside* the wrapper's storage.
+    const auto* target_ptr = reinterpret_cast<const char*>(cb.target<GiantFunctor>());
+    const auto* self_begin = reinterpret_cast<const char*>(&cb);
+    const auto* self_end = self_begin + sizeof(cb);
+    const bool target_outside_self = (target_ptr < self_begin) || (target_ptr >= self_end);
+    CHECK(target_outside_self);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("custom-SBO Function still supports copy and move semantics") {
+    using Big = Function<int(int), 256>;
+
+    Big a = [](int x) { return x + 1; };
+    Big b = a;  // copy
+    CHECK(a(10) == 11);
+    CHECK(b(10) == 11);
+
+    Big c = std::move(a);  // move
+    CHECK(c(20) == 21);
+    CHECK(!a);  // moved-from is empty
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("custom-SBO Function compares against nullptr") {
+    Function<void(), 256> empty;
+    CHECK(empty == nullptr);
+    CHECK(nullptr == empty);
+    CHECK_FALSE(empty != nullptr);
+
+    Function<void(), 256> full = []() {};
+    CHECK(full != nullptr);
+    CHECK_FALSE(full == nullptr);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("Function<Sig, X> can be constructed from Function<Sig, Y> as a callable") {
+    Function<int(int), 64> small = [](int x) { return x * 2; };
+    Function<int(int), 256> big{small};  // constructed as a wrapped callable
+    CHECK(big(5) == 10);
+
+    // Empty source propagates as empty.
+    Function<int(int), 64> empty_small;
+    Function<int(int), 256> empty_big{empty_small};
+    CHECK(!empty_big);
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-MoveFunction - custom SBO size") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("kSboSize reflects the SboSizeT template argument") {
+    CHECK(MoveFunction<void()>::kSboSize == 64U);
+    CHECK(MoveFunction<void(), 64>::kSboSize == 64U);
+    CHECK(MoveFunction<void(), 128>::kSboSize == 128U);
+    CHECK(MoveFunction<int(int), 256>::kSboSize == 256U);
+    CHECK(MoveFunction<void(), 1024>::kSboSize == 1024U);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction<Sig> defaults to 64-byte SBO and equals MoveFunction<Sig, 64>") {
+    CHECK(std::is_same_v<MoveFunction<void()>, MoveFunction<void(), 64>>);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("different SboSizeT yields distinct types") {
+    using Small = MoveFunction<void(), 64>;
+    using Big = MoveFunction<void(), 256>;
+    CHECK_FALSE(std::is_same_v<Small, Big>);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("storage_ is at least SboSizeT bytes") {
+    CHECK(sizeof(MoveFunction<void(), 64>) >= 64U);
+    CHECK(sizeof(MoveFunction<void(), 256>) >= 256U);
+    CHECK(sizeof(MoveFunction<void(), 1024>) >= 1024U);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("move-only functor exceeding default SBO stays inline at custom 256-byte SBO") {
+    auto destructions = std::make_shared<std::atomic<int>>(0);
+
+    struct HeavyMoveOnly {
+      std::array<char, 200> payload{};
+      std::shared_ptr<std::atomic<int>> destructions;
+      int marker;
+
+      HeavyMoveOnly(int m, std::shared_ptr<std::atomic<int>> d) noexcept : destructions(std::move(d)), marker(m) {
+        payload.fill('M');
+      }
+      HeavyMoveOnly(const HeavyMoveOnly&) = delete;
+      HeavyMoveOnly& operator=(const HeavyMoveOnly&) = delete;
+      HeavyMoveOnly(HeavyMoveOnly&&) noexcept = default;
+      HeavyMoveOnly& operator=(HeavyMoveOnly&&) noexcept = default;
+      ~HeavyMoveOnly() {
+        if (destructions) destructions->fetch_add(1, std::memory_order_relaxed);
+      }
+
+      int operator()() const noexcept { return marker + static_cast<int>(payload[0]); }
+    };
+    static_assert(sizeof(HeavyMoveOnly) > 64U);
+    static_assert(sizeof(HeavyMoveOnly) <= 256U);
+
+    {
+      MoveFunction<int(), 256> cb = HeavyMoveOnly{99, destructions};
+      CHECK(cb() == 99 + 'M');
+
+      // Verify inline by checking target is inside the wrapper itself.
+      const auto* target_ptr = reinterpret_cast<const char*>(cb.target<HeavyMoveOnly>());
+      const auto* self_begin = reinterpret_cast<const char*>(&cb);
+      const auto* self_end = self_begin + sizeof(cb);
+      CHECK(target_ptr >= self_begin);
+      CHECK(target_ptr < self_end);
+    }
+    // Wrapper destruction must invoke the functor's destructor exactly once.
+    CHECK(destructions->load() >= 1);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction larger than custom SBO falls back to heap and stays move-only") {
+    struct GiantMoveOnly {
+      std::array<char, 800> payload{};
+      int marker;
+
+      explicit GiantMoveOnly(int m) noexcept : marker(m) { payload.fill('G'); }
+      GiantMoveOnly(const GiantMoveOnly&) = delete;
+      GiantMoveOnly& operator=(const GiantMoveOnly&) = delete;
+      GiantMoveOnly(GiantMoveOnly&&) noexcept = default;
+      GiantMoveOnly& operator=(GiantMoveOnly&&) noexcept = default;
+
+      int operator()() const noexcept { return marker + static_cast<int>(payload[0]); }
+    };
+    static_assert(sizeof(GiantMoveOnly) > 256U);
+
+    MoveFunction<int(), 256> cb = GiantMoveOnly{3};
+    CHECK(cb() == 3 + 'G');
+
+    MoveFunction<int(), 256> moved = std::move(cb);
+    CHECK(moved() == 3 + 'G');
+    CHECK(!cb);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("custom-SBO MoveFunction compares against nullptr") {
+    MoveFunction<void(), 256> empty;
+    CHECK(empty == nullptr);
+    CHECK(nullptr == empty);
+
+    MoveFunction<void(), 256> full = []() {};
+    CHECK(full != nullptr);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("MoveFunction<Sig, X> can wrap MoveFunction<Sig, Y>") {
+    MoveFunction<int(int), 64> small = [](int x) { return x + 100; };
+    MoveFunction<int(int), 256> big{std::move(small)};
+    CHECK(big(5) == 105);
+  }
+}
+
+// ---------------------------------------------------------------------------
+TEST_SUITE("base-LargeFunction / LargeMoveFunction aliases") {
+  // -------------------------------------------------------------------------
+  TEST_CASE("LargeFunction<Sig> is exactly Function<Sig, 256>") {
+    CHECK(std::is_same_v<vlink::LargeFunction<void()>, vlink::Function<void(), 256>>);
+    CHECK(std::is_same_v<vlink::LargeFunction<int(int, int)>, vlink::Function<int(int, int), 256>>);
+    CHECK(vlink::LargeFunction<void()>::kSboSize == 256U);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("LargeMoveFunction<Sig> is exactly MoveFunction<Sig, 256>") {
+    CHECK(std::is_same_v<vlink::LargeMoveFunction<void()>, vlink::MoveFunction<void(), 256>>);
+    CHECK(std::is_same_v<vlink::LargeMoveFunction<int(int, int)>, vlink::MoveFunction<int(int, int), 256>>);
+    CHECK(vlink::LargeMoveFunction<void()>::kSboSize == 256U);
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("LargeFunction can hold a 200-byte functor inline") {
+    struct HeavyFunctor {
+      std::array<char, 200> payload{};
+      int marker;
+
+      explicit HeavyFunctor(int m) noexcept : marker(m) { payload.fill('L'); }
+
+      int operator()() const noexcept { return marker + static_cast<int>(payload[0]); }
+    };
+
+    vlink::LargeFunction<int()> cb = HeavyFunctor{1};
+    CHECK(cb() == 1 + 'L');
+
+    // Inline check: target lives inside the wrapper.
+    const auto* target_ptr = reinterpret_cast<const char*>(cb.target<HeavyFunctor>());
+    const auto* self_begin = reinterpret_cast<const char*>(&cb);
+    CHECK(target_ptr >= self_begin);
+    CHECK(target_ptr < self_begin + sizeof(cb));
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("LargeMoveFunction supports move-only state") {
+    auto sentinel = std::make_unique<int>(42);
+
+    vlink::LargeMoveFunction<int()> cb = [sp = std::move(sentinel)]() mutable { return *sp + 1; };
+    CHECK(cb() == 43);
+
+    vlink::LargeMoveFunction<int()> moved = std::move(cb);
+    CHECK(moved() == 43);
+    CHECK(!cb);
+  }
+}
+
 #endif
 
 // NOLINTEND

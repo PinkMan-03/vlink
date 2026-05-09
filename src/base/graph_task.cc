@@ -403,7 +403,7 @@ std::string GraphTask::export_to_dot() const {
 
   std::unordered_set<const GraphTask*> visited;
 
-  vlink::Function<void(const GraphTask*)> traverse = [&](const GraphTask* task) {
+  Function<void(const GraphTask*)> traverse = [&](const GraphTask* task) {
     if (visited.count(task)) {
       return;
     }

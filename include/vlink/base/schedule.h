@@ -99,17 +99,17 @@ struct VLINK_EXPORT Schedule final {
   /**
    * @brief Callback type for void tasks and lifecycle hooks (schedule/execution timeout, else).
    */
-  using Callback = vlink::MoveFunction<void()>;
+  using Callback = MoveFunction<void()>;
 
   /**
    * @brief Callback type for tasks that return a boolean result.
    */
-  using RetCallback = vlink::MoveFunction<bool()>;
+  using RetCallback = MoveFunction<bool()>;
 
   /**
    * @brief Callback type invoked when an exception is caught inside the task.
    */
-  using CatchCallback = vlink::MoveFunction<void(std::exception&)>;
+  using CatchCallback = MoveFunction<void(std::exception&)>;
 
   /**
    * @struct Config

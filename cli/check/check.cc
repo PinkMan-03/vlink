@@ -143,7 +143,7 @@ struct DiagContext final {
   std::atomic<int> failed_count{0};
   std::atomic<DiagType> last_type{DiagType::kFailed};
   std::mutex mtx;
-  vlink::condition_variable cv;
+  vlink::ConditionVariable cv;
   std::string detail;
   std::string filter;
 };

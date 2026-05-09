@@ -91,7 +91,7 @@ class VLINK_EXPORT Security final {
    * @p out and return @c true on success.  When a custom callback is installed via
    * @c set_callbacks(), the built-in AES implementation is bypassed.
    */
-  using Callback = vlink::MoveFunction<bool(const Bytes& in, Bytes& out)>;
+  using Callback = MoveFunction<bool(const Bytes& in, Bytes& out)>;
 
   /**
    * @brief Constructs a @c Security object with the default AES key and IV.

@@ -127,7 +127,7 @@ using DumpCallback = vlink::Function<void(int64_t timestamp, const std::string& 
 
 [[maybe_unused]] bool quiet_flag{false};
 [[maybe_unused]] bool detail_flag{false};
-[[maybe_unused]] [[maybe_unused]] vlink::condition_variable quit_cv;
+[[maybe_unused]] [[maybe_unused]] vlink::ConditionVariable quit_cv;
 [[maybe_unused]] std::mutex print_mtx;
 [[maybe_unused]] std::thread print_thread;
 [[maybe_unused]] [[maybe_unused]] bool dump_for_bag{false};

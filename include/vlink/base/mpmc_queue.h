@@ -286,8 +286,8 @@ class MpmcQueue {
   struct AlignedAllocator {
     using value_type = ChunkT;
 
-    ChunkT* allocate(std::size_t n) {
-      if (n > std::numeric_limits<std::size_t>::max() / sizeof(ChunkT)) {
+    ChunkT* allocate(size_t n) {
+      if (n > std::numeric_limits<size_t>::max() / sizeof(ChunkT)) {
         throw std::bad_array_new_length();
       }
 
@@ -308,7 +308,7 @@ class MpmcQueue {
       return p;
     }
 
-    void deallocate(ChunkT* p, std::size_t) {
+    void deallocate(ChunkT* p, size_t) {
 #ifdef _WIN32
       _aligned_free(p);
 #else
@@ -358,8 +358,8 @@ class MpmcQueue {
 
   alignas(kInterferenceSize) std::atomic<size_t> tail_{0U};
 
-  vlink::condition_variable cv_not_empty_;
-  vlink::condition_variable cv_not_full_;
+  ConditionVariable cv_not_empty_;
+  ConditionVariable cv_not_full_;
 
 #if defined(__has_cpp_attribute) && __has_cpp_attribute(no_unique_address)
   AlignedAllocator<Chunk> allocator_ [[no_unique_address]];

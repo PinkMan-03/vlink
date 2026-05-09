@@ -82,7 +82,7 @@ struct DatabaseReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.
   std::string path;
   BagReader::Info info;
   std::mutex mtx;
-  vlink::condition_variable cv;
+  ConditionVariable cv;
 
   BagReader::Config config;
   std::mutex config_mtx;

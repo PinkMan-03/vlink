@@ -82,7 +82,7 @@ struct WheelTimer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
 
   std::mutex mtx;
   std::mutex lifecycle_mtx;
-  vlink::condition_variable cv;
+  ConditionVariable cv;
 
   std::unordered_map<WheelTimer::Key, std::pair<uint32_t, std::list<Handler>::iterator>> timer_index;
 

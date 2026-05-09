@@ -183,7 +183,7 @@ std::shared_ptr<dds::Topic> DdsFactory::create_topic(uint8_t type, const DdsConf
     topic = conf.topic;
   }
 
-  vlink::Function<void*()> type_support_callback = DdsConf::find_type_support(topic);
+  Function<void*()> type_support_callback = DdsConf::find_type_support(topic);
 
   if (is_cdr_type) {
     if VUNLIKELY (!type_support_callback) {

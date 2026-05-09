@@ -54,7 +54,7 @@ struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
 
   std::mutex mtx;
   std::recursive_mutex recursive_mtx;
-  vlink::condition_variable cv;
+  ConditionVariable cv;
 
   std::shared_ptr<std::atomic_bool> alive_flag{std::make_shared<std::atomic_bool>(true)};
 };

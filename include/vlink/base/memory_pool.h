@@ -188,7 +188,7 @@ class VLINK_EXPORT MemoryPool final {
    * mode (no pool, every alloc goes through @c ::operator @c new); the
    * @p prealloc flag is ignored in bypass mode (no tiers to fill).
    * At level @c 9 the fully-saturated resident footprint is approximately
-   * 512 MiB.
+   * 480 MiB.
    *
    * Equivalent to @c MemoryPool(Config{tiers_for(level), prealloc}); see the
    * @c Config-based constructor for the full validation, fallback, and
@@ -276,8 +276,10 @@ class VLINK_EXPORT MemoryPool final {
    *         @c blocks_per_chunk == 0 sentinel).  The count reflects only
    *         live (managed) tiers: sentinel entries are stripped at
    *         construction and do not appear here.  Built-in pyramid level
-   *         @c 1 yields @c 7 live tiers (its 12 MiB ceiling is a sentinel);
-   *         levels @c 2..9 each yield @c 8 live tiers.
+   *         @c 1 yields @c 13 live tiers (4 MiB / 8 MiB / 16 MiB ceilings
+   *         are sentinels); level @c 2 yields @c 14 (8 MiB / 16 MiB
+   *         sentinels); level @c 3 yields @c 15 (16 MiB sentinel); levels
+   *         @c 4..9 yield all @c 16 live tiers.
    */
   [[nodiscard]] size_t get_tier_count() const noexcept;
 
@@ -357,12 +359,14 @@ class VLINK_EXPORT MemoryPool final {
    * Each level (0..9) maps to a hand-coded row of {max_size, blocks_per_chunk}
    * pairs -- nothing is computed at runtime.  Level @c 0 returns an
    * all-sentinel row (every entry has @c blocks_per_chunk == 0) which the
-   * constructor then strips into bypass mode.  Levels @c 1..9 return 8
-   * entries spanning 128 B .. 12 MiB; some entries (notably L1's 12 MiB
-   * ceiling) are sentinels and yield 7 live tiers post-construction.
+   * constructor then strips into bypass mode.  Levels @c 1..9 return 16
+   * entries spanning 128 B .. 16 MiB; the 4 MiB / 8 MiB / 16 MiB ceilings
+   * are sentinels at low levels (4 MiB activates at L2, 8 MiB at L3,
+   * 16 MiB at L4) and yield 13..16 live tiers post-construction depending
+   * on level.
    * Non-numeric or out-of-range @c VLINK_MEMORY_LEVEL values are clamped to
    * @c [0, 9] with a warning.  At level @c 9 the fully-saturated footprint
-   * is approximately 512 MiB.
+   * is approximately 480 MiB.
    *
    * @c VLINK_MEMORY_PREALLOC populates the @c prealloc flag of the
    * returned config.  Only the literal value @c "1" enables preallocation;

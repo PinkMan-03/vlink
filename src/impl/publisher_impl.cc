@@ -35,7 +35,7 @@ namespace vlink {
 struct PublisherImplHelper final {
   bool has_subscribers{false};
   NodeImpl::ConnectCallback connected_callback;
-  vlink::condition_variable connected_cv;
+  ConditionVariable connected_cv;
   std::mutex mtx;
   std::recursive_mutex callback_mtx;
 };

@@ -170,7 +170,7 @@ int run_sub() {
 
   std::mutex mtx;
   std::unique_lock lock(mtx);
-  vlink::condition_variable cv;
+  vlink::ConditionVariable cv;
 
   Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });
 

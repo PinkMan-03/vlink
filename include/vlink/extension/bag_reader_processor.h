@@ -82,7 +82,7 @@ class VLINK_EXPORT BagReaderProcessor {
    * Called from an internal processing thread after the cache window has elapsed.
    */
   using OutputCallback =
-      vlink::MoveFunction<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
+      MoveFunction<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
 
   /**
    * @struct Config

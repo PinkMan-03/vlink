@@ -149,14 +149,14 @@ sub.listen([](const Helloworld::Message& msg) {
 });
 
 // 用 condition_variable 阻塞主线程
-vlink::condition_variable cv;
+vlink::ConditionVariable cv;
 Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });
 cv.wait(lock);
 ```
 
 关键点：
 - `listen()` 注册的回调在 VLink 内部线程中异步触发，无需事件循环
-- 使用 `vlink::condition_variable`（而非 `std::condition_variable`）是为了跨平台兼容性
+- 使用 `vlink::ConditionVariable`（而非 `std::condition_variable`）是为了跨平台兼容性
 - 主线程通过 `cv.wait()` 阻塞，直到收到 Ctrl+C 信号
 
 ---

@@ -102,7 +102,7 @@ class BagReaderPluginInterface {
    * Stored in @c output_callback_.  Call this inside @c push() to forward a message.
    */
   using OutputCallback =
-      vlink::MoveFunction<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
+      MoveFunction<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
 
   /**
    * @brief Returns version and build metadata for this plugin.

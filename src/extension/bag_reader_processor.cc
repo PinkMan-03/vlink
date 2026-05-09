@@ -60,8 +60,8 @@ struct BagReaderProcessor::Impl final {
   int64_t current_size{0};
 
   std::mutex mtx;
-  vlink::condition_variable cv;
-  vlink::condition_variable wait_cv;
+  ConditionVariable cv;
+  ConditionVariable wait_cv;
   std::thread thread;
 };
 

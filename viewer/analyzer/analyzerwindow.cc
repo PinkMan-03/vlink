@@ -180,8 +180,8 @@ QString global_fbs_dir_config = QStandardPaths::writableLocation(QStandardPaths:
 
   int array_pos = -1;
 
-  std::size_t pos_left = condition.find('[');
-  std::size_t pos_right = condition.find(']');
+  size_t pos_left = condition.find('[');
+  size_t pos_right = condition.find(']');
 
   if (pos_left != std::string::npos && pos_right != std::string::npos) {
     if (pos_right < condition.size() && pos_right > pos_left) {
@@ -1688,8 +1688,8 @@ bool AnalyzerWindow::load_bag(const QString& path) {
               } else if (expression == "size") {
                 pvalue.emplace(point_cloud.size());
               } else if (vlink::Helpers::has_startwith(expression, "data")) {
-                std::size_t pos_left = expression.find('[');
-                std::size_t pos_right = expression.find(']');
+                size_t pos_left = expression.find('[');
+                size_t pos_right = expression.find(']');
                 int array_pos = -1;
 
                 if (pos_left != std::string::npos && pos_right != std::string::npos) {

@@ -142,7 +142,7 @@ class VLINK_EXPORT Process {
   /**
    * @brief Callback type invoked when an error occurs.
    */
-  using ErrorCallback = vlink::Function<void(Error)>;
+  using ErrorCallback = Function<void(Error)>;
 
   /**
    * @brief Callback type invoked when the process exits.
@@ -150,17 +150,17 @@ class VLINK_EXPORT Process {
    * @details
    * First argument is the exit code; second is @c kNormalExitStatus or @c kCrashExitStatus.
    */
-  using FinishedCallback = vlink::Function<void(int, ExitStatus)>;
+  using FinishedCallback = Function<void(int, ExitStatus)>;
 
   /**
    * @brief Callback type invoked when new data is available on a pipe.
    */
-  using ReadyReadCallback = vlink::Function<void()>;
+  using ReadyReadCallback = Function<void()>;
 
   /**
    * @brief Callback type invoked when the process state changes.
    */
-  using StateChangedCallback = vlink::Function<void(State)>;
+  using StateChangedCallback = Function<void(State)>;
 
   /**
    * @brief Sentinel wait timeout meaning wait indefinitely.

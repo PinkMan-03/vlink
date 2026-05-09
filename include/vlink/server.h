@@ -114,10 +114,10 @@ class Server : public Node<ServerImpl, SecT> {
   using SharedPtr = std::shared_ptr<Server<ReqT, RespT, SecT>>;
 
   /** @brief Fire-and-forget callback -- no response (@c RespT must be @c EmptyType). */
-  using ReqCallback = vlink::Function<void(const ReqT&)>;
+  using ReqCallback = Function<void(const ReqT&)>;
 
   /** @brief Synchronous callback -- response filled in-place inside the callback. */
-  using ReqRespCallback = vlink::Function<void(const ReqT&, RespT&)>;
+  using ReqRespCallback = Function<void(const ReqT&, RespT&)>;
 
   /**
    * @brief Asynchronous callback -- response sent later via @c reply(req_id, resp).
@@ -126,7 +126,7 @@ class Server : public Node<ServerImpl, SecT> {
    * The first parameter is the opaque request ID that must be passed to
    * @c reply() to deliver the response to the waiting client.
    */
-  using ReqAsyncRespCallback = vlink::Function<void(uint64_t, const ReqT&)>;
+  using ReqAsyncRespCallback = Function<void(uint64_t, const ReqT&)>;
 
   /** @brief Node role identifier (@c kServer). */
   static constexpr ImplType kImplType = kServer;

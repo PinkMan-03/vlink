@@ -277,7 +277,7 @@ void MqttFactory::set_connection_state(const MqttSessionID& session_id, bool con
 }
 
 void MqttFactory::notify_connection_change(const MqttSessionID& session_id, bool connected) {
-  std::vector<vlink::Function<void(bool)>> callbacks;
+  std::vector<Function<void(bool)>> callbacks;
 
   {
     std::lock_guard lock(connection_mtx_);
@@ -421,7 +421,7 @@ MessageLoop& MqttFactory::get_message_loop() { return message_loop_; }
 
 void MqttFactory::subscribe_topic(void* owner, int32_t domain, const std::string& fragment,
                                   const Conf::PropertiesMap& properties, const std::string& topic, int qos,
-                                  vlink::Function<void(const std::string&, const uint8_t*, size_t)>&& callback) {
+                                  Function<void(const std::string&, const uint8_t*, size_t)>&& callback) {
   MqttSessionID session_id = MqttSessionID{domain, fragment, properties};
   MqttSubscriptionID subscription_id = MqttSubscriptionID{session_id, topic};
   int target_qos = qos;
@@ -543,8 +543,7 @@ bool MqttFactory::publish_topic(int32_t domain, const std::string& fragment, con
 }
 
 void MqttFactory::register_connection_callback(void* owner, int32_t domain, const std::string& fragment,
-                                               const Conf::PropertiesMap& properties,
-                                               vlink::Function<void(bool)>&& callback) {
+                                               const Conf::PropertiesMap& properties, Function<void(bool)>&& callback) {
   std::lock_guard lock(connection_mtx_);
   connection_callbacks_[owner] = {MqttSessionID{domain, fragment, properties}, std::move(callback)};
 }
@@ -580,7 +579,7 @@ int MqttFactory::on_message_arrived(void* context, char* topic_name, int topic_l
 
   factory->message_loop_.post_task(
       [factory, session_id = std::move(session_id), topic = std::move(topic), data = std::move(data_copy)]() {
-        std::vector<vlink::Function<void(const std::string&, const uint8_t*, size_t)>> callbacks;
+        std::vector<Function<void(const std::string&, const uint8_t*, size_t)>> callbacks;
 
         {
           std::lock_guard lock(factory->sub_mtx_);
@@ -1144,7 +1143,7 @@ void MqttClient::start_listening() {
                                        Bytes resp_bytes =
                                            Bytes::deep_copy(data + kMqttHeaderSize, size - kMqttHeaderSize);
 
-                                       vlink::Function<void(uint64_t, const Bytes&)> callback;
+                                       Function<void(uint64_t, const Bytes&)> callback;
                                        NodeImpl* owner = nullptr;
 
                                        {

@@ -111,12 +111,12 @@ class VLINK_EXPORT MessageLoop {
    * @brief Callback type for tasks and event handlers.
    *
    * @details
-   * Move-only (`vlink::MoveFunction<void()>`).  Posting and storage paths only
+   * Move-only (`MoveFunction<void()>`).  Posting and storage paths only
    * require move semantics; using a move-only wrapper allows targets such as
    * @c std::packaged_task and lambdas with @c std::unique_ptr captures to be
    * scheduled directly without a @c std::shared_ptr trampoline.
    */
-  using Callback = vlink::MoveFunction<void()>;
+  using Callback = MoveFunction<void()>;
 
   /**
    * @brief Queue implementation type.

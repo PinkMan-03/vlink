@@ -132,7 +132,7 @@ class Client : public Node<ClientImpl, SecT> {
   using ConnectCallback = NodeImpl::ConnectCallback;
 
   /** @brief Callback type for async response delivery. */
-  using RespCallback = vlink::Function<void(const RespT&)>;
+  using RespCallback = Function<void(const RespT&)>;
 
   /** @brief Node role identifier (@c kClient). */
   static constexpr ImplType kImplType = kClient;

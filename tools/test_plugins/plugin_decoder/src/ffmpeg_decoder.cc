@@ -69,7 +69,7 @@ struct VideoDecoder::Impl {
   vlink::ElapsedTimer freq_timer;
   FFmpegDecoder::DataCallback image_callback;
   FFmpegDecoder::ErrorCallback error_callback;
-  vlink::condition_variable cv;
+  vlink::ConditionVariable cv;
   std::mutex mtx;
 };
 

@@ -99,7 +99,7 @@ class VLINK_EXPORT WheelTimer {
    * @details
    * The @c Key parameter allows a single lambda to manage multiple timers.
    */
-  using Callback = vlink::Function<void(Key)>;
+  using Callback = Function<void(Key)>;
 
   /**
    * @brief Constructs the wheel timer.

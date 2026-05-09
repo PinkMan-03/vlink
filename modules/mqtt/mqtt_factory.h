@@ -84,7 +84,7 @@ class MqttFactory final : public AbstractFactory<MqttID> {
 
   void subscribe_topic(void* owner, int32_t domain, const std::string& fragment, const Conf::PropertiesMap& properties,
                        const std::string& topic, int qos,
-                       vlink::Function<void(const std::string&, const uint8_t*, size_t)>&& callback);
+                       Function<void(const std::string&, const uint8_t*, size_t)>&& callback);
 
   void unsubscribe_topic(void* owner, int32_t domain, const std::string& fragment,
                          const Conf::PropertiesMap& properties, const std::string& topic);
@@ -93,7 +93,7 @@ class MqttFactory final : public AbstractFactory<MqttID> {
                      const std::string& topic, const uint8_t* payload, size_t payload_size, int qos);
 
   void register_connection_callback(void* owner, int32_t domain, const std::string& fragment,
-                                    const Conf::PropertiesMap& properties, vlink::Function<void(bool)>&& callback);
+                                    const Conf::PropertiesMap& properties, Function<void(bool)>&& callback);
 
   void unregister_connection_callback(void* owner);
 
@@ -105,7 +105,7 @@ class MqttFactory final : public AbstractFactory<MqttID> {
 
   struct Subscription final {
     int qos{1};
-    vlink::Function<void(const std::string&, const uint8_t*, size_t)> callback;
+    Function<void(const std::string&, const uint8_t*, size_t)> callback;
   };
 
   bool connect_client_locked(const MqttSessionID& session_id, MQTTClient& client);
@@ -137,7 +137,7 @@ class MqttFactory final : public AbstractFactory<MqttID> {
   std::map<MqttSubscriptionID, std::map<void*, Subscription>> subscription_callbacks_;
   std::mutex sub_mtx_;
 
-  std::unordered_map<void*, std::pair<MqttSessionID, vlink::Function<void(bool)>>> connection_callbacks_;
+  std::unordered_map<void*, std::pair<MqttSessionID, Function<void(bool)>>> connection_callbacks_;
   std::mutex connection_mtx_;
   std::atomic_bool reconnect_scheduled_{false};
 
@@ -276,7 +276,7 @@ class MqttClient final : public AbstractObject<MqttID>, public std::enable_share
  private:
   struct ResponseCallback final {
     NodeImpl* owner{nullptr};
-    vlink::Function<void(uint64_t, const Bytes&)> callback;
+    Function<void(uint64_t, const Bytes&)> callback;
   };
 
   std::atomic_bool has_connected_{false};

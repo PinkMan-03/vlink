@@ -33,7 +33,7 @@ namespace vlink {
 // Semaphore::Impl
 struct Semaphore::Impl final {
   mutable std::mutex mtx;
-  vlink::condition_variable cv;
+  ConditionVariable cv;
   size_t count{0};
   size_t initial_count{0};
   size_t in_flight_count{0};

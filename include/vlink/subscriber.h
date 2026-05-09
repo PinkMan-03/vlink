@@ -116,7 +116,7 @@ class Subscriber : public Node<SubscriberImpl, SecT> {
   using SharedPtr = std::shared_ptr<Subscriber<MsgT, SecT>>;
 
   /** @brief User-facing callback type for received messages. */
-  using MsgCallback = vlink::Function<void(const MsgT&)>;
+  using MsgCallback = Function<void(const MsgT&)>;
 
   /** @brief Node role identifier (@c kSubscriber). */
   static constexpr ImplType kImplType = kSubscriber;

@@ -245,14 +245,14 @@ struct VLINK_EXPORT DdsConf final : public Conf {
 
   static void register_qos_internal(const std::string& name, const Qos& qos);
 
-  static vlink::Function<void*()> find_type_support(const std::string& name);
+  static Function<void*()> find_type_support(const std::string& name);
 
   static const Qos& find_qos(const std::string& name);
 
   static std::string get_topic_for_url(const std::string& url);
 
   friend class DdsFactory;
-  static std::map<std::string, vlink::Function<void*()>> type_support_map_;
+  static std::map<std::string, Function<void*()>> type_support_map_;
   static std::map<std::string, Qos> qos_map_;
   static std::shared_mutex mtx_;
   static constexpr const char* kRespSuffix{"___resp"};

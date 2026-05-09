@@ -76,7 +76,7 @@ struct ThreadPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
   std::optional<NormalQueue> normal_queue;
   std::optional<LockfreeQueue> lockfree_queue;
 
-  vlink::condition_variable cv;
+  ConditionVariable cv;
   std::mutex mtx;
 };
 

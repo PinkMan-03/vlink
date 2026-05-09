@@ -88,7 +88,7 @@ int sub() {
   // Use a condition variable to block the main thread until a termination signal is received
   std::mutex mtx;
   std::unique_lock lock(mtx);
-  vlink::condition_variable cv;
+  vlink::ConditionVariable cv;
 
   // Register Ctrl+C signal handler to wake up the condition variable and exit
   Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });

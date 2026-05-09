@@ -508,7 +508,7 @@ message_loop.run();  // 阻塞直到 quit()
 // 方式 2：condition_variable（适合无事件循环的简单程序）
 std::mutex mtx;
 std::unique_lock lock(mtx);
-vlink::condition_variable cv;
+vlink::ConditionVariable cv;
 Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });
 cv.wait(lock);
 ```

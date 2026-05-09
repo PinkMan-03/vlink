@@ -21,8 +21,10 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | Bytes             | `base/bytes.h`                  | 128 字节固定大小缓冲区，SBO + 五种所有权       |
 | MemoryPool        | `base/memory_pool.h`            | 分级（金字塔）free-list 内存池，Bytes 默认分配器 |
 | MemoryResource    | `base/memory_resource.h`        | `std::pmr::memory_resource` 适配器，桥接 `MemoryPool` |
-| Function          | `base/functional.h`             | 类型擦除可调用包装器，64 字节 SBO + `MemoryPool` 堆回退 |
+| Function          | `base/functional.h`             | 类型擦除可调用包装器，可配置 SBO（默认 64 字节）+ `MemoryPool` 堆回退 |
+| LargeFunction     | `base/functional.h`             | `Function<Sig, 256>` 别名，256 字节 SBO 用于重型闭包 |
 | MoveFunction      | `base/functional.h`             | 移动专属类型擦除包装器，对应 C++23 `std::move_only_function` |
+| LargeMoveFunction | `base/functional.h`             | `MoveFunction<Sig, 256>` 别名 |
 | ConditionVariable | `base/condition_variable.h`     | POSIX `CLOCK_MONOTONIC` 条件变量，替代 std 实现 |
 | MessageLoop       | `base/message_loop.h`           | 单线程事件循环，集成定时器与优先级队列         |
 | Timer             | `base/timer.h`                  | 事件循环驱动的周期/单次定时器                  |
@@ -562,19 +564,26 @@ std::pmr::vector<int> b(&bypass);       // 每次直通 ::operator new
 
 ## 11.4.2 类型擦除可调用包装器 Function
 
-`vlink::Function<ReturnT(ArgsT...)>`（`base/functional.h`）是 `std::function` 的高性能
-替代品，针对 VLink 热路径（消息回调、定时器、线程池任务等）做了三处关键调优：
+`vlink::Function<ReturnT(ArgsT...), SboSizeT = 64>`（`base/functional.h`）是
+`std::function` 的高性能替代品，针对 VLink 热路径（消息回调、定时器、线程池任
+务等）做了四处关键调优：
 
-- **64 字节 SBO（一行缓存）**：`kSboSize = 64`，足以容纳常见的捕获集合（若干
-  `shared_ptr`、几个指针、若干小型 POD），命中后整个对象保留在 inline 缓冲区
-  内，零堆分配。`sizeof(Function)` ≈ 72 字节（SBO + vtable 指针）。
-- **`MemoryPool` 堆回退**：当目标 `sizeof` 超过 64、或 `alignof` 超过
+- **可配置 SBO**：`kSboSize = SboSizeT`，默认 64 字节（一行缓存），足以容纳
+  常见的捕获集合（若干 `shared_ptr`、几个指针、若干小型 POD），命中后整个对
+  象保留在 inline 缓冲区内，零堆分配。需要承载更重的闭包时通过第二个非类型
+  模板参数选大档：`Function<Sig, 256>` 或别名 `LargeFunction<Sig>`，把 256
+  字节以下的 functor 全部留在内联区。`SboSizeT` 必须 `>= sizeof(void*)`（堆
+  路径要在存储里塞 `FunctorT*`），否则 `static_assert` 拒绝。
+- **`MemoryPool` 堆回退**：当目标 `sizeof` 超过 `SboSizeT`、或 `alignof` 超过
   `alignof(std::max_align_t)`、或移动构造可能抛异常时，存储改为从
   `vlink::MemoryPool::global_instance()` 分配，并在析构时归还到同一池。**全程
   不调用全局 `operator new` / `operator delete`**，与 `Bytes` 共享分级 free-list
   的复用收益。
 - **`std::function` 互转**：转换构造接受任何满足 `is_invocable_r` 的可调用对
   象，`std::function ⇄ vlink::Function` 双向都可隐式构造（无需显式 `cast`）。
+- **类型隔离**：不同 `SboSizeT` 是不同类型——`Function<Sig, 64>` 与
+  `Function<Sig, 256>` 不能互相隐式赋值，但任一可作为另一的源 callable
+  被包裹（多一层 vtable 间接，少见时不必担心）。
 
 ### 平台开关
 
@@ -588,13 +597,13 @@ std::pmr::vector<int> b(&bypass);       // 每次直通 ::operator new
 ```cpp
 namespace vlink {
 
-template <typename SignatureT>
+template <typename SignatureT, size_t SboSizeT = 64U>
 class Function;                                     // 主模板未定义，仅特化
 
-template <typename ReturnT, typename... ArgsT>
-class Function<ReturnT(ArgsT...)> {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+class Function<ReturnT(ArgsT...), SboSizeT> {
  public:
-  static constexpr std::size_t kSboSize = 64U;
+  static constexpr size_t kSboSize = SboSizeT;      // 与模板实参等价
   using result_type = ReturnT;
 
   Function() noexcept = default;                    // 空
@@ -621,6 +630,9 @@ class Function<ReturnT(ArgsT...)> {
 #endif
 };
 
+template <typename SignatureT>
+using LargeFunction = Function<SignatureT, 256U>;   // 256 字节 SBO 别名
+
 }  // namespace vlink
 ```
 
@@ -628,7 +640,7 @@ class Function<ReturnT(ArgsT...)> {
 
 | 路径   | 触发条件                                                  | 调用开销           |
 | ------ | --------------------------------------------------------- | ------------------ |
-| Inline | `sizeof(FunctorT) ≤ 64` 且 `alignof(FunctorT) ≤ max_align_t` 且移动 noexcept | 1 次间接调用       |
+| Inline | `sizeof(FunctorT) ≤ SboSizeT` 且 `alignof(FunctorT) ≤ max_align_t` 且移动 noexcept | 1 次间接调用       |
 | Heap   | 不满足 inline 条件                                        | 1 次间接调用 + 1 次额外加载 |
 
 - 调用开销恒定为通过 vtable 的 1 次间接 call；inline 路径无额外指针追逐，
@@ -664,6 +676,14 @@ vlink::Function<void()> heavy = [big_capture]() {   // 大捕获 → 池回退
   // ...
 };
 
+// 256 字节 SBO（让 200 字节级别的闭包留在内联）：
+vlink::Function<void(), 256> jumbo = [arr = std::array<int, 50>{}]() {
+  // sizeof 约 200 字节，在默认 64B SBO 下走堆，在 256B SBO 下留 inline。
+};
+
+// 等价的便捷别名：
+vlink::LargeFunction<void()> alias_jumbo = std::move(jumbo);
+
 // std::function 双向互转：
 std::function<void(int)> stdfn = [](int x) { /* ... */ };
 vlink::Function<void(int)> wrapped = stdfn;          // 包装 std::function
@@ -686,11 +706,12 @@ ObjectPool 工厂/重置等）由 `vlink::MoveFunction` 承载（详见 §11.4.3
 
 ## 11.4.3 移动专属可调用包装器 MoveFunction
 
-`vlink::MoveFunction<ReturnT(ArgsT...)>`（`base/functional.h`）是 C++23
-`std::move_only_function` 的 VLink 等价物：与 `Function` 共享同一份 64 字节 SBO
-+ `MemoryPool` 堆回退基础设施，但放宽了对目标的拷贝可构造要求，**接受
+`vlink::MoveFunction<ReturnT(ArgsT...), SboSizeT = 64>`（`base/functional.h`）是
+C++23 `std::move_only_function` 的 VLink 等价物：与 `Function` 共享同一份可配
+置 SBO + `MemoryPool` 堆回退基础设施，但放宽了对目标的拷贝可构造要求，**接受
 move-only 可调用对象**（捕获了 `std::unique_ptr` 的 lambda、`std::packaged_task`
-等），并且 `MoveFunction` 自身也是 move-only。
+等），并且 `MoveFunction` 自身也是 move-only。需要更大 SBO 时同样使用
+`MoveFunction<Sig, 256>` 或别名 `LargeMoveFunction<Sig>`。
 
 适用场景：
 
@@ -705,10 +726,13 @@ move-only 可调用对象**（捕获了 `std::unique_ptr` 的 lambda、`std::pac
 ```cpp
 namespace vlink {
 
-template <typename ReturnT, typename... ArgsT>
-class MoveFunction<ReturnT(ArgsT...)> {
+template <typename SignatureT, size_t SboSizeT = 64U>
+class MoveFunction;                                       // 主模板未定义，仅特化
+
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
  public:
-  static constexpr std::size_t kSboSize = 64U;
+  static constexpr size_t kSboSize = SboSizeT;            // 与模板实参等价
   using result_type = ReturnT;
 
   MoveFunction() noexcept = default;                    // 空
@@ -734,6 +758,9 @@ class MoveFunction<ReturnT(ArgsT...)> {
   template <typename FunctorT> const FunctorT* target() const noexcept;
 #endif
 };
+
+template <typename SignatureT>
+using LargeMoveFunction = MoveFunction<SignatureT, 256U>;  // 256 字节 SBO 别名
 
 }  // namespace vlink
 ```

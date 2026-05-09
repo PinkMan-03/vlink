@@ -25,21 +25,44 @@
  * @file functional.h
  * @brief Type-erased callable wrappers: @c vlink::Function tracks the public
  *        surface of @c std::function (C++11) and @c vlink::MoveFunction tracks
- *        @c std::move_only_function (C++23). Storage uses a 64-byte SBO and a
- *        @c vlink::MemoryPool-backed heap fallback.
+ *        @c std::move_only_function (C++23). Storage uses a configurable SBO
+ *        (default 64 bytes) and a @c vlink::MemoryPool-backed heap fallback.
  *
  * @details
  * @par Storage predicate (kIsInline)
  * A target @c FunctorT is held inline iff @b all three conditions hold:
- * @c sizeof(FunctorT) @c <= @c 64 (one cache line), @c alignof(FunctorT) @c <=
+ * @c sizeof(FunctorT) @c <= @c SboSizeT, @c alignof(FunctorT) @c <=
  * @c alignof(std::max_align_t), and @c FunctorT is nothrow move-constructible.
  * Otherwise @c FunctorT is allocated through @c vlink::MemoryPool::global_instance();
  * the original @c sizeof(FunctorT) and @c alignof(FunctorT) are passed back to
  * @c deallocate so the block routes to its source tier. This predicate
  * matches the @c __stored_locally rule used by libstdc++
- * @c std::move_only_function. The 64-byte budget intentionally exceeds the
- * typical @c std::function SBO (~16-24 B) so common VLink capture sets
- * (a handful of @c shared_ptr / pointers / small POD) stay inline.
+ * @c std::move_only_function.
+ *
+ * @par SBO sizing
+ * Both wrappers expose a second non-type template parameter @c SboSizeT that
+ * selects the inline storage budget at compile time:
+ * @code
+ * vlink::Function<void()>                // default 64-byte SBO
+ * vlink::Function<void(), 128>           // 128-byte SBO
+ * vlink::MoveFunction<void(), 256>       // 256-byte SBO -- explicit form
+ * vlink::LargeFunction<void()>           // alias for Function<void(), 256>
+ * vlink::LargeMoveFunction<void()>       // alias for MoveFunction<void(), 256>
+ * @endcode
+ * The 64-byte default intentionally exceeds the typical @c std::function SBO
+ * (~16-24 B) so common VLink capture sets (a handful of @c shared_ptr /
+ * pointers / small POD) stay inline.  Enlarge the budget when capturing
+ * heavyweight closures (e.g. @c std::array<shared_ptr<T>, N>, multiple
+ * @c std::string captures by value) to avoid the @c MemoryPool roundtrip.
+ * @c SboSizeT must be at least @c sizeof(void*) so the heap-fallback pointer
+ * fits inside the storage; this is enforced by a @c static_assert.
+ *
+ * @par Type identity per SboSizeT
+ * @c Function<Sig, X> and @c Function<Sig, Y> are distinct types and cannot
+ * be implicitly assigned to one another (same for @c MoveFunction).  They
+ * remain interchangeable through the generic functor-construction path:
+ * a @c Function<Sig, 64> can be passed as the source for @c Function<Sig,
+ * 256>, which wraps it as a regular callable.
  *
  * @par Empty-state propagation
  * Constructing or assigning from any of the following yields an empty
@@ -90,6 +113,12 @@
  * @note
  * - @c Function requires copy-constructible targets and is itself copyable.
  * - @c MoveFunction accepts move-only targets and is itself move-only.
+ * - @c LargeFunction / @c LargeMoveFunction are convenience aliases for
+ *   @c Function<Sig, 256> / @c MoveFunction<Sig, 256>.
+ * - When @c VLINK_ENABLE_BASE_FUNCTIONAL is undefined (e.g. on platforms
+ *   where the SBO + @c MemoryPool path is suppressed), every alias above
+ *   degenerates to @c std::function / @c std::move_only_function so source
+ *   code remains unchanged; the @c SboSizeT argument is then ignored.
  * - Class template declarations precede the @c Details section;
  *   out-of-class member definitions follow it.
  */
@@ -116,11 +145,23 @@ namespace vlink {
 
 [[maybe_unused]] static constexpr bool kIsSupportMoveFunction = true;
 
-template <typename SignatureT>
+template <typename SignatureT, size_t SboSizeT = 64U>
 class Function;
 
-template <typename SignatureT>
+template <typename SignatureT, size_t SboSizeT = 64U>
 class MoveFunction;
+
+template <typename SignatureT>
+using LargeFunction = Function<SignatureT, 256U>;
+
+template <typename SignatureT>
+using LargeMoveFunction = MoveFunction<SignatureT, 256U>;
+
+template <typename SignatureT>
+using function = Function<SignatureT>;
+
+template <typename SignatureT>
+using move_only_function = MoveFunction<SignatureT>;
 
 namespace detail {
 
@@ -133,14 +174,14 @@ struct IsStdFunction<std::function<SignatureT>> : std::true_type {};
 template <typename TypeT>
 struct IsVlinkFunction : std::false_type {};
 
-template <typename SignatureT>
-struct IsVlinkFunction<Function<SignatureT>> : std::true_type {};
+template <typename SignatureT, size_t SboSizeT>
+struct IsVlinkFunction<Function<SignatureT, SboSizeT>> : std::true_type {};
 
 template <typename TypeT>
 struct IsVlinkMoveFunction : std::false_type {};
 
-template <typename SignatureT>
-struct IsVlinkMoveFunction<MoveFunction<SignatureT>> : std::true_type {};
+template <typename SignatureT, size_t SboSizeT>
+struct IsVlinkMoveFunction<MoveFunction<SignatureT, SboSizeT>> : std::true_type {};
 
 #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
 template <typename TypeT>
@@ -155,11 +196,16 @@ struct IsStdMoveOnlyFunction<std::move_only_function<SignatureT>> : std::true_ty
 /**
  * @class Function
  * @brief Copyable type-erased callable wrapper -- @c std::function analogue
- *        with a 64-byte SBO and @c vlink::MemoryPool-backed heap fallback.
+ *        with a configurable SBO (default 64 bytes) and a
+ *        @c vlink::MemoryPool-backed heap fallback.
  *
  * @details
- * @c Function<ReturnT(ArgsT...)> stores any copy-constructible callable that is
- * invocable as @c ReturnT(ArgsT...). The observable contract mirrors
+ * @c Function<ReturnT(ArgsT...), SboSizeT> stores any copy-constructible
+ * callable that is invocable as @c ReturnT(ArgsT...).  The @c SboSizeT
+ * non-type template argument selects the inline storage budget; default
+ * @c Function<Sig> uses 64 bytes, @c Function<Sig, 256> (or the
+ * @c LargeFunction alias) keeps any 256-byte-or-smaller functor inline.
+ * The observable contract mirrors
  * @c std::function:
  *  - @c operator() is @c const (the @c std::function "logical const"
  *    convention -- the placement-newed target is non-const, so the standard
@@ -174,13 +220,22 @@ struct IsStdMoveOnlyFunction<std::move_only_function<SignatureT>> : std::true_ty
  * guarantee through copy-and-swap. The move constructor, move assignment,
  * and @c swap are @c noexcept.
  */
-template <typename ReturnT, typename... ArgsT>
-class Function<ReturnT(ArgsT...)> {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+class Function<ReturnT(ArgsT...), SboSizeT> {
+  static_assert(SboSizeT >= sizeof(void*),
+                "Function: SboSizeT must be at least sizeof(void*) so the heap-fallback "
+                "pointer can fit in the inline storage.");
+
  public:
   /**
    * @brief Inline storage budget before falling back to @c MemoryPool.
+   *
+   * @details
+   * Equal to the @c SboSizeT template argument.  Default-instantiated
+   * @c Function<Sig> uses 64 bytes; override via @c Function<Sig, N> to enlarge
+   * (e.g. @c Function<void(), 256> keeps 256-byte functors inline).
    */
-  static constexpr std::size_t kSboSize = 64U;
+  static constexpr size_t kSboSize = SboSizeT;
 
   /**
    * @brief Result type alias, matching @c std::function.
@@ -372,7 +427,7 @@ class Function<ReturnT(ArgsT...)> {
 
   void reset() noexcept;
 
-  alignas(std::max_align_t) std::byte storage_[kSboSize]{};
+  alignas(std::max_align_t) std::byte storage_[SboSizeT]{};
 
   const VTable* vtable_{nullptr};
 };
@@ -380,43 +435,47 @@ class Function<ReturnT(ArgsT...)> {
 /**
  * @brief Swaps two function wrappers.
  */
-template <typename ReturnT, typename... ArgsT>
-void swap(Function<ReturnT(ArgsT...)>& lhs, Function<ReturnT(ArgsT...)>& rhs) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+void swap(Function<ReturnT(ArgsT...), SboSizeT>& lhs, Function<ReturnT(ArgsT...), SboSizeT>& rhs) noexcept;
 
 /**
  * @brief Returns whether @p cb is empty.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator==(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator==(const Function<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
  * @brief Returns whether @p cb is empty.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator==(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator==(std::nullptr_t, const Function<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;
 
 /**
  * @brief Returns whether @p cb stores a callable target.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator!=(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator!=(const Function<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
  * @brief Returns whether @p cb stores a callable target.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;
 
 /**
  * @class MoveFunction
  * @brief Move-only type-erased callable wrapper -- @c std::move_only_function
- *        analogue sharing the 64-byte SBO and @c MemoryPool fallback used by
- *        @c Function.
+ *        analogue sharing the configurable SBO and @c MemoryPool fallback used
+ *        by @c Function (default 64 bytes; pick a wider budget via the
+ *        @c SboSizeT template argument or the @c LargeMoveFunction alias).
  *
  * @details
- * @c MoveFunction<ReturnT(ArgsT...)> stores any move-constructible callable that
- * is invocable as @c ReturnT(ArgsT...). It mirrors @c std::move_only_function with
- * two deliberate divergences and one extension:
+ * @c MoveFunction<ReturnT(ArgsT...), SboSizeT> stores any move-constructible
+ * callable that is invocable as @c ReturnT(ArgsT...).  As with @c Function,
+ * the @c SboSizeT non-type template parameter selects the inline storage
+ * budget; @c MoveFunction<Sig, 256> (or @c LargeMoveFunction<Sig>) keeps any
+ * 256-byte-or-smaller functor inline.  It mirrors @c std::move_only_function
+ * with two deliberate divergences and one extension:
  *  - @b Divergence: invoking an empty wrapper throws
  *    @c std::bad_function_call (matching @c Function and @c std::function);
  *    @c std::move_only_function leaves it as UB.
@@ -430,13 +489,23 @@ bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept;
  * "logical const" workaround. Move construction, move assignment, and
  * @c swap are @c noexcept; copy operations are @c =delete.
  */
-template <typename ReturnT, typename... ArgsT>
-class MoveFunction<ReturnT(ArgsT...)> {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
+  static_assert(SboSizeT >= sizeof(void*),
+                "MoveFunction: SboSizeT must be at least sizeof(void*) so the "
+                "heap-fallback pointer can fit in the inline storage.");
+
  public:
   /**
    * @brief Inline storage budget before falling back to @c MemoryPool.
+   *
+   * @details
+   * Equal to the @c SboSizeT template argument.  Default-instantiated
+   * @c MoveFunction<Sig> uses 64 bytes; override via @c MoveFunction<Sig, N>
+   * to enlarge (e.g. @c MoveFunction<void(), 256> keeps 256-byte functors
+   * inline).
    */
-  static constexpr std::size_t kSboSize = 64U;
+  static constexpr size_t kSboSize = SboSizeT;
 
   /**
    * @brief Result type alias.
@@ -621,7 +690,7 @@ class MoveFunction<ReturnT(ArgsT...)> {
 
   void reset() noexcept;
 
-  alignas(std::max_align_t) std::byte storage_[kSboSize]{};
+  alignas(std::max_align_t) std::byte storage_[SboSizeT]{};
 
   const VTable* vtable_{nullptr};
 };
@@ -629,53 +698,53 @@ class MoveFunction<ReturnT(ArgsT...)> {
 /**
  * @brief Swaps two move-only function wrappers.
  */
-template <typename ReturnT, typename... ArgsT>
-void swap(MoveFunction<ReturnT(ArgsT...)>& lhs, MoveFunction<ReturnT(ArgsT...)>& rhs) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+void swap(MoveFunction<ReturnT(ArgsT...), SboSizeT>& lhs, MoveFunction<ReturnT(ArgsT...), SboSizeT>& rhs) noexcept;
 
 /**
  * @brief Returns whether @p cb is empty.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator==(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator==(const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
  * @brief Returns whether @p cb is empty.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator==(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator==(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;
 
 /**
  * @brief Returns whether @p cb stores a callable target.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator!=(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator!=(const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
  * @brief Returns whether @p cb stores a callable target.
  */
-template <typename ReturnT, typename... ArgsT>
-bool operator!=(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept;
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+bool operator!=(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;
 
 ////////////////////////////////////////////////////////////////
 /// Details
 ////////////////////////////////////////////////////////////////
 
-template <typename ReturnT, typename... ArgsT>
-inline Function<ReturnT(ArgsT...)>::Function(std::nullptr_t) noexcept {}
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline Function<ReturnT(ArgsT...), SboSizeT>::Function(std::nullptr_t) noexcept {}
 
-template <typename ReturnT, typename... ArgsT>
-inline Function<ReturnT(ArgsT...)>::Function(const Function& other) {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline Function<ReturnT(ArgsT...), SboSizeT>::Function(const Function& other) {
   copy_from(other);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline Function<ReturnT(ArgsT...)>::Function(Function&& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline Function<ReturnT(ArgsT...), SboSizeT>::Function(Function&& other) noexcept {
   move_from(std::move(other));
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT, typename DecayFunctorT, typename>
-inline Function<ReturnT(ArgsT...)>::Function(FunctorT&& f) {
+inline Function<ReturnT(ArgsT...), SboSizeT>::Function(FunctorT&& f) {
   if constexpr (kIsFunctionWrapper<DecayFunctorT>) {
     if VUNLIKELY (!f) {
       return;
@@ -689,9 +758,9 @@ inline Function<ReturnT(ArgsT...)>::Function(FunctorT&& f) {
   construct_from<DecayFunctorT>(std::forward<FunctorT>(f));
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 // NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
-inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(const Function& other) {
+inline Function<ReturnT(ArgsT...), SboSizeT>& Function<ReturnT(ArgsT...), SboSizeT>::operator=(const Function& other) {
   if VLIKELY (this != &other) {
     Function tmp(other);
     swap(tmp);
@@ -700,8 +769,9 @@ inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(const
   return *this;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(Function&& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline Function<ReturnT(ArgsT...), SboSizeT>& Function<ReturnT(ArgsT...), SboSizeT>::operator=(
+    Function&& other) noexcept {
   if VLIKELY (this != &other) {
     reset();
     move_from(std::move(other));
@@ -710,27 +780,28 @@ inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(Funct
   return *this;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline Function<ReturnT(ArgsT...), SboSizeT>& Function<ReturnT(ArgsT...), SboSizeT>::operator=(
+    std::nullptr_t) noexcept {
   reset();
   return *this;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT, typename DecayFunctorT, typename>
-inline Function<ReturnT(ArgsT...)>& Function<ReturnT(ArgsT...)>::operator=(FunctorT&& f) {
+inline Function<ReturnT(ArgsT...), SboSizeT>& Function<ReturnT(ArgsT...), SboSizeT>::operator=(FunctorT&& f) {
   Function tmp(std::forward<FunctorT>(f));
   swap(tmp);
   return *this;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline Function<ReturnT(ArgsT...)>::~Function() {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline Function<ReturnT(ArgsT...), SboSizeT>::~Function() {
   reset();
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline ReturnT Function<ReturnT(ArgsT...)>::operator()(ArgsT... args) const {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline ReturnT Function<ReturnT(ArgsT...), SboSizeT>::operator()(ArgsT... args) const {
   if VUNLIKELY (vtable_ == nullptr) {
     throw std::bad_function_call();
   }
@@ -738,14 +809,14 @@ inline ReturnT Function<ReturnT(ArgsT...)>::operator()(ArgsT... args) const {
   return vtable_->invoke(&storage_, std::forward<ArgsT>(args)...);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline Function<ReturnT(ArgsT...)>::operator bool() const noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline Function<ReturnT(ArgsT...), SboSizeT>::operator bool() const noexcept {
   return vtable_ != nullptr;
 }
 
 #if defined(__cpp_rtti)
-template <typename ReturnT, typename... ArgsT>
-inline const std::type_info& Function<ReturnT(ArgsT...)>::target_type() const noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline const std::type_info& Function<ReturnT(ArgsT...), SboSizeT>::target_type() const noexcept {
   if VLIKELY (vtable_ != nullptr) {
     return vtable_->target_type();
   }
@@ -753,9 +824,9 @@ inline const std::type_info& Function<ReturnT(ArgsT...)>::target_type() const no
   return typeid(void);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline FunctorT* Function<ReturnT(ArgsT...)>::target() noexcept {
+inline FunctorT* Function<ReturnT(ArgsT...), SboSizeT>::target() noexcept {
   if constexpr (std::is_object_v<FunctorT>) {
     if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
       return static_cast<FunctorT*>(vtable_->target(&storage_));
@@ -765,9 +836,9 @@ inline FunctorT* Function<ReturnT(ArgsT...)>::target() noexcept {
   return nullptr;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const FunctorT* Function<ReturnT(ArgsT...)>::target() const noexcept {
+inline const FunctorT* Function<ReturnT(ArgsT...), SboSizeT>::target() const noexcept {
   if constexpr (std::is_object_v<FunctorT>) {
     if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
       return static_cast<const FunctorT*>(vtable_->target_const(&storage_));
@@ -778,8 +849,8 @@ inline const FunctorT* Function<ReturnT(ArgsT...)>::target() const noexcept {
 }
 #endif
 
-template <typename ReturnT, typename... ArgsT>
-inline void Function<ReturnT(ArgsT...)>::swap(Function& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void Function<ReturnT(ArgsT...), SboSizeT>::swap(Function& other) noexcept {
   if VUNLIKELY (this == &other) {
     return;
   }
@@ -789,9 +860,10 @@ inline void Function<ReturnT(ArgsT...)>::swap(Function& other) noexcept {
   other = std::move(tmp);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline ReturnT Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::invoke(const void* storage, ArgsT... args) {
+inline ReturnT Function<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::invoke(const void* storage,
+                                                                                     ArgsT... args) {
   auto* f = std::launder(reinterpret_cast<FunctorT*>(const_cast<void*>(storage)));
 
   if constexpr (std::is_void_v<ReturnT>) {
@@ -801,51 +873,53 @@ inline ReturnT Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::invoke(const
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::copy_construct(void* dst, const void* src) {
+inline void Function<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::copy_construct(void* dst, const void* src) {
   const auto* src_f = std::launder(reinterpret_cast<const FunctorT*>(src));
   ::new (dst) FunctorT(*src_f);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+inline void Function<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::move_construct(void* dst,
+                                                                                          void* src) noexcept {
   auto* src_f = std::launder(reinterpret_cast<FunctorT*>(src));
   ::new (dst) FunctorT(std::move(*src_f));
   src_f->~FunctorT();
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::destroy(void* storage) noexcept {
+inline void Function<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::destroy(void* storage) noexcept {
   auto* f = std::launder(reinterpret_cast<FunctorT*>(storage));
   f->~FunctorT();
 }
 
 #if defined(__cpp_rtti)
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const std::type_info& Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_type() noexcept {
+inline const std::type_info& Function<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::target_type() noexcept {
   return typeid(FunctorT);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void* Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target(void* storage) noexcept {
+inline void* Function<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::target(void* storage) noexcept {
   return storage;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const void* Function<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_const(const void* storage) noexcept {
+inline const void* Function<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::target_const(
+    const void* storage) noexcept {
   return storage;
 }
 #endif
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline ReturnT Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::invoke(const void* storage, ArgsT... args) {
+inline ReturnT Function<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::invoke(const void* storage, ArgsT... args) {
   FunctorT* f = *std::launder(static_cast<FunctorT* const*>(storage));
 
   if constexpr (std::is_void_v<ReturnT>) {
@@ -855,9 +929,9 @@ inline ReturnT Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::invoke(const v
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::copy_construct(void* dst, const void* src) {
+inline void Function<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::copy_construct(void* dst, const void* src) {
   FunctorT* src_f = *std::launder(static_cast<FunctorT* const*>(src));
 
   auto& pool = MemoryPool::global_instance();
@@ -876,18 +950,18 @@ inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::copy_construct(vo
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+inline void Function<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
   FunctorT** src_slot = std::launder(static_cast<FunctorT**>(src));
   FunctorT* src_f = *src_slot;
   ::new (dst) FunctorT*(src_f);
   *src_slot = nullptr;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::destroy(void* storage) noexcept {
+inline void Function<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::destroy(void* storage) noexcept {
   FunctorT** slot = std::launder(static_cast<FunctorT**>(storage));
   FunctorT* f = *slot;
 
@@ -902,28 +976,30 @@ inline void Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::destroy(void* sto
 }
 
 #if defined(__cpp_rtti)
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const std::type_info& Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_type() noexcept {
+inline const std::type_info& Function<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::target_type() noexcept {
   return typeid(FunctorT);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void* Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target(void* storage) noexcept {
+inline void* Function<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::target(void* storage) noexcept {
   return *std::launder(static_cast<FunctorT**>(storage));
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const void* Function<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_const(const void* storage) noexcept {
+inline const void* Function<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::target_const(
+    const void* storage) noexcept {
   return *std::launder(static_cast<FunctorT* const*>(storage));
 }
 #endif
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const typename Function<ReturnT(ArgsT...)>::VTable* Function<ReturnT(ArgsT...)>::get_vtable() noexcept {
+inline const typename Function<ReturnT(ArgsT...), SboSizeT>::VTable*
+Function<ReturnT(ArgsT...), SboSizeT>::get_vtable() noexcept {
   if constexpr (kIsInline<FunctorT>) {
     static constexpr VTable kVTable = {
         &InlineVTable<FunctorT>::invoke,         &InlineVTable<FunctorT>::copy_construct,
@@ -947,9 +1023,9 @@ inline const typename Function<ReturnT(ArgsT...)>::VTable* Function<ReturnT(Args
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT, typename SourceT>
-inline void Function<ReturnT(ArgsT...)>::construct_from(SourceT&& src) {
+inline void Function<ReturnT(ArgsT...), SboSizeT>::construct_from(SourceT&& src) {
   if constexpr (kIsInline<FunctorT>) {
     ::new (&storage_) FunctorT(std::forward<SourceT>(src));
   } else {
@@ -972,16 +1048,16 @@ inline void Function<ReturnT(ArgsT...)>::construct_from(SourceT&& src) {
   vtable_ = get_vtable<FunctorT>();
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline void Function<ReturnT(ArgsT...)>::copy_from(const Function& other) {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void Function<ReturnT(ArgsT...), SboSizeT>::copy_from(const Function& other) {
   if VLIKELY (other.vtable_ != nullptr) {
     other.vtable_->copy_construct(&storage_, &other.storage_);
     vtable_ = other.vtable_;
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline void Function<ReturnT(ArgsT...)>::move_from(Function&& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void Function<ReturnT(ArgsT...), SboSizeT>::move_from(Function&& other) noexcept {
   if VLIKELY (other.vtable_ != nullptr) {
     other.vtable_->move_construct(&storage_, &other.storage_);
     vtable_ = other.vtable_;
@@ -989,50 +1065,50 @@ inline void Function<ReturnT(ArgsT...)>::move_from(Function&& other) noexcept {
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline void Function<ReturnT(ArgsT...)>::reset() noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void Function<ReturnT(ArgsT...), SboSizeT>::reset() noexcept {
   if VLIKELY (vtable_ != nullptr) {
     vtable_->destroy(&storage_);
     vtable_ = nullptr;
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline void swap(Function<ReturnT(ArgsT...)>& lhs, Function<ReturnT(ArgsT...)>& rhs) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void swap(Function<ReturnT(ArgsT...), SboSizeT>& lhs, Function<ReturnT(ArgsT...), SboSizeT>& rhs) noexcept {
   lhs.swap(rhs);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator==(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator==(const Function<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept {
   return !cb;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator==(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator==(std::nullptr_t, const Function<ReturnT(ArgsT...), SboSizeT>& cb) noexcept {
   return !cb;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator!=(const Function<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator!=(const Function<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept {
   return static_cast<bool>(cb);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...)>& cb) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...), SboSizeT>& cb) noexcept {
   return static_cast<bool>(cb);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline MoveFunction<ReturnT(ArgsT...)>::MoveFunction(std::nullptr_t) noexcept {}
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::MoveFunction(std::nullptr_t) noexcept {}
 
-template <typename ReturnT, typename... ArgsT>
-inline MoveFunction<ReturnT(ArgsT...)>::MoveFunction(MoveFunction&& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::MoveFunction(MoveFunction&& other) noexcept {
   move_from(std::move(other));
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT, typename DecayFunctorT, typename>
-inline MoveFunction<ReturnT(ArgsT...)>::MoveFunction(FunctorT&& f) {
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::MoveFunction(FunctorT&& f) {
   if constexpr (kIsFunctionWrapper<DecayFunctorT>) {
     if VUNLIKELY (!f) {
       return;
@@ -1046,8 +1122,9 @@ inline MoveFunction<ReturnT(ArgsT...)>::MoveFunction(FunctorT&& f) {
   construct_from<DecayFunctorT>(std::forward<FunctorT>(f));
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline MoveFunction<ReturnT(ArgsT...)>& MoveFunction<ReturnT(ArgsT...)>::operator=(MoveFunction&& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>& MoveFunction<ReturnT(ArgsT...), SboSizeT>::operator=(
+    MoveFunction&& other) noexcept {
   if VLIKELY (this != &other) {
     reset();
     move_from(std::move(other));
@@ -1056,27 +1133,28 @@ inline MoveFunction<ReturnT(ArgsT...)>& MoveFunction<ReturnT(ArgsT...)>::operato
   return *this;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline MoveFunction<ReturnT(ArgsT...)>& MoveFunction<ReturnT(ArgsT...)>::operator=(std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>& MoveFunction<ReturnT(ArgsT...), SboSizeT>::operator=(
+    std::nullptr_t) noexcept {
   reset();
   return *this;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT, typename DecayFunctorT, typename>
-inline MoveFunction<ReturnT(ArgsT...)>& MoveFunction<ReturnT(ArgsT...)>::operator=(FunctorT&& f) {
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>& MoveFunction<ReturnT(ArgsT...), SboSizeT>::operator=(FunctorT&& f) {
   MoveFunction tmp(std::forward<FunctorT>(f));
   swap(tmp);
   return *this;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline MoveFunction<ReturnT(ArgsT...)>::~MoveFunction() {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::~MoveFunction() {
   reset();
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline ReturnT MoveFunction<ReturnT(ArgsT...)>::operator()(ArgsT... args) {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline ReturnT MoveFunction<ReturnT(ArgsT...), SboSizeT>::operator()(ArgsT... args) {
   if VUNLIKELY (vtable_ == nullptr) {
     throw std::bad_function_call();
   }
@@ -1084,14 +1162,14 @@ inline ReturnT MoveFunction<ReturnT(ArgsT...)>::operator()(ArgsT... args) {
   return vtable_->invoke(&storage_, std::forward<ArgsT>(args)...);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline MoveFunction<ReturnT(ArgsT...)>::operator bool() const noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::operator bool() const noexcept {
   return vtable_ != nullptr;
 }
 
 #if defined(__cpp_rtti)
-template <typename ReturnT, typename... ArgsT>
-inline const std::type_info& MoveFunction<ReturnT(ArgsT...)>::target_type() const noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline const std::type_info& MoveFunction<ReturnT(ArgsT...), SboSizeT>::target_type() const noexcept {
   if VLIKELY (vtable_ != nullptr) {
     return vtable_->target_type();
   }
@@ -1099,9 +1177,9 @@ inline const std::type_info& MoveFunction<ReturnT(ArgsT...)>::target_type() cons
   return typeid(void);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline FunctorT* MoveFunction<ReturnT(ArgsT...)>::target() noexcept {
+inline FunctorT* MoveFunction<ReturnT(ArgsT...), SboSizeT>::target() noexcept {
   if constexpr (std::is_object_v<FunctorT>) {
     if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
       return static_cast<FunctorT*>(vtable_->target(&storage_));
@@ -1111,9 +1189,9 @@ inline FunctorT* MoveFunction<ReturnT(ArgsT...)>::target() noexcept {
   return nullptr;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const FunctorT* MoveFunction<ReturnT(ArgsT...)>::target() const noexcept {
+inline const FunctorT* MoveFunction<ReturnT(ArgsT...), SboSizeT>::target() const noexcept {
   if constexpr (std::is_object_v<FunctorT>) {
     if VLIKELY (vtable_ != nullptr && typeid(FunctorT) == target_type()) {
       return static_cast<const FunctorT*>(vtable_->target_const(&storage_));
@@ -1124,8 +1202,8 @@ inline const FunctorT* MoveFunction<ReturnT(ArgsT...)>::target() const noexcept 
 }
 #endif
 
-template <typename ReturnT, typename... ArgsT>
-inline void MoveFunction<ReturnT(ArgsT...)>::swap(MoveFunction& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::swap(MoveFunction& other) noexcept {
   if VUNLIKELY (this == &other) {
     return;
   }
@@ -1135,9 +1213,9 @@ inline void MoveFunction<ReturnT(ArgsT...)>::swap(MoveFunction& other) noexcept 
   other = std::move(tmp);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline ReturnT MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::invoke(void* storage, ArgsT... args) {
+inline ReturnT MoveFunction<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::invoke(void* storage, ArgsT... args) {
   auto* f = std::launder(reinterpret_cast<FunctorT*>(storage));
 
   if constexpr (std::is_void_v<ReturnT>) {
@@ -1147,44 +1225,46 @@ inline ReturnT MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::invoke(v
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::move_construct(void* dst,
+                                                                                              void* src) noexcept {
   auto* src_f = std::launder(reinterpret_cast<FunctorT*>(src));
   ::new (dst) FunctorT(std::move(*src_f));
   src_f->~FunctorT();
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::destroy(void* storage) noexcept {
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::destroy(void* storage) noexcept {
   auto* f = std::launder(reinterpret_cast<FunctorT*>(storage));
   f->~FunctorT();
 }
 
 #if defined(__cpp_rtti)
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const std::type_info& MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_type() noexcept {
+inline const std::type_info& MoveFunction<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::target_type() noexcept {
   return typeid(FunctorT);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void* MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target(void* storage) noexcept {
+inline void* MoveFunction<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::target(void* storage) noexcept {
   return storage;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const void* MoveFunction<ReturnT(ArgsT...)>::InlineVTable<FunctorT>::target_const(const void* storage) noexcept {
+inline const void* MoveFunction<ReturnT(ArgsT...), SboSizeT>::InlineVTable<FunctorT>::target_const(
+    const void* storage) noexcept {
   return storage;
 }
 #endif
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline ReturnT MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::invoke(void* storage, ArgsT... args) {
+inline ReturnT MoveFunction<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::invoke(void* storage, ArgsT... args) {
   FunctorT* f = *std::launder(static_cast<FunctorT**>(storage));
 
   if constexpr (std::is_void_v<ReturnT>) {
@@ -1194,18 +1274,19 @@ inline ReturnT MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::invoke(voi
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::move_construct(void* dst, void* src) noexcept {
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::move_construct(void* dst,
+                                                                                            void* src) noexcept {
   FunctorT** src_slot = std::launder(static_cast<FunctorT**>(src));
   FunctorT* src_f = *src_slot;
   ::new (dst) FunctorT*(src_f);
   *src_slot = nullptr;
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::destroy(void* storage) noexcept {
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::destroy(void* storage) noexcept {
   FunctorT** slot = std::launder(static_cast<FunctorT**>(storage));
   FunctorT* f = *slot;
 
@@ -1220,28 +1301,30 @@ inline void MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::destroy(void*
 }
 
 #if defined(__cpp_rtti)
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const std::type_info& MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_type() noexcept {
+inline const std::type_info& MoveFunction<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::target_type() noexcept {
   return typeid(FunctorT);
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline void* MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target(void* storage) noexcept {
+inline void* MoveFunction<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::target(void* storage) noexcept {
   return *std::launder(static_cast<FunctorT**>(storage));
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const void* MoveFunction<ReturnT(ArgsT...)>::HeapVTable<FunctorT>::target_const(const void* storage) noexcept {
+inline const void* MoveFunction<ReturnT(ArgsT...), SboSizeT>::HeapVTable<FunctorT>::target_const(
+    const void* storage) noexcept {
   return *std::launder(static_cast<FunctorT* const*>(storage));
 }
 #endif
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT>
-inline const typename MoveFunction<ReturnT(ArgsT...)>::VTable* MoveFunction<ReturnT(ArgsT...)>::get_vtable() noexcept {
+inline const typename MoveFunction<ReturnT(ArgsT...), SboSizeT>::VTable*
+MoveFunction<ReturnT(ArgsT...), SboSizeT>::get_vtable() noexcept {
   if constexpr (kIsInline<FunctorT>) {
     static constexpr VTable kVTable = {
         &InlineVTable<FunctorT>::invoke,       &InlineVTable<FunctorT>::move_construct,
@@ -1263,9 +1346,9 @@ inline const typename MoveFunction<ReturnT(ArgsT...)>::VTable* MoveFunction<Retu
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 template <typename FunctorT, typename SourceT>
-inline void MoveFunction<ReturnT(ArgsT...)>::construct_from(SourceT&& src) {
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::construct_from(SourceT&& src) {
   if constexpr (kIsInline<FunctorT>) {
     ::new (&storage_) FunctorT(std::forward<SourceT>(src));
   } else {
@@ -1288,8 +1371,8 @@ inline void MoveFunction<ReturnT(ArgsT...)>::construct_from(SourceT&& src) {
   vtable_ = get_vtable<FunctorT>();
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline void MoveFunction<ReturnT(ArgsT...)>::move_from(MoveFunction&& other) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::move_from(MoveFunction&& other) noexcept {
   if VLIKELY (other.vtable_ != nullptr) {
     other.vtable_->move_construct(&storage_, &other.storage_);
     vtable_ = other.vtable_;
@@ -1297,36 +1380,37 @@ inline void MoveFunction<ReturnT(ArgsT...)>::move_from(MoveFunction&& other) noe
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline void MoveFunction<ReturnT(ArgsT...)>::reset() noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void MoveFunction<ReturnT(ArgsT...), SboSizeT>::reset() noexcept {
   if VLIKELY (vtable_ != nullptr) {
     vtable_->destroy(&storage_);
     vtable_ = nullptr;
   }
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline void swap(MoveFunction<ReturnT(ArgsT...)>& lhs, MoveFunction<ReturnT(ArgsT...)>& rhs) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline void swap(MoveFunction<ReturnT(ArgsT...), SboSizeT>& lhs,
+                 MoveFunction<ReturnT(ArgsT...), SboSizeT>& rhs) noexcept {
   lhs.swap(rhs);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator==(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator==(const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept {
   return !cb;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator==(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator==(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb) noexcept {
   return !cb;
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator!=(const MoveFunction<ReturnT(ArgsT...)>& cb, std::nullptr_t) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator!=(const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept {
   return static_cast<bool>(cb);
 }
 
-template <typename ReturnT, typename... ArgsT>
-inline bool operator!=(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...)>& cb) noexcept {
+template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
+inline bool operator!=(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb) noexcept {
   return static_cast<bool>(cb);
 }
 
@@ -1339,14 +1423,32 @@ namespace vlink {
 template <typename SignatureT>
 using Function = std::function<SignatureT>;
 
+template <typename SignatureT>
+using LargeFunction = std::function<SignatureT>;
+
+template <typename SignatureT>
+using function = std::function<SignatureT>;
+
 #if defined(__cpp_lib_move_only_function) && __cpp_lib_move_only_function >= 202110L
 [[maybe_unused]] static constexpr bool kIsSupportMoveFunction = true;
 template <typename SignatureT>
 using MoveFunction = std::move_only_function<SignatureT>;
+
+template <typename SignatureT>
+using LargeMoveFunction = std::move_only_function<SignatureT>;
+
+template <typename SignatureT>
+using move_only_function = std::move_only_function<SignatureT>;
 #else
 [[maybe_unused]] static constexpr bool kIsSupportMoveFunction = false;
 template <typename SignatureT>
 using MoveFunction = std::function<SignatureT>;
+
+template <typename SignatureT>
+using LargeMoveFunction = std::function<SignatureT>;
+
+template <typename SignatureT>
+using move_only_function = std::function<SignatureT>;
 #endif
 
 }  // namespace vlink

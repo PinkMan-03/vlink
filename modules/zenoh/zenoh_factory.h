@@ -61,7 +61,7 @@ namespace vlink {
 using SessionID = std::tuple<int32_t, int32_t, std::string, Conf::PropertiesMap>;
 using ZenohID = std::tuple<uint8_t, std::string, int32_t, int32_t, std::string, std::string, Conf::PropertiesMap>;
 using ZenohSessionPtr = std::shared_ptr<z_owned_session_t>;
-static constexpr std::size_t kZenohDefaultShmLoanThreshold{8 * 1024};
+static constexpr size_t kZenohDefaultShmLoanThreshold{8 * 1024};
 
 struct alignas(16) ZenohHeader final {
   uint64_t guid{0};
@@ -257,7 +257,7 @@ class ZenohClient final : public AbstractObject<ZenohID>, public std::enable_sha
 
   struct ResponseCallback final {
     NodeImpl* owner{nullptr};
-    vlink::Function<void(uint64_t, const Bytes&)> callback;
+    Function<void(uint64_t, const Bytes&)> callback;
   };
 
   std::unordered_map<uint64_t, ResponseCallback> callbacks_;

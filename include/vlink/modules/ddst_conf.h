@@ -177,7 +177,7 @@ struct VLINK_EXPORT DdstConf final : public Conf {
   static const Qos& find_qos(const std::string& name);
 
   friend class DdstFactory;
-  static std::map<std::string, vlink::Function<void*()>> type_support_map_;
+  static std::map<std::string, Function<void*()>> type_support_map_;
   static std::map<std::string, Qos> qos_map_;
   static std::shared_mutex mtx_;
   static constexpr const char* kRespSuffix{"___resp"};

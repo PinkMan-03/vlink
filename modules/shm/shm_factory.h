@@ -83,8 +83,8 @@ using ShmID = std::tuple<uint8_t, std::string, int32_t, int32_t, int32_t, int32_
 // ShmFactory
 class ShmFactory final : public AbstractFactory<ShmID> {
  public:
-  using DetectCallback = vlink::Function<void()>;
-  using DiscoveryCallback = vlink::Function<void(shm::runtime::ServiceDiscovery*)>;
+  using DetectCallback = Function<void()>;
+  using DiscoveryCallback = Function<void(shm::runtime::ServiceDiscovery*)>;
   using ShmId = std::tuple<shm::capro::IdString_t, shm::capro::IdString_t, shm::capro::IdString_t>;
 
  private:
@@ -281,7 +281,7 @@ class ShmClient final : public AbstractObject<ShmID>, public std::enable_shared_
   shm::popo::Listener* listener_{nullptr};
   std::optional<shm::popo::UntypedClient> client_;
   std::mutex mtx_;
-  std::unordered_map<uint64_t, vlink::Function<void(uint64_t, const Bytes&)>> callbacks_;
+  std::unordered_map<uint64_t, Function<void(uint64_t, const Bytes&)>> callbacks_;
 };
 
 // ShmPublisher

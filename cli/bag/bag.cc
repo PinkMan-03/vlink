@@ -84,7 +84,7 @@ std::atomic<uint8_t> time_method{kUseUnknown};
 [[maybe_unused]] static bool quiet_flag{false};
 [[maybe_unused]] static bool detail_flag{false};
 
-vlink::condition_variable quit_cv;
+vlink::ConditionVariable quit_cv;
 std::mutex print_mtx;
 std::thread print_thread;
 vlink::ElapsedTimer main_elapsed_timer{vlink::ElapsedTimer::kMicro};

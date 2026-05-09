@@ -417,8 +417,8 @@ TEST_SUITE("base-ConditionVariableAny") {
   // -------------------------------------------------------------------------
   TEST_CASE("type aliases resolve correctly") {
     // condition_variable and condition_variable_any are aliases
-    vlink::condition_variable cv;
-    vlink::condition_variable_any cva;
+    vlink::ConditionVariable cv;
+    vlink::ConditionVariable_any cva;
 
     // Just verify construction and destruction don't crash
     CHECK(cv.native_handle() != nullptr);

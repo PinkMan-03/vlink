@@ -132,7 +132,7 @@ TEST_SUITE("base-MemoryResource - global instance") {
 
     auto over_before = pool.get_oversized_stats();
 
-    constexpr size_t kHuge = 32u * 1024u * 1024u;  // larger than the 12 MiB top tier
+    constexpr size_t kHuge = 32u * 1024u * 1024u;  // larger than the 16 MiB top tier
     void* p = res.allocate(kHuge);
     REQUIRE(p != nullptr);
 

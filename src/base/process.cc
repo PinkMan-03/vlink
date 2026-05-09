@@ -442,7 +442,7 @@ struct Process::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding
   std::mutex buffer_mtx;
 
   std::mutex state_mtx;
-  vlink::condition_variable state_cv;
+  ConditionVariable state_cv;
 
   std::unique_ptr<std::thread> monitor_thread;
 

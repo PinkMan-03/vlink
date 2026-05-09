@@ -111,7 +111,7 @@ class Getter : public Node<GetterImpl, SecT> {
   using SharedPtr = std::shared_ptr<Getter<ValueT, SecT>>;
 
   /** @brief User-facing callback type for value-change notifications. */
-  using MsgCallback = vlink::Function<void(const ValueT&)>;
+  using MsgCallback = Function<void(const ValueT&)>;
 
   /** @brief Node role identifier (@c kGetter). */
   static constexpr ImplType kImplType = kGetter;
@@ -294,7 +294,7 @@ class Getter : public Node<GetterImpl, SecT> {
 
   std::optional<ValueT> value_;
   mutable std::mutex mtx_;
-  vlink::condition_variable cv_;
+  ConditionVariable cv_;
   MsgCallback callback_;
   Bytes last_cache_;
   bool has_value_notification_{false};

@@ -64,9 +64,6 @@
  * // Using the macro (preferred for member name checks):
  * static_assert(VLINK_HAS_MEMBER(Foo, bar));
  * static_assert(!VLINK_HAS_MEMBER(Baz, bar));
- *
- * // Using the template directly:
- * static_assert(vlink::Traits::Callable<vlink::Function<void()>>::value);
  * @endcode
  */
 
@@ -75,8 +72,6 @@
 #include <atomic>
 #include <memory>
 #include <type_traits>
-
-#include "./functional.h"
 
 namespace vlink {
 

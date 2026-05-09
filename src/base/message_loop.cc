@@ -126,7 +126,7 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
   std::thread thread;
   std::unordered_set<Timer*> timer_set;
   std::mutex mtx;
-  vlink::condition_variable cv;
+  ConditionVariable cv;
 };
 
 // MessageLoop

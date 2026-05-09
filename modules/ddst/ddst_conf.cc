@@ -43,7 +43,7 @@ namespace vlink {
 
 VLINK_DEFINE_GLOBAL_PROPERTY(DdstConf)
 
-std::map<std::string, vlink::Function<void*()>> DdstConf::type_support_map_;
+std::map<std::string, Function<void*()>> DdstConf::type_support_map_;
 std::map<std::string, Qos> DdstConf::qos_map_;
 std::shared_mutex DdstConf::mtx_;
 
