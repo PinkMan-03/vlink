@@ -72,7 +72,7 @@
 | `dds://`     | Fast-DDS RTPS    | 跨机器         | 否     | **稳定** |
 | `ddsc://`    | CycloneDDS       | 跨机器         | 否     | **稳定** |
 
-> ^1^ `intra://` 的零拷贝通过 `shared_ptr<IntraData>` 子类实现（引用计数共享指针传递），无序列化开销。
+> ^1^ `intra://` 的零拷贝通过 `shared_ptr<IntraDataType 子类>` 实现（由 `VLINK_INTRA_DATA_DECLARE` 宏生成，引用计数共享指针传递），无序列化开销。
 > ^2^ `shm://` / `shm2://` 的零拷贝通过 `loan()` / `return_loan()` 接口实现（共享内存借贷缓冲区），详见 [节点基类与生命周期 -- 零拷贝借贷](02-node-lifecycle.md#7-零拷贝借贷)。
 
 **Beta 后端（实验性，API 可能变化）：**
@@ -165,7 +165,7 @@ explicit Publisher(const std::string& url_str,
                    InitType type = InitType::kWithInit);
 
 // 从传输配置对象构造（细粒度控制）
-template <typename ConfT>
+template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
 explicit Publisher(const ConfT& conf,
                    InitType type = InitType::kWithInit);
 ```
@@ -243,7 +243,7 @@ class Subscriber : public Node<SubscriberImpl, SecT>;
 explicit Subscriber(const std::string& url_str,
                     InitType type = InitType::kWithInit);
 
-template <typename ConfT>
+template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
 explicit Subscriber(const ConfT& conf,
                     InitType type = InitType::kWithInit);
 ```

@@ -1219,12 +1219,37 @@ TEST_SUITE("base-Function - custom SBO size") {
   }
 
   // -------------------------------------------------------------------------
-  TEST_CASE("different SboSizeT yields distinct types") {
+  TEST_CASE("different SboSizeT yields distinct types but are interchangeable") {
     using Small = Function<void(), 64>;
     using Big = Function<void(), 256>;
     CHECK_FALSE(std::is_same_v<Small, Big>);
-    CHECK_FALSE(std::is_assignable_v<Small&, Big>);
-    CHECK_FALSE(std::is_assignable_v<Big&, Small>);
+
+    // Cross-SboSize Function instantiations are distinct types but remain
+    // interchangeable through the generic functor-construction path: each can
+    // be wrapped as a callable inside the other.
+    CHECK(std::is_constructible_v<Big, const Small&>);
+    CHECK(std::is_constructible_v<Big, Small&&>);
+    CHECK(std::is_constructible_v<Small, const Big&>);
+    CHECK(std::is_constructible_v<Small, Big&&>);
+
+    CHECK(std::is_assignable_v<Small&, Big>);
+    CHECK(std::is_assignable_v<Big&, Small>);
+
+    int counter = 0;
+    Small small_fn = [&counter]() { ++counter; };
+
+    Big big_from_small(small_fn);
+    big_from_small();
+    CHECK(counter == 1);
+
+    Big big_assigned;
+    big_assigned = small_fn;
+    big_assigned();
+    CHECK(counter == 2);
+
+    Small small_from_big(big_assigned);
+    small_from_big();
+    CHECK(counter == 3);
   }
 
   // -------------------------------------------------------------------------

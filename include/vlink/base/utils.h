@@ -286,8 +286,15 @@ VLINK_EXPORT bool set_thread_stick(uint32_t core_mask, std::thread* thread = nul
  * @brief Returns the native OS thread identifier of the calling thread.
  *
  * @details
- * Returns @c pthread_self() on POSIX or @c GetCurrentThreadId() on Windows.
- * The value can be used with profiling tools or for thread identification in logs.
+ * Platform mapping:
+ *  - **Linux / Android / QNX**: @c syscall(SYS_gettid) — kernel TID (LWP id),
+ *    matches what @c top / @c htop / @c perf show.
+ *  - **macOS / iOS**: @c pthread_threadid_np() — 64-bit Mach thread id.
+ *  - **Windows**: @c ::GetCurrentThreadId() — Win32 thread id.
+ *
+ * Note this is **not** @c pthread_self() (which is an opaque @c pthread_t
+ * handle and is process-internal).  Use this id for profiling tools, log
+ * correlation, or @c gdb @c "thread find @c ID".
  *
  * @return Native thread ID.
  */
@@ -348,13 +355,20 @@ VLINK_EXPORT void stop_detect_keyboard() noexcept;
 [[nodiscard]] VLINK_EXPORT std::pair<int, int> get_terminal_size() noexcept;
 
 /**
- * @brief Returns the current CPU usage of the process as a percentage.
+ * @brief Returns the current system-wide CPU usage as a percentage.
  *
  * @details
- * Computes @c (user_time + kernel_time) / elapsed_time * 100.  The value is a snapshot
- * since the last call and may return 0 on the first invocation.
+ * Computes @c (1 @c - @c idle_delta @c / @c total_delta) @c * @c 100, where
+ * the deltas come from @c /proc/stat (Linux/Android) or @c GetSystemTimes
+ * (Windows).  The value is a snapshot taken between this call and the
+ * previous call, so the first invocation usually returns @c 0.
  *
- * @return CPU usage in the range [0.0, 100.0 * num_cpus].
+ * @note
+ * The result is **system-wide**, not process-specific, and is **normalised
+ * to a single percentage** in @c [0.0, @c 100.0] regardless of core count
+ * (it is averaged across all logical CPUs, not summed).
+ *
+ * @return System CPU usage in the range @c [0.0, @c 100.0].
  */
 [[nodiscard]] VLINK_EXPORT double get_cpu_usage() noexcept;
 

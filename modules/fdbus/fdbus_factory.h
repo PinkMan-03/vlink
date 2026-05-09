@@ -94,6 +94,8 @@ class FdbusClient final : public AbstractObject<FdbusID>,
 
   std::any get_native_handle() const override;
 
+  void start_timer();
+
   bool call(uint32_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback = nullptr,
             int32_t timeout_ms = 0);
 
@@ -105,6 +107,8 @@ class FdbusClient final : public AbstractObject<FdbusID>,
   void onBroadcast(fdbus::CBaseJob::Ptr& msg_ref) override;
 
   std::atomic_bool quit_flag_{false};
+  std::atomic_bool timer_started_{false};
+  std::string url_;
   Timer timer_;
 };
 

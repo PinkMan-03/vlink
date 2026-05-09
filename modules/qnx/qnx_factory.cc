@@ -403,31 +403,9 @@ QnxClient::QnxClient(const QnxID& id) {
 
   std::tie(std::ignore, address_) = id;
 
-  try_connect();
-
   timer_.set_interval(10);
   timer_.set_loop_count(Timer::kInfinite);
   timer_.attach(&QnxFactory::get_message_loop());
-
-  std::weak_ptr<QnxClient> weak_self = shared_from_this();
-
-  timer_.start([this, weak_self] {
-    if VUNLIKELY (!weak_self.lock()) {
-      return;
-    }
-
-    if VUNLIKELY (quit_flag_) {
-      return;
-    }
-
-    if (coid_ < 0 || !back_fd_) {
-      timer_.set_interval(50);
-      try_connect();
-    } else {
-      timer_.set_interval(100);
-      try_detect();
-    }
-  });
 }
 
 QnxClient::~QnxClient() {
@@ -666,6 +644,35 @@ bool QnxClient::listen() {
   });
 
   return true;
+}
+
+void QnxClient::start_timer() {
+  bool expected = false;
+  if (!timer_started_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  try_connect();
+
+  std::weak_ptr<QnxClient> weak_self = weak_from_this();
+
+  timer_.start([this, weak_self] {
+    if VUNLIKELY (!weak_self.lock()) {
+      return;
+    }
+
+    if VUNLIKELY (quit_flag_) {
+      return;
+    }
+
+    if (coid_ < 0 || !back_fd_) {
+      timer_.set_interval(50);
+      try_connect();
+    } else {
+      timer_.set_interval(100);
+      try_detect();
+    }
+  });
 }
 
 void QnxClient::try_connect() {

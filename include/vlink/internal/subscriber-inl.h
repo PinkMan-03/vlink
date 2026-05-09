@@ -162,10 +162,12 @@ template <typename MsgT, SecurityType SecT>
 inline bool Subscriber<MsgT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callback) {
   if VUNLIKELY (!this->has_inited_) {
     VLOG_F("Subscriber::listen_bytes() called before init().");
+    return false;
   }
 
   if VUNLIKELY (this->impl_->is_listened) {
     VLOG_F("Subscriber has already been listened, url: ", this->impl_->url, ".");
+    return false;
   }
 
   bool ret = this->impl_->listen([this, callback = std::move(callback)](const Bytes& data) {
@@ -194,10 +196,12 @@ template <typename MsgT, SecurityType SecT>
 inline bool Subscriber<MsgT, SecT>::listen_intra(NodeImpl::IntraMsgCallback&& callback) {
   if VUNLIKELY (!this->has_inited_) {
     VLOG_F("Subscriber::listen_intra() called before init().");
+    return false;
   }
 
   if VUNLIKELY (this->impl_->is_listened) {
     VLOG_F("Subscriber has already been listened, url: ", this->impl_->url, ".");
+    return false;
   }
 
   bool ret = this->impl_->listen([this, callback = std::move(callback)](const IntraData& intra_data) {

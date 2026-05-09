@@ -152,30 +152,32 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    * | domain_id               | 0        | DDS domain ID shared with all clients.                                |
    * | buf_size                | 0        | DDS socket buffer size in bytes; 0 = built-in default.               |
    * | mtu_size                | 0        | DDS MTU size in bytes; 0 = built-in default.                         |
-   * | max_packet_size         | 0        | Maximum relayed message size in MiB; 0 = unlimited.                  |
-   * | security_key            | ""       | Security key for Time, Info, and Control DDS channels.               |
-   * | bind_ip                 | ""       | Bind DDS sockets to this IP; empty = any interface.                  |
-   * | peer_ip                 | ""       | Unicast peer IP for DDS discovery; empty = multicast.                |
-   * | dds_impl                | "dds"    | DDS implementation: "dds", "ddsc", "ddsr", etc.                      |
-   * | use_iox                 | false    | Launch an embedded Iceoryx RouDi daemon at startup.                  |
-   * | iox_monitoring          | true     | Enable Iceoryx introspection/monitoring.                             |
-   * | iox_strategy            | 1        | Iceoryx memory strategy index passed to ShmConf::init_roudi().       |
-   * | iox_config              | ""       | Path to a custom Iceoryx TOML configuration file; empty = default.   |
-   * | runnable_version_major  | 1        | Required major version for loaded runnable plugins.                  |
-   * | runnable_version_minor  | 0        | Required minor version for loaded runnable plugins.                  |
-   * | runnable_prefix         | ""       | Library name prefix for plugin shared objects.                       |
-   * | runnable_list           | {}       | Names of runnable plugins (@c RunablePluginInterface in the API).    |
+   * | max_packet_size         | 0        | Maximum relayed message size in MiB; **0 drops every non-empty message** (no
+   * special-case in the implementation). Set a positive MiB value to forward larger packets; the @c vlink-proxy CLI
+   * defaults this to 4.0. | | security_key            | ""       | Security key for Time, Info, and Control DDS
+   * channels.               | | bind_ip                 | ""       | Bind DDS sockets to this IP; empty = any
+   * interface.                  | | peer_ip                 | ""       | Unicast peer IP for DDS discovery; empty =
+   * multicast.                | | dds_impl                | "dds"    | DDS implementation: "dds", "ddsc", "ddsr", etc.
+   * | | use_iox                 | false    | Launch an embedded Iceoryx RouDi daemon at startup.                  | |
+   * iox_monitoring          | true     | Enable Iceoryx introspection/monitoring.                             | |
+   * iox_strategy            | 1        | Iceoryx memory strategy index passed to ShmConf::init_roudi().       | |
+   * iox_config              | ""       | Path to a custom Iceoryx TOML configuration file; empty = default.   | |
+   * runnable_version_major  | 1        | Required major version for loaded runnable plugins.                  | |
+   * runnable_version_minor  | 0        | Required minor version for loaded runnable plugins.                  | |
+   * runnable_prefix         | ""       | Library name prefix for plugin shared objects.                       | |
+   * runnable_list           | {}       | Names of runnable plugins (@c RunablePluginInterface in the API).    |
    */
   struct Config final {
-    bool async{false};                       ///< Async data forwarding on the MessageLoop thread.
-    bool reliable{false};                    ///< Use reliable DDS QoS; must match all client configs.
-    bool enable_tcp{false};                  ///< Use TCP transport for DDS data channels.
-    bool direct{false};                      ///< Use SHM channels for data (requires use_iox or external RouDi).
-    bool native_mode{false};                 ///< Restrict all DDS traffic to loopback (127.0.0.1).
-    int domain_id{0};                        ///< DDS domain ID.
-    uint32_t buf_size{0};                    ///< DDS socket send/receive buffer in bytes; 0 = default.
-    uint32_t mtu_size{0};                    ///< DDS fragment MTU in bytes; 0 = default.
-    double max_packet_size{0};               ///< Maximum relayed payload in MiB; 0 = no limit.
+    bool async{false};        ///< Async data forwarding on the MessageLoop thread.
+    bool reliable{false};     ///< Use reliable DDS QoS; must match all client configs.
+    bool enable_tcp{false};   ///< Use TCP transport for DDS data channels.
+    bool direct{false};       ///< Use SHM channels for data (requires use_iox or external RouDi).
+    bool native_mode{false};  ///< Restrict all DDS traffic to loopback (127.0.0.1).
+    int domain_id{0};         ///< DDS domain ID.
+    uint32_t buf_size{0};     ///< DDS socket send/receive buffer in bytes; 0 = default.
+    uint32_t mtu_size{0};     ///< DDS fragment MTU in bytes; 0 = default.
+    double max_packet_size{
+        0};  ///< Maximum relayed payload in MiB; 0 drops every non-empty message (set > 0 to forward).
     std::string security_key;                ///< Security key for authenticated DDS channels.
     std::string bind_ip;                     ///< Local IP to bind DDS sockets; empty = any.
     std::string peer_ip;                     ///< Peer unicast IP for DDS; empty = multicast.

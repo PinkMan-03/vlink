@@ -23,6 +23,10 @@
 
 #include "./dds_status_listener.h"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <memory>
 
 #include "./base/traits.h"
@@ -30,22 +34,43 @@
 
 namespace vlink {
 
+static constexpr size_t kDdsInstanceHandleSize = rtps::RTPS_KEY_HASH_SIZE;
+static constexpr size_t kStatusInstanceHandleStorageSize = 32;
+
+template <typename StatusT>
+static std::shared_ptr<StatusT> make_status_with_handle(const void* handle, size_t size,
+                                                        Status::InstanceHandle StatusT::* member) {
+  auto storage = std::make_shared<std::array<uint8_t, kStatusInstanceHandleStorageSize>>();
+  storage->fill(0);
+
+  auto sts = std::shared_ptr<StatusT>(new StatusT(), [storage](StatusT* ptr) { delete ptr; });
+
+  if VLIKELY (handle && size <= storage->size()) {
+    std::memcpy(storage->data(), handle, size);
+    sts.get()->*member = storage->data();
+  }
+
+  return sts;
+}
+
 template <Status::Type TypeT, typename T>
 static auto convert_status(const T& status) {
   if constexpr (TypeT == Status::kPublicationMatched) {
-    auto sts = std::make_shared<Status::PublicationMatched>();
+    auto sts = make_status_with_handle<Status::PublicationMatched>(
+        status.last_subscription_handle.value, kDdsInstanceHandleSize,
+        &Status::PublicationMatched::last_subscription_handle);
     sts->total_count = status.total_count;
     sts->total_count_change = status.total_count_change;
     sts->current_count = status.current_count;
     sts->current_count_change = status.current_count_change;
-    sts->last_subscription_handle = status.last_subscription_handle.value;
 
     return sts;
   } else if constexpr (TypeT == Status::kOfferedDeadlineMissed) {
-    auto sts = std::make_shared<Status::OfferedDeadlineMissed>();
+    auto sts = make_status_with_handle<Status::OfferedDeadlineMissed>(
+        status.last_instance_handle.value, kDdsInstanceHandleSize,
+        &Status::OfferedDeadlineMissed::last_instance_handle);
     sts->total_count = status.total_count;
     sts->total_count_change = status.total_count_change;
-    sts->last_instance_handle = status.last_instance_handle.value;
 
     return sts;
   } else if constexpr (TypeT == Status::kOfferedIncompatibleQos) {
@@ -62,36 +87,39 @@ static auto convert_status(const T& status) {
 
     return sts;
   } else if constexpr (TypeT == Status::kSubscriptionMatched) {
-    auto sts = std::make_shared<Status::SubscriptionMatched>();
+    auto sts = make_status_with_handle<Status::SubscriptionMatched>(
+        status.last_publication_handle.value, kDdsInstanceHandleSize,
+        &Status::SubscriptionMatched::last_publication_handle);
     sts->total_count = status.total_count;
     sts->total_count_change = status.total_count_change;
     sts->current_count = status.current_count;
     sts->current_count_change = status.current_count_change;
-    sts->last_publication_handle = status.last_publication_handle.value;
 
     return sts;
   } else if constexpr (TypeT == Status::kRequestedDeadlineMissed) {
-    auto sts = std::make_shared<Status::RequestedDeadlineMissed>();
+    auto sts = make_status_with_handle<Status::RequestedDeadlineMissed>(
+        status.last_instance_handle.value, kDdsInstanceHandleSize,
+        &Status::RequestedDeadlineMissed::last_instance_handle);
     sts->total_count = status.total_count;
     sts->total_count_change = status.total_count_change;
-    sts->last_instance_handle = status.last_instance_handle.value;
 
     return sts;
   } else if constexpr (TypeT == Status::kLivelinessChanged) {
-    auto sts = std::make_shared<Status::LivelinessChanged>();
+    auto sts =
+        make_status_with_handle<Status::LivelinessChanged>(status.last_publication_handle.value, kDdsInstanceHandleSize,
+                                                           &Status::LivelinessChanged::last_publication_handle);
     sts->alive_count = status.alive_count;
     sts->not_alive_count = status.not_alive_count;
     sts->alive_count_change = status.alive_count_change;
     sts->not_alive_count_change = status.not_alive_count_change;
-    sts->last_publication_handle = status.last_publication_handle.value;
 
     return sts;
   } else if constexpr (TypeT == Status::kSampleRejected) {
-    auto sts = std::make_shared<Status::SampleRejected>();
+    auto sts = make_status_with_handle<Status::SampleRejected>(
+        status.last_instance_handle.value, kDdsInstanceHandleSize, &Status::SampleRejected::last_instance_handle);
     sts->total_count = status.total_count;
     sts->total_count_change = status.total_count_change;
     sts->last_reason = static_cast<Status::SampleRejected::Kind>(status.last_reason);
-    sts->last_instance_handle = status.last_instance_handle.value;
 
     return sts;
   } else if constexpr (TypeT == Status::kRequestedIncompatibleQos) {

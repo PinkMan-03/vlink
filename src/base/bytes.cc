@@ -950,6 +950,9 @@ void Bytes::process_type(Type type, uint8_t* data, size_t size, uint8_t offset, 
 
       size_t total_size = size + offset;
 
+      uint8_t* deferred_free_buffer = nullptr;
+      size_t deferred_free_size = 0;
+
       if (is_owner_ && data_) {
         if VUNLIKELY (data_ == data) {
           VLOG_E("Bytes: Cannot deep copy self.");
@@ -971,7 +974,8 @@ void Bytes::process_type(Type type, uint8_t* data, size_t size, uint8_t offset, 
         }
 
         if (data_ != stack_data_ && capacity_ + offset_ > kStackSize && !can_reuse) {
-          bytes_free(data_, capacity_ + offset_);
+          deferred_free_buffer = data_;
+          deferred_free_size = capacity_ + offset_;
           data_ = nullptr;
           capacity_ = 0;
           offset_ = 0;
@@ -984,6 +988,9 @@ void Bytes::process_type(Type type, uint8_t* data, size_t size, uint8_t offset, 
             data_ = bytes_malloc(total_size);
             if VUNLIKELY (!data_) {
               VLOG_E("Bytes: Failed to allocate memory.");
+              if (deferred_free_buffer) {
+                bytes_free(deferred_free_buffer, deferred_free_size);
+              }
               clear();
               return;
             }
@@ -1013,6 +1020,10 @@ void Bytes::process_type(Type type, uint8_t* data, size_t size, uint8_t offset, 
         offset_ = 0;
         is_owner_ = false;
         is_loaned_ = false;
+      }
+
+      if (deferred_free_buffer) {
+        bytes_free(deferred_free_buffer, deferred_free_size);
       }
 
       break;

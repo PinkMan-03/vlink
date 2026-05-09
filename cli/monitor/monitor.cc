@@ -1230,13 +1230,13 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
 
       if (static_cast<size_t>(selected_line) < current_info_list.size()) {
         const auto& current_info = current_info_list.at(selected_line);
-        std::lock_guard<std::mutex> lock(current_mtx);
+        std::lock_guard lock(current_mtx);
         current_type = current_info.type;
         current_schema_type = static_cast<uint32_t>(current_info.schema_type);
         current_url = current_info.url;
         current_ser = current_info.ser_type;
       } else {
-        std::lock_guard<std::mutex> lock(current_mtx);
+        std::lock_guard lock(current_mtx);
         current_type = 0;
         current_schema_type = 0;
         current_url.clear();
@@ -1244,7 +1244,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
       }
 
     } else {
-      std::lock_guard<std::mutex> lock(current_mtx);
+      std::lock_guard lock(current_mtx);
       current_type = 0;
       current_schema_type = 0;
       current_url.clear();
@@ -1896,7 +1896,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
     std::string selected_ser;
 
     {
-      std::lock_guard<std::mutex> lock(current_mtx);
+      std::lock_guard lock(current_mtx);
       selected_type = current_type.load(std::memory_order_relaxed);
       selected_schema_type = static_cast<vlink::SchemaType>(current_schema_type.load(std::memory_order_relaxed));
       selected_url = current_url;

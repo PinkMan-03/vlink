@@ -43,7 +43,7 @@ void FastStream::reset() noexcept {
 
 void FastStream::append_to(std::string& target) const noexcept { buf_.append_to(target); }
 
-std::string_view FastStream::take_view() noexcept { return buf_.take_view(); }
+std::string_view FastStream::take_view() { return buf_.take_view(); }
 
 size_t FastStream::size() const noexcept { return buf_.size(); }
 
@@ -51,13 +51,13 @@ size_t FastStream::capacity() const noexcept { return buf_.capacity(); }
 
 void FastStream::shrink_to_fit() noexcept { buf_.shrink_to_fit(); }
 
-FastStream& FastStream::write_raw(const char* data, size_t len) noexcept {
+FastStream& FastStream::write_raw(const char* data, size_t len) {
   buf_.xsputn(data, static_cast<std::streamsize>(len));
   return *this;
 }
 
 // FastStream::StringBuf
-FastStream::StringBuf::StringBuf(size_t initial_capacity) noexcept {
+FastStream::StringBuf::StringBuf(size_t initial_capacity) {
   auto actual_capacity = std::max(initial_capacity, kMinCapacity);
   buffer_.resize(actual_capacity);
   reset();
@@ -75,7 +75,7 @@ void FastStream::StringBuf::append_to(std::string& target) const noexcept {
   target.append(pbase(), size());
 }
 
-std::string_view FastStream::StringBuf::take_view() noexcept {
+std::string_view FastStream::StringBuf::take_view() {
   auto current_size = static_cast<size_t>(pptr() - pbase());
 
   if VUNLIKELY (current_size >= buffer_.size()) {
@@ -91,7 +91,7 @@ size_t FastStream::StringBuf::size() const noexcept { return static_cast<size_t>
 
 size_t FastStream::StringBuf::capacity() const noexcept { return buffer_.size(); }
 
-void FastStream::StringBuf::grow_buffer(size_t required_size) noexcept {
+void FastStream::StringBuf::grow_buffer(size_t required_size) {
   auto pos = static_cast<size_t>(pptr() - pbase());
   auto new_size = buffer_.size();
 

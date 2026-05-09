@@ -231,14 +231,28 @@ inline DynamicData& DynamicData::load(const char (&type)[SizeT], const T& t) {
 
   bool ret = Serializer::serialize<Serializer::get_type_of<T>()>(t, data_, TransportType::kUnknown, get_offset());
 
-  if VUNLIKELY (!ret) {
+  if VUNLIKELY (!ret || data_.real_data() == nullptr) {
     VLOG_F("DynamicData serialize failed.");
+    type_ = std::string_view();
+    return *this;
   }
 
   if constexpr (SizeT > 0) {
     std::memcpy(data_.real_data(), type, SizeT);
-    type_ = std::string_view(reinterpret_cast<const char*>(data_.real_data()), SizeT);
+
+    if constexpr (SizeT < kOffset) {
+      std::memset(data_.real_data() + SizeT, 0, kOffset - SizeT);
+    }
+
+    size_t name_len = SizeT;
+
+    if (name_len > 0 && type[SizeT - 1] == '\0') {
+      name_len -= 1;
+    }
+
+    type_ = std::string_view(reinterpret_cast<const char*>(data_.real_data()), name_len);
   } else {
+    std::memset(data_.real_data(), 0, kOffset);
     type_ = std::string_view();
   }
 

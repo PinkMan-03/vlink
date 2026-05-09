@@ -126,7 +126,7 @@ class VLINK_EXPORT FastStream : public std::ostream {
    *
    * @return A @c std::string_view over the internal buffer content.
    */
-  std::string_view take_view() noexcept;
+  std::string_view take_view();
 
   /**
    * @brief Returns the current number of bytes stored in the buffer.
@@ -162,7 +162,7 @@ class VLINK_EXPORT FastStream : public std::ostream {
    * @param len   Number of bytes to write.
    * @return A reference to @c *this to support chaining.
    */
-  FastStream& write_raw(const char* data, size_t len) noexcept;
+  FastStream& write_raw(const char* data, size_t len);
 
  private:
   static constexpr size_t kDefaultCapacity{256};
@@ -171,7 +171,7 @@ class VLINK_EXPORT FastStream : public std::ostream {
 
   class VLINK_EXPORT StringBuf final : public std::streambuf {
    public:
-    explicit StringBuf(size_t initial_capacity = kDefaultCapacity) noexcept;
+    explicit StringBuf(size_t initial_capacity = kDefaultCapacity);
 
     void reset() noexcept;
 
@@ -179,7 +179,7 @@ class VLINK_EXPORT FastStream : public std::ostream {
 
     void append_to(std::string& target) const noexcept;
 
-    [[nodiscard]] std::string_view take_view() noexcept;
+    [[nodiscard]] std::string_view take_view();
 
     [[nodiscard]] size_t size() const noexcept;
 
@@ -190,7 +190,7 @@ class VLINK_EXPORT FastStream : public std::ostream {
     std::streamsize xsputn(const char* s, std::streamsize n) override;
 
    private:
-    void grow_buffer(size_t required_size) noexcept;
+    void grow_buffer(size_t required_size);
 
     void advance_pptr(size_t count) noexcept;
 

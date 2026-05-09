@@ -46,7 +46,9 @@
  * - Shared state accessed inside task callbacks must be protected by its own synchronisation.
  * - Timers attached to a @c MultiLoop fire as queue tasks on the dispatcher and execute on a
  *   pool worker (non-deterministic which worker).
- * - The destructor quits the loop and shuts down the internal pool, joining all workers.
+ * - The destructor is defaulted. Stop the loop before destruction with @c quit()
+ *   and @c wait_for_quit(), or destroy it only after the dispatcher has already
+ *   exited and @c on_end() has shut down the internal pool.
  *
  * @par Example
  * @code
@@ -59,6 +61,7 @@
  *
  * loop.wait_for_idle();
  * loop.quit();
+ * loop.wait_for_quit();
  * @endcode
  */
 
@@ -97,8 +100,15 @@ class VLINK_EXPORT MultiLoop : public MessageLoop {
   explicit MultiLoop(size_t thread_num, Type type);
 
   /**
-   * @brief Destructor.  Quits the loop; the inherited @c MessageLoop destructor joins
-   *        the dispatcher thread and @c on_end() shuts down the internal @c ThreadPool.
+   * @brief Destructor.  Defaulted; callers must stop the loop before destruction.
+   *
+   * @warning
+   * @c MessageLoop's destructor can request an emergency quit and join the
+   * dispatcher thread, but it runs after the @c MultiLoop sub-object and its
+   * members have been destroyed.  Do not rely on that path to call
+   * @c MultiLoop::on_end() or to tear down the internal @c ThreadPool.
+   * Always call @c quit() and @c wait_for_quit() before destruction, or destroy
+   * the loop only after it has exited on its own.
    */
   ~MultiLoop() override;
 

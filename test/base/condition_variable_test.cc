@@ -49,13 +49,13 @@ TEST_SUITE("base-ConditionVariable") {
     std::thread producer([&]() {
       std::this_thread::sleep_for(20ms);
       {
-        std::lock_guard<std::mutex> lk(mtx);
+        std::lock_guard lk(mtx);
         ready = true;
       }
       cv.notify_one();
     });
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     cv.wait(lk, [&] { return ready; });
 
     CHECK(ready);
@@ -75,7 +75,7 @@ TEST_SUITE("base-ConditionVariable") {
 
     for (int i = 0; i < kThreads; ++i) {
       consumers.emplace_back([&]() {
-        std::unique_lock<std::mutex> lk(mtx);
+        std::unique_lock lk(mtx);
         cv.wait(lk, [&] { return go; });
         woken.fetch_add(1, std::memory_order_relaxed);
       });
@@ -83,7 +83,7 @@ TEST_SUITE("base-ConditionVariable") {
 
     std::this_thread::sleep_for(20ms);
     {
-      std::lock_guard<std::mutex> lk(mtx);
+      std::lock_guard lk(mtx);
       go = true;
     }
     cv.notify_all();
@@ -100,7 +100,7 @@ TEST_SUITE("base-ConditionVariable") {
     ConditionVariable cv;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto status = cv.wait_for(lk, 30ms);
 
     CHECK(status == std::cv_status::timeout);
@@ -115,13 +115,13 @@ TEST_SUITE("base-ConditionVariable") {
     std::thread producer([&]() {
       std::this_thread::sleep_for(10ms);
       {
-        std::lock_guard<std::mutex> lk(mtx);
+        std::lock_guard lk(mtx);
         ready = true;
       }
       cv.notify_one();
     });
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto status = cv.wait_for(lk, 500ms);
 
     CHECK(status == std::cv_status::no_timeout);
@@ -137,13 +137,13 @@ TEST_SUITE("base-ConditionVariable") {
     std::thread producer([&]() {
       std::this_thread::sleep_for(10ms);
       {
-        std::lock_guard<std::mutex> lk(mtx);
+        std::lock_guard lk(mtx);
         flag = true;
       }
       cv.notify_one();
     });
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     bool result = cv.wait_for(lk, 500ms, [&] { return flag; });
 
     CHECK(result);
@@ -155,7 +155,7 @@ TEST_SUITE("base-ConditionVariable") {
     ConditionVariable cv;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     bool result = cv.wait_for(lk, 30ms, [] { return false; });
 
     CHECK(!result);
@@ -166,7 +166,7 @@ TEST_SUITE("base-ConditionVariable") {
     ConditionVariable cv;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::steady_clock::now() + 30ms;
     auto status = cv.wait_until(lk, deadline);
 
@@ -178,7 +178,7 @@ TEST_SUITE("base-ConditionVariable") {
     ConditionVariable cv;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::system_clock::now() + 30ms;
     auto status = cv.wait_until(lk, deadline);
 
@@ -190,7 +190,7 @@ TEST_SUITE("base-ConditionVariable") {
     ConditionVariable cv;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::steady_clock::now() + 30ms;
     bool result = cv.wait_until(lk, deadline, [] { return false; });
 
@@ -206,13 +206,13 @@ TEST_SUITE("base-ConditionVariable") {
     std::thread producer([&]() {
       std::this_thread::sleep_for(10ms);
       {
-        std::lock_guard<std::mutex> lk(mtx);
+        std::lock_guard lk(mtx);
         flag = true;
       }
       cv.notify_one();
     });
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::steady_clock::now() + 500ms;
     bool result = cv.wait_until(lk, deadline, [&] { return flag; });
 
@@ -237,7 +237,7 @@ TEST_SUITE("base-ConditionVariable") {
       for (int i = 1; i <= kRounds; ++i) {
         std::this_thread::sleep_for(5ms);
         {
-          std::lock_guard<std::mutex> lk(mtx);
+          std::lock_guard lk(mtx);
           value = i;
         }
         cv.notify_one();
@@ -245,7 +245,7 @@ TEST_SUITE("base-ConditionVariable") {
     });
 
     for (int expected = 1; expected <= kRounds; ++expected) {
-      std::unique_lock<std::mutex> lk(mtx);
+      std::unique_lock lk(mtx);
       cv.wait(lk, [&] { return value == expected; });
       CHECK(value == expected);
     }
@@ -265,13 +265,13 @@ TEST_SUITE("base-ConditionVariableAny") {
     std::thread producer([&]() {
       std::this_thread::sleep_for(20ms);
       {
-        std::lock_guard<std::mutex> lk(mtx);
+        std::lock_guard lk(mtx);
         ready = true;
       }
       cva.notify_one();
     });
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     cva.wait(lk, [&] { return ready; });
 
     CHECK(ready);
@@ -291,7 +291,7 @@ TEST_SUITE("base-ConditionVariableAny") {
 
     for (int i = 0; i < kThreads; ++i) {
       consumers.emplace_back([&]() {
-        std::unique_lock<std::mutex> lk(mtx);
+        std::unique_lock lk(mtx);
         cva.wait(lk, [&] { return go; });
         woken.fetch_add(1, std::memory_order_relaxed);
       });
@@ -299,7 +299,7 @@ TEST_SUITE("base-ConditionVariableAny") {
 
     std::this_thread::sleep_for(20ms);
     {
-      std::lock_guard<std::mutex> lk(mtx);
+      std::lock_guard lk(mtx);
       go = true;
     }
     cva.notify_all();
@@ -316,7 +316,7 @@ TEST_SUITE("base-ConditionVariableAny") {
     ConditionVariableAny cva;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto status = cva.wait_for(lk, 30ms);
 
     CHECK(status == std::cv_status::timeout);
@@ -327,7 +327,7 @@ TEST_SUITE("base-ConditionVariableAny") {
     ConditionVariableAny cva;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     bool result = cva.wait_for(lk, 30ms, [] { return false; });
 
     CHECK(!result);
@@ -342,13 +342,13 @@ TEST_SUITE("base-ConditionVariableAny") {
     std::thread producer([&]() {
       std::this_thread::sleep_for(10ms);
       {
-        std::lock_guard<std::mutex> lk(mtx);
+        std::lock_guard lk(mtx);
         flag = true;
       }
       cva.notify_one();
     });
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     bool result = cva.wait_for(lk, 500ms, [&] { return flag; });
 
     CHECK(result);
@@ -360,7 +360,7 @@ TEST_SUITE("base-ConditionVariableAny") {
     ConditionVariableAny cva;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::steady_clock::now() + 30ms;
     auto status = cva.wait_until(lk, deadline);
 
@@ -372,7 +372,7 @@ TEST_SUITE("base-ConditionVariableAny") {
     ConditionVariableAny cva;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::system_clock::now() + 30ms;
     auto status = cva.wait_until(lk, deadline);
 
@@ -384,7 +384,7 @@ TEST_SUITE("base-ConditionVariableAny") {
     ConditionVariableAny cva;
     std::mutex mtx;
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::steady_clock::now() + 30ms;
     bool result = cva.wait_until(lk, deadline, [] { return false; });
 
@@ -400,13 +400,13 @@ TEST_SUITE("base-ConditionVariableAny") {
     std::thread producer([&]() {
       std::this_thread::sleep_for(10ms);
       {
-        std::lock_guard<std::mutex> lk(mtx);
+        std::lock_guard lk(mtx);
         flag = true;
       }
       cva.notify_one();
     });
 
-    std::unique_lock<std::mutex> lk(mtx);
+    std::unique_lock lk(mtx);
     auto deadline = std::chrono::steady_clock::now() + 500ms;
     bool result = cva.wait_until(lk, deadline, [&] { return flag; });
 
@@ -418,7 +418,7 @@ TEST_SUITE("base-ConditionVariableAny") {
   TEST_CASE("type aliases resolve correctly") {
     // condition_variable and condition_variable_any are aliases
     vlink::ConditionVariable cv;
-    vlink::ConditionVariable_any cva;
+    vlink::ConditionVariableAny cva;
 
     // Just verify construction and destruction don't crash
     CHECK(cv.native_handle() != nullptr);

@@ -297,13 +297,23 @@ int main() {
 
     // VLINK_MEMORY_LEVEL: Tier configuration level for vlink::MemoryPool.
     //   Integer in [0, 9]; 0 = bypass mode (every allocation goes straight to
-    //   ::operator new / delete). 1..9 select the built-in pyramid; higher
-    //   levels reserve more blocks per tier, trading resident footprint for
-    //   fewer upstream allocations. Out-of-range or non-numeric values clamp
-    //   to [0, 9].
-    //   Default: 3 (Balanced)
+    //   ::operator new / delete). 1..9 select the built-in 16-tier pyramid;
+    //   higher levels reserve more blocks per tier, trading resident footprint
+    //   for fewer upstream allocations.  L9 saturates around 480 MiB (strictly
+    //   below 500 MiB). Out-of-range or non-numeric values clamp to [0, 9].
+    //   Default: 3 (Balanced, ~32 MiB)
     //   Shell: export VLINK_MEMORY_LEVEL=4
     show_env("VLINK_MEMORY_LEVEL", "MemoryPool tier level (0..9, default 3; 0 = bypass)");
+
+    // VLINK_MEMORY_PREALLOC: Eagerly fill every tier on first construction.
+    //   Set to "1" to make MemoryPool::global_instance(true) front-load one
+    //   ::operator new per tier sized for the full blocks_per_chunk quota
+    //   (best-effort: a per-tier failure leaves that tier in lazy mode but
+    //   does not abort).  Removes upstream-allocation latency from hot paths
+    //   at the cost of higher startup RSS.
+    //   Default: unset (lazy geometric growth)
+    //   Shell: export VLINK_MEMORY_PREALLOC=1
+    show_env("VLINK_MEMORY_PREALLOC", "Eager prealloc on first global_instance() (set to 1 to enable)");
 
     // Show the current platform temp directory
     VLOG_I("  Platform tmp dir:", vlink::Utils::get_tmp_dir());

@@ -242,9 +242,11 @@ bool SysSharemem::detach(bool force) {
 
 #if defined(_WIN32) || defined(__CYGWIN__)
   (void)force;
+  bool ok = true;
+
   if VUNLIKELY (!::UnmapViewOfFile(impl_->data)) {
     VLOG_E("SysSharemem: UnmapViewOfFile failed.");
-    return false;
+    ok = false;
   }
 
   impl_->data = nullptr;
@@ -255,26 +257,24 @@ bool SysSharemem::detach(bool force) {
   // NOLINTNEXTLINE(readability-implicit-bool-conversion)
   if VUNLIKELY (!::CloseHandle(impl_->handle)) {
     VLOG_E("SysSharemem: CloseHandle failed.");
-    return false;
+    ok = false;
   }
 
   impl_->handle = nullptr;
 
-  return true;
+  return ok;
 #elif defined(__ANDROID__)
   (void)force;
   VLOG_E("SysSharemem: shm_unlink is not supported on this platform.");
 
   return false;
 #else
+  bool ok = true;
 
   if VUNLIKELY (::munmap(impl_->data, size_t(impl_->size)) == -1) {
     VLOG_E("SysSharemem: munmap failed.");
-    return false;
+    ok = false;
   }
-
-  impl_->data = nullptr;
-  impl_->size = 0;
 
   int shm_nattch = force ? 0 : -1;
 
@@ -290,17 +290,19 @@ bool SysSharemem::detach(bool force) {
     impl_->handle = -1;
   }
 
-  if (shm_nattch == 0) {
+  if (shm_nattch == 0 && !impl_->name.empty()) {
     if VUNLIKELY (::shm_unlink(impl_->name.c_str()) == -1 && errno != ENOENT) {
       VLOG_E("SysSharemem: shm_unlink failed.");
-      return false;
+      ok = false;
     }
   }
 
+  impl_->data = nullptr;
+  impl_->size = 0;
   impl_->name.clear();
   impl_->mode = kReadWrite;
 
-  return true;
+  return ok;
 #endif
 }
 

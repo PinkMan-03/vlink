@@ -277,14 +277,25 @@ class VLINK_EXPORT MessageLoop {
   bool spin_once(bool block = true);
 
   /**
-   * @brief Requests the loop to exit cleanly.
+   * @brief Requests the loop to exit.
    *
    * @details
-   * Signals the loop to stop after finishing the current task.  If @p force is @c true,
-   * remaining queued tasks are discarded.
+   * Sets an internal quit flag that the dispatcher checks between iterations.
+   * Behaviour is **per-batch**, not per-task:
+   *  - With @p force @c == @c false (default), the loop finishes the current
+   *    batch of already-dequeued tasks (the snapshot it is currently iterating)
+   *    and then exits — tasks @b posted after this call return through
+   *    @c post_task() but are not executed.
+   *  - With @p force @c == @c true, the dispatcher additionally aborts the
+   *    in-flight batch and drops the remaining tasks in that batch.
    *
-   * @param force  If @c true, discard pending tasks.  Default: @c false.
-   * @return @c true on success.
+   * If a graceful drain of *everything currently queued* is required, prefer
+   * @c wait_for_idle() before @c quit().  Returns @c false if the loop is not
+   * running or @c quit() has already been called (only when @p force is
+   * @c false).
+   *
+   * @param force  If @c true, also discard the in-flight batch.  Default: @c false.
+   * @return @c true if the quit signal was accepted.
    */
   bool quit(bool force = false);
 

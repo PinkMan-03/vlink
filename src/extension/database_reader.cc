@@ -2274,7 +2274,7 @@ void DatabaseReader::close() {
     }
 
     if (wrapper_file.db) {
-      int ret = ::sqlite3_close(wrapper_file.db);
+      int ret = ::sqlite3_close_v2(wrapper_file.db);
       if VUNLIKELY (ret != SQLITE_OK) {
         CLOG_W("Failed to close database: %s.", ::sqlite3_errmsg(wrapper_file.db));
         return;
@@ -2315,6 +2315,7 @@ int DatabaseReader::get_reset_index(const Config& config) {
         impl_->update_sql_time_str.append(" ORDER BY elapsed;");
       } else {
         std::string id_list_str = " url IN (";
+        bool id_appended = false;
 
         for (const auto& url : config.filter_urls) {
           auto iter = wrapper_file.url_to_id_map.find(url);
@@ -2325,10 +2326,15 @@ int DatabaseReader::get_reset_index(const Config& config) {
 
           id_list_str.append(std::to_string(iter->second));
           id_list_str.append(",");
+          id_appended = true;
         }
 
-        id_list_str.pop_back();
-        id_list_str.append(")");
+        if (id_appended) {
+          id_list_str.pop_back();
+          id_list_str.append(")");
+        } else {
+          id_list_str = " url IN (NULL)";
+        }
 
         impl_->update_sql_default_str = "SELECT elapsed, url, action, data FROM VLinkDatas WHERE";
         impl_->update_sql_default_str.append(id_list_str);

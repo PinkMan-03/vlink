@@ -109,9 +109,12 @@ inline Client<ReqT, RespT, SecT>::Client(const std::string& url_str, InitType ty
 
 template <typename ReqT, typename RespT, SecurityType SecT>
 inline Client<ReqT, RespT, SecT>::~Client() {
+  {
+    std::lock_guard lock(future_mtx_);
+    future_map_.clear();
+  }
+
   this->deinit();
-  std::lock_guard lock(future_mtx_);
-  future_map_.clear();
 }
 
 template <typename ReqT, typename RespT, SecurityType SecT>

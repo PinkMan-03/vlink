@@ -126,6 +126,8 @@ class QnxClient final : public AbstractObject<QnxID>, public std::enable_shared_
 
   bool listen();
 
+  void start_timer();
+
  private:
   void try_connect();
 
@@ -135,6 +137,7 @@ class QnxClient final : public AbstractObject<QnxID>, public std::enable_shared_
 
   std::atomic_bool quit_flag_{false};
   std::atomic_bool is_busy_{false};
+  std::atomic_bool timer_started_{false};
   std::atomic<name_attach_t*> back_fd_{nullptr};
   std::atomic<int> coid_{-1};
   std::string address_;

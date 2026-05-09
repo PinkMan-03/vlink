@@ -349,6 +349,12 @@ void WheelTimer::Impl::run() {
       now = std::chrono::steady_clock::now();
     }
 
+    constexpr int64_t kStaleTickResetIntervals = 10;
+
+    if (next_tick + interval * kStaleTickResetIntervals < now) {
+      next_tick = now + interval;
+    }
+
     uint32_t advanced = 0;
     uint32_t catchup_limit_snapshot = catchup_limit.load();
 
@@ -413,7 +419,6 @@ void WheelTimer::Impl::run() {
       }
     }
 
-    constexpr int64_t kStaleTickResetIntervals = 10;
     now = std::chrono::steady_clock::now();
 
     if (next_tick + interval * kStaleTickResetIntervals < now) {

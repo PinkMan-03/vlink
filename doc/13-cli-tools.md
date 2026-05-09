@@ -603,7 +603,7 @@ Compression:   lzav (Ratio: 50%)
 Process Name:  my_node
 Meta Flags:    completed | idx_elapsed | idx_url | schema
 Date Time:     2026-03-17 10:00:00 (Timezone: +08:00:00)
-Duration:      00:00:00.500 ~ 00:05:30.123
+Duration:      00:00:00.500 ~ 00:05:30.123     # 左：累计静默间隔；右：录制总时长
 Message Count: 33120
 Split Count:   ---
 
@@ -1250,7 +1250,7 @@ HTML 报告面向“先看结论、再定位问题、最后看细节”的阅读
 - `Loss` 显示的是丢包率百分比。低于 5% 的丢包不在 Run Overview、Transport Health、推荐卡片标题上突出显示，避免正常轻微丢包干扰判断；展开测试对象推荐卡片时仍会显示该 URL 的精确丢包率（不论是否触发阈值），便于审计。
 - `P95 / P99 / P99.9 / P99.99` 是成功运行的聚合结果。P95 表示大约 95% 的消息不超过这个延迟；P99 可以理解为 100 条消息里接近第 99 条的慢消息；P99.9 / P99.99 更关注极少数慢消息。数值越小越好，它们比平均值更能暴露偶发卡顿。
 - 推荐总分上限为 **120 分**，按 **延迟 30% / 吞吐 20% / 资源 10% / 送达（丢包）10% / 发送阻塞 10% / 覆盖度 10% / 拓扑 10%** 七个大类权重合成（实际公式为 `0.36×延迟 + 0.24×吞吐 + 0.12×资源 + 0.12×送达 + 0.12×发送阻塞 + 0.12×覆盖度 + 0.12×拓扑`，比例与 30/20/10/10/10/10/10 一致，乘以 1.20 得到满分 120），最后再乘 confidence 因子（high 1.00 / solo 0.99 / medium 0.99 / unknown 0.95 / noisy 0.95）。**送达分** 直接由该 URL 跨所有 case 的丢包率通过 `compute_delivery_integrity_score(loss_percent)` 线性给出。**发送阻塞分** 由 publisher 调用 `publish()` 的墙上钟阻塞时长（每 case P99）通过 `compute_absolute_send_block_score(send_block_us, payload)` 评分（payload-aware），按 payload 权重做几何平均得到 `avg_send_block`。**覆盖度分** = 该 URL 通过的 case 数 ÷ 该 URL 总 case 数。**拓扑分** 来自 topology suite 各 case 的 sort_score 简单平均；该 URL 没跑 topology suite 时退路到 `clamp(coverage, 60, 95)`。
-- **常量集中**：所有维度权重、丢包阈值、gate 参数、confidence 乘数等都集中在 `cli/bench/report_score.h` 的 `detail::ScoreConfig` 结构里，per-case (`report.cc`) 与 per-endpoint (`report_html.h`) 两条管道都通过 `detail::score_config()` 读取，便于按经验数据统一校准。
+- **常量集中**：所有维度权重、丢包阈值、gate 参数、confidence 乘数等都集中在 `cli/bench/report_score.h` 的 `detail::ScoreConfig` 结构里，per-case (`report_internal.cc`) 与 per-endpoint (`report_html.cc`) 两条管道都通过 `detail::score_config()` 读取，便于按经验数据统一校准。
 - **维度退路（fallback）**：当某 URL 缺少送达数据（`expected_sum == 0`）时，送达分填入 `clamp(avg_coverage, 60, 100)`；缺少拓扑数据时拓扑分填入 `clamp(avg_coverage, 60, 95)`。这是为了在某维度无数据时给出温和占位，而不是 0 分误判。
 - 子分数聚合采用**几何平均**（geometric mean）而不是算术平均：每个 case 的分数先取 `log1p()`，对所有 case 求和后除以数量（或 payload 权重和）、再 `expm1()` 还原。这样任何一个灾难性 case（如一个 size 上 P95 暴涨到几百毫秒）会显著拉低整体均值，比算术平均更能反映链路质量的一致性。
 - **延迟分按 payload 加权聚合**：latency 套件（含其退路）的几何平均按权重 `clamp(1 + 0.27·log1p(payload_KiB), 1, 3)` 加权 — 128 B → ~1.04，1 KB → ~1.19，16 KB → ~1.77，64 KB → ~2.13，512 KB → ~2.69，2 MB 及以上封顶 3.00。这样大 payload 的影响是小 payload 的 1.5~3 倍，体现"小消息延迟反映 overhead/RTT、大消息延迟反映真实数据传输能力"的差异，但权重区间被夹在 [1, 3] 内，曲线更平缓，不会让某一档 payload 主宰整体延迟分。

@@ -62,6 +62,10 @@ const Conf* DdstSetterImpl::get_conf() const { return &conf_; }
 const AbstractNode* DdstSetterImpl::get_abstract_node() const { return this; }
 
 Status::BasePtr DdstSetterImpl::get_status(Status::Type type) const {
+  if VUNLIKELY (!writer_) {
+    return std::make_shared<Status::Unknown>();
+  }
+
   return WriterListener::get_status(writer_.get(), type);
 }
 

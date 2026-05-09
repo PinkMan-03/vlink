@@ -2033,7 +2033,7 @@ bool RerunConverter::log_image(::rerun::RecordingStream& rec, const std::string&
   auto channels = static_cast<uint32_t>(data.size() / pixel_total);
 
   if (channels == 0) {
-    channels = 1;
+    return false;
   }
 
   auto pixel_data = ::rerun::Collection<uint8_t>::borrow(data.data(), data.size());
@@ -2139,17 +2139,17 @@ bool RerunConverter::log_depth_image(::rerun::RecordingStream& rec, const std::s
   const auto* data_field = find_proto_field_cached(*desc, data_field_name);
 
   if (!data_field || width == 0 || height == 0) {
-    rec.log(entity_path, ::rerun::TextLog(msg.ShortDebugString()));
-    return true;
+    return false;
   }
 
-  if (data_field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
-    std::string scratch;
-    const auto& data = ref->GetStringReference(msg, data_field, &scratch);
-    auto pixel_data = ::rerun::Collection<uint8_t>::borrow(reinterpret_cast<const uint8_t*>(data.data()), data.size());
-    rec.log(entity_path, ::rerun::archetypes::DepthImage(std::move(pixel_data), {width, height}));
+  if (data_field->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
+    return false;
   }
 
+  std::string scratch;
+  const auto& data = ref->GetStringReference(msg, data_field, &scratch);
+  auto pixel_data = ::rerun::Collection<uint8_t>::borrow(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+  rec.log(entity_path, ::rerun::archetypes::DepthImage(std::move(pixel_data), {width, height}));
   return true;
 }
 
@@ -2684,23 +2684,31 @@ bool RerunConverter::log_mesh3d(::rerun::RecordingStream& rec, const std::string
     } else {
       triangle_indices.reserve(count / 3);
 
+      auto idx_cpp_type = idx_field->cpp_type();
+
       for (int i = 0; i + 2 < count; i += 3) {
         uint32_t i0 = 0;
         uint32_t i1 = 0;
         uint32_t i2 = 0;
 
-        if (idx_field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_UINT32) {
+        if (idx_cpp_type == google::protobuf::FieldDescriptor::CPPTYPE_UINT32) {
           i0 = ref->GetRepeatedUInt32(msg, idx_field, i);
           i1 = ref->GetRepeatedUInt32(msg, idx_field, i + 1);
           i2 = ref->GetRepeatedUInt32(msg, idx_field, i + 2);
-        } else if (idx_field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_INT32) {
+        } else if (idx_cpp_type == google::protobuf::FieldDescriptor::CPPTYPE_INT32) {
           i0 = static_cast<uint32_t>(ref->GetRepeatedInt32(msg, idx_field, i));
           i1 = static_cast<uint32_t>(ref->GetRepeatedInt32(msg, idx_field, i + 1));
           i2 = static_cast<uint32_t>(ref->GetRepeatedInt32(msg, idx_field, i + 2));
-        } else {
+        } else if (idx_cpp_type == google::protobuf::FieldDescriptor::CPPTYPE_UINT64) {
           i0 = static_cast<uint32_t>(ref->GetRepeatedUInt64(msg, idx_field, i));
           i1 = static_cast<uint32_t>(ref->GetRepeatedUInt64(msg, idx_field, i + 1));
           i2 = static_cast<uint32_t>(ref->GetRepeatedUInt64(msg, idx_field, i + 2));
+        } else if (idx_cpp_type == google::protobuf::FieldDescriptor::CPPTYPE_INT64) {
+          i0 = static_cast<uint32_t>(ref->GetRepeatedInt64(msg, idx_field, i));
+          i1 = static_cast<uint32_t>(ref->GetRepeatedInt64(msg, idx_field, i + 1));
+          i2 = static_cast<uint32_t>(ref->GetRepeatedInt64(msg, idx_field, i + 2));
+        } else {
+          continue;
         }
 
         triangle_indices.emplace_back(::rerun::datatypes::UVec3D{i0, i1, i2});
@@ -2717,18 +2725,15 @@ bool RerunConverter::log_mesh3d(::rerun::RecordingStream& rec, const std::string
     if (col_field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       vertex_colors.reserve(count);
       FieldMapping empty_fm;
+      const auto* color_msg_type = col_field->message_type();
+      const auto* a_field_desc = color_msg_type ? color_msg_type->FindFieldByName("a") : nullptr;
 
       for (int i = 0; i < count; ++i) {
         const auto& item = ref->GetRepeatedMessage(msg, col_field, i);
         auto r = static_cast<uint8_t>(get_proto_double(item, "r", empty_fm));
         auto g = static_cast<uint8_t>(get_proto_double(item, "g", empty_fm));
         auto b = static_cast<uint8_t>(get_proto_double(item, "b", empty_fm));
-        auto a = static_cast<uint8_t>(get_proto_double(item, "a", empty_fm));
-
-        if (a == 0) {
-          a = 255;
-        }
-
+        auto a = a_field_desc ? static_cast<uint8_t>(get_proto_double(item, "a", empty_fm)) : static_cast<uint8_t>(255);
         vertex_colors.emplace_back(r, g, b, a);
       }
     } else {
@@ -3087,7 +3092,11 @@ bool RerunConverter::log_bar_chart(::rerun::RecordingStream& rec, const std::str
   std::string field_name = values_src.empty() ? "values" : values_src;
   const auto* values_field = find_proto_field_cached(*desc, field_name);
 
-  if (!values_field || !values_field->is_repeated()) {
+  if (!values_field) {
+    return false;
+  }
+
+  if (!values_field->is_repeated()) {
     FieldMapping empty_fm;
     double value = get_proto_double(msg, field_name, empty_fm);
     rec.log(entity_path, ::rerun::archetypes::BarChart::f64({value}));
@@ -5643,7 +5652,7 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     auto channels = static_cast<uint32_t>(vec->size() / pixel_total);
 
     if (channels == 0) {
-      channels = 1;
+      return false;
     }
 
     auto pixel_data = ::rerun::Collection<uint8_t>::borrow(vec->data(), vec->size());

@@ -671,7 +671,7 @@ TEST_SUITE("base-Process") {
     proc.register_ready_read_stdout_callback([&]() {
       std::string local;
       if (proc.read_all_output(local)) {
-        std::lock_guard<std::mutex> lock(output_mtx);
+        std::lock_guard lock(output_mtx);
         output += local;
         read_in_callback.store(true, std::memory_order_release);
       }
@@ -684,7 +684,7 @@ TEST_SUITE("base-Process") {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    std::lock_guard<std::mutex> lock(output_mtx);
+    std::lock_guard lock(output_mtx);
     CHECK(output.find("callback_read") != std::string::npos);
   }
 

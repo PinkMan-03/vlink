@@ -145,21 +145,25 @@ bool SysSemaphore::detach(bool force) {
     return false;
   }
 
+  bool ok = true;
+
   if VUNLIKELY (::sem_close(impl_->handle) == -1) {
     VLOG_E("SysSemaphore: sem_close failed.");
-    return false;
+    ok = false;
   }
 
-  if (impl_->is_create || force) {
+  impl_->handle = SEM_FAILED;
+
+  if ((impl_->is_create || force) && !impl_->name.empty()) {
     if VUNLIKELY (::sem_unlink(impl_->name.c_str()) == -1 && errno != ENOENT) {
       VLOG_E("SysSemaphore: sem_unlink failed.");
-      return false;
+      ok = false;
     }
   }
 
   impl_->is_create = false;
   impl_->name.clear();
-  return true;
+  return ok;
 #endif
 }
 
@@ -227,7 +231,12 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
   size_t acquired = 0;
   if (timeout_ms < 0) {
     for (; n > 0; --n) {
-      if VUNLIKELY (::sem_wait(impl_->handle) == -1) {
+      int rc = -1;
+      do {
+        rc = ::sem_wait(impl_->handle);
+      } while (rc == -1 && errno == EINTR);
+
+      if VUNLIKELY (rc == -1) {
         // if (is_attached()) {
         //   VLOG_E("Sys semaphore sem_wait failed.");
         // }

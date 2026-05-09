@@ -84,6 +84,7 @@ BagReaderProcessor::~BagReaderProcessor() {
 }
 
 void BagReaderProcessor::register_output_callback(OutputCallback&& output_callback) {
+  std::lock_guard lock(impl_->mtx);
   impl_->output_callback = std::move(output_callback);
 }
 
@@ -120,15 +121,19 @@ void BagReaderProcessor::push(int64_t timestamp, const std::string& url, ActionT
 }
 
 bool BagReaderProcessor::on_check() {
-  if (!impl_->data_queue.empty()) {
-    return impl_->data_queue.back().timestamp - impl_->data_queue.front().timestamp >=
-           impl_->config.min_cache_time * 1000;
+  if (impl_->data_queue.empty()) {
+    return false;
   }
 
-  return false;
+  if (impl_->current_size >= impl_->config.max_cache_size) {
+    return true;
+  }
+
+  return impl_->data_queue.back().timestamp - impl_->data_queue.front().timestamp >=
+         impl_->config.min_cache_time * 1000;
 }
 
-void BagReaderProcessor::on_output(std::unique_lock<std::mutex>& lock) {
+void BagReaderProcessor::on_output(std::unique_lock<std::mutex>& lock, bool at_end) {
   if VUNLIKELY (!impl_->output_callback) {
     return;
   }
@@ -147,7 +152,7 @@ void BagReaderProcessor::on_output(std::unique_lock<std::mutex>& lock) {
     if (is_first) {
       first_push_time = bag_data.push_call_time;
       is_first = false;
-    } else {
+    } else if (!at_end) {
       int64_t expected_output_time = output_start_time + (bag_data.push_call_time - first_push_time);
 
       int64_t current_time = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMicro);
@@ -165,7 +170,7 @@ void BagReaderProcessor::on_output(std::unique_lock<std::mutex>& lock) {
 
     impl_->output_callback(bag_data.timestamp, bag_data.url, bag_data.action_type, bag_data.bytes);
 
-    if VUNLIKELY (impl_->quit_flag) {
+    if VUNLIKELY (!at_end && impl_->quit_flag) {
       return;
     }
   }
@@ -196,7 +201,7 @@ void BagReaderProcessor::on_exec(bool at_end) {
     }
   }
 
-  on_output(lock);
+  on_output(lock, at_end);
 
   if VLIKELY (!at_end) {
     impl_->cv.notify_all();

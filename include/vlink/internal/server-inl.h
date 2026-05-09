@@ -231,10 +231,12 @@ inline bool Server<ReqT, RespT, SecT>::reply(uint64_t req_id, const RespT& resp)
 
   if VUNLIKELY (!this->impl_->is_listened) {
     VLOG_F("Server::reply() requires listen() to be called first.");
+    return false;
   }
 
   if VUNLIKELY (this->impl_->is_sync_type) {
     VLOG_F("Server::reply() is not available in synchronous listen mode.");
+    return false;
   }
 
   if constexpr (std::is_same_v<RespT, Bytes>) {
@@ -281,10 +283,12 @@ template <typename ReqT, typename RespT, SecurityType SecT>
 inline bool Server<ReqT, RespT, SecT>::listen_bytes(NodeImpl::ReqRespCallback&& callback) {
   if VUNLIKELY (!this->has_inited_) {
     VLOG_F("Server::listen_bytes() called before init().");
+    return false;
   }
 
   if VUNLIKELY (this->impl_->is_listened) {
     VLOG_F("Server has already been listened, url: ", this->impl_->url, ".");
+    return false;
   }
 
   bool ret = this->impl_->listen(

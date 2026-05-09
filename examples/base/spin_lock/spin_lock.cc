@@ -121,8 +121,8 @@ int main() {
     vlink::SpinLock lock;
 
     {
-      std::lock_guard<vlink::SpinLock> guard(lock);
-      VLOG_I("  Using std::lock_guard<SpinLock>");
+      std::lock_guard guard(lock);  // CTAD deduces std::lock_guard<vlink::SpinLock>
+      VLOG_I("  Using std::lock_guard with SpinLock");
     }
     VLOG_I("  std::lock_guard released");
   }
@@ -148,7 +148,7 @@ int main() {
     // std::mutex performance.
     timer.start();
     for (int i = 0; i < kOps; ++i) {
-      std::lock_guard<std::mutex> guard(mtx);
+      std::lock_guard guard(mtx);
     }
     int64_t mutex_time = timer.get();
     timer.stop();

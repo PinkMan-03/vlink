@@ -88,6 +88,11 @@ inline Getter<ValueT, SecT>::Getter(const std::string& url_str, InitType type)
     : Getter<ValueT, SecT>(Url(url_str), type) {}
 
 template <typename ValueT, SecurityType SecT>
+inline Getter<ValueT, SecT>::~Getter() {
+  this->deinit();
+}
+
+template <typename ValueT, SecurityType SecT>
 inline std::optional<ValueT> Getter<ValueT, SecT>::get() const {
   std::lock_guard lock(mtx_);
   return value_;
@@ -124,6 +129,7 @@ template <typename ValueT, SecurityType SecT>
 inline bool Getter<ValueT, SecT>::listen(MsgCallback&& callback) {
   if VUNLIKELY (this->impl_->is_listened) {
     VLOG_F("Getter has already been listened.");
+    return false;
   }
 
   callback_ = std::move(callback);

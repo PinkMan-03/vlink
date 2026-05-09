@@ -56,9 +56,9 @@ void ShmPublisherImpl::init() {
 }
 
 void ShmPublisherImpl::deinit() {
-  detach();
-
   object_->remove_impl(this);
+
+  detach();
 }
 
 bool ShmPublisherImpl::is_support_loan() const { return true; }

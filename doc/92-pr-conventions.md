@@ -158,6 +158,8 @@ VLink 采用 **master + 功能分支（feature branch）** 模型：
 
 VLink 采用 **Conventional Commits** 简化版。
 
+> **当前仓库基线**：`git log` 中现存提交普遍是 `<type>: <subject>` 形式（不带 scope），且 subject 多为简短中文/英文短语。本节描述的是**目标规范**——新贡献请按目标规范提交；历史提交可能不完全符合，逐步迁移即可。
+
 ### 4.1 格式
 
 ```

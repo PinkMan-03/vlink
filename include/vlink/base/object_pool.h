@@ -411,25 +411,25 @@ inline void ObjectPool<T>::give_back(T* ptr) {
 
 template <typename T>
 inline typename ObjectPool<T>::Stats ObjectPool<T>::stats() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock(mutex_);
   return {pool_.size(), borrowed_, total_created_, max_size_};
 }
 
 template <typename T>
 inline size_t ObjectPool<T>::size() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock(mutex_);
   return pool_.size();
 }
 
 template <typename T>
 inline size_t ObjectPool<T>::borrowed() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock(mutex_);
   return borrowed_;
 }
 
 template <typename T>
 inline size_t ObjectPool<T>::total_created() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock(mutex_);
   return total_created_;
 }
 
@@ -445,7 +445,7 @@ inline typename ObjectPool<T>::FactoryCallback ObjectPool<T>::get_default_factor
 
 template <typename T>
 inline std::unique_ptr<T> ObjectPool<T>::acquire() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::unique_lock lock(mutex_);
 
   if (!pool_.empty()) {
     std::unique_ptr<T> obj = std::move(pool_.back());
@@ -498,7 +498,7 @@ inline void ObjectPool<T>::release(std::unique_ptr<T> obj) noexcept {
   }
 
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard lock(mutex_);
 
     if (borrowed_ > 0) {
       --borrowed_;
@@ -510,7 +510,7 @@ inline void ObjectPool<T>::release(std::unique_ptr<T> obj) noexcept {
 
 template <typename T>
 inline void ObjectPool<T>::safe_dec_borrowed_and_live() noexcept {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard lock(mutex_);
 
   if (borrowed_ > 0) {
     --borrowed_;

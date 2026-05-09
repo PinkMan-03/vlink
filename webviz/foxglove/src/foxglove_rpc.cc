@@ -259,11 +259,12 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
   }
 
   auto weak_lifetime = std::weak_ptr<LifetimeHandle>(lifetime_handle_);
-  auto response_callback_sp = std::make_shared<RpcResponseCallback>(std::move(response_callback));
 
   if VUNLIKELY (!state.client->invoke(converted.payload, [this, weak_lifetime, pending_key, state, rpc_id, call_id,
-                                                          response_callback_sp](const Bytes& response_raw) {
-                  if VUNLIKELY (!weak_lifetime.lock()) {
+                                                          response_callback](const Bytes& response_raw) {
+                  auto lifetime_guard = weak_lifetime.lock();
+
+                  if VUNLIKELY (!lifetime_guard) {
                     return;
                   }
 
@@ -296,8 +297,8 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
                     return;
                   }
 
-                  if (*response_callback_sp) {
-                    (*response_callback_sp)(rpc_id, call_id, "json", response_payload);
+                  if (response_callback) {
+                    response_callback(rpc_id, call_id, "json", response_payload);
                   }
                 })) {
     PendingRpcCall pending;

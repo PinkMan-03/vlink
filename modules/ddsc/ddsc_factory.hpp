@@ -24,6 +24,7 @@
 #pragma once
 
 #include <dds/dds.h>
+#include <dds/ddsi/ddsi_config.h>
 
 #include <map>
 #include <memory>
@@ -113,7 +114,19 @@ class DdscFactory final {
   using PublisherFilter = std::tuple<uint8_t, int32_t, std::string>;
   using SubscriberFilter = std::tuple<uint8_t, int32_t, std::string>;
 
-  std::map<int32_t, dds_entity_t> domain_map_;
+  struct DomainEntry final {
+    dds_entity_t entity{0};
+    size_t ref_count{0};
+    std::string ssl_keystore;
+    std::string ssl_key_pass;
+    std::string ssl_ciphers;
+    std::vector<std::string> network_interface_list;
+    std::unique_ptr<ddsi_config_network_interface_listelem[]> network_interface_elements;
+    std::vector<std::string> peer_list;
+    std::unique_ptr<ddsi_config_peer_listelem[]> peer_elements;
+  };
+
+  std::map<int32_t, DomainEntry> domain_map_;
   std::map<PartFilter, std::weak_ptr<ddsc::DomainParticipant>> part_map_;
   std::map<TopicFilter, std::weak_ptr<ddsc::Topic>> topic_map_;
   std::map<PublisherFilter, std::weak_ptr<ddsc::Publisher>> publisher_map_;

@@ -557,11 +557,11 @@ ShmServer::ShmServer(const ShmID& id) {
 ShmServer::~ShmServer() {
   static auto& factory = ShmFactory::get();
 
-  server_->stopOffer();
-  server_->releaseQueuedRequests();
-
   listener_->detachEvent(server_.value(), shm::popo::ServerEvent::REQUEST_RECEIVED);
   factory.try_to_destroy_listener(domain_, listener_);
+
+  server_->stopOffer();
+  server_->releaseQueuedRequests();
 }
 
 std::any ShmServer::get_native_handle() const { return this; }
@@ -594,36 +594,43 @@ void ShmServer::process_message() {
 
           (void)seq;
 
-          traverse_req_resp_callback(
-              [this, channel, &req_bytes, &read_req, &read_header](NodeImpl* impl, const auto& callback) {
-                const auto* conf_ptr = impl->get_target_conf<ShmConf>();
+          bool request_released = false;
 
-                if (static_cast<uint64_t>(conf_ptr->hash_code) != channel) {
-                  ignore_called();
-                  return;
-                }
+          traverse_req_resp_callback([this, channel, &req_bytes, &read_req, &read_header, &request_released](
+                                         NodeImpl* impl, const auto& callback) {
+            const auto* conf_ptr = impl->get_target_conf<ShmConf>();
 
-                if VUNLIKELY (has_called()) {
-                  VLOG_F(*conf_ptr, "Two identical service requests.");
-                  return;
-                }
+            if (static_cast<uint64_t>(conf_ptr->hash_code) != channel) {
+              ignore_called();
+              return;
+            }
 
-                std::lock_guard lock(mtx_);
+            if VUNLIKELY (has_called()) {
+              VLOG_F(*conf_ptr, "Two identical service requests.");
+              return;
+            }
 
-                if (static_cast<ServerImpl*>(impl)->is_resp_type) {
-                  last_req_header_ = read_header;
+            std::lock_guard lock(mtx_);
 
-                  Bytes resp_bytes;
+            if (static_cast<ServerImpl*>(impl)->is_resp_type) {
+              last_req_header_ = read_header;
 
-                  auto seq = static_cast<uint64_t>(read_header->getSequenceId());
+              Bytes resp_bytes;
 
-                  callback(seq, req_bytes, &resp_bytes);
-                } else {
-                  callback(0, req_bytes, nullptr);
-                }
+              auto seq = static_cast<uint64_t>(read_header->getSequenceId());
 
-                server_->releaseRequest(read_req);
-              });
+              callback(seq, req_bytes, &resp_bytes);
+            } else {
+              callback(0, req_bytes, nullptr);
+            }
+
+            server_->releaseRequest(read_req);
+            request_released = true;
+          });
+
+          if VUNLIKELY (!request_released) {
+            server_->releaseRequest(read_req);
+          }
         })
         .or_else([](auto& e) { VLOG_E("ShmFactory: Failed to take request, error: ", e, "."); });
   }
@@ -710,10 +717,22 @@ void ShmServer::on_request_received(shm::popo::UntypedServer*, ShmServer* target
     return;
   }
 
-  auto* message_loop = target->get_first_impl()->get_message_loop();
+  auto* impl = target->get_first_impl();
+  if VUNLIKELY (!impl) {
+    return;
+  }
+
+  auto* message_loop = impl->get_message_loop();
   if VLIKELY (message_loop) {
-    message_loop->post_task([target]() {
-      if VUNLIKELY (!target->get_first_impl()->get_message_loop()) {
+    std::weak_ptr<ShmServer> weak_target = target->weak_from_this();
+    message_loop->post_task([weak_target]() {
+      auto target = weak_target.lock();
+      if VUNLIKELY (!target) {
+        return;
+      }
+
+      auto* impl = target->get_first_impl();
+      if VUNLIKELY (!impl || !impl->get_message_loop()) {
         return;
       }
 
@@ -763,11 +782,11 @@ ShmClient::~ShmClient() {
 
   quit_flag_ = true;
 
-  client_->disconnect();
-  client_->releaseQueuedResponses();
-
   listener_->detachEvent(client_.value(), shm::popo::ClientEvent::RESPONSE_RECEIVED);
   factory.try_to_destroy_listener(domain_, listener_);
+
+  client_->disconnect();
+  client_->releaseQueuedResponses();
 
   disable_detect_timer();
 }
@@ -958,10 +977,22 @@ void ShmClient::discovery_server(bool connect) {
 }
 
 void ShmClient::on_response_received(shm::popo::UntypedClient*, ShmClient* target) {
-  auto* message_loop = target->get_first_impl()->get_message_loop();
+  auto* impl = target->get_first_impl();
+  if VUNLIKELY (!impl) {
+    return;
+  }
+
+  auto* message_loop = impl->get_message_loop();
   if VLIKELY (message_loop) {
-    message_loop->post_task([target]() {
-      if VUNLIKELY (!target->get_first_impl()->get_message_loop()) {
+    std::weak_ptr<ShmClient> weak_target = target->weak_from_this();
+    message_loop->post_task([weak_target]() {
+      auto target = weak_target.lock();
+      if VUNLIKELY (!target) {
+        return;
+      }
+
+      auto* impl = target->get_first_impl();
+      if VUNLIKELY (!impl || !impl->get_message_loop()) {
         return;
       }
 
@@ -1195,12 +1226,12 @@ ShmSubscriber::~ShmSubscriber() {
     sem_->detach(false);
   }
 
+  listener_->detachEvent(sub_.value(), shm::popo::SubscriberEvent::DATA_RECEIVED);
+  factory.try_to_destroy_listener(domain_, listener_);
+
   sub_->unsubscribe();
 
   sub_->releaseQueuedData();
-
-  listener_->detachEvent(sub_.value(), shm::popo::SubscriberEvent::DATA_RECEIVED);
-  factory.try_to_destroy_listener(domain_, listener_);
 }
 
 std::any ShmSubscriber::get_native_handle() const { return this; }
@@ -1297,10 +1328,22 @@ void ShmSubscriber::on_msg_received(shm::popo::UntypedSubscriber*, ShmSubscriber
     return;
   }
 
-  auto* message_loop = target->get_first_impl()->get_message_loop();
+  auto* impl = target->get_first_impl();
+  if VUNLIKELY (!impl) {
+    return;
+  }
+
+  auto* message_loop = impl->get_message_loop();
   if VLIKELY (message_loop) {
-    message_loop->post_task([target]() {
-      if VUNLIKELY (!target->get_first_impl()->get_message_loop()) {
+    std::weak_ptr<ShmSubscriber> weak_target = target->weak_from_this();
+    message_loop->post_task([weak_target]() {
+      auto target = weak_target.lock();
+      if VUNLIKELY (!target) {
+        return;
+      }
+
+      auto* impl = target->get_first_impl();
+      if VUNLIKELY (!impl || !impl->get_message_loop()) {
         return;
       }
 

@@ -1185,6 +1185,15 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
     cached.proto_direct_fields.clear();
     cached.proto_indexed_field_refs.clear();
 
+    size_t proto_direct_count = 0;
+    for (int i = 0; i < desc->field_count(); ++i) {
+      const auto* field = desc->field(i);
+      if (!field->is_repeated() && is_proto_numeric_type(field->cpp_type())) {
+        ++proto_direct_count;
+      }
+    }
+    cached.field_values.reserve(proto_direct_count + replacement_paths.size());
+
     for (int i = 0; i < desc->field_count(); ++i) {
       const auto* field = desc->field(i);
 
@@ -2051,6 +2060,17 @@ inline double evaluate_expression_with_fbs(const std::string& expression, const 
     cached.fbs_direct_fields.clear();
     cached.fbs_indexed_field_refs.clear();
 
+    size_t fbs_direct_count = 0;
+    if (obj.fields()) {
+      for (unsigned i = 0; i < obj.fields()->size(); ++i) {
+        const auto* f = obj.fields()->Get(i);
+        if (f && is_fbs_numeric_type(f->type()->base_type())) {
+          ++fbs_direct_count;
+        }
+      }
+    }
+    cached.field_values.reserve(fbs_direct_count + replacement_paths.size());
+
     if (obj.fields()) {
       for (unsigned i = 0; i < obj.fields()->size(); ++i) {
         const auto* f = obj.fields()->Get(i);
@@ -2342,7 +2362,7 @@ inline int64_t convert_timestamp_to_ns(double value, std::string_view unit) {
   auto scale = static_cast<double>(timestamp_unit_to_ns_scale(unit));
   auto scaled = value * scale;
 
-  if VUNLIKELY (scaled > static_cast<double>(std::numeric_limits<int64_t>::max())) {
+  if VUNLIKELY (scaled >= static_cast<double>(std::numeric_limits<int64_t>::max())) {
     return std::numeric_limits<int64_t>::max();
   }
 

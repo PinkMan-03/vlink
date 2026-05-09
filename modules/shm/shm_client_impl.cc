@@ -45,6 +45,7 @@ void ShmClientImpl::init() {
 
   object_->register_server_connect_callback(this, [this](bool) {
     auto* message_loop = get_message_loop();
+
     if VLIKELY (message_loop) {
       message_loop->post_task([this]() { ClientImpl::update_connected(); });
     } else {
@@ -56,9 +57,9 @@ void ShmClientImpl::init() {
 }
 
 void ShmClientImpl::deinit() {
-  detach();
-
   object_->remove_impl(this);
+
+  detach();
 }
 
 void ShmClientImpl::interrupt() {

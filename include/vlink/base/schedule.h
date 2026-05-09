@@ -46,8 +46,13 @@
  * | ----------------------- | -------------------------------------------------------------- |
  * | @c delay_ms             | Delay before the task is posted (via one-shot Timer)           |
  * | @c priority             | Task dispatch priority (for @c kPriorityType loop)             |
- * | @c schedule_timeout_ms  | If the task is not started within this time, fire the timeout  |
- * | @c execution_timeout_ms | If the task runs longer than this, fire the timeout callback   |
+ * | @c schedule_timeout_ms  | Wait deadline.  Checked once when the task is dequeued: if the |
+ * |                         | dispatcher latency exceeds this budget the task is **dropped** |
+ * |                         | and @c on_schedule_timeout fires instead of the user callback. |
+ * | @c execution_timeout_ms | Run-time budget.  Checked once **after** the user callback     |
+ * |                         | returns: if it ran longer than the budget,                     |
+ * |                         | @c on_execution_timeout fires.  This is a post-hoc notifier —  |
+ * |                         | it does **not** interrupt or cancel a long-running callback.   |
  *
  * @note
  * - @c Status is move-only; copying is disabled.  The internal state is reference-counted

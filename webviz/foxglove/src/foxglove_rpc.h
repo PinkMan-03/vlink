@@ -54,8 +54,8 @@ class FoxgloveRpc final {
     ProxyBridge::TransportConfig transport;
   };
 
-  using RpcResponseCallback = vlink::MoveFunction<void(uint32_t, uint32_t, const std::string&, const Bytes&)>;
-  using RpcErrorCallback = vlink::MoveFunction<void(uint32_t, uint32_t, const std::string&)>;
+  using RpcResponseCallback = vlink::Function<void(uint32_t, uint32_t, const std::string&, const Bytes&)>;
+  using RpcErrorCallback = vlink::Function<void(uint32_t, uint32_t, const std::string&)>;
   using RawClient = Client<Bytes, Bytes>;
 
   FoxgloveRpc(const Config& config, VlinkConvert* vlink_convert, MessageLoop* loop);

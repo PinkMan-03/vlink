@@ -21,6 +21,8 @@ def _make_node(cls, url, ser_type=""):
 
 
 def test_bytes_extended():
+    _vlink.Bytes.init_memory_pool()
+
     b = _vlink.Bytes.from_bytes(b"hello")
     assert b.size() == 5
     assert b.real_size() == 5
@@ -35,6 +37,10 @@ def test_bytes_extended():
     # resize / reserve / shrink
     b2 = _vlink.Bytes.create(100)
     assert b2.size() == 100
+    b2_offset = _vlink.Bytes.create(4, offset=2)
+    assert b2_offset.size() == 4
+    assert b2_offset.offset() == 2
+    assert b2_offset.real_size() == 6
     b2.resize(50)
     assert b2.size() == 50
     b2.reserve(200)
@@ -58,6 +64,7 @@ def test_bytes_extended():
     c = _vlink.Bytes.from_bytes(b"other")
     assert a == b
     assert not (a == c)
+    assert a != c
 
     # is_compress_data
     compressed = _vlink.Bytes.compress(_vlink.Bytes.from_bytes(b"X" * 1000))
@@ -111,6 +118,10 @@ def test_bytes_extended():
     c1 = _vlink.Bytes.compress(big)
     assert _vlink.Bytes.is_compress_data(c1)
     assert _vlink.Bytes.uncompress(c1).to_bytes() == big
+    assert _vlink.Bytes.uncompress(c1, check_valid=False).to_bytes() == big
+    assert _vlink.Bytes.from_string("hi", offset=1).offset() == 1
+    assert _vlink.Bytes.from_bytes(b"hi", offset=1).offset() == 1
+    assert _vlink.Bytes.convert_to_hex_str(b"\x0a\xff").lower() == "0a ff"
 
     rev = _vlink.Bytes.reverse_order(b"\x01\x02\x03")
     assert rev.to_bytes() == b"\x03\x02\x01"
@@ -130,6 +141,16 @@ def test_logger_extended():
     _vlink.Logger.set_console_fmt_enable(False)
     assert not _vlink.Logger.get_console_fmt_enable()
     _vlink.Logger.set_console_fmt_enable(orig)
+
+    orig_precision = _vlink.Logger.get_stream_precision()
+    orig_width = _vlink.Logger.get_stream_width()
+    _vlink.Logger.set_stream_precision(6)
+    _vlink.Logger.set_stream_width(4)
+    assert _vlink.Logger.get_stream_precision() == 6
+    assert _vlink.Logger.get_stream_width() == 4
+    assert isinstance(_vlink.Logger.get_stream_flag(), int)
+    _vlink.Logger.set_stream_precision(orig_precision)
+    _vlink.Logger.set_stream_width(orig_width)
 
     # Backtrace
     _vlink.Logger.enable_backtrace(10)
@@ -258,13 +279,14 @@ def test_timer_extended():
     cb2_called = [False]
     timer.set_loop_count(1)
     timer.set_callback(lambda: cb2_called.__setitem__(0, True))
-    timer.start(lambda: cb2_called.__setitem__(0, True))
+    timer.start()
     time.sleep(0.2)
     timer.stop()
+    assert cb2_called[0]
 
     # call_once
     once_done = threading.Event()
-    _vlink.Timer.call_once(loop, 30, once_done.set)
+    assert _vlink.Timer.call_once(loop, 30, once_done.set)
     once_done.wait(2.0)
     assert once_done.is_set()
 
@@ -276,11 +298,45 @@ def test_timer_extended():
     print("[PASS] Timer extended")
 
 
+def test_wheel_timer_extended():
+    wheel = _vlink.WheelTimer(32, 10)
+    assert not wheel.is_running()
+    wheel.set_catchup_limit(4)
+
+    pending_key = wheel.add(100, lambda key: None)
+    assert isinstance(pending_key, int)
+    assert isinstance(wheel.get_remaining_time(pending_key), int)
+    assert wheel.remove(pending_key)
+    assert wheel.get_remaining_time(pending_key) == 0
+    print("[PASS] WheelTimer extended")
+
+
 def test_thread_pool_extended():
     pool = _vlink.ThreadPool(2)
     assert pool.get_max_task_count() >= 0
-    # ThreadPool uses its own Strategy type (same values as MessageLoop::Strategy)
-    pool.shutdown()
+    pool.set_strategy(_vlink.ThreadPoolStrategy.Block)
+    assert pool.get_strategy() == _vlink.ThreadPoolStrategy.Block
+
+    done = threading.Event()
+    count = [0]
+    lock = threading.Lock()
+
+    def task():
+        with lock:
+            count[0] += 1
+            if count[0] >= 4:
+                done.set()
+
+    for _ in range(4):
+        assert pool.post_task(task) is True
+    assert done.wait(2.0)
+    assert count[0] >= 4
+    assert pool.shutdown() is True
+    assert pool.post_task(lambda: None) is False
+
+    pool2 = _vlink.ThreadPool(1, _vlink.ThreadPoolType.Normal)
+    assert pool2.get_type() == _vlink.ThreadPoolType.Normal
+    assert pool2.shutdown() is True
     print("[PASS] ThreadPool extended")
 
 
@@ -348,6 +404,15 @@ def test_process():
     chunk_out = p6.read_stdout(0)
     assert isinstance(chunk_out, bytes)
 
+    p7 = _vlink.Process()
+    p7.set_process_mode(_vlink.Process.Mode.Merged)
+    p7.start("/bin/cat")
+    assert p7.wait_for_started(5000)
+    assert p7.write(bytearray(b"bytes_write_line\n"))
+    p7.close_write_channel()
+    p7.wait_for_finished(5000)
+    assert b"bytes_write_line" in p7.read_all()
+
     assert _vlink.Process.INFINITE == -1
     assert _vlink.Process.DEFAULT_WAIT_TIMEOUT_MS == 3000
 
@@ -356,6 +421,8 @@ def test_process():
 
 def test_utils_extended():
     # New utils
+    assert isinstance(_vlink.utils.get_app_path(), str)
+
     mid = _vlink.utils.get_machine_id()
     assert isinstance(mid, str)
 
@@ -387,6 +454,8 @@ def test_utils_extended():
 
     # set_thread_name without thread arg
     assert isinstance(_vlink.utils.set_thread_name("py_audit_thread"), bool)
+
+    assert _vlink.utils.wait_for_device("/tmp", 10, 1)
 
     print("[PASS] Utils extended")
 
@@ -429,6 +498,13 @@ def test_helpers_extended():
     rt = _vlink.helpers.string_utf8_to_local(_vlink.helpers.string_local_to_utf8("ascii-text"))
     assert rt == "ascii-text"
 
+    wide_text = "ascii-text-é"
+    assert _vlink.helpers.string_to_wstring(wide_text) == wide_text
+    assert _vlink.helpers.wstring_to_string(wide_text) == wide_text
+    assert isinstance(_vlink.helpers.path_to_string("/tmp"), str)
+    assert _vlink.helpers.get_split_string_view("a,b", ",") == ["a", "b"]
+    assert _vlink.helpers.get_pair_string_view("left=right", "=") == ("left", "right")
+
     print("[PASS] Helpers extended")
 
 
@@ -470,6 +546,8 @@ def test_qos_enums():
     qos.additions.is_express = True
     qos.valid = True
     assert qos.valid
+    qos.additions.priority = _vlink.Qos.Additions.Priority.Normal
+    assert qos.additions.priority == _vlink.Qos.Additions.Priority.Normal
 
     qos.destination_order.kind = _vlink.Qos.DestinationOrder.Kind.SourceTimestamp
     assert qos.destination_order.kind == _vlink.Qos.DestinationOrder.Kind.SourceTimestamp
@@ -596,11 +674,41 @@ def test_bag_extended():
     # Writer with split callback
     cfg = _vlink.BagWriter.Config()
     cfg.compress = _vlink.BagWriter.CompressType.LZAV
+    cfg.ignore_compress_urls = {"intra://schema_cb"}
     w = _vlink.BagWriter.create(bag_path, cfg)
+
+    explicit_schema = _vlink.SchemaData()
+    explicit_schema.name = "demo.Explicit"
+    explicit_schema.encoding = "protobuf"
+    explicit_schema.schema_type = _vlink.SchemaType.Protobuf
+    explicit_schema.data = _vlink.Bytes.from_bytes(b"explicit-schema")
+    assert w.push_schema(explicit_schema, immediate=True)
+
+    callback_calls = []
+
+    def schema_callback(ser_type, schema_type):
+        callback_calls.append((ser_type, schema_type))
+        schema = _vlink.SchemaData()
+        schema.name = ser_type
+        schema.encoding = "protobuf"
+        schema.schema_type = schema_type
+        schema.data = _vlink.Bytes.from_bytes(b"callback-schema")
+        return schema
+
+    w.register_schema_callback(schema_callback)
     w.async_run()
     for i in range(5):
         seq = w.push("intra://t", "raw", _vlink.SchemaType.Raw, _vlink.ActionType.Publish, f"m{i}".encode())
         assert isinstance(seq, int)
+    schema_seq = w.push(
+        "intra://schema_cb",
+        "demo.Callback",
+        _vlink.SchemaType.Protobuf,
+        _vlink.ActionType.Publish,
+        b"schema-msg",
+        immediate=True,
+    )
+    assert isinstance(schema_seq, int)
     time.sleep(0.05)
     seq_immediate = w.push(
         "intra://t", "raw", _vlink.SchemaType.Raw, _vlink.ActionType.Publish, b"sync", immediate=True
@@ -622,8 +730,12 @@ def test_bag_extended():
     info = r.get_info()
     assert info.message_count >= 5
     assert info.storage_type == "SQLite3"
-    assert info.url_metas[0].schema_type == _vlink.SchemaType.Raw
+    metas = {meta.url: meta for meta in info.url_metas}
+    assert metas["intra://t"].schema_type == _vlink.SchemaType.Raw
     assert r.get_schema_type("intra://t") == _vlink.SchemaType.Raw
+    schemas = r.detect_schema()
+    schema_names = {schema.name for schema in schemas}
+    assert "demo.Explicit" in schema_names
 
     # Start loop first (check/reindex run async tasks on the loop)
     r.async_run()
@@ -741,6 +853,17 @@ def test_server_async_reply():
     print("[PASS] Server async reply (binding verified)")
 
 
+def test_client_invoke_timeout_arg():
+    cli = _vlink.Client("intra://test/client_timeout_arg", auto_init=False)
+    cli.set_discovery_enabled(False)
+    cli.init()
+    try:
+        assert cli.invoke(b"no-server", timeout_ms=20) is None
+    finally:
+        cli.deinit()
+    print("[PASS] Client.invoke timeout_ms")
+
+
 def test_exec_task():
     """Test MessageLoop exec_task with delay."""
     loop = _vlink.MessageLoop()
@@ -770,12 +893,44 @@ def test_timer_constructors():
     # Full constructor: Timer(loop, interval_ms, loop_count, callback)
     timer = _vlink.Timer(loop, 50, 3, lambda: (ticks.__setitem__(0, ticks[0] + 1),
                                                  done.set() if ticks[0] >= 3 else None))
-    # The timer auto-starts from this constructor
-    timer.start(lambda: (ticks.__setitem__(0, ticks[0] + 1),
-                         done.set() if ticks[0] >= 3 else None))
+    timer.start()
     done.wait(3.0)
     assert ticks[0] >= 3, f"Timer ticked only {ticks[0]} times"
     timer.stop()
+
+    configured_done = threading.Event()
+    configured = _vlink.Timer(loop, 20, 1)
+    configured.set_callback(configured_done.set)
+    configured.start()
+    configured_done.wait(2.0)
+    assert configured_done.is_set()
+    configured.stop()
+
+    detached_configured_done = threading.Event()
+    detached_configured = _vlink.Timer(20, 1)
+    detached_configured.set_callback(detached_configured_done.set)
+    assert detached_configured.attach(loop)
+    detached_configured.start()
+    detached_configured_done.wait(2.0)
+    assert detached_configured_done.is_set()
+    detached_configured.stop()
+
+    detached_done = threading.Event()
+    detached = _vlink.Timer(20, 1, detached_done.set)
+    assert detached.attach(loop)
+    detached.start()
+    detached_done.wait(2.0)
+    assert detached_done.is_set()
+    detached.stop()
+
+    shorthand_done = threading.Event()
+    shorthand = _vlink.Timer(20, shorthand_done.set)
+    shorthand.set_loop_count(1)
+    assert shorthand.attach(loop)
+    shorthand.start()
+    shorthand_done.wait(2.0)
+    assert shorthand_done.is_set()
+    shorthand.stop()
 
     loop.quit()
     loop.wait_for_quit(2000)
@@ -798,6 +953,7 @@ def test_discovery_viewer_fields():
     # Test convert_type_to_view
     view = _vlink.DiscoveryViewer.convert_type_to_view(1)  # kPublisher
     assert isinstance(view, str)
+    assert _vlink.DiscoveryViewer.convert_type("Pub") == _vlink.ImplType.Publisher
 
     # Test get_listen_address
     addr = _vlink.DiscoveryViewer.get_listen_address()
@@ -816,51 +972,78 @@ def test_utils_terminal():
 
 def test_api_surface():
     expected_exports = [
-        "ImplType", "TransportType", "InitType", "ActionType", "SchemaType", "LogLevel", "StatusType",
+        "ImplType", "TransportType", "InitType", "SecurityType", "ActionType", "SchemaType", "LogLevel", "StatusType",
         "TimerMethod", "TimerAccuracy", "MessageLoopType", "MessageLoopStrategy", "TaskPriority",
-        "Bytes", "Version", "SampleLostInfo",
-        "Logger", "ElapsedTimer", "DeadlineTimer", "MessageLoop", "Timer", "ThreadPool", "SpinLock",
+        "ThreadPoolType", "ThreadPoolStrategy",
+        "Bytes", "Version", "SchemaData", "SampleLostInfo",
+        "Logger", "ElapsedTimer", "DeadlineTimer", "MessageLoop", "MultiLoop", "Timer", "WheelTimer",
+        "ThreadPool", "SpinLock", "CpuProfiler", "CpuProfilerGuard", "MemoryPool",
         "Process", "UrlRemap",
         "Qos", "SslOptions", "Security",
         "Publisher", "Subscriber", "Server", "Client", "Setter", "Getter",
+        "SecurityPublisher", "SecuritySubscriber", "SecurityServer", "SecurityClient", "SecuritySetter",
+        "SecurityGetter",
         "DiscoveryViewer", "BagWriter", "BagReader",
-        "utils", "helpers", "QosProfile",
+        "utils", "helpers", "QosProfile", "Status",
         "log_trace", "log_debug", "log_info", "log_warn", "log_error", "log_fatal",
-        "VERSION", "VERSION_MAJOR", "VERSION_MINOR", "VERSION_PATCH",
+        "TIMER_INFINITE", "VERSION", "VERSION_MAJOR", "VERSION_MINOR", "VERSION_PATCH",
     ]
     for name in expected_exports:
         assert hasattr(_vlink, name), f"Missing module export: {name}"
+        assert name in _vlink.__all__, f"Missing __all__ export: {name}"
 
     node_methods = [
         "init", "deinit", "set_discovery_enabled", "get_url", "get_transport_type",
-        "get_schema_type", "set_ser_type",
-        "attach", "detach", "get_message_loop", "get_status", "register_status_handler",
+        "get_schema_type", "set_ser_type", "get_ser_type", "set_property", "get_property",
+        "get_discovery_enabled", "set_record_path", "set_ssl_options", "set_safety_quit",
+        "get_safety_quit", "get_cpu_usage", "has_inited", "interrupt", "suspend", "resume",
+        "is_suspend", "is_support_loan", "loan", "return_loan", "set_manual_unloan", "is_manual_unloan",
+        "attach", "detach", "get_message_loop", "get_abstract_node", "get_status", "register_status_handler",
     ]
     for cls in (_vlink.Publisher, _vlink.Subscriber, _vlink.Server, _vlink.Client, _vlink.Setter, _vlink.Getter):
         for method in node_methods:
             assert hasattr(cls, method), f"{cls.__name__} missing method: {method}"
 
     class_methods = {
-        _vlink.Publisher: ["detect_subscribers", "wait_for_subscribers", "has_subscribers", "publish"],
+        _vlink.Publisher: ["detect_subscribers", "wait_for_subscribers", "has_subscribers", "publish",
+                           "mark_as_setter"],
         _vlink.Subscriber: ["listen", "set_latency_and_lost_enabled", "is_latency_and_lost_enabled",
-                            "get_latency", "get_lost"],
+                            "get_latency", "get_lost", "mark_as_getter"],
         _vlink.Server: ["listen", "listen_for_reply", "reply"],
         _vlink.Client: ["detect_connected", "wait_for_connected", "is_connected", "invoke", "invoke_async"],
         _vlink.Setter: ["set", "mark_as_publisher"],
         _vlink.Getter: ["listen", "get", "wait_for_value", "set_change_reporting", "get_change_reporting",
+                        "set_latency_and_lost_enabled", "is_latency_and_lost_enabled", "get_latency", "get_lost",
                         "mark_as_subscriber"],
     }
     for cls, methods in class_methods.items():
         for method in methods:
             assert hasattr(cls, method), f"{cls.__name__} missing method: {method}"
 
-    helper_exports = ["to_int", "to_long", "trim_string", "has_startwith", "has_endwith"]
+    for cls in (
+        _vlink.SecurityPublisher, _vlink.SecuritySubscriber, _vlink.SecurityServer, _vlink.SecurityClient,
+        _vlink.SecuritySetter, _vlink.SecurityGetter,
+    ):
+        for method in node_methods + ["set_security_key", "set_security_callbacks"]:
+            assert hasattr(cls, method), f"{cls.__name__} missing method: {method}"
+
+    helper_exports = ["to_int", "to_long", "trim_string", "has_startwith", "has_endwith",
+                      "get_split_string_view", "get_pair_string_view", "path_to_string"]
     for name in helper_exports:
         assert hasattr(_vlink.helpers, name), f"helpers missing function: {name}"
 
-    utils_exports = ["get_host_name", "get_pid", "get_pid_str", "get_tmp_dir", "register_terminate_signal"]
+    utils_exports = ["get_app_path", "get_host_name", "get_pid", "get_pid_str", "get_tmp_dir",
+                     "register_terminate_signal", "wait_for_device"]
     for name in utils_exports:
         assert hasattr(_vlink.utils, name), f"utils missing function: {name}"
+
+    assert hasattr(_vlink.BagWriter.Config, "ignore_compress_urls")
+    for method in ("register_schema_callback", "push_schema"):
+        assert hasattr(_vlink.BagWriter, method), f"BagWriter missing method: {method}"
+    assert hasattr(_vlink.BagReader, "detect_schema")
+    assert hasattr(_vlink.DiscoveryViewer, "convert_type")
+    assert hasattr(_vlink.Status, "is_for_writer")
+    assert hasattr(_vlink.Status, "is_for_reader")
 
     print("[PASS] API surface")
 
@@ -874,12 +1057,27 @@ def test_node_extended():
 
     status = sub.get_status(_vlink.StatusType.SubscriptionMatched)
     assert status is None or isinstance(status, dict)
+    assert _vlink.Status.is_for_reader(_vlink.StatusType.SubscriptionMatched)
+    assert _vlink.Status.is_for_writer(_vlink.StatusType.PublicationMatched)
+    assert sub.get_abstract_node() is None or isinstance(sub.get_abstract_node(), int)
 
     sub.deinit()
     print("[PASS] Node extended (get_message_loop / get_status)")
 
 
 def test_node_role_swaps():
+    pub = _vlink.Publisher("intra://test/role_swap_pub", auto_init=False)
+    pub.set_discovery_enabled(False)
+    pub.mark_as_setter()
+    pub.init()
+    pub.deinit()
+
+    sub = _vlink.Subscriber("intra://test/role_swap_sub", auto_init=False)
+    sub.set_discovery_enabled(False)
+    sub.mark_as_getter()
+    sub.init()
+    sub.deinit()
+
     setter = _vlink.Setter("intra://test/role_swap_set", auto_init=False)
     setter.set_discovery_enabled(False)
     setter.mark_as_publisher()
@@ -891,7 +1089,49 @@ def test_node_role_swaps():
     getter.mark_as_subscriber()
     getter.init()
     getter.deinit()
-    print("[PASS] Setter.mark_as_publisher / Getter.mark_as_subscriber")
+    print("[PASS] Publisher/Subscriber/Setter/Getter role swaps")
+
+
+def test_security_node_bindings():
+    def passthrough(data):
+        return bytes(data)
+
+    for cls in (
+        _vlink.SecurityPublisher, _vlink.SecuritySubscriber, _vlink.SecurityServer, _vlink.SecurityClient,
+        _vlink.SecuritySetter, _vlink.SecurityGetter,
+    ):
+        node = cls(f"shm://test/security_bindings_{cls.__name__}", auto_init=False)
+        node.set_security_key("python-api-key")
+        node.set_security_callbacks(passthrough, passthrough)
+        assert node.get_transport_type() == _vlink.TransportType.Shm
+
+    assert _vlink.SecurityType.WithSecurity is not None
+    assert _vlink.ActionType.Unknown is not None
+    print("[PASS] Security node bindings")
+
+
+def test_schema_data_and_version():
+    schema = _vlink.SchemaData()
+    assert not schema
+    schema.name = "demo.Schema"
+    schema.encoding = "protobuf"
+    schema.schema_type = _vlink.SchemaType.Protobuf
+    schema.data = _vlink.Bytes.from_bytes(b"schema")
+    assert schema
+    assert _vlink.SchemaData.is_valid_type(_vlink.SchemaType.Protobuf)
+    assert _vlink.SchemaData.is_real_type(_vlink.SchemaType.Protobuf)
+    assert _vlink.SchemaData.convert_type(_vlink.SchemaType.Protobuf) == "protobuf"
+    assert _vlink.SchemaData.convert_encoding("proto") == _vlink.SchemaType.Protobuf
+    assert _vlink.SchemaData.infer_ser_type("raw") == _vlink.SchemaType.Raw
+    assert _vlink.SchemaData.resolve_type(_vlink.SchemaType.Unknown, "raw", "") == _vlink.SchemaType.Raw
+
+    v1 = _vlink.Version.from_string("1.2.3")
+    v2 = _vlink.Version(1, 2, 4)
+    assert v1.is_valid()
+    assert v1 < v2
+    assert v2 > v1
+    assert v1 != v2
+    print("[PASS] SchemaData / Version helpers")
 
 
 def test_log_fatal():
@@ -940,6 +1180,7 @@ if __name__ == "__main__":
     test_deadline_timer_extended()
     test_message_loop_extended()
     test_timer_extended()
+    test_wheel_timer_extended()
     test_thread_pool_extended()
     test_process()
     test_utils_extended()
@@ -954,6 +1195,7 @@ if __name__ == "__main__":
     test_security()
     test_security_set_callbacks()
     test_server_async_reply()
+    test_client_invoke_timeout_arg()
     test_exec_task()
     test_timer_constructors()
     test_discovery_viewer_fields()
@@ -962,8 +1204,10 @@ if __name__ == "__main__":
     test_node_wire_meta_validation()
     test_node_extended()
     test_node_role_swaps()
+    test_security_node_bindings()
+    test_schema_data_and_version()
     test_log_fatal()
     test_publish_after_buffer_release()
 
     print("=" * 60)
-    print("ALL 30 TESTS PASSED!")
+    print("ALL TESTS PASSED!")

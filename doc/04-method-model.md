@@ -87,7 +87,7 @@ explicit Client(const std::string& url_str,
                 InitType type = InitType::kWithInit);
 
 // 从传输配置对象构造（细粒度控制）
-template <typename ConfT>
+template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
 explicit Client(const ConfT& conf,
                 InitType type = InitType::kWithInit);
 ```
@@ -186,7 +186,7 @@ using ReqAsyncRespCallback = vlink::Function<void(uint64_t req_id, const ReqT&)>
 explicit Server(const std::string& url_str,
                 InitType type = InitType::kWithInit);
 
-template <typename ConfT>
+template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
 explicit Server(const ConfT& conf,
                 InitType type = InitType::kWithInit);
 ```
@@ -641,7 +641,7 @@ void worker_thread() {
 
         // 从工作线程发送响应
         g_server->reply(task.req_id, resp);
-        printf("[Worker] replied to req_id=%lu\n", task.req_id);
+        printf("[Worker] replied to req_id=%" PRIu64 "\n", task.req_id);
     }
 }
 

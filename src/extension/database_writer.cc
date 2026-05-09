@@ -674,10 +674,54 @@ void DatabaseWriter::open(const std::string& path) {
   int ret = 0;
   char* err_msg = nullptr;
 
+  auto free_err_msg = [&]() noexcept {
+    if (err_msg) {
+      ::sqlite3_free(err_msg);
+      err_msg = nullptr;
+    }
+  };
+
+  auto finalize_stmt = [](sqlite3_stmt*& stmt) noexcept {
+    if (stmt) {
+      ::sqlite3_finalize(stmt);
+      stmt = nullptr;
+    }
+  };
+
+  auto close_db = [&]() noexcept {
+    if (!impl_->db) {
+      return;
+    }
+
+    if (impl_->in_cached) {
+      ::sqlite3_exec(impl_->db, "ROLLBACK;", nullptr, nullptr, nullptr);
+      impl_->in_cached = false;
+      impl_->cached_size = 0;
+      impl_->cache_timer.stop();
+    }
+
+    finalize_stmt(impl_->schemas_stmt);
+    finalize_stmt(impl_->datas_stmt);
+    finalize_stmt(impl_->urls_stmt);
+    finalize_stmt(impl_->update_complete_stmt);
+    finalize_stmt(impl_->update_header_stmt);
+    finalize_stmt(impl_->update_url_loss_stmt);
+    finalize_stmt(impl_->update_url_meta_stmt);
+    finalize_stmt(impl_->update_urls_stmt);
+
+    int close_ret = ::sqlite3_close_v2(impl_->db);
+    if VUNLIKELY (close_ret != SQLITE_OK) {
+      CLOG_W("Failed to close database: %s.", ::sqlite3_errmsg(impl_->db));
+    }
+
+    impl_->db = nullptr;
+  };
+
   // open db
   ret = ::sqlite3_open_v2(path.c_str(), &impl_->db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr);
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to open database [%s].", path.c_str());
+    close_db();
     return;
   }
 
@@ -689,13 +733,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set temp_store: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -705,13 +744,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set page_size: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -721,13 +755,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set cache_size: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -737,13 +766,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set synchronous: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -754,13 +778,8 @@ void DatabaseWriter::open(const std::string& path) {
     if VUNLIKELY (ret != SQLITE_OK) {
       CLOG_F("Failed to set journal_mode: %s.", err_msg);
 
-      if (err_msg) {
-        ::sqlite3_free(err_msg);
-        err_msg = nullptr;
-      }
-
-      ::sqlite3_close(impl_->db);
-      impl_->db = nullptr;
+      free_err_msg();
+      close_db();
 
       return;
     }
@@ -769,13 +788,8 @@ void DatabaseWriter::open(const std::string& path) {
     if VUNLIKELY (ret != SQLITE_OK) {
       CLOG_F("Failed to set journal_mode: %s.", err_msg);
 
-      if (err_msg) {
-        ::sqlite3_free(err_msg);
-        err_msg = nullptr;
-      }
-
-      ::sqlite3_close(impl_->db);
-      impl_->db = nullptr;
+      free_err_msg();
+      close_db();
 
       return;
     }
@@ -786,13 +800,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set automatic_index: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -802,13 +811,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set locking_mode: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -827,13 +831,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create header table: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -849,13 +848,9 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare header table: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    finalize_stmt(header_stmt);
+    close_db();
 
     return;
   }
@@ -883,21 +878,14 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_DONE) {
     CLOG_F("Failed to insert header table: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    finalize_stmt(header_stmt);
+    close_db();
 
     return;
   }
 
-  if VLIKELY (header_stmt) {
-    ::sqlite3_finalize(header_stmt);
-    header_stmt = nullptr;
-  }
+  finalize_stmt(header_stmt);
 
   // create schema table
   ret = ::sqlite3_exec(impl_->db, "CREATE TABLE IF NOT EXISTS VLinkSchemas(ser TEXT, encoding TEXT, data BLOB);",
@@ -905,13 +893,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create schema table: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -923,13 +906,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare schema table: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -942,13 +920,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create urls table: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -961,13 +934,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare urls table: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -979,13 +947,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create datas table: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -996,13 +959,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare datas table: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -1014,13 +972,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare update_header: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -1032,13 +985,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare update_urls: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -1049,13 +997,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create datas idx_elapsed_url: %s.", err_msg);
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -1066,13 +1009,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare update_url_meta: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -1083,13 +1021,8 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare update_url_loss: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
@@ -1100,21 +1033,13 @@ void DatabaseWriter::open(const std::string& path) {
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare update_complete: %s.", ::sqlite3_errmsg(impl_->db));
 
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
-    }
-
-    ::sqlite3_close(impl_->db);
-    impl_->db = nullptr;
+    free_err_msg();
+    close_db();
 
     return;
   }
 
-  if (err_msg) {
-    ::sqlite3_free(err_msg);
-    err_msg = nullptr;
-  }
+  free_err_msg();
 
   sync_cache();
 
@@ -1291,11 +1216,10 @@ void DatabaseWriter::close() {
   }
 
   if VLIKELY (impl_->db) {
-    int ret = ::sqlite3_close(impl_->db);
+    int ret = ::sqlite3_close_v2(impl_->db);
 
     if VUNLIKELY (ret != SQLITE_OK) {
       CLOG_W("Failed to close database: %s.", ::sqlite3_errmsg(impl_->db));
-      return;
     }
 
     impl_->db = nullptr;
@@ -1415,9 +1339,9 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
 
   // split
   if (impl_->is_split_mode && !impl_->url_map.empty()) {
-    if (impl_->config.split_by_time > 0 &&
-        (microseconds_timestamp - impl_->config.begin_time * 1000) >
-            (impl_->config.split_by_time * 1000) * static_cast<int64_t>(impl_->split_file_list.size())) {
+    if (impl_->config.split_by_time > 0 && (microseconds_timestamp - impl_->config.begin_time * 1000) >
+                                               static_cast<int64_t>(impl_->config.split_by_time) * 1000 *
+                                                   static_cast<int64_t>(impl_->split_file_list.size())) {
       do_split = true;
     } else if (impl_->config.split_by_time <= 0 && impl_->config.split_by_size > 0 &&
                (impl_->current_size + static_cast<int64_t>(data.size())) > impl_->config.split_by_size) {

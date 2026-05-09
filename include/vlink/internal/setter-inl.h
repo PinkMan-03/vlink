@@ -93,8 +93,14 @@ inline bool Setter<ValueT, SecT>::init() {
   }
 
   this->impl_->sync([this]() {
-    if VLIKELY (value_.has_value()) {
-      write(value_.value());
+    std::optional<ValueT> snapshot;
+    {
+      std::lock_guard lock(mtx_);
+      snapshot = value_;
+    }
+
+    if VLIKELY (snapshot.has_value()) {
+      write(snapshot.value());
     }
   });
 

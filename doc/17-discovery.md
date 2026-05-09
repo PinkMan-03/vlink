@@ -520,11 +520,16 @@ VLink 提供了两个基于 `DiscoveryViewer` 的 CLI 工具：
 # 列出所有存活节点
 vlink-list
 
-# 输出示例：
-# URL                         Type            SerType     Processes
-# dds://camera_image          Pub+Sub         protobuf    sensor_node(PID:1234) vision_node(PID:5678)
-# shm://lidar_points          Pub             standard    lidar_node(PID:4321)
-# intra://control_cmd         Server+Client   standard    ctrl_node(PID:9999)
+# 输出示例（每个进程一段、内嵌列表 Publisher/Subscriber/Server/Client/Setter/Getter；详见
+# [CLI 工具 -- vlink-list](13-cli-tools.md#vlink-list)）：
+# sensor_node (pid: 1234, host: hostA, ip: 192.168.1.10)
+#   Publisher:
+#     dds://camera_image  protobuf  CameraImage
+#   Subscriber:
+#     shm://control_cmd   standard  ControlCmd
+# lidar_node (pid: 4321, host: hostA, ip: 192.168.1.10)
+#   Publisher:
+#     shm://lidar_points  standard  LidarPoints
 ```
 
 ### 7.2 vlink-monitor

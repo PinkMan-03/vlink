@@ -82,6 +82,10 @@ const Conf* DdscPublisherImpl::get_conf() const { return &conf_; }
 const AbstractNode* DdscPublisherImpl::get_abstract_node() const { return this; }
 
 Status::BasePtr DdscPublisherImpl::get_status(Status::Type type) const {
+  if VUNLIKELY (!writer_) {
+    return std::make_shared<Status::Unknown>();
+  }
+
   return WriterListener::get_status(writer_->entity, type);
 }
 

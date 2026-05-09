@@ -135,7 +135,7 @@ class VLINK_EXPORT BagReaderProcessor {
  private:
   bool on_check();
 
-  void on_output(std::unique_lock<std::mutex>& lock);
+  void on_output(std::unique_lock<std::mutex>& lock, bool at_end);
 
   void on_run();
 

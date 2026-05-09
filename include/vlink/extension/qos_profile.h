@@ -35,13 +35,13 @@
  * | Profile    | Reliability | History        | Durability     | PubMode | Priority   | Use case                    |
  * | ---------- | ----------  | -------------- | -------------- | ------- | ---------- | --------------------------- |
  * | kEvent     | Reliable    | KeepLast(10)   | Volatile       | Sync    | RealTime   | Discrete control events     |
- * | kMethod    | Reliable    | KeepAll(1)     | Volatile       | Sync    | High       | RPC request/response        |
+ * | kMethod    | Reliable    | KeepAll        | Volatile       | Sync    | High       | RPC request/response        |
  * | kField     | Reliable    | KeepLast(1)    | TransientLocal | Sync    | High       | Latest-value state sync     |
  * | kSensor    | BestEffort  | KeepLast(20)   | Volatile       | ASync   | Normal     | High-rate sensor data       |
  * | kParameter | Reliable    | KeepLast(1000) | Volatile       | Sync    | Normal     | Configuration parameters    |
  * | kService   | Reliable    | KeepLast(10)   | TransientLocal | Sync    | Normal     | Service discovery           |
  * | kClock     | BestEffort  | KeepLast(1)    | Volatile       | ASync   | Low        | Time synchronisation        |
- * | kStatic    | Reliable    | KeepAll(1)     | TransientLocal | Sync    | Normal     | Static/slow-changing data   |
+ * | kStatic    | Reliable    | KeepAll        | TransientLocal | Sync    | Normal     | Static/slow-changing data   |
  * | kLight     | Reliable    | KeepLast(1)    | Volatile       | ASync   | High       | Lightweight fast messaging  |
  * | kPoor      | BestEffort  | KeepLast(5)    | Volatile       | ASync   | Background | Low-priority best-effort    |
  * | kBetter    | BestEffort  | KeepLast(50)   | Volatile       | Sync    | RealTime   | High-throughput best-effort |

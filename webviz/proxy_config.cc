@@ -131,6 +131,11 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
   }
 
   if (!program.is_used("--proxy_interface") && proxy.contains("interface_mode")) {
+    if VUNLIKELY (!proxy["interface_mode"].is_string()) {
+      error = "proxy.interface_mode must be a string";
+      return false;
+    }
+
     if VUNLIKELY (!ProxyBridge::parse_interface_mode(proxy["interface_mode"].get<std::string>(),
                                                      config.interface_mode)) {
       error = "proxy.interface_mode must be 'proxy_api' or 'proxy_server'";
@@ -139,6 +144,11 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
   }
 
   if (!program.is_used("--proxy_role") && proxy.contains("role")) {
+    if VUNLIKELY (!proxy["role"].is_string()) {
+      error = "proxy.role must be a string";
+      return false;
+    }
+
     if VUNLIKELY (!parse_role(proxy["role"].get<std::string>(), config.transport.role)) {
       error = "proxy.role must be 'controller' or 'listener'";
       return false;
@@ -146,6 +156,11 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
   }
 
   if (!program.is_used("--proxy_data_callback_mode") && proxy.contains("data_callback_mode")) {
+    if VUNLIKELY (!proxy["data_callback_mode"].is_string()) {
+      error = "proxy.data_callback_mode must be a string";
+      return false;
+    }
+
     if VUNLIKELY (!ProxyBridge::parse_data_callback_mode(proxy["data_callback_mode"].get<std::string>(),
                                                          config.data_callback_mode)) {
       error = "proxy.data_callback_mode must be 'direct' or 'queued'";
@@ -154,34 +169,74 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
   }
 
   if (!program.is_used("--proxy_domain_id") && proxy.contains("domain_id")) {
+    if VUNLIKELY (!proxy["domain_id"].is_number_integer()) {
+      error = "proxy.domain_id must be an integer";
+      return false;
+    }
+
     config.transport.domain_id = proxy["domain_id"].get<int>();
   }
 
   if (!program.is_used("--proxy_dds_impl") && proxy.contains("dds_impl")) {
+    if VUNLIKELY (!proxy["dds_impl"].is_string()) {
+      error = "proxy.dds_impl must be a string";
+      return false;
+    }
+
     config.transport.dds_impl = normalize_token(proxy["dds_impl"].get<std::string>());
   }
 
   if (!program.is_used("--proxy_native") && proxy.contains("native")) {
+    if VUNLIKELY (!proxy["native"].is_boolean()) {
+      error = "proxy.native must be a boolean";
+      return false;
+    }
+
     config.transport.native = proxy["native"].get<bool>();
   }
 
   if (!program.is_used("--proxy_tcp") && proxy.contains("enable_tcp")) {
+    if VUNLIKELY (!proxy["enable_tcp"].is_boolean()) {
+      error = "proxy.enable_tcp must be a boolean";
+      return false;
+    }
+
     config.transport.enable_tcp = proxy["enable_tcp"].get<bool>();
   }
 
   if (!program.is_used("--proxy_bind_ip") && proxy.contains("bind_ip")) {
+    if VUNLIKELY (!proxy["bind_ip"].is_string()) {
+      error = "proxy.bind_ip must be a string";
+      return false;
+    }
+
     config.transport.bind_ip = proxy["bind_ip"].get<std::string>();
   }
 
   if (!program.is_used("--proxy_peer_ip") && proxy.contains("peer_ip")) {
+    if VUNLIKELY (!proxy["peer_ip"].is_string()) {
+      error = "proxy.peer_ip must be a string";
+      return false;
+    }
+
     config.transport.peer_ip = proxy["peer_ip"].get<std::string>();
   }
 
   if (!program.is_used("--proxy_buf_size") && proxy.contains("buf_size")) {
+    if VUNLIKELY (!proxy["buf_size"].is_number_integer()) {
+      error = "proxy.buf_size must be an integer";
+      return false;
+    }
+
     config.transport.buf_size = proxy["buf_size"].get<int>();
   }
 
   if (!program.is_used("--proxy_mtu_size") && proxy.contains("mtu_size")) {
+    if VUNLIKELY (!proxy["mtu_size"].is_number_integer()) {
+      error = "proxy.mtu_size must be an integer";
+      return false;
+    }
+
     config.transport.mtu_size = proxy["mtu_size"].get<int>();
   }
 
@@ -194,18 +249,38 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
     }
 
     if (!program.is_used("--proxy_key") && api.contains("security_key")) {
+      if VUNLIKELY (!api["security_key"].is_string()) {
+        error = "proxy.api.security_key must be a string";
+        return false;
+      }
+
       config.api.security_key = api["security_key"].get<std::string>();
     }
 
     if (!program.is_used("--proxy_reliable") && api.contains("reliable")) {
+      if VUNLIKELY (!api["reliable"].is_boolean()) {
+        error = "proxy.api.reliable must be a boolean";
+        return false;
+      }
+
       config.api.reliable = api["reliable"].get<bool>();
     }
 
     if (!program.is_used("--proxy_direct") && api.contains("direct")) {
+      if VUNLIKELY (!api["direct"].is_boolean()) {
+        error = "proxy.api.direct must be a boolean";
+        return false;
+      }
+
       config.api.direct = api["direct"].get<bool>();
     }
 
     if (!program.is_used("--proxy_no_match_version") && api.contains("match_version")) {
+      if VUNLIKELY (!api["match_version"].is_boolean()) {
+        error = "proxy.api.match_version must be a boolean";
+        return false;
+      }
+
       config.api.match_version = api["match_version"].get<bool>();
     }
   }
@@ -219,14 +294,29 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
     }
 
     if (!program.is_used("--proxy_max_packet_size") && server.contains("max_packet_size")) {
+      if VUNLIKELY (!server["max_packet_size"].is_number()) {
+        error = "proxy.server.max_packet_size must be a number";
+        return false;
+      }
+
       config.server.max_packet_size = server["max_packet_size"].get<double>();
     }
 
     if (!program.is_used("--proxy_use_iox") && server.contains("use_iox")) {
+      if VUNLIKELY (!server["use_iox"].is_boolean()) {
+        error = "proxy.server.use_iox must be a boolean";
+        return false;
+      }
+
       config.server.use_iox = server["use_iox"].get<bool>();
     }
 
     if (!program.is_used("--proxy_iox_config") && server.contains("iox_config")) {
+      if VUNLIKELY (!server["iox_config"].is_string()) {
+        error = "proxy.server.iox_config must be a string";
+        return false;
+      }
+
       config.server.iox_config = server["iox_config"].get<std::string>();
 
       if (!config.server.iox_config.empty() && !std::filesystem::path(config.server.iox_config).is_absolute() &&
@@ -237,6 +327,11 @@ bool ProxyConfigHelper::apply_config(const Json& root, const std::filesystem::pa
     }
 
     if (!program.is_used("--proxy_iox_strategy") && server.contains("iox_strategy")) {
+      if VUNLIKELY (!server["iox_strategy"].is_number_integer()) {
+        error = "proxy.server.iox_strategy must be an integer";
+        return false;
+      }
+
       config.server.iox_strategy = server["iox_strategy"].get<int>();
     }
 

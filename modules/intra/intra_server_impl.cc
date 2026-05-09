@@ -88,7 +88,7 @@ bool IntraServerImpl::detach() {
   return false;
 }
 
-bool IntraServerImpl::has_clients() const { return !object_->req_resp_map_is_empty(); }
+bool IntraServerImpl::has_clients() const { return !object_->server_connect_map_is_empty(); }
 
 bool IntraServerImpl::listen(ReqRespCallback&& callback) {
   object_->register_req_resp_callback(this, std::move(callback));

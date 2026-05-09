@@ -23,6 +23,7 @@
 
 #include "./base/multi_loop.h"
 
+#include <mutex>
 #include <optional>
 #include <utility>
 
@@ -47,6 +48,7 @@ struct MultiLoopGlobal final {
 
 // MultiLoop::Impl
 struct MultiLoop::Impl final {
+  mutable std::mutex pool_mtx;
   std::optional<ThreadPool> thread_pool;
   size_t thread_num{0};
 };
@@ -71,6 +73,8 @@ MultiLoop::MultiLoop(size_t thread_num, Type type) : MessageLoop(type), impl_(st
 MultiLoop::~MultiLoop() = default;
 
 bool MultiLoop::is_in_same_thread() const {
+  std::lock_guard lock(impl_->pool_mtx);
+
   if VUNLIKELY (!impl_->thread_pool) {
     return false;
   }
@@ -79,25 +83,41 @@ bool MultiLoop::is_in_same_thread() const {
 }
 
 void MultiLoop::on_begin() {
-  if (get_type() == MultiLoop::kNormalType) {
-    impl_->thread_pool.emplace(impl_->thread_num, ThreadPool::kNormalType);
-  } else if (get_type() == MultiLoop::kLockfreeType) {
-    impl_->thread_pool.emplace(impl_->thread_num, ThreadPool::kLockfreeType);
-  } else if (get_type() == MultiLoop::kPriorityType) {
-    impl_->thread_pool.emplace(impl_->thread_num, ThreadPool::kNormalType);
+  {
+    std::lock_guard lock(impl_->pool_mtx);
+
+    if (get_type() == MultiLoop::kNormalType) {
+      impl_->thread_pool.emplace(impl_->thread_num, ThreadPool::kNormalType);
+    } else if (get_type() == MultiLoop::kLockfreeType) {
+      impl_->thread_pool.emplace(impl_->thread_num, ThreadPool::kLockfreeType);
+    } else if (get_type() == MultiLoop::kPriorityType) {
+      impl_->thread_pool.emplace(impl_->thread_num, ThreadPool::kNormalType);
+    }
   }
 
   MessageLoop::on_begin();
 }
 
 void MultiLoop::on_end() {
-  impl_->thread_pool->shutdown();
-  impl_->thread_pool.reset();
+  {
+    std::lock_guard lock(impl_->pool_mtx);
+
+    if (impl_->thread_pool) {
+      impl_->thread_pool->shutdown();
+      impl_->thread_pool.reset();
+    }
+  }
 
   MessageLoop::on_end();
 }
 
 void MultiLoop::on_task_changed(Callback&& callback, uint32_t start_time) {
+  std::lock_guard lock(impl_->pool_mtx);
+
+  if VUNLIKELY (!impl_->thread_pool) {
+    return;
+  }
+
   impl_->thread_pool->post_task([this, tmp_callback = std::move(callback), start_time]() mutable {
     MessageLoop::on_task_changed(std::move(tmp_callback), start_time);
   });

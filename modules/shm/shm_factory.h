@@ -366,11 +366,11 @@ class ShmSubscriber final : public AbstractObject<ShmID>, public std::enable_sha
 
   std::optional<SysSemaphore> sem_;
 
-  bool is_latency_and_lost_enabled_{false};
+  std::atomic_bool is_latency_and_lost_enabled_{false};
 
   CalculateSample calc_sample_;
 
-  bool manual_unloan_{false};
+  std::atomic_bool manual_unloan_{false};
 };
 
 }  // namespace vlink

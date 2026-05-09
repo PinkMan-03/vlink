@@ -76,14 +76,14 @@
  *
  * // Consumer thread:
  * {
- *   std::unique_lock<std::mutex> lock(mtx);
+ *   std::unique_lock lock(mtx);
  *   cv.wait_for(lock, std::chrono::milliseconds(200),
  *               [&]{ return ready; });
  * }
  *
  * // Producer thread:
  * {
- *   std::lock_guard<std::mutex> lock(mtx);
+ *   std::lock_guard lock(mtx);
  *   ready = true;
  * }
  * cv.notify_one();
@@ -286,7 +286,7 @@ class ConditionVariable final {
  * @details
  * Drop-in replacement for @c std::condition_variable_any that uses
  * @c CLOCK_MONOTONIC internally.  Accepts any lockable type (not just
- * @c std::unique_lock<std::mutex>).
+ * @c std::unique_lock).
  *
  * Internally uses a shared @c ConditionVariable wrapped in a @c std::mutex
  * to provide the @c BasicLockable compatibility layer.
@@ -538,20 +538,20 @@ inline ConditionVariableAny::~ConditionVariableAny() noexcept = default;
 
 inline void ConditionVariableAny::notify_one() noexcept {
   std::shared_ptr<SharedState> state = shared_state_;
-  std::lock_guard<std::mutex> lock(state->mtx);
+  std::lock_guard lock(state->mtx);
   state->cv.notify_one();
 }
 
 inline void ConditionVariableAny::notify_all() noexcept {
   std::shared_ptr<SharedState> state = shared_state_;
-  std::lock_guard<std::mutex> lock(state->mtx);
+  std::lock_guard lock(state->mtx);
   state->cv.notify_all();
 }
 
 template <typename LockT>
 inline void ConditionVariableAny::wait(LockT& lock) noexcept {
   std::shared_ptr<SharedState> state = shared_state_;
-  std::unique_lock<std::mutex> internal_lock(state->mtx);
+  std::unique_lock internal_lock(state->mtx);
   lock.unlock();
 
   struct UnlockGuard final {
@@ -641,7 +641,7 @@ inline std::cv_status ConditionVariableAny::wait_until_impl(
   }
 
   std::shared_ptr<SharedState> state = shared_state_;
-  std::unique_lock<std::mutex> internal_lock(state->mtx);
+  std::unique_lock internal_lock(state->mtx);
   lock.unlock();
 
   struct UnlockGuard final {

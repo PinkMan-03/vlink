@@ -503,14 +503,26 @@ Shm2Server::Shm2Server(const ShmID2& id) {
           return;
         }
 
-        auto* ml = get_first_impl()->get_message_loop();
+        auto* impl = get_first_impl();
+        if VUNLIKELY (!impl) {
+          return;
+        }
+
+        auto* ml = impl->get_message_loop();
         if VLIKELY (ml) {
-          ml->post_task([this]() {
-            if VUNLIKELY (!get_first_impl()->get_message_loop()) {
+          std::weak_ptr<Shm2Server> weak_self = weak_from_this();
+          ml->post_task([weak_self]() {
+            auto self = weak_self.lock();
+            if VUNLIKELY (!self) {
               return;
             }
 
-            process_message();
+            auto* impl = self->get_first_impl();
+            if VUNLIKELY (!impl || !impl->get_message_loop()) {
+              return;
+            }
+
+            self->process_message();
           });
         } else {
           process_message();
@@ -951,14 +963,26 @@ Shm2Client::Shm2Client(const ShmID2& id) {
           }
         } while (has_received_event);
 
-        auto* ml = get_first_impl()->get_message_loop();
+        auto* impl = get_first_impl();
+        if VUNLIKELY (!impl) {
+          return;
+        }
+
+        auto* ml = impl->get_message_loop();
         if VLIKELY (ml) {
-          ml->post_task([this]() {
-            if VUNLIKELY (!get_first_impl()->get_message_loop()) {
+          std::weak_ptr<Shm2Client> weak_self = weak_from_this();
+          ml->post_task([weak_self]() {
+            auto self = weak_self.lock();
+            if VUNLIKELY (!self) {
               return;
             }
 
-            process_message();
+            auto* impl = self->get_first_impl();
+            if VUNLIKELY (!impl || !impl->get_message_loop()) {
+              return;
+            }
+
+            self->process_message();
           });
         } else {
           process_message();
@@ -1904,14 +1928,26 @@ void Shm2Subscriber::subscribe() {
           }
         } while (has_received_event);
 
-        auto* ml = get_first_impl()->get_message_loop();
+        auto* impl = get_first_impl();
+        if VUNLIKELY (!impl) {
+          return;
+        }
+
+        auto* ml = impl->get_message_loop();
         if VLIKELY (ml) {
-          ml->post_task([this]() {
-            if VUNLIKELY (!get_first_impl()->get_message_loop()) {
+          std::weak_ptr<Shm2Subscriber> weak_self = weak_from_this();
+          ml->post_task([weak_self]() {
+            auto self = weak_self.lock();
+            if VUNLIKELY (!self) {
               return;
             }
 
-            process_message();
+            auto* impl = self->get_first_impl();
+            if VUNLIKELY (!impl || !impl->get_message_loop()) {
+              return;
+            }
+
+            self->process_message();
           });
         } else {
           process_message();

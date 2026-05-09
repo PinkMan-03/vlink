@@ -66,8 +66,11 @@ namespace vlink {
  * @brief Global BFBS registry shared by schema-plugin instances in one process.
  *
  * @details
- * The registry owns copied BFBS blobs so callers may register data from
- * generated @c *BinarySchema helpers without managing the lifetime manually.
+ * The registry stores non-owning views of BFBS blobs supplied by the caller;
+ * the caller must keep the underlying buffer alive for as long as the registry
+ * is referenced.  In practice BFBS blobs come from generated @c *BinarySchema
+ * helpers whose @c data() points into static link-time storage, which trivially
+ * satisfies this requirement.
  * Each BFBS blob is keyed by its fully-qualified FlatBuffers root type name.
  */
 class FlatbuffersRegistry final {

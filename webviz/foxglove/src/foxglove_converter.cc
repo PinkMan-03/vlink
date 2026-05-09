@@ -764,6 +764,10 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
       qz = cr * cp * sy - sr * sp * cy;
     }
 
+    if (qx == 0.0 && qy == 0.0 && qz == 0.0 && qw == 0.0) {
+      qw = 1.0;
+    }
+
     auto ts = (timestamp_ns > 0) ? make_timestamp_from_ns(timestamp_ns) : make_timestamp_from_us(timestamp_us);
     auto fid = builder.CreateString(frame_id);
 

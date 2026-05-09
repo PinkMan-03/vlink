@@ -159,6 +159,11 @@ class Getter : public Node<GetterImpl, SecT> {
   explicit Getter(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
+   * @brief Destroys the getter and releases any subscribed resources.
+   */
+  ~Getter() override;
+
+  /**
    * @brief Returns the latest cached value, if one has been received.
    *
    * @details

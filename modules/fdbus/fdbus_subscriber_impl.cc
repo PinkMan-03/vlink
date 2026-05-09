@@ -41,6 +41,8 @@ void FdbusSubscriberImpl::init() {
 
   object_->add_impl(this);
 
+  object_->start_timer();
+
   if (object_->getSessionCount() > 0) {
     subscribe();
 

@@ -58,11 +58,11 @@
  * fits inside the storage; this is enforced by a @c static_assert.
  *
  * @par Type identity per SboSizeT
- * @c Function<Sig, X> and @c Function<Sig, Y> are distinct types and cannot
- * be implicitly assigned to one another (same for @c MoveFunction).  They
- * remain interchangeable through the generic functor-construction path:
- * a @c Function<Sig, 64> can be passed as the source for @c Function<Sig,
- * 256>, which wraps it as a regular callable.
+ * @c Function<Sig, X> and @c Function<Sig, Y> are distinct types, but
+ * copyable @c Function wrappers remain constructible and assignable across
+ * SBO sizes through the generic functor path: a @c Function<Sig, 64> can be
+ * used as the source for @c Function<Sig, 256>, which wraps it as a regular
+ * callable.  @c MoveFunction follows the same pattern for movable sources.
  *
  * @par Empty-state propagation
  * Constructing or assigning from any of the following yields an empty
@@ -115,10 +115,11 @@
  * - @c MoveFunction accepts move-only targets and is itself move-only.
  * - @c LargeFunction / @c LargeMoveFunction are convenience aliases for
  *   @c Function<Sig, 256> / @c MoveFunction<Sig, 256>.
- * - When @c VLINK_ENABLE_BASE_FUNCTIONAL is undefined (e.g. on platforms
- *   where the SBO + @c MemoryPool path is suppressed), every alias above
- *   degenerates to @c std::function / @c std::move_only_function so source
- *   code remains unchanged; the @c SboSizeT argument is then ignored.
+ * - This header self-defines @c VLINK_ENABLE_BASE_FUNCTIONAL when the macro is
+ *   absent, so normal builds always use the VLink SBO + @c MemoryPool
+ *   implementation.  The standard-library alias block below is not a public
+ *   compile-command opt-out and is not selected by passing
+ *   @c -UVLINK_ENABLE_BASE_FUNCTIONAL.
  * - Class template declarations precede the @c Details section;
  *   out-of-class member definitions follow it.
  */
@@ -1114,7 +1115,7 @@ inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::MoveFunction(FunctorT&& f) {
       return;
     }
   } else if constexpr (kIsPointerLike<DecayFunctorT>) {
-    if VUNLIKELY (f == nullptr) {
+    if VUNLIKELY (static_cast<DecayFunctorT>(f) == nullptr) {
       return;
     }
   }

@@ -292,7 +292,7 @@ TEST_SUITE("base-Schedule") {
     // handler may not be set when the task throws.
     loop.exec_task(Schedule::Config{100}, []() { throw std::runtime_error("test error"); })
         .on_catch([&caught, &caught_msg, &msg_mtx](std::exception& e) {
-          std::lock_guard<std::mutex> lk(msg_mtx);
+          std::lock_guard lk(msg_mtx);
           caught.store(true);
           caught_msg = e.what();
         });
@@ -302,7 +302,7 @@ TEST_SUITE("base-Schedule") {
 
     CHECK(caught.load());
     {
-      std::lock_guard<std::mutex> lk(msg_mtx);
+      std::lock_guard lk(msg_mtx);
       CHECK(caught_msg == "test error");
     }
 
@@ -494,17 +494,17 @@ TEST_SUITE("base-Schedule") {
     sleep_ms(20);
 
     loop.exec_task(Schedule::Config{0, MessageLoop::kLowestPriority}, [&order, &mtx]() {
-      std::lock_guard<std::mutex> lk(mtx);
+      std::lock_guard lk(mtx);
       order.push_back(1);
     });
 
     loop.exec_task(Schedule::Config{0, MessageLoop::kHighestPriority}, [&order, &mtx]() {
-      std::lock_guard<std::mutex> lk(mtx);
+      std::lock_guard lk(mtx);
       order.push_back(3);
     });
 
     loop.exec_task(Schedule::Config{0, MessageLoop::kNormalPriority}, [&order, &mtx]() {
-      std::lock_guard<std::mutex> lk(mtx);
+      std::lock_guard lk(mtx);
       order.push_back(2);
     });
 

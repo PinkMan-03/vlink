@@ -237,8 +237,12 @@ class VLINK_EXPORT Plugin final {
    * @brief Internal entry-point handler called from @c VLINK_PLUGIN_DECLARE.
    *
    * @details
-   * Validates the plugin ID and version, then configures the logger level inside the plugin.
-   * Should not be called directly by user code.
+   * Validates the plugin ID and the major/minor version exported by the
+   * plugin against the values required by the caller, emitting diagnostic
+   * messages gated by @p log_level (i.e. @p log_level filters the
+   * info/error output produced by this function — it does **not** propagate
+   * or configure the logger level inside the plugin module).  Should not be
+   * called directly by user code.
    *
    * @param lib_name             Library name (for logging).
    * @param local_plugin_id      ID exported by the plugin implementation.
@@ -247,8 +251,10 @@ class VLINK_EXPORT Plugin final {
    * @param target_plugin_id     ID expected by the caller (from @c T::get_plugin_id()).
    * @param target_version_major Major version required by the caller.
    * @param target_version_minor Minor version required by the caller.
-   * @param log_level            Logger level to propagate into the plugin.
-   * @return @c true if the ID and version match.
+   * @param log_level            Threshold used to gate this function's own
+   *                             diagnostic output (@c kInfo / @c kError).
+   * @return @c true iff the IDs match and the local version satisfies
+   *         @c "major @c == @c target_major @c && @c minor @c >= @c target_minor".
    */
   static bool process_plugin_internal(const std::string& lib_name, const std::string& local_plugin_id,
                                       uint16_t local_version_major, uint16_t local_version_minor,

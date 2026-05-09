@@ -542,7 +542,7 @@ class VLINK_EXPORT Logger final {
 
     WrapperStream& operator=(WrapperStream&&) = delete;
 
-    ~WrapperStream() {
+    ~WrapperStream() noexcept(LevelT != Level::kFatal) {
       if constexpr (kIsEnabled) {
         if (enabled_) {
           finalize_log<LevelT>(stream_->take_view());

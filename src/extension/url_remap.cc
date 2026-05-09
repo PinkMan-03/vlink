@@ -47,6 +47,9 @@ bool UrlRemap::load(const std::string& file_path) noexcept {
     return false;
   }
 
+  remap_list_.clear();
+  cache_map_.clear();
+
   std::filesystem::path target_path;
 
   try {
@@ -96,6 +99,9 @@ bool UrlRemap::load(const std::string& file_path) noexcept {
     error_string_ = e.what();
 
     VLOG_W("UrlRemap: Parse error: ", error_string_, ".");
+
+    remap_list_.clear();
+    cache_map_.clear();
 
     is_valid_ = false;
     return false;

@@ -233,7 +233,8 @@ void SomeipClient::start() {
   }
 }
 
-bool SomeipClient::call(vsomeip_v3::method_t method, const Bytes& req_data, NodeImpl::MsgCallback&& callback) {
+bool SomeipClient::call(vsomeip_v3::method_t method, const Bytes& req_data, NodeImpl::MsgCallback&& callback,
+                        uint64_t* seq_out) {
   auto request = someip::runtime::get()->create_request();
 
   request->set_service(service_id_);
@@ -252,6 +253,10 @@ bool SomeipClient::call(vsomeip_v3::method_t method, const Bytes& req_data, Node
     seq = 1;
   }
 
+  if (seq_out) {
+    *seq_out = seq;
+  }
+
   if VLIKELY (callback) {
     std::lock_guard lock(mtx_);
     resp_callbacks_[seq] = std::move(callback);
@@ -263,5 +268,10 @@ bool SomeipClient::call(vsomeip_v3::method_t method, const Bytes& req_data, Node
 }
 
 bool SomeipClient::is_connected() const { return connected_; }
+
+void SomeipClient::remove_response_callback(uint64_t seq) {
+  std::lock_guard lock(mtx_);
+  resp_callbacks_.erase(seq);
+}
 
 }  // namespace vlink

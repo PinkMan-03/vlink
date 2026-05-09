@@ -49,7 +49,7 @@ SpinLock lock;
 }  // 析构时自动解锁
 ```
 
-`SpinLockGuard` 类似于 `std::lock_guard`，确保异常安全。由于 SpinLock 满足 `Lockable` 要求，也可以直接使用 `std::lock_guard<SpinLock>`。
+`SpinLockGuard` 类似于 `std::lock_guard`，确保异常安全。由于 SpinLock 满足 `Lockable` 要求，也可以直接 `std::lock_guard guard(lock)`（C++17 CTAD 自动推导出 `std::lock_guard<vlink::SpinLock>`）。
 
 ## 代码执行流程
 

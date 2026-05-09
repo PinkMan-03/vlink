@@ -100,13 +100,24 @@ class Uint128 final {
   Uint128() noexcept = default;
 
   /**
-   * @brief Constructs a @c Uint128 from any integral type @p T (implicit conversion).
+   * @brief Constructs a @c Uint128 from an integral-like type @p T (implicit conversion).
    *
    * @details
-   * - If @c T is @c __uint128_t (available on GCC/Clang 64-bit), splits into high and low halves.
-   * - Otherwise zero-extends the value into @c low_; @c high_ is set to zero.
+   * - If @c T is @c __uint128_t (available on GCC/Clang 64-bit), splits into
+   *   high and low halves.
+   * - Else if @c T is signed and @c uint64_t is constructible from @c T,
+   *   sign-extends @p v: negative values yield @c high_ @c = @c ~uint64_t{0}
+   *   and @c low_ @c = the two's-complement bit pattern of @p v, so e.g.
+   *   @c Uint128(int64_t{-1}) equals @c (~uint64_t{0}, @c ~uint64_t{0})
+   *   matching @c __uint128_t(int64_t{-1}).
+   * - Else if @c uint64_t is constructible from @c T (unsigned case),
+   *   zero-extends @p v into @c low_ and sets @c high_ to @c 0.
+   * - Otherwise both halves keep their default-member-initialized value of
+   *   @c 0 — there is no diagnostic for non-integral @p T because the
+   *   integrality assertion is intentionally not enforced at this layer.
    *
-   * @tparam T  Source integral type.
+   * @tparam T  Source type.  Expected to be integral or @c __uint128_t; other
+   *            types silently produce a zero-valued @c Uint128.
    * @param v   Source value.
    *
    * @note This constructor is intentionally non-explicit to allow natural integral literals.
@@ -740,8 +751,13 @@ inline constexpr Uint128::Uint128(T v) noexcept {
 #endif
 
   if constexpr (std::is_constructible_v<uint64_t, T>) {
-    high_ = 0;
-    low_ = v;
+    if constexpr (std::is_signed_v<T>) {
+      high_ = (v < 0) ? ~uint64_t{0} : uint64_t{0};
+      low_ = static_cast<uint64_t>(static_cast<int64_t>(v));
+    } else {
+      high_ = 0;
+      low_ = v;
+    }
   }
 }
 

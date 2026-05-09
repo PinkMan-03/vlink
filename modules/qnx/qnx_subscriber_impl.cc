@@ -41,6 +41,8 @@ void QnxSubscriberImpl::init() {
 
   object_->add_impl(this);
 
+  object_->start_timer();
+
   if (object_->is_connected()) {
     object_->subscribe(conf_.hash_code);
 

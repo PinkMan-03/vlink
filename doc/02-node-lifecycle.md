@@ -296,7 +296,7 @@ static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.");
 ```
 
 - 在非 `kWithSecurity` 实例上调用会编译失败；
-- `intra://` 与 `dds://` CDR 类型运行时不支持安全加密，调用 `set_security_key()` 会触发 `VLOG_F`（抛出 `Exception::RuntimeError`）；
+- `intra://` 与 `dds://` CDR 类型运行时不支持安全加密，调用 `set_security_key()` 会触发 `VLOG_F`（抛出 `Exception::RuntimeError`）；`set_security_callbacks()` 当前未做该传输检查（`include/vlink/internal/node-inl.h:210-221` 仅校验 `security_` 是否非空），在这两类传输上调用会静默接受但实际不生效，需用户自行避免；
 - 内置 AES-128-CBC 需以 `ENABLE_SECURITY=ON` 构建（依赖 OpenSSL）；未启用时使用内置 key 路径会打印警告。
 
 ```cpp
@@ -386,7 +386,7 @@ pub.init();
 
 ```cpp
 void set_property(const std::string& prop, const std::string& value);
-std::string get_property(const std::string& prop);
+[[nodiscard]] std::string get_property(const std::string& prop) const;
 ```
 
 提供键值对形式的扩展机制，用于传输后端特定的配置调优。属性存储在 `NodeImpl` 内部的 `PropertiesMap` 中，受 `std::shared_mutex` 保护，线程安全。
@@ -475,7 +475,7 @@ bool is_manual_unloan() const;
 ### 7.2 Publisher 端使用
 
 ```cpp
-Publisher<MyStruct> pub("shm://topic");
+Publisher<Bytes> pub("shm://topic");
 
 if (pub.is_support_loan()) {
     Bytes buf = pub.loan(sizeof(MyStruct));
@@ -485,6 +485,9 @@ if (pub.is_support_loan()) {
     }
 }
 ```
+
+> 注：loan 路径需要使用 `Publisher<Bytes>`——`loan()` 返回的 `Bytes` 作为消息直接发送；若用 `Publisher<MyStruct>` 则 `publish(buf)` 与模板签名 `publish(const MsgT&)` 不匹配，无法编译。
+
 
 ### 7.3 Subscriber 端手动归还
 

@@ -431,7 +431,12 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
   } else if constexpr (TypeT == kFlatTableType) {
     flatbuffers::FlatBufferBuilder fbb;
     fbb.Finish(T::TableType::Pack(fbb, &deref(src)));
-    des = Bytes::deep_copy(fbb.GetBufferPointer(), fbb.GetSize(), offset);
+
+    if (des.is_loaned() && des.size() >= fbb.GetSize() + offset) {
+      std::memcpy(des.data() + offset, fbb.GetBufferPointer(), fbb.GetSize());
+    } else {
+      des = Bytes::deep_copy(fbb.GetBufferPointer(), fbb.GetSize(), offset);
+    }
   } else if constexpr (TypeT == kFlatBuilderType) {
     src.fbb_.Finish(const_cast<T&>(src).Finish());
 
@@ -444,6 +449,7 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
     static_assert(Traits::ExpectFalse<T>(), "Not support flat ptr type.");
   } else if constexpr (TypeT == kCustomType) {
     const_cast<RealType&>(deref(src)) >> des;
+
     if (offset > 0) {
       des = Bytes::deep_copy(des.data(), des.size(), offset);
     }
@@ -468,7 +474,13 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
       return false;
     }
     const auto* src_ptr = reinterpret_cast<const uint8_t*>(src);
-    des = Bytes::shallow_copy(src_ptr, sizeof(std::remove_pointer_t<T>));
+    constexpr size_t kSize = sizeof(std::remove_pointer_t<T>);
+
+    if (des.is_loaned() && des.size() >= kSize) {
+      std::memcpy(des.data(), src_ptr, kSize);
+    } else {
+      des = Bytes::shallow_copy(src_ptr, kSize);
+    }
   } else {
     static_assert(Traits::ExpectFalse<T>(), "Not support serialize.");
     return false;
@@ -492,7 +504,12 @@ inline bool deserialize(const Bytes& src, T& des, [[maybe_unused]] TransportType
     des = src;
     return true;
   } else if constexpr (TypeT == kDynamicType) {
-    deref(des) << src;
+    try {
+      deref(des) << src;
+    } catch (const std::exception& e) {
+      VLOG_T("Serializer: Dynamic deserialize threw: ", e.what(), ".");
+      return false;
+    }
   } else if constexpr (TypeT == kCdrType) {
     if (transport == TransportType::kDds) {
       if VUNLIKELY (!src.is_ptr()) {
@@ -563,7 +580,12 @@ inline bool deserialize(const Bytes& src, T& des, [[maybe_unused]] TransportType
       return false;
     }
   } else if constexpr (TypeT == kCustomType) {
-    deref(des) << src;
+    try {
+      deref(des) << src;
+    } catch (const std::exception& e) {
+      VLOG_T("Serializer: Custom deserialize threw: ", e.what(), ".");
+      return false;
+    }
   } else if constexpr (TypeT == kStringType) {
     if VLIKELY (!src.empty()) {
       deref(des) = std::string(reinterpret_cast<const char*>(src.data()), src.size());
@@ -582,6 +604,11 @@ inline bool deserialize(const Bytes& src, T& des, [[maybe_unused]] TransportType
     ss.str(std::string(reinterpret_cast<const char*>(src.data()), src.size()));
 
     ss >> deref(des);
+
+    if VUNLIKELY (ss.fail()) {
+      VLOG_T("Serializer: Stream deserialize failed.");
+      return false;
+    }
   } else if constexpr (TypeT == kStandardType) {
     if VLIKELY (!src.empty() && src.size() == sizeof(RealType)) {
       std::memcpy(&deref(des), src.data(), src.size());

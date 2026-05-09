@@ -213,9 +213,15 @@ void Timer::set_interval(uint32_t interval_ms) {
 
   uint64_t interval_nano = interval_ms == 0 ? kMinInterval : static_cast<uint64_t>(interval_ms) * 1000'000U;
 
-  if (is_active()) {
-    impl_->invoke_count =
-        static_cast<uint64_t>(MessageLoop::get_current_nano_time() - impl_->start_time) / interval_nano;
+  uint64_t start_snapshot = impl_->start_time.load(std::memory_order_acquire);
+
+  if (start_snapshot != 0) {
+    uint64_t now_ns = MessageLoop::get_current_nano_time();
+
+    if VLIKELY (now_ns >= start_snapshot) {
+      impl_->invoke_count = (now_ns - start_snapshot) / interval_nano;
+    }
+
     MessageLoop* message_loop = impl_->message_loop.load();
 
     if (message_loop) {

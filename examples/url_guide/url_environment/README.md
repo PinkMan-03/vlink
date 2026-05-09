@@ -68,7 +68,8 @@
 |------|------|--------|
 | `VLINK_TMP_DIR` | 临时文件目录覆盖 | 平台默认 |
 | `VLINK_LOCK_DIR` | 锁文件目录 | 同临时目录 |
-| `VLINK_MEMORY_LEVEL` | `MemoryPool` 默认分级（`0..9`：`0` = bypass，`1..9` 越大每档预留 chunk 越多） | 3 (Balanced) |
+| `VLINK_MEMORY_LEVEL` | `MemoryPool` 默认分级（`0..9`：`0` = bypass，`1..9` 越大每档预留 chunk 越多；L9 满载 ≈ 480 MiB） | 3 (Balanced) |
+| `VLINK_MEMORY_PREALLOC` | 设为 `1` 时全局 `MemoryPool` 在构造时为每个 tier 一次性预分配满额 `blocks_per_chunk` 的 chunk（best-effort），消除热路径上的所有上游分配延迟。仅 `MemoryPool::global_instance(true)` 首次构造时读取 | (禁用) |
 
 ## 关键代码分析
 

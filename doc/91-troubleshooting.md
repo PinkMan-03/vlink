@@ -105,7 +105,7 @@
 
 **原因**：你 `find_package(vlink REQUIRED COMPONENTS shm dds)` 但 VLink 构建时 `SKIP_SHM=ON` 或依赖缺失导致该 module 没编出来。
 
-**确认**：跑 `vlink-info -l` 看 `ENABLE_SHM` / `ENABLE_DDS` 等开关是否 ON。
+**确认**：跑 `vlink-info -l` 查看 `Modules:` 行（列出实际编译进来的传输模块名，例如 `intra;shm;dds;ddsc;...`）；构建期可在 CMake 配置日志里看 `SKIP_SHM` / `SKIP_DDS` / ... 这类 `option(SKIP_<NAME>)` 的取值。
 
 **修复**：重新构建 VLink 时显式 `-DSKIP_SHM=OFF`，或在你的项目里改用 `find_package(vlink REQUIRED COMPONENTS all)` 自动适配当前安装。
 
@@ -352,7 +352,7 @@ iox-roudi -c /path/to/iceoryx_config.toml &
 
 ### 6.2 `loan()` 返回空 / 报 `Failed to loan buffer, size: ...`
 
-**源码**：`modules/shm/shm_factory.cc:640, 677, 832, 887, 1028, 1068`。
+**源码**：`modules/shm/shm_factory.cc:656, 693, 866, 921, 1068, 1110`。
 
 **原因**：共享内存池配置不够大，或你一直 loan 但忘了 `publish`（泄露）。
 
@@ -364,7 +364,7 @@ iox-roudi -c /path/to/iceoryx_config.toml &
 
 ### 6.3 `Shm roudi is not supported.` 错误
 
-**源码**：`modules/shm/shm_factory.cc:363`。
+**源码**：`modules/shm/shm_factory.cc:369`。
 
 **原因**：代码路径里错误地假设可以用外部 RouDi；实际 VLink 的 shm module 只支持"代码侧 init_runtime 连到已经运行的 iox-roudi"。
 
@@ -491,7 +491,7 @@ iox-roudi -c /path/to/iceoryx_config.toml &
 
 ### 8.7 `The number of messages has reached the upper limit`
 
-**源码**：`src/extension/database_writer.cc:1351-1353`。
+**源码**：`src/extension/database_writer.cc:1272-1277`。
 
 **原因**：达到 `max_row_count`（需先 `enable_limit=true`）；writer 按策略丢旧数据或丢新数据。
 
@@ -567,7 +567,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 ### 10.5 `vlink-bag record` 报 `Sync mode and task depth cannot be set at the same time`
 
-**源码**：`cli/bag/bag.cc:2825`。
+**源码**：`cli/bag/bag.cc:2824`。
 
 **原因**：`-s/--sync_mode` 与 `--max_task_depth` 冲突（sync 不需要队列）。
 
@@ -947,22 +947,22 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 ## 19. 插件加载失败
 
-**源码**：`src/base/plugin.cc:114-287`。
+**源码**：`src/base/plugin.cc:272-456`。
 
 | 错误 | 行 | 说明 |
 |---|---|---|
-| `Plugin: Plugin id is empty.` | 114, 221 | `VLINK_PLUGIN_REGISTER_BY_ID` 没带 id |
-| `Plugin: Lib name is empty.` | 122 | `Plugin::load` 第一个参数空 |
-| `Plugin: Already loaded (...)` | 131 | 同一 lib 加载两次 |
-| `Plugin: Cannot find plugin (...)` | 162 | `dlopen`/`LoadLibrary` 失败；`ldd` 看依赖 |
-| `Plugin: Cannot find symbol function to create (...)` | 182 | 插件没导出 `create_*` 入口 |
-| `Plugin: Failed to create handle (...)` | 191 | 插件的 create 返回 nullptr |
-| `Plugin: Failed to load plugin (...): ...` | 212 | create 过程中抛异常 |
-| `Plugin: Not loaded (...)` | 228 | `destroy` 之前没 load 成功 |
-| `Plugin: Cannot find symbol function to destroy (...)` | 255 | 插件没导出 destroy |
-| `Plugin: Failed to destroy handle (...)` | 262 | destroy 抛异常 |
-| `Plugin: Plugin id mismatch: expected '...', got '...'` | 280 | lib 内部的 PLUGIN_ID 不对 |
-| `Plugin: Version mismatch: local X.Y, required X.Z.` | 287 | ABI 版本不兼容 |
+| `Plugin: Plugin id is empty.` | 272, 385 | `VLINK_PLUGIN_REGISTER_BY_ID` 没带 id |
+| `Plugin: Lib name is empty.` | 280 | `Plugin::load` 第一个参数空 |
+| `Plugin: Already loaded (...)` | 290 | 同一 lib 加载两次 |
+| `Plugin: Cannot find plugin (...)` | 322 | `dlopen`/`LoadLibrary` 失败；`ldd` 看依赖 |
+| `Plugin: Cannot find symbol function to create (...)` | 343 | 插件没导出 `create_*` 入口 |
+| `Plugin: Failed to create handle (...)` | 353 | 插件的 create 返回 nullptr |
+| `Plugin: Failed to load plugin (...): ...` | 375 | create 过程中抛异常 |
+| `Plugin: Not loaded (...)` | 393 | `destroy` 之前没 load 成功 |
+| `Plugin: Cannot find symbol function to destroy (...)` | 421 | 插件没导出 destroy |
+| `Plugin: Failed to destroy handle (...)` | 429 | destroy 抛异常 |
+| `Plugin: Plugin id mismatch: expected '...', got '...'` | 448 | lib 内部的 PLUGIN_ID 不对 |
+| `Plugin: Version mismatch: local X.Y, required X.Z.` | 456 | ABI 版本不兼容 |
 
 **通用排查**：
 ```bash

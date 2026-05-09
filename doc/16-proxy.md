@@ -201,10 +201,10 @@ vlink-proxy [选项]
   -e, --mtu_size UINT     DDS MTU 大小（字节）
   -n, --native            限制 DDS 流量到 127.0.0.1
   -x, --max_packet_size FLOAT  单条消息最大大小（MiB，默认 4.0）
-  -c, --iox_config PATH   Iceoryx TOML 配置路径（同时启用 use_iox）
-  -l, --iox_strategy INT  Iceoryx 内存策略（1/2/3，CLI 默认 2）
+  -c, --iox_config PATH   Iceoryx TOML 配置路径（**给 -c 即隐式 use_iox=true**，无独立 use_iox 开关）
+  -l, --iox_strategy INT  Iceoryx 内存策略（1/2/3，CLI 默认 2；注意 ProxyServer::Config 结构体默认是 1，此处为 vlink-proxy CLI 覆盖）
   -m, --iox_monitoring STR  Iceoryx 监控（on/off，默认 on）
-  --dds_impl STRING       DDS 实现（dds/ddsc/ddsr/ddst，默认 dds）
+  --dds_impl STRING       DDS 实现（CLI 仅接受 dds/ddsc，依赖编译期 ENABLE_DDS/ENABLE_DDSC，默认 dds；ddsr/ddst 仅可在程序里通过 ProxyServer::Config.dds_impl 设置）
   --runnable NAME...      加载 runnable 插件名称列表（API 名为 RunablePluginInterface）
 ```
 
@@ -466,7 +466,7 @@ double mem = api.get_current_memory_usage(); // 0~100
        // data.ser       — 序列化类型
        // data.schema   — 粗粒度 schema 家族
        // data.raw       — 原始字节（浅拷贝，仅在回调内有效）
-       // data.timestamp — 相对时间（微秒）
+       // data.timestamp — 自代理会话起的相对时间（微秒，int64_t）；-1 表示未设置
        // data.seq       — 发布序号
    });
 

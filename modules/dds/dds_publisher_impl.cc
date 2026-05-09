@@ -86,6 +86,10 @@ const Conf* DdsPublisherImpl::get_conf() const { return &conf_; }
 const AbstractNode* DdsPublisherImpl::get_abstract_node() const { return this; }
 
 Status::BasePtr DdsPublisherImpl::get_status(Status::Type type) const {
+  if VUNLIKELY (!writer_) {
+    return std::make_shared<Status::Unknown>();
+  }
+
   return WriterListener::get_status(writer_.get(), type);
 }
 

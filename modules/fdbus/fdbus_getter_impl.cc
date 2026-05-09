@@ -40,6 +40,8 @@ void FdbusGetterImpl::init() {
   object_ = factory.get_object<Object>({kImplType, conf_.transport, conf_.address});
 
   object_->add_impl(this);
+
+  object_->start_timer();
 }
 
 void FdbusGetterImpl::deinit() { object_->remove_impl(this); }

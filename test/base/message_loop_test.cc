@@ -155,7 +155,7 @@ TEST_SUITE("base-MessageLoop") {
 
     for (int i = 0; i < 5; ++i) {
       loop.post_task([i, &order, &mtx]() {
-        std::lock_guard<std::mutex> lock(mtx);
+        std::lock_guard lock(mtx);
         order.push_back(i);
       });
     }
@@ -414,21 +414,21 @@ TEST_SUITE("base-MessageLoop") {
     // Post tasks with different priorities
     loop.post_task_with_priority(
         [&order, &mtx]() {
-          std::lock_guard<std::mutex> lk(mtx);
+          std::lock_guard lk(mtx);
           order.push_back(1);
         },
         MessageLoop::kLowestPriority);
 
     loop.post_task_with_priority(
         [&order, &mtx]() {
-          std::lock_guard<std::mutex> lk(mtx);
+          std::lock_guard lk(mtx);
           order.push_back(3);
         },
         MessageLoop::kHighestPriority);
 
     loop.post_task_with_priority(
         [&order, &mtx]() {
-          std::lock_guard<std::mutex> lk(mtx);
+          std::lock_guard lk(mtx);
           order.push_back(2);
         },
         MessageLoop::kNormalPriority);
@@ -743,7 +743,7 @@ TEST_SUITE("base-MessageLoop") {
     for (int i = 0; i < 5; ++i) {
       loop.post_task([i, &order, &mtx, &remaining, &done]() {
         {
-          std::lock_guard<std::mutex> lk(mtx);
+          std::lock_guard lk(mtx);
           order.push_back(i);
         }
 

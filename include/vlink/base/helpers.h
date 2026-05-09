@@ -74,11 +74,21 @@ namespace Helpers {  // NOLINT(readability-identifier-naming)
 [[nodiscard]] VLINK_EXPORT int to_int(const std::string& str, int dv = 0) noexcept;
 
 /**
- * @brief Converts a decimal string to @c int64_t with an optional byte offset.
+ * @brief Converts a string to @c int64_t, optionally ignoring trailing characters.
  *
- * @param str     Decimal integer string.
+ * @details
+ * Parses via @c std::stoll with auto base detection (@c 0x prefix → hex,
+ * leading @c 0 → octal, otherwise decimal).  Parsing always starts at index
+ * @c 0; @p offset specifies how many @b trailing characters of @p str the
+ * parser is allowed to leave unconsumed (e.g., to skip a unit suffix like
+ * @c "100s" by passing @p offset @c = @c 1).  If the parser consumes a
+ * different number of characters than @c str.size() @c - @p offset, the
+ * function returns @p dv.
+ *
+ * @param str     Integer string (decimal / @c 0x-hex / leading-@c 0-octal).
  * @param dv      Default value returned when conversion fails.  Default: 0.
- * @param offset  Starting character offset within @p str.  Default: 0.
+ * @param offset  Number of @b trailing characters of @p str to ignore.
+ *                Default: 0 (the whole string must be consumed).
  * @return Parsed 64-bit integer, or @p dv on failure.
  */
 [[nodiscard]] VLINK_EXPORT int64_t to_long(const std::string& str, int64_t dv = 0, int offset = 0) noexcept;
@@ -284,11 +294,15 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
  * @brief Formats a byte count as a human-readable size string.
  *
  * @details
- * Selects the appropriate unit (B, KB, MB, GB, TB) and formats to 2 decimal places.
- * Example: @c 1536 -> @c "1.50KB".
+ * Selects the appropriate unit and formats to 2 decimal places.  Three units
+ * are emitted: @c KB (always for @p size @c < @c 1 @c MiB, including small
+ * sub-KiB byte counts which are rendered as fractional KB), @c MB
+ * (@p size @c < @c 1 @c GiB), @c GB (everything else, no @c TB step).
+ * Examples: @c 1536 → @c "1.50KB", @c 100 → @c "0.10KB", @c 5 @c GiB →
+ * @c "5.00GB".
  *
  * @param size  Size in bytes.
- * @return Human-readable size string.
+ * @return Human-readable size string (KB / MB / GB only).
  */
 [[nodiscard]] VLINK_EXPORT std::string format_file_size(size_t size) noexcept;
 
@@ -305,13 +319,22 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
 [[nodiscard]] VLINK_EXPORT std::string format_rate_size(size_t size) noexcept;
 
 /**
- * @brief Converts a date string to a Unix millisecond timestamp.
+ * @brief Converts a date string to a Unix nanosecond timestamp.
  *
  * @details
- * Accepts ISO 8601 style dates such as @c "2026-03-18" or @c "2026-03-18 12:00:00".
+ * Parses with the format @c "%Y/%m/%d @c %H:%M:%S" (slash-separated date,
+ * colon-separated time) plus an optional @c ":<ms>" trailing field for
+ * milliseconds, e.g. @c "2026/03/18 12:00:00" or
+ * @c "2026/03/18 12:00:00:250".  ISO-8601 dashes (@c "2026-03-18") are
+ * **not** accepted and will return @c -1.
+ *
+ * The string is interpreted in the **local timezone** of the calling
+ * process (it is fed through @c std::mktime), so the same input yields
+ * different timestamps depending on @c $TZ / system locale.
  *
  * @param date  Date string to parse.
- * @return Unix timestamp in milliseconds, or -1 on parse failure.
+ * @return Unix timestamp in **nanoseconds** (ns since 1970-01-01 00:00:00
+ *         UTC), or @c -1 on parse failure.
  */
 [[nodiscard]] VLINK_EXPORT int64_t convert_date_to_timestamp(const std::string& date) noexcept;
 

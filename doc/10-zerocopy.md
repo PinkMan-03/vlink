@@ -362,7 +362,7 @@ struct Vector3d final {
 
 | 方法                                           | 说明                              |
 | ---------------------------------------------- | --------------------------------- |
-| `create(raw, url, ser, schema, hostname)`      | 一次性打包 payload 与全部路由字段 |
+| `create(raw, url, ser, schema=0, hostname={})` | 一次性打包 payload 与全部路由字段（`schema` 为 `uint32_t`，对应 `SchemaType` 数值；`hostname` 默认为空字符串） |
 | `control_id()` / `set_control_id(id)`          | 代理控制标识符                    |
 | `mode()` / `set_mode(mode)`                    | 代理操作模式                      |
 | `timestamp()` / `set_timestamp(ts)`            | 消息时间戳（微秒）                |

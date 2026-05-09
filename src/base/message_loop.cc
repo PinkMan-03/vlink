@@ -338,7 +338,7 @@ bool MessageLoop::quit(bool force) {
     impl_->lockfree_queue->notify_to_quit();
   }
 
-  impl_->cv.notify_one();
+  impl_->cv.notify_all();
 
   return true;
 }

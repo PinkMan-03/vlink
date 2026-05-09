@@ -279,12 +279,14 @@ sub.listen([](const vlink::Bytes& msg) {
 
 ## 9.8 不支持安全加密的组合
 
-`include/vlink/internal/node-inl.h:182-191` 中 `set_security_key()` 与 `set_security_callbacks()` 对以下传输组合会触发 `VLOG_F` 警告：
+`include/vlink/internal/node-inl.h:185-189` 中 `set_security_key()` 对以下传输组合会触发 `VLOG_F` 警告：
 
 - `intra://`：进程内直接传对象，不进入序列化/加密管道。
 - `dds://` 配合 CDR 类型（`is_cdr_type == true`）：CDR 直接交给 Fast-DDS 处理，不经过 VLink 的 Bytes 管道。
 
 这些组合**当前只打印 fatal 级别日志，不抛出异常**，密钥也不会实际作用。其他传输后端（shm/shm2/ddsc/ddsr/ddst/zenoh/mqtt/fdbus/someip/qnx 以及 `dds://` 的非 CDR 类型）均支持消息级加密。
+
+> 注：`set_security_callbacks()`（`include/vlink/internal/node-inl.h:210-221`）当前**未做该传输检查**，只校验内部 `security_` 是否非空。在 `intra://` 与 CDR-DDS 上调用它会静默接受但加密路径依然不被触发，需用户自行避免——后续可能会与 `set_security_key()` 对齐。
 
 如需在 CDR 链路上保护消息，请使用 DDS Security 插件（FastDDS 官方方案）或传输层 TLS。
 

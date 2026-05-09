@@ -258,6 +258,7 @@ ctest --output-on-failure
 | 测试文件                          | Suite / Case 标签风格                     | 测试内容                                        |
 | --------------------------------- | ----------------------------------------- | ----------------------------------------------- |
 | `base/logger_test.cc`             | 多个 case 名（句子风格）                   | 日志级别、格式化输出、handler 回调、backtrace    |
+| `base/logger_plugin_interface_test.cc` | 多个 case 名                          | 日志后端插件接口（SPI）契约与桩验证               |
 | `base/bytes_test.cc`              | 多个 case 名                               | 空 Bytes、浅拷贝/深拷贝、移动语义、用户输入解析  |
 | `base/timer_test.cc`              | 多个 case 名                               | 定时触发、循环次数、restart、call_once            |
 | `base/wheel_timer_test.cc`        | 多个 case 名                               | 定时触发、重复定时、暂停/恢复、删除定时器         |
@@ -313,6 +314,32 @@ ctest --output-on-failure
 | `mqtt_test.cc`    | `VLINK_SUPPORT_MQTT`    | mqtt-init, mqtt-method, mqtt-event, mqtt-field, mqtt-dynamic, mqtt-identity, mqtt-latency              |
 | `fdbus_test.cc`   | `VLINK_SUPPORT_FDBUS`   | fdbus-init, fdbus-method, fdbus-event, fdbus-field, fdbus-identity                                     |
 | `qnx_test.cc`     | `VLINK_SUPPORT_QNX`     | qnx-init, qnx-method, qnx-event, qnx-field, qnx-identity, qnx-latency（仅 QNX 平台）                  |
+
+### 4.3 Extension 测试
+
+`test/extension/` 收录 `include/vlink/extension/` 下各扩展组件的独立单元测试。
+这些测试不依赖任何传输后端，可在所有平台无条件构建。
+
+| 测试文件                                       | 测试内容                                                                |
+| ---------------------------------------------- | ----------------------------------------------------------------------- |
+| `bag_config_test.cc`                           | Bag 文件后缀识别（`.vdb` / `.vdbx` / `.vcap` / `.vcapx`）与配置解析        |
+| `bag_writer_test.cc`                           | `BagWriter` 录制路径、压缩、分段、回调                                    |
+| `bag_reader_test.cc`                           | `BagReader` 顺序回放、跳转、过滤                                          |
+| `bag_reader_processor_test.cc`                 | `BagReaderProcessor` 时间轴对齐与节流                                     |
+| `bag_reader_plugin_interface_test.cc`          | Bag 后端插件 SPI 契约（自定义存储格式扩展点）                              |
+| `discovery_test.cc`                            | `DiscoveryReporter` / `DiscoveryViewer` 注册、上报、订阅、UDP 组播路径    |
+| `dynamic_data_test.cc`                         | DynamicData 动态类型构造与序列化                                          |
+| `flatbuffers_registry_test.cc`                 | FlatBuffers schema 注册与查询                                            |
+| `protobuf_registry_test.cc`                    | Protobuf schema 注册与查询                                               |
+| `message_convert_plugin_test.cc`               | 消息转换插件 SPI                                                         |
+| `qos_test.cc`                                  | `Qos` 结构体字段语义                                                      |
+| `qos_profile_test.cc`                          | 内置 QoS profile（`sensor` / `event` / `command` / `state` 等）映射      |
+| `runnable_plugin_interface_test.cc`            | Runnable 插件 SPI（`vlink-proxy --runnable` 等加载入口）                 |
+| `schema_plugin_test.cc`                        | Schema 插件 SPI（自定义序列化格式扩展点）                                 |
+| `security_test.cc`                             | Security 加密回调、AES-128-CBC 默认实现                                   |
+| `status_test.cc`                               | `Status` / `BasePtr` 状态对象与回调                                       |
+| `terminal_stream_test.cc`                      | TerminalStream 颜色与宽度处理                                            |
+| `url_remap_test.cc`                            | URL 重映射（`VLINK_URL_REMAP` JSON 文件）解析与子串匹配                   |
 
 ---
 

@@ -55,20 +55,20 @@ class CustomLogHandler {
 
   // Return the number of captured log records.
   size_t captured_count() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard lock(mutex_);
     return captured_logs_.size();
   }
 
   // Return a copy of all captured log messages.
   std::vector<std::string> captured_logs() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard lock(mutex_);
     return captured_logs_;
   }
 
  private:
   void handle(vlink::Logger::Level level, std::string_view message) {
     {
-      std::lock_guard<std::mutex> lock(mutex_);
+      std::lock_guard lock(mutex_);
       captured_logs_.emplace_back(message);
     }
 

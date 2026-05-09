@@ -198,6 +198,10 @@ const AbstractNode* DdscClientImpl::get_abstract_node() const { return this; }
 
 Status::BasePtr DdscClientImpl::get_status(Status::Type type) const {
   if (Status::is_for_writer(type)) {
+    if VUNLIKELY (!writer_) {
+      return std::make_shared<Status::Unknown>();
+    }
+
     return WriterListener::get_status(writer_->entity, type);
   }
 

@@ -172,8 +172,9 @@ inline TimeRollingFile<MutexT>::TimeRollingFile(spdlog::filename_t base_filename
           }
         }
       } else {
-        base_filename_ += "_dir";
-        std::filesystem::create_directories(base_filename_);
+        std::string new_filename = base_filename_ + "_dir";
+        std::filesystem::create_directories(new_filename);
+        base_filename_ = std::move(new_filename);
       }
     } else {
       std::filesystem::create_directories(base_path);
@@ -373,16 +374,17 @@ inline void TimeRollingFile<MutexT>::flush_() {
 
 template <typename MutexT>
 inline void TimeRollingFile<MutexT>::rotate_() {
-  file_helper_.close();
-
-  FileInfo new_file = generate_file_(++current_index_);
+  size_t next_index = current_index_ + 1;
+  FileInfo new_file = generate_file_(next_index);
 
   if VUNLIKELY (!new_file.is_valid) {
     spdlog::throw_spdlog_ex("Failed to generate valid file info for rotation");
   }
 
+  file_helper_.close();
   file_helper_.open(new_file.path, true);
 
+  current_index_ = next_index;
   file_list_.emplace_back(std::move(new_file));
 
   while (file_list_.size() > max_files_) {

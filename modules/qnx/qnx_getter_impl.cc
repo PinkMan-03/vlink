@@ -40,6 +40,8 @@ void QnxGetterImpl::init() {
   object_ = factory.get_object<Object>({kImplType, conf_.address});
 
   object_->add_impl(this);
+
+  object_->start_timer();
 }
 
 void QnxGetterImpl::deinit() { object_->remove_impl(this); }

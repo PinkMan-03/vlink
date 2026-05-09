@@ -109,15 +109,15 @@ DdsClientImpl::DdsClientImpl(const DdsConf& conf) : conf_(conf) {}
 
 void DdsClientImpl::process_message(dds::DataReader* reader) {
   if (is_cdr_type) {
+    if VUNLIKELY (!type_support_resp_) {
+      return;
+    }
+
     DdsFactory::ReadCdrMessage msg;
 
     msg.sample = type_support_resp_.create_data();
 
     while (DdsFactory::take_cdr_data(reader, msg)) {
-      if VUNLIKELY (!type_support_resp_) {
-        return;
-      }
-
       if VUNLIKELY (quit_flag_) {
         break;
       }
@@ -249,6 +249,10 @@ const AbstractNode* DdsClientImpl::get_abstract_node() const { return this; }
 
 Status::BasePtr DdsClientImpl::get_status(Status::Type type) const {
   if (Status::is_for_writer(type)) {
+    if VUNLIKELY (!writer_) {
+      return std::make_shared<Status::Unknown>();
+    }
+
     return WriterListener::get_status(writer_.get(), type);
   }
 

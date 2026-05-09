@@ -193,7 +193,18 @@ class VLINK_EXPORT Process {
   Process();
 
   /**
-   * @brief Destructor.  Closes the process and waits up to @c kDestructorWaitTimeoutMs.
+   * @brief Destructor.
+   *
+   * @details
+   * If the child is still running:
+   *  1. Sends @c SIGTERM via @c terminate(),
+   *  2. Drains any pending pipe output and waits up to
+   *     @c kDestructorWaitTimeoutMs (default @c 5000 ms) for graceful exit,
+   *  3. If the process is still alive, sends @c SIGKILL via @c kill() and
+   *     waits up to a further @c 1000 ms before tearing down.
+   *
+   * Always finalises by closing pipes, joining the I/O thread and freeing
+   * resources.
    */
   ~Process();
 

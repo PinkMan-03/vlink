@@ -128,13 +128,13 @@ std::string trim_string(const std::string& str) noexcept {
 
   auto start = str.begin();
 
-  while (start != str.end() && std::isspace(*start) != 0) {
+  while (start != str.end() && std::isspace(static_cast<unsigned char>(*start)) != 0) {
     ++start;
   }
 
   auto end = str.rbegin();
 
-  while (end != str.rend() && std::isspace(*end) != 0) {
+  while (end != str.rend() && std::isspace(static_cast<unsigned char>(*end)) != 0) {
     ++end;
   }
 
@@ -146,7 +146,15 @@ std::wstring string_to_wstring(const std::string& input) noexcept {
   std::wstring dest;
   int length = ::MultiByteToWideChar(CP_UTF8, 0, input.c_str(), input.size(), nullptr, 0);
 
+  if VUNLIKELY (length <= 0) {
+    return dest;
+  }
+
   auto* buffer = new (std::nothrow) WCHAR[length + 1];
+  if VUNLIKELY (!buffer) {
+    return dest;
+  }
+
   ::MultiByteToWideChar(CP_UTF8, 0, input.c_str(), input.size(), buffer, length);
 
   buffer[length] = '\0';
@@ -177,7 +185,15 @@ std::string wstring_to_string(const std::wstring& input) noexcept {
   std::string dest;
   int length = ::WideCharToMultiByte(CP_UTF8, 0, input.c_str(), input.size(), nullptr, 0, nullptr, nullptr);
 
+  if VUNLIKELY (length <= 0) {
+    return dest;
+  }
+
   auto* buffer = new (std::nothrow) char[length + 1];
+  if VUNLIKELY (!buffer) {
+    return dest;
+  }
+
   ::WideCharToMultiByte(CP_UTF8, 0, input.c_str(), input.size(), buffer, length, nullptr, nullptr);
 
   buffer[length] = '\0';

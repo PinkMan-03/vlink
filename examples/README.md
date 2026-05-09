@@ -199,7 +199,7 @@ VLink 节点的高级功能配置。
 
 ### samples/ -- 传输协议专项示例（9 个工程）
 
-针对各传输后端的完整可运行示例，也是默认构建（`ENABLE_WHOLE_EXAMPLES=OFF`）时优先编译的一组综合示例。详见 [samples/README.md](samples/README.md)。
+针对各传输后端的完整可运行示例。当 `ENABLE_EXAMPLES=ON` 而 `ENABLE_WHOLE_EXAMPLES=OFF`（默认配置）时，**仅编译这一组**综合示例；其余 13 个分类要在 `ENABLE_WHOLE_EXAMPLES=ON` 时才会被编译。详见 [samples/README.md](samples/README.md)。
 
 | 工程 | 传输协议 | 序列化格式 | 通信模型 | 进程模式 |
 |------|----------|------------|----------|----------|
@@ -445,8 +445,8 @@ EVENT_URL="someip://0x01/0x02?groups=0x1&event=0x2" \
 |------|------|
 | 分类目录总数 | 14 |
 | 示例工程总数 | 84 |
-| 已实现工程数 | 8（均在 `samples/` 下） |
-| 源文件数量 | 10 个 .cc + 4 个 .proto + 1 个 .fbs + 1 个 .idl + 2 个 .h 头文件 |
-| 覆盖传输协议 | dds, ddsc, shm, someip, fdbus（+ 环境变量切换 qnx） |
+| 已实现工程数 | 84（仅 `samples/dds_idl` 默认在 `samples/CMakeLists.txt:21` 被注释禁用，需手动启用 FastDDS IDL 工具链） |
+| 源文件数量 | 95 个 .cc + 3 个 .c + 33 个 .h + 4 个 .proto + 2 个 .fbs + 1 个 .idl |
+| 覆盖传输协议 | dds, ddsc, shm, someip, fdbus, mqtt, zenoh, intra（+ 环境变量切换 qnx） |
 | 覆盖序列化格式 | Protobuf, FlatBuffers, DDS IDL (CDR), Bytes, DynamicData |
 | 覆盖通信模型 | Method (RPC), Event (Pub/Sub), Field (Get/Set), Fire & Forget |

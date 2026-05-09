@@ -98,15 +98,15 @@ DdsServerImpl::DdsServerImpl(const DdsConf& conf) : conf_(conf) {}
 
 void DdsServerImpl::process_message(dds::DataReader* reader) {
   if (is_cdr_type) {
+    if VUNLIKELY (!type_support_req_) {
+      return;
+    }
+
     DdsFactory::ReadCdrMessage msg;
 
     msg.sample = type_support_req_.create_data();
 
     while (DdsFactory::take_cdr_data(reader, msg)) {
-      if VUNLIKELY (!type_support_req_) {
-        return;
-      }
-
       if VUNLIKELY (quit_flag_) {
         break;
       }

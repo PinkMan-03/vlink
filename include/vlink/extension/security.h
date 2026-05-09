@@ -29,8 +29,9 @@
  * @c Security provides message-level encryption and decryption for VLink transports.
  * When compiled with @c VLINK_ENABLE_SECURITY (requires OpenSSL), it uses
  * AES-128-CBC via the EVP API with PKCS7 padding.  The default AES key is
- * @c "vlink" and the IV is @c "thun.lu@zohomail.cn" (OpenSSL uses the first
- * 16 bytes of each).
+ * @c "vlink" and the IV is @c "thun.lu@zohomail.cn"; both are normalised to
+ * exactly 16 bytes by the implementation (zero-padded if shorter, truncated
+ * if longer) before being passed to OpenSSL.
  *
  * Custom crypto implementations can replace the built-in algorithm by registering
  * a pair of @c Callback functions via @c set_callbacks().  When custom callbacks
@@ -111,9 +112,9 @@ class VLINK_EXPORT Security final {
    * @brief Sets the AES encryption key.
    *
    * @details
-   * The key string is stored as @c Bytes.  If @p key is empty, the default
-   * built-in key @c "vlink" is restored.  The key length is not validated here;
-   * OpenSSL will use the first 16 bytes for AES-128.
+   * The supplied key is normalised to exactly 16 bytes for AES-128: shorter
+   * keys are zero-padded, longer keys are truncated.  If @p key is empty, the
+   * default built-in key @c "vlink" is restored (also zero-padded to 16 bytes).
    *
    * @param key  Key string.  Pass an empty string to restore the default.
    */

@@ -232,11 +232,11 @@ struct LoggerGlobal final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::string app_name;
   std::string log_path;
   std::string version_log;
-  int console_level{Logger::kDebug};
-  int file_level{Logger::kDebug};
+  std::atomic<int> console_level{Logger::kDebug};
+  std::atomic<int> file_level{Logger::kDebug};
   bool console_in_order{true};
-  bool console_level_by_user{false};
-  bool file_level_by_user{false};
+  std::atomic_bool console_level_by_user{false};
+  std::atomic_bool file_level_by_user{false};
   bool console_format_enable{false};
   bool utc_enable{false};
   // Protected by callback_mtx (shared on read/invoke, exclusive on register).
@@ -359,22 +359,24 @@ void Logger::register_file_handler(Callback&& callback) noexcept {
 }
 
 void Logger::set_console_level(Level level) noexcept {
-  LoggerGlobal::get().console_level = level;
-  LoggerGlobal::get().console_level_by_user = true;
+  LoggerGlobal::get().console_level.store(level, std::memory_order_release);
+  LoggerGlobal::get().console_level_by_user.store(true, std::memory_order_release);
 }
 
 void Logger::set_file_level(Level level) noexcept {
-  LoggerGlobal::get().file_level = level;
-  LoggerGlobal::get().file_level_by_user = true;
+  LoggerGlobal::get().file_level.store(level, std::memory_order_release);
+  LoggerGlobal::get().file_level_by_user.store(true, std::memory_order_release);
 }
 
 void Logger::set_console_fmt_enable(bool enable) noexcept { LoggerGlobal::get().console_format_enable = enable; }
 
 Logger::Level Logger::get_console_level() noexcept {
-  return static_cast<Logger::Level>(LoggerGlobal::get().console_level);
+  return static_cast<Logger::Level>(LoggerGlobal::get().console_level.load(std::memory_order_acquire));
 }
 
-Logger::Level Logger::get_file_level() noexcept { return static_cast<Logger::Level>(LoggerGlobal::get().file_level); }
+Logger::Level Logger::get_file_level() noexcept {
+  return static_cast<Logger::Level>(LoggerGlobal::get().file_level.load(std::memory_order_acquire));
+}
 
 bool Logger::get_console_fmt_enable() noexcept { return LoggerGlobal::get().console_format_enable; }
 
@@ -490,7 +492,8 @@ bool Logger::is_busy() noexcept { return LoggerGlobal::get().is_busy.load(std::m
 bool Logger::is_writable(Level level) noexcept {
   static auto& global_instance = LoggerGlobal::get();
 
-  return level >= global_instance.console_level || level >= global_instance.file_level;
+  return level >= global_instance.console_level.load(std::memory_order_acquire) ||
+         level >= global_instance.file_level.load(std::memory_order_acquire);
 }
 
 Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
@@ -500,27 +503,28 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
 
   int common_level = get_log_level("VLINK_LOG_LEVEL");
 
-  if (!global_instance.console_level_by_user) {
+  if (!global_instance.console_level_by_user.load(std::memory_order_acquire)) {
     int console_level = get_log_level("VLINK_LOG_CONSOLE_LEVEL");
 
     if (console_level >= 0) {
-      global_instance.console_level = console_level;
+      global_instance.console_level.store(console_level, std::memory_order_release);
     } else if (common_level >= 0) {
-      global_instance.console_level = common_level;
+      global_instance.console_level.store(common_level, std::memory_order_release);
     }
   }
 
-  if (!global_instance.file_level_by_user) {
+  if (!global_instance.file_level_by_user.load(std::memory_order_acquire)) {
     int file_level = get_log_level("VLINK_LOG_FILE_LEVEL");
 
     if (file_level >= 0) {
-      global_instance.file_level = file_level;
+      global_instance.file_level.store(file_level, std::memory_order_release);
     } else if (common_level >= 0) {
-      global_instance.file_level = common_level;
+      global_instance.file_level.store(common_level, std::memory_order_release);
     }
   }
 
-  if (global_instance.console_level < kOff || global_instance.file_level < kOff) {
+  if (global_instance.console_level.load(std::memory_order_acquire) < kOff ||
+      global_instance.file_level.load(std::memory_order_acquire) < kOff) {
     std::string enable_console_unorder = Utils::get_env("VLINK_LOG_CONSOLE_UNORDER");
     global_instance.console_in_order = (enable_console_unorder != "1");
 
@@ -540,7 +544,7 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
     global_instance.console_format_enable = (console_format == "1");
   }
 
-  if (global_instance.file_level < kOff) {
+  if (global_instance.file_level.load(std::memory_order_acquire) < kOff) {
     global_instance.version_log.reserve(128);
 
     global_instance.version_log.append("***** ");
@@ -899,7 +903,7 @@ FastStream& Logger::get_local_stream() noexcept {
 void Logger::write_to_console(Level level, std::string_view log) noexcept {
   static auto& global_instance = LoggerGlobal::get();
 
-  if (level < global_instance.console_level) {
+  if (level < global_instance.console_level.load(std::memory_order_acquire)) {
     return;
   }
 
@@ -993,7 +997,7 @@ void Logger::write_to_console(Level level, std::string_view log) noexcept {
 void Logger::write_to_file(Level level, std::string_view log) noexcept {
   static auto& global_instance = LoggerGlobal::get();
 
-  if (level < global_instance.file_level) {
+  if (level < global_instance.file_level.load(std::memory_order_acquire)) {
     return;
   }
 

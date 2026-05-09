@@ -1375,7 +1375,7 @@ void register_terminate_signal(MoveFunction<void(int)>&& callback, bool is_async
 
   constexpr size_t kTerminateSignals[] = {SIGINT, SIGTERM, SIGHUP};
 
-  struct sigaction act;
+  struct sigaction act{};
 
 #ifdef SA_RESTART
   act.sa_flags = SA_RESTART;
@@ -1413,8 +1413,9 @@ void register_crash_signal(MoveFunction<void(int)>&& callback) noexcept {
 
   constexpr size_t kCrashSignals[] = {SIGABRT, SIGSEGV, SIGFPE, SIGILL, SIGBUS, SIGSYS};
 
-  struct sigaction act;
+  struct sigaction act{};
 
+  act.sa_flags = 0;
   act.sa_handler = SignalHelper::on_crash;
 
 #ifdef __APPLE__

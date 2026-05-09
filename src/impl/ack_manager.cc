@@ -132,6 +132,7 @@ void AckManager::clear() noexcept {
   }
 
   for (const auto& request : temp_set) {
+    std::lock_guard lock(request->mtx);
     request->cv.notify_all();
   }
 }

@@ -190,6 +190,9 @@ class Client : public Node<ClientImpl, SecT> {
    */
   explicit Client(const std::string& url_str, InitType type = InitType::kWithInit);
 
+  /**
+   * @brief Destroys the client and releases any associated resources.
+   */
   ~Client() override;
 
   /**

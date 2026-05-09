@@ -103,7 +103,10 @@ class SomeipClient final : public AbstractObject<SomeipID>, public std::enable_s
 
   void start();
 
-  bool call(someip::method_t method, const Bytes& req_data, NodeImpl::MsgCallback&& callback = nullptr);
+  bool call(someip::method_t method, const Bytes& req_data, NodeImpl::MsgCallback&& callback = nullptr,
+            uint64_t* seq_out = nullptr);
+
+  void remove_response_callback(uint64_t seq);
 
   bool is_connected() const;
 

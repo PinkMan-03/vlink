@@ -46,6 +46,10 @@ PublisherImpl::~PublisherImpl() = default;
 void PublisherImpl::interrupt() {
   NodeImpl::interrupt();
 
+  {
+    std::lock_guard sync_lock(helper_->mtx);
+  }
+
   helper_->connected_cv.notify_all();
 }
 
@@ -99,6 +103,10 @@ void PublisherImpl::update_subscribers() {
   }
 
   helper_->has_subscribers = !helper_->has_subscribers;
+
+  {
+    std::lock_guard sync_lock(helper_->mtx);
+  }
 
   helper_->connected_cv.notify_all();
 

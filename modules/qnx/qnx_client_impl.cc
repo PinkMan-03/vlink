@@ -42,6 +42,8 @@ void QnxClientImpl::init() {
 
   object_->add_impl(this);
 
+  object_->start_timer();
+
   object_->register_server_connect_callback(this, [this](bool) { ClientImpl::update_connected(); });
 
   ClientImpl::update_connected();

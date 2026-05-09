@@ -184,32 +184,13 @@ FdbusClient::FdbusClient(const FdbusID& id) {
   enableTCPSecure(false);
   keepAlive(1000, 3);
 
-  const std::string& url = transport + "://" + address;
-  connect(url.c_str());
+  url_ = transport + "://" + address;
+  connect(url_.c_str());
 
   if (transport == "ipc") {
     timer_.set_interval(10);
     timer_.set_loop_count(Timer::kInfinite);
     timer_.attach(&FdbusFactory::get_message_loop());
-
-    std::weak_ptr<FdbusClient> weak_self = shared_from_this();
-
-    timer_.start([this, url, weak_self]() {
-      if VUNLIKELY (!weak_self.lock()) {
-        return;
-      }
-
-      if VUNLIKELY (quit_flag_) {
-        return;
-      }
-
-      if (!connected(FDB_SEC_NO_CHECK)) {
-        timer_.set_interval(50);
-        connect(url.c_str());
-      } else {
-        timer_.set_interval(100);
-      }
-    });
   }
 }
 
@@ -244,6 +225,36 @@ bool FdbusClient::call(uint32_t channel, const Bytes& req_data, NodeImpl::MsgCal
 }
 
 std::any FdbusClient::get_native_handle() const { return this; }
+
+void FdbusClient::start_timer() {
+  if (!timer_.get_message_loop()) {
+    return;
+  }
+
+  bool expected = false;
+  if (!timer_started_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  std::weak_ptr<FdbusClient> weak_self = weak_from_this();
+
+  timer_.start([this, weak_self]() {
+    if VUNLIKELY (!weak_self.lock()) {
+      return;
+    }
+
+    if VUNLIKELY (quit_flag_) {
+      return;
+    }
+
+    if (!connected(FDB_SEC_NO_CHECK)) {
+      timer_.set_interval(50);
+      connect(url_.c_str());
+    } else {
+      timer_.set_interval(100);
+    }
+  });
+}
 
 void FdbusClient::onOnline(const fdbus::CFdbOnlineInfo& info) {
   (void)info;

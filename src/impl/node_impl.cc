@@ -55,6 +55,7 @@ struct NodeImplHelper final {
   Conf::PropertiesMap property_map;
   std::shared_mutex mtx;
   std::shared_mutex status_mtx;
+  std::mutex post_mtx;
   NodeImpl::StatusCallback status_callback;
   std::atomic<MessageLoop*> message_loop{nullptr};
 
@@ -137,7 +138,11 @@ bool NodeImpl::attach(class MessageLoop* message_loop) {
 }
 
 bool NodeImpl::detach() {
-  auto* message_loop = helper_->message_loop.exchange(nullptr, std::memory_order_acq_rel);
+  MessageLoop* message_loop = nullptr;
+  {
+    std::lock_guard lock(helper_->post_mtx);
+    message_loop = helper_->message_loop.exchange(nullptr, std::memory_order_acq_rel);
+  }
 
   if (!message_loop) {
     return false;
@@ -182,20 +187,25 @@ void NodeImpl::call_status(Status::BasePtr ptr) {
     return;
   }
 
-  auto* message_loop = helper_->message_loop.load(std::memory_order_acquire);
+  {
+    std::lock_guard post_lock(helper_->post_mtx);
 
-  if (message_loop) {
-    message_loop->post_task([this, ptr]() mutable {
-      std::shared_lock lock(helper_->status_mtx);
-      if (helper_->status_callback) {
-        helper_->status_callback(std::move(ptr));
-      }
-    });
-  } else {
-    std::shared_lock lock(helper_->status_mtx);
-    if (helper_->status_callback) {
-      helper_->status_callback(std::move(ptr));
+    auto* message_loop = helper_->message_loop.load(std::memory_order_acquire);
+
+    if (message_loop) {
+      message_loop->post_task([this, ptr]() mutable {
+        std::shared_lock lock(helper_->status_mtx);
+        if (helper_->status_callback) {
+          helper_->status_callback(std::move(ptr));
+        }
+      });
+      return;
     }
+  }
+
+  std::shared_lock lock(helper_->status_mtx);
+  if (helper_->status_callback) {
+    helper_->status_callback(std::move(ptr));
   }
 }
 
@@ -226,6 +236,8 @@ void NodeImpl::set_discovery_enabled(bool enable) { is_discovery_enabled = enabl
 bool NodeImpl::get_discovery_enabled() const { return is_discovery_enabled; }
 
 void NodeImpl::set_record_path(const std::string& path) {
+  std::lock_guard lock(helper_->mtx);
+
   if (path.empty()) {
     helper_->data_recorder.reset();
   } else {
@@ -250,13 +262,19 @@ void NodeImpl::try_record(ActionType action_type, const Bytes& data) {
     global_recorder->push(url, ser_type, schema_type, action_type, data);
   }
 
-  if VUNLIKELY (helper_->data_recorder) {
+  std::shared_ptr<BagWriter> data_recorder;
+  {
+    std::shared_lock lock(helper_->mtx);
+    data_recorder = helper_->data_recorder;
+  }
+
+  if VUNLIKELY (data_recorder) {
     if ((kIgnoreIntraUrl && transport_type == TransportType::kIntra) ||
         (transport_type == TransportType::kDds && is_cdr_type)) {
       return;
     }
 
-    helper_->data_recorder->push(url, ser_type, schema_type, action_type, data);
+    data_recorder->push(url, ser_type, schema_type, action_type, data);
   }
 }
 

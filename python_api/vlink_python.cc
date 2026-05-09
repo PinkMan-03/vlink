@@ -42,6 +42,7 @@
 #include <nanobind/stl/string_view.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/unordered_map.h>
+#include <nanobind/stl/unordered_set.h>
 #include <nanobind/stl/vector.h>
 #include <vlink/base/cpu_profiler.h>
 #include <vlink/base/cpu_profiler_guard.h>
@@ -60,14 +61,17 @@
 #include <vlink/extension/bag_writer.h>
 #include <vlink/extension/discovery_viewer.h>
 #include <vlink/extension/qos_profile.h>
+#include <vlink/extension/status_detail.h>
 #include <vlink/extension/url_remap.h>
 #include <vlink/vlink.h>
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -102,6 +106,33 @@ inline void report_current_exception(const char* context) noexcept {
     PyErr_SetString(PyExc_RuntimeError, "Unknown C++ exception");
     PyErr_WriteUnraisable(nb::str(context).ptr());
   }
+}
+
+inline nb::str wide_string_to_python_str(const std::wstring& value) {
+  PyObject* obj = PyUnicode_FromWideChar(value.c_str(), static_cast<Py_ssize_t>(value.size()));
+  if (!obj) {
+    throw nb::python_error();
+  }
+  return nb::steal<nb::str>(obj);
+}
+
+struct PyWideStringDeleter {
+  void operator()(wchar_t* ptr) const noexcept {
+    if (ptr) {
+      PyMem_Free(ptr);
+    }
+  }
+};
+
+inline std::wstring python_str_to_wide_string(nb::str input) {
+  Py_ssize_t size = 0;
+  wchar_t* raw = PyUnicode_AsWideCharString(input.ptr(), &size);
+  if (!raw) {
+    throw nb::python_error();
+  }
+
+  std::unique_ptr<wchar_t, PyWideStringDeleter> wide(raw);
+  return std::wstring(wide.get(), static_cast<size_t>(size));
 }
 
 class PythonBufferView {
@@ -207,6 +238,100 @@ inline auto make_void_callback(nb::callable py_cb, const char* context) {
   };
 }
 
+inline auto make_security_callback(nb::callable py_cb, const char* context) {
+  auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
+
+  return [cb = std::move(cb), context](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
+    if (!Py_IsInitialized()) {
+      return false;
+    }
+
+    nb::gil_scoped_acquire gil;
+
+    try {
+      nb::object result = cb->fn(PythonCodec<vlink::Bytes>::to_python(in));
+      if (result.is_none()) {
+        return false;
+      }
+      out = PythonCodec<vlink::Bytes>::from_python_owned(result);
+      return true;
+    } catch (std::exception&) {
+      report_current_exception(context);
+      return false;
+    }
+  };
+}
+
+inline nb::dict status_to_dict(const vlink::Status::BasePtr& status) {
+  nb::dict d;
+
+  if (!status) {
+    return d;
+  }
+
+  const auto type = status->get_type();
+  d["type"] = static_cast<int>(type);
+  d["status_type"] = type;
+  d["description"] = status->get_string();
+
+  auto put_handle = [&d](const char* key, vlink::Status::InstanceHandle handle) {
+    if (handle == nullptr) {
+      d[key] = nb::none();
+    } else {
+      d[key] = reinterpret_cast<uintptr_t>(handle);
+    }
+  };
+
+  if (auto s = std::dynamic_pointer_cast<vlink::Status::PublicationMatched>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["current_count"] = s->current_count;
+    d["current_count_change"] = s->current_count_change;
+    put_handle("last_subscription_handle", s->last_subscription_handle);
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::OfferedDeadlineMissed>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    put_handle("last_instance_handle", s->last_instance_handle);
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::OfferedIncompatibleQos>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["last_policy_id"] = s->last_policy_id;
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::LivelinessLost>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::SubscriptionMatched>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["current_count"] = s->current_count;
+    d["current_count_change"] = s->current_count_change;
+    put_handle("last_publication_handle", s->last_publication_handle);
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::RequestedDeadlineMissed>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    put_handle("last_instance_handle", s->last_instance_handle);
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::LivelinessChanged>(status)) {
+    d["alive_count"] = s->alive_count;
+    d["not_alive_count"] = s->not_alive_count;
+    d["alive_count_change"] = s->alive_count_change;
+    d["not_alive_count_change"] = s->not_alive_count_change;
+    put_handle("last_publication_handle", s->last_publication_handle);
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::SampleRejected>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["last_reason"] = static_cast<int>(s->last_reason);
+    put_handle("last_instance_handle", s->last_instance_handle);
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::RequestedIncompatibleQos>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["last_policy_id"] = s->last_policy_id;
+  } else if (auto s = std::dynamic_pointer_cast<vlink::Status::SampleLost>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+  }
+
+  return d;
+}
+
 int bytes_getbuffer(PyObject* obj, Py_buffer* view, int flags) {
   auto* bytes = nb::inst_ptr<vlink::Bytes>(nb::handle(obj));
   return PyBuffer_FillInfo(view, obj, const_cast<uint8_t*>(bytes->data()), static_cast<Py_ssize_t>(bytes->size()), 0,
@@ -274,16 +399,23 @@ void bind_node_common(Class& cls) {
       .def("attach", &NodeT::attach, "loop"_a, nb::keep_alive<1, 2>())
       .def("detach", &NodeT::detach)
       .def("get_message_loop", &NodeT::get_message_loop, nb::rv_policy::reference)
+      .def(
+          "get_abstract_node",
+          [](const NodeT& self) -> nb::object {
+            const auto* node = self.get_abstract_node();
+            if (node == nullptr) {
+              return nb::none();
+            }
+            return nb::int_(reinterpret_cast<uintptr_t>(node));
+          },
+          "Return the non-owning AbstractNode address, or None if unavailable.")
       .def("get_cpu_usage", &NodeT::get_cpu_usage)
       .def(
           "get_status",
           [](NodeT& self, vlink::Status::Type type) -> nb::object {
             auto status = self.get_status(type);
             if (!status) return nb::none();
-            nb::dict d;
-            d["type"] = static_cast<int>(status->get_type());
-            d["description"] = status->get_string();
-            return nb::object(d);
+            return nb::object(status_to_dict(status));
           },
           "type"_a)
       .def(
@@ -294,10 +426,7 @@ void bind_node_common(Class& cls) {
               if (!Py_IsInitialized()) return;
               nb::gil_scoped_acquire gil;
               try {
-                nb::dict d;
-                d["type"] = static_cast<int>(status->get_type());
-                d["description"] = status->get_string();
-                cb->fn(d);
+                cb->fn(status_to_dict(status));
               } catch (std::exception&) {
                 report_current_exception("vlink::register_status_handler");
               }
@@ -306,13 +435,29 @@ void bind_node_common(Class& cls) {
           "callback"_a);
 }
 
-template <typename PubT, typename MsgT, typename Codec = PythonCodec<MsgT>>
+template <typename Class, typename NodeT>
+void bind_node_security(Class& cls) {
+  cls.def("set_security_key", &NodeT::set_security_key, "key"_a)
+      .def(
+          "set_security_callbacks",
+          [](NodeT& self, nb::callable encrypt_cb, nb::callable decrypt_cb) {
+            self.set_security_callbacks(
+                make_security_callback(std::move(encrypt_cb), "vlink::Node.set_security_callbacks(encrypt)"),
+                make_security_callback(std::move(decrypt_cb), "vlink::Node.set_security_callbacks(decrypt)"));
+          },
+          "encrypt_callback"_a, "decrypt_callback"_a);
+}
+
+template <typename PubT, typename MsgT, typename Codec = PythonCodec<MsgT>, bool SecurityNode = false>
 void bind_publisher(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<PubT>(m, name, doc);
   cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
                       bool auto_init) { return make_url_node<PubT>(url, ser_type, schema_type, auto_init); }),
           "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   bind_node_common<decltype(cls), PubT>(cls);
+  if constexpr (SecurityNode) {
+    bind_node_security<decltype(cls), PubT>(cls);
+  }
   cls.def(
          "detect_subscribers",
          [](PubT& self, nb::callable callback) {
@@ -335,16 +480,20 @@ void bind_publisher(nb::module_& m, const char* name, const char* doc) {
             return self.publish(value, force);
           },
           "data"_a, "force"_a = false)
+      .def("mark_as_setter", &PubT::mark_as_setter)
       .def("__repr__", [](const PubT& self) { return "Publisher(url='" + self.get_url() + "')"; });
 }
 
-template <typename SubT, typename MsgT, typename Codec = PythonCodec<MsgT>>
+template <typename SubT, typename MsgT, typename Codec = PythonCodec<MsgT>, bool SecurityNode = false>
 void bind_subscriber(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<SubT>(m, name, doc);
   cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
                       bool auto_init) { return make_url_node<SubT>(url, ser_type, schema_type, auto_init); }),
           "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   bind_node_common<decltype(cls), SubT>(cls);
+  if constexpr (SecurityNode) {
+    bind_node_security<decltype(cls), SubT>(cls);
+  }
   cls.def(
          "listen",
          [](SubT& self, nb::callable callback) {
@@ -355,17 +504,21 @@ void bind_subscriber(nb::module_& m, const char* name, const char* doc) {
       .def("is_latency_and_lost_enabled", &SubT::is_latency_and_lost_enabled)
       .def("get_latency", &SubT::get_latency)
       .def("get_lost", &SubT::get_lost)
+      .def("mark_as_getter", &SubT::mark_as_getter)
       .def("__repr__", [](const SubT& self) { return "Subscriber(url='" + self.get_url() + "')"; });
 }
 
 template <typename ServerT, typename ReqT, typename RespT, typename ReqCodec = PythonCodec<ReqT>,
-          typename RespCodec = PythonCodec<RespT>>
+          typename RespCodec = PythonCodec<RespT>, bool SecurityNode = false>
 void bind_server(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<ServerT>(m, name, doc);
   cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
                       bool auto_init) { return make_url_node<ServerT>(url, ser_type, schema_type, auto_init); }),
           "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   bind_node_common<decltype(cls), ServerT>(cls);
+  if constexpr (SecurityNode) {
+    bind_node_security<decltype(cls), ServerT>(cls);
+  }
   cls.def(
          "listen",
          [](ServerT& self, nb::callable callback) {
@@ -409,13 +562,16 @@ void bind_server(nb::module_& m, const char* name, const char* doc) {
 }
 
 template <typename ClientT, typename ReqT, typename RespT, typename ReqCodec = PythonCodec<ReqT>,
-          typename RespCodec = PythonCodec<RespT>>
+          typename RespCodec = PythonCodec<RespT>, bool SecurityNode = false>
 void bind_client(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<ClientT>(m, name, doc);
   cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
                       bool auto_init) { return make_url_node<ClientT>(url, ser_type, schema_type, auto_init); }),
           "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   bind_node_common<decltype(cls), ClientT>(cls);
+  if constexpr (SecurityNode) {
+    bind_node_security<decltype(cls), ClientT>(cls);
+  }
   cls.def(
          "detect_connected",
          [](ClientT& self, nb::callable callback) {
@@ -432,19 +588,19 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
       .def("is_connected", &ClientT::is_connected)
       .def(
           "invoke",
-          [](ClientT& self, nb::handle data) -> nb::object {
+          [](ClientT& self, nb::handle data, int timeout_ms) -> nb::object {
             auto req = ReqCodec::from_python_owned(data);
             std::optional<RespT> res;
             {
               nb::gil_scoped_release release;
-              res = self.invoke(req);
+              res = self.invoke(req, std::chrono::milliseconds(timeout_ms));
             }
             if (res.has_value()) {
               return RespCodec::to_python(*res);
             }
             return nb::none();
           },
-          "data"_a)
+          "data"_a, "timeout_ms"_a = 5000)
       .def(
           "invoke_async",
           [](ClientT& self, nb::handle data, nb::callable callback) {
@@ -466,26 +622,32 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
       });
 }
 
-template <typename SetterT, typename ValueT, typename Codec = PythonCodec<ValueT>>
+template <typename SetterT, typename ValueT, typename Codec = PythonCodec<ValueT>, bool SecurityNode = false>
 void bind_setter(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<SetterT>(m, name, doc);
   cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
                       bool auto_init) { return make_url_node<SetterT>(url, ser_type, schema_type, auto_init); }),
           "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   bind_node_common<decltype(cls), SetterT>(cls);
+  if constexpr (SecurityNode) {
+    bind_node_security<decltype(cls), SetterT>(cls);
+  }
   cls.def(
          "set", [](SetterT& self, nb::handle data) { self.set(Codec::from_python_owned(data)); }, "data"_a)
       .def("mark_as_publisher", &SetterT::mark_as_publisher)
       .def("__repr__", [](const SetterT& self) { return "Setter(url='" + self.get_url() + "')"; });
 }
 
-template <typename GetterT, typename ValueT, typename Codec = PythonCodec<ValueT>>
+template <typename GetterT, typename ValueT, typename Codec = PythonCodec<ValueT>, bool SecurityNode = false>
 void bind_getter(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<GetterT>(m, name, doc);
   cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
                       bool auto_init) { return make_url_node<GetterT>(url, ser_type, schema_type, auto_init); }),
           "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   bind_node_common<decltype(cls), GetterT>(cls);
+  if constexpr (SecurityNode) {
+    bind_node_security<decltype(cls), GetterT>(cls);
+  }
   cls.def(
          "listen",
          [](GetterT& self, nb::callable callback) {
@@ -550,7 +712,12 @@ NB_MODULE(_vlink_nanobind, m) {
       .value("WithoutInit", vlink::InitType::kWithoutInit)
       .value("WithInit", vlink::InitType::kWithInit);
 
+  nb::enum_<vlink::SecurityType>(m, "SecurityType")
+      .value("WithoutSecurity", vlink::SecurityType::kWithoutSecurity)
+      .value("WithSecurity", vlink::SecurityType::kWithSecurity);
+
   nb::enum_<vlink::ActionType>(m, "ActionType", "Message recording action")
+      .value("Unknown", vlink::ActionType::kUnknownAction)
       .value("ClientRequest", vlink::ActionType::kClientRequest)
       .value("ClientResponse", vlink::ActionType::kClientResponse)
       .value("ServerRequest", vlink::ActionType::kServerRequest)
@@ -569,12 +736,21 @@ NB_MODULE(_vlink_nanobind, m) {
 
   nb::class_<vlink::Bytes>(m, "Bytes", nb::type_slots(kBytesTypeSlots), "Versatile byte buffer")
       .def(nb::init<>())
+      .def_static("init_memory_pool", &vlink::Bytes::init_memory_pool)
+      .def_static("release_memory_pool", &vlink::Bytes::release_memory_pool)
       .def_static(
-          "create", [](size_t size) { return vlink::Bytes::create(size); }, "size"_a)
+          "create", [](size_t size, uint8_t offset) { return vlink::Bytes::create(size, offset); }, "size"_a,
+          "offset"_a = static_cast<uint8_t>(0))
       .def_static(
-          "from_bytes", [](nb::handle data) { return PythonCodec<vlink::Bytes>::from_python_owned(data); }, "data"_a)
+          "from_bytes",
+          [](nb::handle data, uint8_t offset) {
+            PythonBufferView view(data);
+            return vlink::Bytes::deep_copy(view.data(), view.size(), offset);
+          },
+          "data"_a, "offset"_a = static_cast<uint8_t>(0))
       .def_static(
-          "from_string", [](const std::string& s) { return vlink::Bytes::from_string(s); }, "s"_a)
+          "from_string", [](const std::string& s, uint8_t offset) { return vlink::Bytes::from_string(s, offset); },
+          "s"_a, "offset"_a = static_cast<uint8_t>(0))
       .def_static(
           "from_user_input",
           [](const std::string& s) {
@@ -618,11 +794,11 @@ NB_MODULE(_vlink_nanobind, m) {
           "bytes"_a, "high_ratio"_a = false)
       .def_static(
           "uncompress",
-          [](nb::handle data) {
+          [](nb::handle data, bool check_valid) {
             PythonBufferView view(data);
-            return vlink::Bytes::uncompress_data(view.data(), view.size());
+            return vlink::Bytes::uncompress_data(view.data(), view.size(), check_valid);
           },
-          "bytes"_a)
+          "bytes"_a, "check_valid"_a = true)
       .def_static(
           "is_compress_data",
           [](nb::handle data) {
@@ -636,6 +812,13 @@ NB_MODULE(_vlink_nanobind, m) {
             PythonBufferView view(data);
             auto b = vlink::Bytes::shallow_copy(view.data(), view.size());
             return vlink::Bytes::reverse_order(b);
+          },
+          "bytes"_a)
+      .def_static(
+          "convert_to_hex_str",
+          [](nb::handle data) {
+            PythonBufferView view(data);
+            return vlink::Bytes::convert_to_hex_str(view.data(), view.size());
           },
           "bytes"_a)
       .def_static("is_little_endian", &vlink::Bytes::is_little_endian)
@@ -662,6 +845,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("__bool__", [](const vlink::Bytes& self) { return !self.empty(); })
       .def("__bytes__", [](const vlink::Bytes& self) { return nb::bytes(self.data(), self.size()); })
       .def("__eq__", [](const vlink::Bytes& a, const vlink::Bytes& b) { return a == b; })
+      .def("__ne__", [](const vlink::Bytes& a, const vlink::Bytes& b) { return a != b; })
       .def("__getitem__",
            [](const vlink::Bytes& self, size_t i) -> uint8_t {
              if (i >= self.size()) throw nb::index_error();
@@ -684,10 +868,47 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(nb::init<uint8_t, uint8_t, uint8_t>(), "major"_a, "minor"_a, "patch"_a)
       .def_static("from_string", &vlink::Version::from_string, "str"_a)
       .def("to_string", &vlink::Version::to_string)
+      .def("is_valid", &vlink::Version::is_valid)
       .def_rw("major", &vlink::Version::major)
       .def_rw("minor", &vlink::Version::minor)
       .def_rw("patch", &vlink::Version::patch)
+      .def("__eq__", [](const vlink::Version& a, const vlink::Version& b) { return a == b; })
+      .def("__ne__", [](const vlink::Version& a, const vlink::Version& b) { return a != b; })
+      .def("__lt__", [](const vlink::Version& a, const vlink::Version& b) { return a < b; })
+      .def("__gt__", [](const vlink::Version& a, const vlink::Version& b) { return a > b; })
       .def("__repr__", [](const vlink::Version& self) { return "Version(" + self.to_string() + ")"; });
+
+  nb::class_<vlink::SchemaData>(m, "SchemaData", "Runtime schema descriptor")
+      .def(nb::init<>())
+      .def_rw("name", &vlink::SchemaData::name)
+      .def_rw("encoding", &vlink::SchemaData::encoding)
+      .def_rw("schema_type", &vlink::SchemaData::schema_type)
+      .def_rw("data", &vlink::SchemaData::data)
+      .def_static("is_valid_type", &vlink::SchemaData::is_valid_type, "schema_type"_a)
+      .def_static("is_real_type", &vlink::SchemaData::is_real_type, "schema_type"_a)
+      .def_static(
+          "convert_type",
+          [](vlink::SchemaType schema_type) { return std::string(vlink::SchemaData::convert_type(schema_type)); },
+          "schema_type"_a)
+      .def_static("convert_encoding", &vlink::SchemaData::convert_encoding, "encoding"_a)
+      .def_static(
+          "infer_ser_type", [](const std::string& ser_type) { return vlink::SchemaData::infer_ser_type(ser_type); },
+          "ser_type"_a)
+      .def_static(
+          "resolve_type",
+          [](vlink::SchemaType schema_type, const std::string& ser_type, const std::string& encoding) {
+            return vlink::SchemaData::resolve_type(schema_type, ser_type, encoding);
+          },
+          "schema_type"_a, "ser_type"_a = "", "encoding"_a = "")
+      .def("__bool__",
+           [](const vlink::SchemaData& self) {
+             return !self.name.empty() || !self.encoding.empty() || self.schema_type != vlink::SchemaType::kUnknown ||
+                    !self.data.empty();
+           })
+      .def("__repr__", [](const vlink::SchemaData& self) {
+        return "SchemaData(name='" + self.name + "', encoding='" + self.encoding +
+               "', size=" + std::to_string(self.data.size()) + ")";
+      });
 
   nb::class_<vlink::SampleLostInfo>(m, "SampleLostInfo")
       .def(nb::init<>())
@@ -716,6 +937,14 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_static("get_file_level", &vlink::Logger::get_file_level)
       .def_static("set_console_fmt_enable", &vlink::Logger::set_console_fmt_enable, "enable"_a)
       .def_static("get_console_fmt_enable", &vlink::Logger::get_console_fmt_enable)
+      .def_static(
+          "set_stream_flag",
+          [](int flags) { vlink::Logger::set_stream_flag(static_cast<std::ios_base::fmtflags>(flags)); }, "flags"_a)
+      .def_static("get_stream_flag", []() { return static_cast<int>(vlink::Logger::get_stream_flag()); })
+      .def_static("set_stream_precision", &vlink::Logger::set_stream_precision, "precision"_a)
+      .def_static("get_stream_precision", &vlink::Logger::get_stream_precision)
+      .def_static("set_stream_width", &vlink::Logger::set_stream_width, "width"_a)
+      .def_static("get_stream_width", &vlink::Logger::get_stream_width)
       .def_static("is_busy", &vlink::Logger::is_busy)
       .def_static("is_writable", &vlink::Logger::is_writable, "level"_a)
       .def_static("enable_backtrace", &vlink::Logger::enable_backtrace, "size"_a)
@@ -813,6 +1042,14 @@ NB_MODULE(_vlink_nanobind, m) {
       .value("Timer", vlink::MessageLoop::kTimerPriority)
       .value("Normal", vlink::MessageLoop::kNormalPriority)
       .value("Highest", vlink::MessageLoop::kHighestPriority);
+
+  nb::enum_<vlink::ThreadPool::Type>(m, "ThreadPoolType")
+      .value("Normal", vlink::ThreadPool::kNormalType)
+      .value("Lockfree", vlink::ThreadPool::kLockfreeType);
+  nb::enum_<vlink::ThreadPool::Strategy>(m, "ThreadPoolStrategy")
+      .value("Optimization", vlink::ThreadPool::kOptimizationStrategy)
+      .value("Pop", vlink::ThreadPool::kPopStrategy)
+      .value("Block", vlink::ThreadPool::kBlockStrategy);
 
   nb::class_<vlink::MessageLoop>(m, "MessageLoop", "Single-threaded event loop")
       .def(nb::init<>())
@@ -926,20 +1163,49 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(nb::init<vlink::MessageLoop*>(), "loop"_a, nb::keep_alive<1, 2>())
       .def(
           "__init__",
+          [](nb::pointer_and_handle<vlink::Timer> v, vlink::MessageLoop* loop, uint32_t interval_ms,
+             int32_t loop_count) { new ((vlink::Timer*)v.p) vlink::Timer(loop, interval_ms, loop_count); },
+          "loop"_a, "interval_ms"_a, "loop_count"_a = vlink::Timer::kInfinite, nb::keep_alive<1, 2>())
+      .def(
+          "__init__",
           [](nb::pointer_and_handle<vlink::Timer> v, vlink::MessageLoop* loop, uint32_t interval_ms, int32_t loop_count,
              nb::callable callback) {
             new ((vlink::Timer*)v.p) vlink::Timer(loop, interval_ms, loop_count,
                                                   make_void_callback(std::move(callback), "vlink::Timer.__init__"));
           },
           "loop"_a, "interval_ms"_a, "loop_count"_a, "callback"_a, nb::keep_alive<1, 2>())
+      .def(
+          "__init__",
+          [](nb::pointer_and_handle<vlink::Timer> v, uint32_t interval_ms, int32_t loop_count) {
+            new ((vlink::Timer*)v.p) vlink::Timer(interval_ms, loop_count);
+          },
+          "interval_ms"_a, "loop_count"_a = vlink::Timer::kInfinite)
+      .def(
+          "__init__",
+          [](nb::pointer_and_handle<vlink::Timer> v, uint32_t interval_ms, nb::callable callback) {
+            new ((vlink::Timer*)v.p) vlink::Timer(interval_ms, vlink::Timer::kInfinite,
+                                                  make_void_callback(std::move(callback), "vlink::Timer.__init__"));
+          },
+          "interval_ms"_a, "callback"_a)
+      .def(
+          "__init__",
+          [](nb::pointer_and_handle<vlink::Timer> v, uint32_t interval_ms, int32_t loop_count, nb::callable callback) {
+            new ((vlink::Timer*)v.p)
+                vlink::Timer(interval_ms, loop_count, make_void_callback(std::move(callback), "vlink::Timer.__init__"));
+          },
+          "interval_ms"_a, "loop_count"_a, "callback"_a)
       .def("attach", &vlink::Timer::attach, "loop"_a, nb::keep_alive<1, 2>())
       .def("detach", &vlink::Timer::detach)
       .def(
           "start",
-          [](vlink::Timer& self, nb::callable callback) {
-            self.start(make_void_callback(std::move(callback), "vlink::Timer.start"));
+          [](vlink::Timer& self, nb::object callback) {
+            if (callback.is_none()) {
+              self.start();
+              return;
+            }
+            self.start(make_void_callback(nb::cast<nb::callable>(callback), "vlink::Timer.start"));
           },
-          "callback"_a)
+          "callback"_a = nb::none())
       .def(
           "set_callback",
           [](vlink::Timer& self, nb::callable callback) {
@@ -962,15 +1228,16 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("get_message_loop", &vlink::Timer::get_message_loop, nb::rv_policy::reference)
       .def_static(
           "call_once",
-          [](vlink::MessageLoop* loop, int64_t interval_ms, nb::callable callback, uint16_t priority) {
-            vlink::Timer::call_once(loop, interval_ms,
-                                    make_void_callback(std::move(callback), "vlink::Timer.call_once"), priority);
+          [](vlink::MessageLoop* loop, uint32_t interval_ms, nb::callable callback, uint16_t priority) {
+            return vlink::Timer::call_once(loop, interval_ms,
+                                           make_void_callback(std::move(callback), "vlink::Timer.call_once"), priority);
           },
           "loop"_a, "interval_ms"_a, "callback"_a, "priority"_a = 0);
   m.attr("TIMER_INFINITE") = vlink::Timer::kInfinite;
 
   nb::class_<vlink::ThreadPool>(m, "ThreadPool")
       .def(nb::init<size_t>(), "thread_count"_a = static_cast<size_t>(4))
+      .def(nb::init<size_t, vlink::ThreadPool::Type>(), "thread_count"_a, "type"_a)
       .def("set_name", &vlink::ThreadPool::set_name, "name"_a)
       .def("get_name", &vlink::ThreadPool::get_name)
       .def("get_type", &vlink::ThreadPool::get_type)
@@ -979,10 +1246,16 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(
           "post_task",
           [](vlink::ThreadPool& self, nb::callable callback) {
-            self.post_task(make_void_callback(std::move(callback), "vlink::ThreadPool.post_task"));
+            auto cb = make_void_callback(std::move(callback), "vlink::ThreadPool.post_task");
+            nb::gil_scoped_release release;
+            return self.post_task(std::move(cb));
           },
           "callback"_a)
-      .def("shutdown", &vlink::ThreadPool::shutdown)
+      .def("shutdown",
+           [](vlink::ThreadPool& self) {
+             nb::gil_scoped_release release;
+             return self.shutdown();
+           })
       .def("get_task_count", &vlink::ThreadPool::get_task_count)
       .def("get_max_task_count", &vlink::ThreadPool::get_max_task_count)
       .def("is_in_work_thread", &vlink::ThreadPool::is_in_work_thread);
@@ -1027,6 +1300,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("pause", &vlink::WheelTimer::pause)
       .def("resume", &vlink::WheelTimer::resume)
       .def("wakeup", &vlink::WheelTimer::wakeup)
+      .def("is_running", &vlink::WheelTimer::is_running)
       .def(
           "add",
           [](vlink::WheelTimer& self, uint32_t timeout_ms, nb::callable callback,
@@ -1048,6 +1322,7 @@ NB_MODULE(_vlink_nanobind, m) {
           "timeout_ms"_a, "callback"_a, "repeat_ms"_a = 0,
           "Schedule callback(key) once after timeout_ms; if repeat_ms>0 reschedule that interval. Returns Key.")
       .def("remove", &vlink::WheelTimer::remove, "key"_a)
+      .def("get_remaining_time", &vlink::WheelTimer::get_remaining_time, "key"_a)
       .def("set_catchup_limit", &vlink::WheelTimer::set_catchup_limit, "max_slots_to_catch_up"_a);
 
   auto mp_cls = nb::class_<vlink::MemoryPool>(m, "MemoryPool", "Tiered (pyramid) memory pool with per-tier statistics");
@@ -1291,6 +1566,14 @@ NB_MODULE(_vlink_nanobind, m) {
           "write",
           [](vlink::Process& self, const std::string& data, int timeout_ms) { return self.write(data, timeout_ms); },
           "data"_a, "timeout_ms"_a = 5000)
+      .def(
+          "write",
+          [](vlink::Process& self, nb::handle data, int timeout_ms) {
+            PythonBufferView view(data);
+            std::vector<uint8_t> buffer(view.data(), view.data() + view.size());
+            return self.write(buffer, timeout_ms);
+          },
+          "data"_a, "timeout_ms"_a = 5000)
       .def("close_write_channel", &vlink::Process::close_write_channel)
       .def_static("execute", &vlink::Process::execute, "program"_a, "arguments"_a = std::vector<std::string>{},
                   "timeout_ms"_a = 30000)
@@ -1315,6 +1598,7 @@ NB_MODULE(_vlink_nanobind, m) {
   utils.def("get_env", &vlink::Utils::get_env, "key"_a, "default_value"_a = "");
   utils.def("set_env", &vlink::Utils::set_env, "key"_a, "value"_a, "force"_a = true);
   utils.def("unset_env", &vlink::Utils::unset_env, "key"_a);
+  utils.def("wait_for_device", &vlink::Utils::wait_for_device, "path"_a, "timeout_ms"_a, "poll_ms"_a = 50);
   utils.def("get_all_ipv4_address", &vlink::Utils::get_all_ipv4_address, "filter_available"_a = false);
   utils.def("get_all_ipv6_address", &vlink::Utils::get_all_ipv6_address, "filter_available"_a = false);
   utils.def("get_interface_name_by_ipv4", &vlink::Utils::get_interface_name_by_ipv4, "addr"_a);
@@ -1435,6 +1719,16 @@ NB_MODULE(_vlink_nanobind, m) {
       "str"_a, "from_substring"_a, "to_substring"_a);
   helpers.def("string_local_to_utf8", &vlink::Helpers::string_local_to_utf8, "local_str"_a);
   helpers.def("string_utf8_to_local", &vlink::Helpers::string_utf8_to_local, "utf8_str"_a);
+  helpers.def(
+      "string_to_wstring",
+      [](const std::string& input) { return wide_string_to_python_str(vlink::Helpers::string_to_wstring(input)); },
+      "input"_a);
+  helpers.def(
+      "wstring_to_string",
+      [](nb::str input) { return vlink::Helpers::wstring_to_string(python_str_to_wide_string(input)); }, "input"_a);
+  helpers.def(
+      "path_to_string",
+      [](const std::string& path) { return vlink::Helpers::path_to_string(std::filesystem::path(path)); }, "path"_a);
   helpers.def("format_hex_number_unsigned", nb::overload_cast<uint64_t>(&vlink::Helpers::format_hex_number), "value"_a);
   helpers.def(
       "get_split_string",
@@ -1443,9 +1737,28 @@ NB_MODULE(_vlink_nanobind, m) {
       },
       "str"_a, "delimiter"_a = ",");
   helpers.def(
+      "get_split_string_view",
+      [](const std::string& s, const std::string& d) {
+        auto views = vlink::Helpers::get_split_string_view(s, d.empty() ? ',' : d[0]);
+        std::vector<std::string> parts;
+        parts.reserve(views.size());
+        for (auto view : views) {
+          parts.emplace_back(view);
+        }
+        return parts;
+      },
+      "str"_a, "delimiter"_a = ",");
+  helpers.def(
       "get_pair_string",
       [](const std::string& s, const std::string& d) {
         return vlink::Helpers::get_pair_string(s, d.empty() ? '=' : d[0]);
+      },
+      "str"_a, "delimiter"_a = "=");
+  helpers.def(
+      "get_pair_string_view",
+      [](const std::string& s, const std::string& d) {
+        auto pair = vlink::Helpers::get_pair_string_view(s, d.empty() ? '=' : d[0]);
+        return std::make_pair(std::string(pair.first), std::string(pair.second));
       },
       "str"_a, "delimiter"_a = "=");
   helpers.def("convert_date_to_timestamp", &vlink::Helpers::convert_date_to_timestamp, "date_string"_a);
@@ -1522,6 +1835,7 @@ NB_MODULE(_vlink_nanobind, m) {
   nb::enum_<vlink::Qos::Additions::Priority>(qos_add, "Priority")
       .value("RealTime", vlink::Qos::Additions::kPriorityRealTime)
       .value("High", vlink::Qos::Additions::kPriorityHigh)
+      .value("Normal", vlink::Qos::Additions::kPriorityNormal)
       .value("Normal_", vlink::Qos::Additions::kPriorityNormal)
       .value("Low", vlink::Qos::Additions::kPriorityLow)
       .value("Background", vlink::Qos::Additions::kPriorityBackground);
@@ -1594,6 +1908,10 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_rw("server_name", &vlink::SslOptions::server_name)
       .def_rw("ciphers", &vlink::SslOptions::ciphers)
       .def("is_valid", &vlink::SslOptions::is_valid);
+
+  auto status = m.def_submodule("Status", "Status helper functions");
+  status.def("is_for_writer", &vlink::Status::is_for_writer, "type"_a);
+  status.def("is_for_reader", &vlink::Status::is_for_reader, "type"_a);
 
   nb::class_<vlink::Security>(m, "Security", "AES-128-CBC encryption/decryption")
       .def(nb::init<>())
@@ -1670,6 +1988,12 @@ NB_MODULE(_vlink_nanobind, m) {
   using BytesCli = vlink::Client<vlink::Bytes, vlink::Bytes>;
   using BytesSet = vlink::Setter<vlink::Bytes>;
   using BytesGet = vlink::Getter<vlink::Bytes>;
+  using SecBytesPub = vlink::SecurityPublisher<vlink::Bytes>;
+  using SecBytesSub = vlink::SecuritySubscriber<vlink::Bytes>;
+  using SecBytesSrv = vlink::SecurityServer<vlink::Bytes, vlink::Bytes>;
+  using SecBytesCli = vlink::SecurityClient<vlink::Bytes, vlink::Bytes>;
+  using SecBytesSet = vlink::SecuritySetter<vlink::Bytes>;
+  using SecBytesGet = vlink::SecurityGetter<vlink::Bytes>;
 
   bind_publisher<BytesPub, vlink::Bytes>(m, "Publisher", "Event-model publisher");
   bind_subscriber<BytesSub, vlink::Bytes>(m, "Subscriber", "Event-model subscriber");
@@ -1677,6 +2001,18 @@ NB_MODULE(_vlink_nanobind, m) {
   bind_client<BytesCli, vlink::Bytes, vlink::Bytes>(m, "Client", "Method-model client");
   bind_setter<BytesSet, vlink::Bytes>(m, "Setter", "Field-model setter");
   bind_getter<BytesGet, vlink::Bytes>(m, "Getter", "Field-model getter");
+  bind_publisher<SecBytesPub, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(
+      m, "SecurityPublisher", "Event-model publisher with payload security");
+  bind_subscriber<SecBytesSub, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(
+      m, "SecuritySubscriber", "Event-model subscriber with payload security");
+  bind_server<SecBytesSrv, vlink::Bytes, vlink::Bytes, PythonCodec<vlink::Bytes>, PythonCodec<vlink::Bytes>, true>(
+      m, "SecurityServer", "Method-model server with payload security");
+  bind_client<SecBytesCli, vlink::Bytes, vlink::Bytes, PythonCodec<vlink::Bytes>, PythonCodec<vlink::Bytes>, true>(
+      m, "SecurityClient", "Method-model client with payload security");
+  bind_setter<SecBytesSet, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(m, "SecuritySetter",
+                                                                          "Field-model setter with payload security");
+  bind_getter<SecBytesGet, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(m, "SecurityGetter",
+                                                                          "Field-model getter with payload security");
 
   nb::class_<vlink::DiscoveryViewer> dv(m, "DiscoveryViewer", "Active endpoint discovery");
   nb::enum_<vlink::DiscoveryViewer::FilterType>(dv, "FilterType")
@@ -1723,7 +2059,10 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("get_info_list", &vlink::DiscoveryViewer::get_info_list)
       .def("get_ser_type", &vlink::DiscoveryViewer::get_ser_type, "url"_a)
       .def("get_schema_type", &vlink::DiscoveryViewer::get_schema_type, "url"_a)
+      .def_static(
+          "convert_type", [](const std::string& type) { return vlink::DiscoveryViewer::convert_type(type); }, "type"_a)
       .def_static("get_listen_address", &vlink::DiscoveryViewer::get_listen_address)
+      .def_static("global_get", &vlink::DiscoveryViewer::global_get, nb::rv_policy::reference)
       .def_static("convert_type_to_view", nb::overload_cast<uint32_t>(&vlink::DiscoveryViewer::convert_type_to_view),
                   "type"_a)
       .def_static("convert_type_to_view",
@@ -1757,7 +2096,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_rw("compress_level", &vlink::BagWriter::Config::compress_level)
       .def_rw("max_task_depth", &vlink::BagWriter::Config::max_task_depth)
       .def_rw("max_memory_size", &vlink::BagWriter::Config::max_memory_size)
-      .def_rw("start_timestamp", &vlink::BagWriter::Config::start_timestamp);
+      .def_rw("start_timestamp", &vlink::BagWriter::Config::start_timestamp)
+      .def_rw("ignore_compress_urls", &vlink::BagWriter::Config::ignore_compress_urls);
   bw.def_static(
         "create",
         [](const std::string& path, const vlink::BagWriter::Config& cfg) {
@@ -1765,6 +2105,7 @@ NB_MODULE(_vlink_nanobind, m) {
         },
         "path"_a, "config"_a = vlink::BagWriter::Config())
       .def_static("filter_get", &vlink::BagWriter::filter_get, "path"_a)
+      .def_static("global_get", &vlink::BagWriter::global_get, nb::rv_policy::reference)
       .def(
           "push",
           [](vlink::BagWriter& self, const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
@@ -1776,6 +2117,27 @@ NB_MODULE(_vlink_nanobind, m) {
           },
           "url"_a, "ser_type"_a, "schema_type"_a, "action_type"_a, "data"_a, "timestamp_us"_a = 0,
           "immediate"_a = false)
+      .def(
+          "register_schema_callback",
+          [](vlink::BagWriter& self, nb::callable callback) {
+            auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
+            self.register_schema_callback([cb](const std::string& ser_type, vlink::SchemaType schema_type) {
+              if (!Py_IsInitialized()) return vlink::SchemaData{};
+              nb::gil_scoped_acquire gil;
+              try {
+                nb::object result = cb->fn(ser_type, schema_type);
+                if (result.is_none()) {
+                  return vlink::SchemaData{};
+                }
+                return nb::cast<vlink::SchemaData>(result);
+              } catch (std::exception&) {
+                report_current_exception("vlink::BagWriter.register_schema_callback");
+                return vlink::SchemaData{};
+              }
+            });
+          },
+          "callback"_a)
+      .def("push_schema", &vlink::BagWriter::push_schema, "schema_data"_a, "immediate"_a = false)
       .def(
           "register_split_callback",
           [](vlink::BagWriter& self, nb::callable callback, bool before) {
@@ -1984,6 +2346,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("get_real_timestamp", &vlink::BagReader::get_real_timestamp)
       .def("get_status", &vlink::BagReader::get_status)
       .def("get_info", &vlink::BagReader::get_info, nb::rv_policy::reference)
+      .def("detect_schema", &vlink::BagReader::detect_schema)
       .def("get_ser_type", &vlink::BagReader::get_ser_type, "url"_a)
       .def("get_schema_type", &vlink::BagReader::get_schema_type, "url"_a)
       .def("is_split_mode", &vlink::BagReader::is_split_mode)

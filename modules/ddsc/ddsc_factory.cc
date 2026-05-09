@@ -95,37 +95,51 @@ std::shared_ptr<ddsc::DomainParticipant> DdscFactory::create_participant(uint8_t
   std::shared_ptr<ddsc::DomainParticipant> part = get_weak_ptr(factory.part_map_, id).lock();
 
   if (!part) {
-    lock.unlock();
+    factory.part_map_.erase(id);
+
     dds_qos_t* dds_qos = dds_create_qos();
 
     set_participant_qos(conf.domain, dds_qos, properties);
 
+    bool has_domain_ref = false;
+    auto domain_iter = factory.domain_map_.find(conf.domain);
+    if (domain_iter != factory.domain_map_.end()) {
+      ++domain_iter->second.ref_count;
+      has_domain_ref = true;
+    }
+
     auto* ptr = new ddsc::DomainParticipant(conf.domain, dds_qos);
 
-    part = std::shared_ptr<ddsc::DomainParticipant>(ptr, [id, domain = conf.domain](ddsc::DomainParticipant* part) {
-      {
-        std::lock_guard lock(factory.mtx_);
-        factory.part_map_.erase(id);
-        auto iter = factory.domain_map_.find(domain);
+    part = std::shared_ptr<ddsc::DomainParticipant>(
+        ptr, [id, domain = conf.domain, has_domain_ref](ddsc::DomainParticipant* part) {
+          static auto& factory = DdscFactory::get();
 
-        if VLIKELY (iter != factory.domain_map_.end()) {
-          dds_delete(iter->second);
-          factory.domain_map_.erase(iter);
-        }
-      }
+          {
+            std::lock_guard lock(factory.mtx_);
+            factory.part_map_.erase(id);
 
-      delete part;
-    });
+            delete part;
+
+            if (!has_domain_ref) {
+              return;
+            }
+
+            auto iter = factory.domain_map_.find(domain);
+
+            if VLIKELY (iter != factory.domain_map_.end() && iter->second.ref_count > 0) {
+              --iter->second.ref_count;
+
+              if (iter->second.ref_count == 0) {
+                dds_delete(iter->second.entity);
+                factory.domain_map_.erase(iter);
+              }
+            }
+          }
+        });
+
+    factory.part_map_.emplace(id, part);
 
     dds_delete_qos(dds_qos);
-
-    lock.lock();
-
-    auto [iter, inserted] = factory.part_map_.emplace(id, part);
-
-    if (!inserted) {
-      part = iter->second.lock();
-    }
   }
   return part;
 }
@@ -440,8 +454,19 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
 
   (void)prop_enable_less_memory;
 
+  if (factory.domain_map_.find(domain_id) != factory.domain_map_.end()) {
+    return;
+  }
+
   ddsi_config config;
   ddsi_config_init_default(&config);
+
+  auto [domain_iter, inserted] = factory.domain_map_.try_emplace(domain_id);
+  if VUNLIKELY (!inserted) {
+    return;
+  }
+
+  auto& domain_config = domain_iter->second;
 
   if (prop_enable_udp) {
     config.transport_selector = DDSI_TRANS_UDP;
@@ -466,23 +491,38 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
   if (ssl_cfg_valid && prop_enable_tcp) {
     config.ssl_enable = 1;
 
-    if (!ssl_cfg.key_file.empty()) {
-      config.ssl_keystore = const_cast<char*>(ssl_cfg.key_file.c_str());
+    if (!ssl_cfg.cert_file.empty()) {
+      domain_config.ssl_keystore = ssl_cfg.cert_file;
+    } else if (!ssl_cfg.key_file.empty()) {
+      domain_config.ssl_keystore = ssl_cfg.key_file;
+    } else if (!ssl_cfg.ca_file.empty()) {
+      domain_config.ssl_keystore = ssl_cfg.ca_file;
+    }
+
+    if (!domain_config.ssl_keystore.empty()) {
+      config.ssl_keystore = const_cast<char*>(domain_config.ssl_keystore.c_str());
     }
 
     if (!ssl_cfg.key_password.empty()) {
-      config.ssl_key_pass = const_cast<char*>(ssl_cfg.key_password.c_str());
+      domain_config.ssl_key_pass = ssl_cfg.key_password;
+      config.ssl_key_pass = const_cast<char*>(domain_config.ssl_key_pass.c_str());
     }
 
-    if (!ssl_cfg.ca_file.empty()) {
-      config.ssl_keystore = const_cast<char*>(ssl_cfg.ca_file.c_str());
+    int provided =
+        (ssl_cfg.cert_file.empty() ? 0 : 1) + (ssl_cfg.key_file.empty() ? 0 : 1) + (ssl_cfg.ca_file.empty() ? 0 : 1);
+    if VUNLIKELY (provided > 1) {
+      VLOG_W(
+          "DdscFactory: CycloneDDS only supports a single ssl_keystore (PEM/PKCS#12 with private key, certificate "
+          "and CA chain combined); ssl.cert/ssl.key/ssl.ca cannot be specified separately. Picked one and ignored "
+          "the others.");
     }
 
     config.ssl_verify = ssl_cfg.verify_peer ? 1 : 0;
     config.ssl_self_signed = ssl_cfg.verify_peer ? 0 : 1;
 
     if (!ssl_cfg.ciphers.empty()) {
-      config.ssl_ciphers = const_cast<char*>(ssl_cfg.ciphers.c_str());
+      domain_config.ssl_ciphers = ssl_cfg.ciphers;
+      config.ssl_ciphers = const_cast<char*>(domain_config.ssl_ciphers.c_str());
     }
   }
 #else
@@ -527,58 +567,62 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
     config.allowMulticast = DDSI_AMC_TRUE;
   }
 
-  std::vector<std::string> ip_list;
-  std::unique_ptr<ddsi_config_network_interface_listelem[]> ip;
-
   if (prop_ip_str.empty()) {
-    ip_list = default_ip_list;
+    domain_config.network_interface_list = default_ip_list;
   } else {
-    ip_list = Helpers::get_split_string(prop_ip_str, ';');
+    domain_config.network_interface_list = Helpers::get_split_string(prop_ip_str, ';');
   }
 
-  if (!ip_list.empty()) {
-    ip = std::make_unique<ddsi_config_network_interface_listelem[]>(ip_list.size());
+  if (!domain_config.network_interface_list.empty()) {
+    domain_config.network_interface_elements =
+        std::make_unique<ddsi_config_network_interface_listelem[]>(domain_config.network_interface_list.size());
 
-    for (size_t i = 0; i < ip_list.size(); ++i) {
-      if (i < ip_list.size() - 1) {
-        ip[i].next = &(ip[i + 1]);
+    for (size_t i = 0; i < domain_config.network_interface_list.size(); ++i) {
+      auto* interfaces = domain_config.network_interface_elements.get();
+      if (i < domain_config.network_interface_list.size() - 1) {
+        interfaces[i].next = &(interfaces[i + 1]);
       } else {
-        ip[i].next = nullptr;
+        interfaces[i].next = nullptr;
       }
 
-      ip[i].cfg.automatic = 0;
-      ip[i].cfg.name = nullptr;
-      ip[i].cfg.address = const_cast<char*>(ip_list.at(i).c_str());
-      ip[i].cfg.prefer_multicast = 0;
-      ip[i].cfg.presence_required = 1;
-      ip[i].cfg.priority.isdefault = 1;
-      ip[i].cfg.multicast = DDSI_BOOLDEF_TRUE;
+      interfaces[i].cfg.automatic = 0;
+      interfaces[i].cfg.name = nullptr;
+      interfaces[i].cfg.address = const_cast<char*>(domain_config.network_interface_list.at(i).c_str());
+      interfaces[i].cfg.prefer_multicast = 0;
+      interfaces[i].cfg.presence_required = 1;
+      interfaces[i].cfg.priority.isdefault = 1;
+      interfaces[i].cfg.multicast = DDSI_BOOLDEF_TRUE;
     }
 
-    config.network_interfaces = ip.get();
+    config.network_interfaces = domain_config.network_interface_elements.get();
   }
 
-  std::vector<std::string> peer_list = Helpers::get_split_string(prop_peer_str, ';');
-  std::unique_ptr<ddsi_config_peer_listelem[]> peer;
+  domain_config.peer_list = Helpers::get_split_string(prop_peer_str, ';');
 
-  if (!peer_list.empty()) {
-    peer = std::make_unique<ddsi_config_peer_listelem[]>(peer_list.size());
+  if (!domain_config.peer_list.empty()) {
+    domain_config.peer_elements = std::make_unique<ddsi_config_peer_listelem[]>(domain_config.peer_list.size());
 
-    for (size_t i = 0; i < peer_list.size(); ++i) {
-      if (i < peer_list.size() - 1) {
-        peer[i].next = &(peer[i + 1]);
+    for (size_t i = 0; i < domain_config.peer_list.size(); ++i) {
+      auto* peers = domain_config.peer_elements.get();
+      if (i < domain_config.peer_list.size() - 1) {
+        peers[i].next = &(peers[i + 1]);
       } else {
-        peer[i].next = nullptr;
+        peers[i].next = nullptr;
       }
 
-      peer[i].peer = const_cast<char*>(peer_list.at(i).c_str());
+      peers[i].peer = const_cast<char*>(domain_config.peer_list.at(i).c_str());
     }
 
-    config.peers = peer.get();
+    config.peers = domain_config.peer_elements.get();
   }
 
   auto domain = dds_create_domain_with_rawconfig(domain_id, &config);
-  factory.domain_map_.emplace(domain_id, std::move(domain));
+  if VUNLIKELY (domain <= 0) {
+    factory.domain_map_.erase(domain_iter);
+    return;
+  }
+
+  domain_config.entity = domain;
 }
 
 }  // namespace vlink

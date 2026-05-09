@@ -568,7 +568,7 @@ sub.listen([](const MyCustomProtocol& m) {
 ```cpp
 // 分配
 auto buf = vlink::Bytes::create(1024);       // 分配 1024 字节
-auto buf2 = vlink::Bytes::create(64, 4);     // 分配 64 字节，预留 4 字节头部偏移
+auto buf2 = vlink::Bytes::create(64, 4);     // 分配 64 字节，预留 4 字节头部偏移（offset 类型为 uint8_t，最大 255）
 
 // 数据访问
 uint8_t* p = buf.data();                     // 用户数据起始指针（跳过偏移区）

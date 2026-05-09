@@ -73,7 +73,7 @@ bool IntraClientImpl::detach() {
   return false;
 }
 
-bool IntraClientImpl::is_connected() const { return !object_->server_connect_map_is_empty(); }
+bool IntraClientImpl::is_connected() const { return !object_->req_resp_map_is_empty(); }
 
 bool IntraClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chrono::milliseconds timeout) {
   if VUNLIKELY (!callback) {

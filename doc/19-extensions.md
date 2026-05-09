@@ -979,7 +979,7 @@ monitor->shutdown();
 ### 共享库搜索路径（`default_search_path()`）
 
 `Plugin::default_search_path()` 按以下顺序返回搜索路径队列（源码
-`src/base/plugin.cc:80`）：
+`src/base/plugin.cc:238`）：
 
 1. `VLINK_PLUGIN_DIR` 环境变量指定的目录（若非空，插入队首）
 2. 当前工作目录

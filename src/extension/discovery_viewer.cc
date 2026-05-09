@@ -853,18 +853,26 @@ DiscoveryViewer::~DiscoveryViewer() {
 
   if VLIKELY (impl_->sock >= 0) {
 #ifdef _WIN32
-    ::closesocket(impl_->sock);
-    ::WSACleanup();
+    ::shutdown(impl_->sock, SD_BOTH);
 #else
-    ::close(impl_->sock);
+    ::shutdown(impl_->sock, SHUT_RDWR);
 #endif
-    impl_->sock = -1;
   }
 
   wait_for_quit();
 
   if VLIKELY (impl_->thread.joinable()) {
     impl_->thread.join();
+  }
+
+  if VLIKELY (impl_->sock >= 0) {
+#ifdef _WIN32
+    ::closesocket(impl_->sock);
+    ::WSACleanup();
+#else
+    ::close(impl_->sock);
+#endif
+    impl_->sock = -1;
   }
 
   impl_->buffer.clear();

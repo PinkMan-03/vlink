@@ -46,6 +46,10 @@ ClientImpl::~ClientImpl() = default;
 void ClientImpl::interrupt() {
   NodeImpl::interrupt();
 
+  {
+    std::lock_guard sync_lock(helper_->mtx);
+  }
+
   helper_->connected_cv.notify_all();
 }
 
@@ -91,6 +95,10 @@ void ClientImpl::update_connected() {
   }
 
   helper_->connected = !helper_->connected;
+
+  {
+    std::lock_guard sync_lock(helper_->mtx);
+  }
 
   helper_->connected_cv.notify_all();
 

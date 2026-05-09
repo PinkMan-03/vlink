@@ -437,9 +437,9 @@ class Shm2Subscriber final : public AbstractObject<ShmID2>, public std::enable_s
 
   std::optional<SysSemaphore> sem_;
 
-  bool is_latency_and_lost_enabled_{false};
+  std::atomic_bool is_latency_and_lost_enabled_{false};
   CalculateSample calc_sample_;
-  bool manual_unloan_{false};
+  std::atomic_bool manual_unloan_{false};
 
   struct SubscriberLoanEntry {
     std::unique_ptr<iox2_sample_t> storage;

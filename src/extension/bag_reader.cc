@@ -90,7 +90,11 @@ BagReader::BagReader(const std::string& path, bool read_only, bool try_to_fix) :
   Bytes::init_memory_pool();
 }
 
-BagReader::~BagReader() = default;
+BagReader::~BagReader() {
+  if (impl_ && impl_->plugin_interface) {
+    impl_->plugin_interface->register_output_callback({});
+  }
+}
 
 void BagReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
   impl_->plugin_interface = plugin_interface;

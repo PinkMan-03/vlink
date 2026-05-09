@@ -169,8 +169,8 @@ writer->push_schema(schema);
 | `split_name_by_time`    | `false`      | 分割文件名附加时间戳               |
 | `sync_mode`             | `false`      | 同步写盘（更安全但更慢）           |
 | `optimize_on_exit`      | `false`      | 关闭时执行 VACUUM/优化             |
-| `max_row_count`         | 50 亿        | 最大消息行数（超出后分割）         |
-| `max_bytes_size`        | 512 GiB      | 最大文件字节数                     |
+| `max_row_count`         | 50 亿        | 上限，仅当 `enable_limit=true` 时生效；超出后停止录制（不是分割） |
+| `max_bytes_size`        | 512 GiB      | 上限，仅当 `enable_limit=true` 时生效；超出后停止录制（不是分割） |
 | `split_by_size`         | 1 GiB        | 按大小分割阈值                     |
 | `split_by_time`         | 0（禁用）    | 按时间分割（毫秒）                 |
 | `cache_size`            | 4 MiB        | SQLite 页缓存大小                  |
@@ -306,8 +306,8 @@ reader->async_run();
 vlink::BagReader::Config cfg;
 cfg.rate        = 1.0;                    // 实时速率
 cfg.times       = 1;                      // 播放 1 次
-cfg.begin_time  = 0;                      // 从头开始
-cfg.end_time    = 0;                      // 播放到结尾
+cfg.begin_time  = 0;                      // 从头开始（毫秒，相对录制起点）
+cfg.end_time    = 0;                      // 播放到结尾（毫秒，相对录制起点；0 表示不限）
 cfg.skip_blank  = true;                   // 跳过静默间隔
 
 // 仅播放指定 URL（为空则播放全部）
@@ -338,7 +338,7 @@ reader->stop();
 
 // 查询当前状态
 vlink::BagReader::Status status = reader->get_status();
-int64_t current_ts   = reader->get_timestamp();      // 当前消息时间戳
+int64_t current_ts   = reader->get_timestamp();      // 当前消息时间戳（毫秒，相对于录制起点；注意 OutputCallback 给的时间戳是微秒）
 int64_t elapsed_real = reader->get_real_timestamp();  // 实际经过时间
 bool is_jumping      = reader->is_jumping();
 ```
@@ -366,9 +366,9 @@ cfg.auto_quit = true;
 ### 时间范围过滤
 
 ```cpp
-// 只播放第 10 秒到第 30 秒的内容（相对于录制起始，毫秒）
-cfg.begin_time = 10 * 1000LL;  // 从第 10 秒开始
-cfg.end_time   = 30 * 1000LL;  // 播放到第 30 秒
+// 只播放第 10 秒到第 30 秒的内容（begin_time/end_time 单位：毫秒，相对录制起点）
+cfg.begin_time = 10 * 1000LL;  // 从第 10 秒（10000 ms）开始
+cfg.end_time   = 30 * 1000LL;  // 播放到第 30 秒（30000 ms）
 reader->play(cfg);
 ```
 

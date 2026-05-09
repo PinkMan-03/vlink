@@ -362,12 +362,23 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   Bytes() noexcept;
 
   /**
-   * @brief Copy constructor.
+   * @brief Copy constructor — always produces an owned deep copy.
    *
    * @details
-   * If @p target is an owner, a deep copy of its data is made.
-   * If @p target is a shallow alias (non-owner, non-loaned), the alias is shared.
-   * Loaned objects are shallow-copied as well (ownership is not transferred).
+   * Allocates a fresh buffer through @c MemoryPool and @c memcpy s the source
+   * payload into it.  The result is always an owner (@c is_owner() returns
+   * @c true, @c is_loaned() returns @c false), regardless of whether @p target
+   * was an owner, a shallow alias, or a loaned object.
+   *
+   * @note
+   * If you need to preserve aliasing or loaned semantics, do not use the copy
+   * constructor — use one of the explicit factory methods instead:
+   *  - @c Bytes::shallow_copy(const Bytes&) — keeps the alias (no ownership).
+   *  - @c Bytes::loan_internal(...) — preserves the loaned tag for iceoryx
+   *    zero-copy transports.
+   * Copying a loaned @c Bytes through this constructor releases the loan
+   * (the new object owns an independent copy and the original loan is not
+   * extended by the copy).
    *
    * @param target  Source @c Bytes to copy.
    */
@@ -406,10 +417,17 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   ~Bytes() noexcept;
 
   /**
-   * @brief Copy assignment operator.
+   * @brief Copy assignment operator — always produces an owned deep copy.
    *
    * @details
-   * Releases the current buffer, then copies @p target (deep if owner, shallow otherwise).
+   * Releases the current buffer (if owned), then allocates a fresh buffer
+   * through @c MemoryPool and @c memcpy s @p target 's payload into it.  The
+   * result is always an owner regardless of @p target 's mode (same contract
+   * as the copy constructor).
+   *
+   * @note
+   * To keep alias / loaned semantics, prefer @c shallow_copy(const Bytes&) or
+   * the dedicated factory methods rather than this assignment operator.
    *
    * @param target  Source @c Bytes to copy-assign from.
    * @return Reference to @c *this.

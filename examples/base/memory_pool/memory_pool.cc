@@ -61,6 +61,11 @@ int main() {
     VLOG_I("=== Section 1: get_default_config() ===");
 
     auto config = vlink::MemoryPool::get_default_config();
+    // config.tiers.size() reports raw entries (always 16 here, including any
+    // sentinel rows whose blocks_per_chunk == 0); pool.get_tier_count() below
+    // reports live tiers after the constructor strips sentinels (e.g. L1=13,
+    // L2=14, L3=15, L4..L9=16).  The two numbers can differ for VLINK_MEMORY_LEVEL
+    // < 4 -- that's expected, not a bug.
     MLOG_I("  VLINK_MEMORY_LEVEL produced {} tiers (prealloc={})", config.tiers.size(), config.prealloc);
     for (size_t i = 0; i < config.tiers.size(); ++i) {
       MLOG_I("    cfg[{}]: max_size={} blocks_per_chunk={}", i, config.tiers[i].max_size,
@@ -68,7 +73,7 @@ int main() {
     }
 
     vlink::MemoryPool pool(config);
-    MLOG_I("  pool.get_tier_count() = {}", pool.get_tier_count());
+    MLOG_I("  pool.get_tier_count() = {} (live tiers after sentinel stripping)", pool.get_tier_count());
 
     // 2 KiB chunk header sized request + 1 KiB hot path + 1 MiB rare path.
     void* small_a = pool.allocate(48);                  // small header tier
@@ -195,8 +200,9 @@ int main() {
   {
     VLOG_I("=== Section 5: MemoryPool(int level) ===");
 
-    // Equivalent to MemoryPool(get_default_config row #5); out-of-range values
-    // are clamped to [0, 9] with a warning.
+    // Equivalent to picking row L5 from the built-in pyramid table (the same
+    // table get_default_config() reads when VLINK_MEMORY_LEVEL=5).  Out-of-range
+    // values are clamped to [0, 9] with a warning.
     vlink::MemoryPool level5_pool(5);
     MLOG_I("  level5_pool tier count = {}", level5_pool.get_tier_count());
 
