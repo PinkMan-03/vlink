@@ -248,11 +248,28 @@ bool MqttFactory::connect_client_locked(const MqttSessionID& session_id, MQTTCli
     }
   }
 
+  ClientContext* ctx = nullptr;
+
+  if (auto ctx_it = client_context_map_.find(session_id); ctx_it != client_context_map_.end()) {
+    ctx = ctx_it->second.get();
+  }
+
   int rc = MQTTClient_connect(client, &conn_opts);
 
   if VUNLIKELY (rc != MQTTCLIENT_SUCCESS) {
-    VLOG_E("MqttFactory: Failed to invoke [MQTTClient_connect], broker=", broker, " rc=", rc, ".");
+    if (!ctx || ctx->last_failed_rc != rc) {
+      VLOG_E("MqttFactory: Failed to invoke [MQTTClient_connect], broker=", broker, " rc=", rc, ".");
+
+      if (ctx) {
+        ctx->last_failed_rc = rc;
+      }
+    }
+
     return false;
+  }
+
+  if (ctx) {
+    ctx->last_failed_rc = 0;
   }
 
   return true;

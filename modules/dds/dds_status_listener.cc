@@ -34,7 +34,11 @@
 
 namespace vlink {
 
+#ifdef VLINK_SUPPORT_DDS_V3
 static constexpr size_t kDdsInstanceHandleSize = rtps::RTPS_KEY_HASH_SIZE;
+#else
+static constexpr size_t kDdsInstanceHandleSize = 16;
+#endif
 static constexpr size_t kStatusInstanceHandleStorageSize = 32;
 
 template <typename StatusT>

@@ -751,8 +751,11 @@ inline Function<ReturnT(ArgsT...), SboSizeT>::Function(FunctorT&& f) {
       return;
     }
   } else if constexpr (kIsPointerLike<DecayFunctorT>) {
-    if VUNLIKELY (f == nullptr) {
-      return;
+    if constexpr (std::is_pointer_v<std::remove_reference_t<FunctorT>> ||
+                  std::is_member_pointer_v<std::remove_reference_t<FunctorT>>) {
+      if VUNLIKELY (f == nullptr) {
+        return;
+      }
     }
   }
 
@@ -1115,10 +1118,11 @@ inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::MoveFunction(FunctorT&& f) {
       return;
     }
   } else if constexpr (kIsPointerLike<DecayFunctorT>) {
-    auto p = static_cast<DecayFunctorT>(f);
-
-    if VUNLIKELY (p == nullptr) {
-      return;
+    if constexpr (std::is_pointer_v<std::remove_reference_t<FunctorT>> ||
+                  std::is_member_pointer_v<std::remove_reference_t<FunctorT>>) {
+      if VUNLIKELY (f == nullptr) {
+        return;
+      }
     }
   }
 

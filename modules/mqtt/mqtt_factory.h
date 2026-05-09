@@ -101,6 +101,7 @@ class MqttFactory final : public AbstractFactory<MqttID> {
   struct ClientContext final {
     std::atomic<MqttFactory*> factory{nullptr};
     MqttSessionID session_id;
+    int last_failed_rc{0};
   };
 
   struct Subscription final {
