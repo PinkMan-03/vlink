@@ -388,7 +388,7 @@
 	#define LZAV_LIKELY( x ) ( __builtin_expect( x, 1 ))
 	#define LZAV_UNLIKELY( x ) ( __builtin_expect( x, 0 ))
 
-#elif defined( __cplusplus ) && __cplusplus >= 202002L
+#elif defined( __cplusplus ) && __cplusplus >= 202002L && !defined(_WIN32)
 
 	#define LZAV_LIKELY( x ) ( x ) [[likely]]
 	#define LZAV_UNLIKELY( x ) ( x ) [[unlikely]]
