@@ -564,7 +564,7 @@ constexpr auto raw_type_name() noexcept {
     constexpr std::string_view kName{__PRETTY_FUNCTION__ + 74, sizeof(__PRETTY_FUNCTION__) - 76};
 #elif defined(_MSC_VER)
     constexpr std::string_view kName{__FUNCSIG__ + 56,
-                                     sizeof(__FUNCSIG__) - 64 - (__FUNCSIG__[sizeof(__FUNCSIG__) - 9] == ' ' ? 1 : 0)};
+                                     sizeof(__FUNCSIG__) - 73 - (__FUNCSIG__[sizeof(__FUNCSIG__) - 18] == ' ' ? 1 : 0)};
 #else
     constexpr auto kName = std::string_view{};
 #endif
