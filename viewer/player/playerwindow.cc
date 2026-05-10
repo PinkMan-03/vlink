@@ -968,31 +968,33 @@ void PlayerWindow::on_toolButton_play_clicked() {
     filter_urls_.clear();
   }
 
-#ifdef VLINK_SUPPORT_SHM
-  bool has_roudi_running = false;
+  // #ifdef VLINK_SUPPORT_SHM
+  //   bool has_roudi_running = false;
 
-  if (vlink::ShmConf::has_roudi_running()) {
-    has_roudi_running = true;
-  } else {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  //   if (vlink::ShmConf::has_roudi_running()) {
+  //     has_roudi_running = true;
+  //   } else {
+  //     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-    if (vlink::ShmConf::has_roudi_running()) {
-      has_roudi_running = true;
-    } else {
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  //     if (vlink::ShmConf::has_roudi_running()) {
+  //       has_roudi_running = true;
+  //     } else {
+  //       std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-      has_roudi_running = vlink::ShmConf::has_roudi_running();
-    }
-  }
+  //       has_roudi_running = vlink::ShmConf::has_roudi_running();
+  //     }
+  //   }
 
-  if (!has_roudi_running) {
-    if (QMessageBox::warning(this, tr("Warning"), tr("The proxy does not seem to be running. Do you want to continue?"),
-                             QMessageBox::StandardButtons(QMessageBox::Yes | QMessageBox::No)) != QMessageBox::Yes) {
-      wait_widget_->stop_wait();
-      return;
-    }
-  }
-#endif
+  //   if (!has_roudi_running) {
+  //     if (QMessageBox::warning(this, tr("Warning"), tr("The proxy does not seem to be running. Do you want to
+  //     continue?"),
+  //                              QMessageBox::StandardButtons(QMessageBox::Yes | QMessageBox::No)) != QMessageBox::Yes)
+  //                              {
+  //       wait_widget_->stop_wait();
+  //       return;
+  //     }
+  //   }
+  // #endif
 
   play_timer_->stop();
 

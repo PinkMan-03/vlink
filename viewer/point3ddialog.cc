@@ -868,6 +868,10 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
 
       const auto schema_type = proxy_data.schema;
 
+      VLOG_E(proxy_data.ser);
+
+      VLOG_E(vlink::Serializer::get_serialized_type<vlink::zerocopy::PointCloud>());
+
       if (schema_type == vlink::SchemaType::kZeroCopy &&
           proxy_data.ser == vlink::Serializer::get_serialized_type<vlink::zerocopy::PointCloud>()) {
         QMetaObject::invokeMethod(this, "update_ui_for_zero_copy_types", Qt::QueuedConnection,
