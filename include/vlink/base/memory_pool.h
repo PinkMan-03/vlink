@@ -107,9 +107,8 @@ class VLINK_EXPORT MemoryPool final {
    * @brief Configuration of a single tier.
    */
   struct Tier final {
-    size_t max_size{0};  ///< Inclusive byte upper bound for this tier.
-    size_t blocks_per_chunk{
-        0};  ///< Max blocks per upstream chunk; @c 0 marks the entry as a sentinel (stripped at construction).
+    size_t max_size{0};          ///< Inclusive byte upper bound for this tier.
+    size_t blocks_per_chunk{0};  ///< Max blocks per upstream chunk.
   };
 
   /**
@@ -143,15 +142,14 @@ class VLINK_EXPORT MemoryPool final {
    * fields are best-effort under concurrent traffic, not globally atomic.
    */
   struct TierStats final {
-    size_t max_size{0};            ///< Tier's @c max_size from the configuration.
-    size_t blocks_per_chunk{0};    ///< Tier's @c blocks_per_chunk from the configuration.
-    size_t block_size{0};          ///< Effective block size after alignment rounding.
-    uint64_t hit_count{0};         ///< Allocations dispatched to this tier (resettable).
-    uint64_t deallocate_count{0};  ///< Deallocations dispatched to this tier (resettable).
-    uint64_t in_use_blocks{0};     ///< Best-effort @c hit_count - @c deallocate_count.
-    uint64_t chunk_count{0};       ///< Currently owned chunks; @c clear decrements by released count.
-    uint64_t upstream_alloc_count{
-        0};  ///< Lifetime chunks fully installed in this tier; OOM and push_back failures excluded.
+    size_t max_size{0};                ///< Tier's @c max_size from the configuration.
+    size_t blocks_per_chunk{0};        ///< Tier's @c blocks_per_chunk from the configuration.
+    size_t block_size{0};              ///< Effective block size after alignment rounding.
+    uint64_t hit_count{0};             ///< Allocations dispatched to this tier (resettable).
+    uint64_t deallocate_count{0};      ///< Deallocations dispatched to this tier (resettable).
+    uint64_t in_use_blocks{0};         ///< Best-effort @c hit_count - @c deallocate_count.
+    uint64_t chunk_count{0};           ///< Currently owned chunks; @c clear decrements by released count.
+    uint64_t upstream_alloc_count{0};  ///< Lifetime chunks fully installed in this tier.
     uint64_t upstream_alloc_bytes{0};  ///< Lifetime bytes of those installed chunks.
   };
 

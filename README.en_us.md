@@ -194,7 +194,7 @@ vlink_generate_cpp(TARGET example_gen PROTO example1.proto example2.proto)
 target_link_libraries(my_app PRIVATE example_gen)
 ```
 
-See the [CMake target list](doc/01-build.md#152-cmake-目标列表) and the full [Build Guide](doc/01-build.md) for details.
+See the [Build Guide](doc/01-build.md) — section 1.5 covers the full CMake target list and `vlink_generate_cpp()` reference.
 
 ---
 
@@ -239,7 +239,9 @@ vlink/
 
 ## 🤝 Contributing
 
-Pull requests are welcome. Please read the [PR Conventions](doc/92-pr-conventions.md) before opening a PR.
+vlink is currently maintained by Thun Lu as a solo effort. This is a long-term commitment, but response times and roadmap velocity are bounded by one person's bandwidth. PRs, issues, and documentation improvements are all welcome.
+
+Please read the [PR Conventions](doc/92-pr-conventions.md) before opening a PR.
 
 ---
 
@@ -248,5 +250,3 @@ Pull requests are welcome. Please read the [PR Conventions](doc/92-pr-convention
 [Apache License 2.0](LICENSE) — free for commercial use.
 
 Copyright (C) 2026 Thun Lu. All rights reserved.
-
-*Author: Thun Lu <thun.lu@zohomail.cn>*
