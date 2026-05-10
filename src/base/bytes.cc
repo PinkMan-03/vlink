@@ -31,7 +31,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <version>
 
 #include "./base/logger.h"
 #include "./base/memory_pool.h"
