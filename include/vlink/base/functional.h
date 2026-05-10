@@ -276,8 +276,8 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
             // NOLINTNEXTLINE(modernize-use-constraints)
             typename = std::enable_if_t<std::conjunction_v<std::negation<std::is_same<DecayFunctorT, Function>>,
                                                            std::negation<std::is_same<DecayFunctorT, std::nullptr_t>>,
-                                                           std::is_copy_constructible<DecayFunctorT>,
-                                                           std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>>>>
+                                                           std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>,
+                                                           std::is_copy_constructible<DecayFunctorT>>>>
   Function(FunctorT&& f);  // NOLINT(google-explicit-constructor)
 
   /**
@@ -302,8 +302,8 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
             // NOLINTNEXTLINE(modernize-use-constraints)
             typename = std::enable_if_t<std::conjunction_v<std::negation<std::is_same<DecayFunctorT, Function>>,
                                                            std::negation<std::is_same<DecayFunctorT, std::nullptr_t>>,
-                                                           std::is_copy_constructible<DecayFunctorT>,
-                                                           std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>>>>
+                                                           std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>,
+                                                           std::is_copy_constructible<DecayFunctorT>>>>
   Function& operator=(FunctorT&& f);
 
   /**
@@ -541,13 +541,13 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
    *
    * @tparam FunctorT  Callable type accepted by @c std::invoke.
    */
-  template <
-      typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
-      // NOLINTNEXTLINE(modernize-use-constraints)
-      typename = std::enable_if_t<std::conjunction_v<
-          std::negation<std::is_same<DecayFunctorT, MoveFunction>>,
-          std::negation<std::is_same<DecayFunctorT, std::nullptr_t>>, std::is_constructible<DecayFunctorT, FunctorT>,
-          std::is_move_constructible<DecayFunctorT>, std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>>>>
+  template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
+            // NOLINTNEXTLINE(modernize-use-constraints)
+            typename = std::enable_if_t<std::conjunction_v<std::negation<std::is_same<DecayFunctorT, MoveFunction>>,
+                                                           std::negation<std::is_same<DecayFunctorT, std::nullptr_t>>,
+                                                           std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>,
+                                                           std::is_constructible<DecayFunctorT, FunctorT>,
+                                                           std::is_move_constructible<DecayFunctorT>>>>
   MoveFunction(FunctorT&& f);  // NOLINT(google-explicit-constructor)
 
   /**
@@ -563,13 +563,13 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
   /**
    * @brief Replaces the target with a compatible move-constructible callable.
    */
-  template <
-      typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
-      // NOLINTNEXTLINE(modernize-use-constraints)
-      typename = std::enable_if_t<std::conjunction_v<
-          std::negation<std::is_same<DecayFunctorT, MoveFunction>>,
-          std::negation<std::is_same<DecayFunctorT, std::nullptr_t>>, std::is_constructible<DecayFunctorT, FunctorT>,
-          std::is_move_constructible<DecayFunctorT>, std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>>>>
+  template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
+            // NOLINTNEXTLINE(modernize-use-constraints)
+            typename = std::enable_if_t<std::conjunction_v<std::negation<std::is_same<DecayFunctorT, MoveFunction>>,
+                                                           std::negation<std::is_same<DecayFunctorT, std::nullptr_t>>,
+                                                           std::is_invocable_r<ReturnT, DecayFunctorT&, ArgsT...>,
+                                                           std::is_constructible<DecayFunctorT, FunctorT>,
+                                                           std::is_move_constructible<DecayFunctorT>>>>
   MoveFunction& operator=(FunctorT&& f);
 
   /**

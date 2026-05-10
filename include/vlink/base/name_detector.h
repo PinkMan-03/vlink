@@ -558,37 +558,17 @@ constexpr EnumT enum_value(size_t i) noexcept {
 template <typename TypeT>
 constexpr auto raw_type_name() noexcept {
   if constexpr (TypeNameSupported<TypeT>::value) {
-#if defined(__clang__) || defined(__GNUC__)
-    constexpr std::string_view kSig{__PRETTY_FUNCTION__};
-    constexpr std::string_view kMarker = "TypeT = ";
-    constexpr auto kPos = kSig.rfind(kMarker);
-    if constexpr (kPos == std::string_view::npos || kSig.empty() || kSig.back() != ']') {
-      return CString<0>{};
-    } else {
-      constexpr auto kStart = kPos + kMarker.size();
-      constexpr auto kEnd = kSig.size() - 1;
-      constexpr auto kLen = (kEnd > kStart) ? (kEnd - kStart) : size_t{0};
-      constexpr std::string_view kName = kSig.substr(kStart, kLen);
-      return CString<static_cast<uint16_t>(kName.size())>{kName};
-    }
+#if defined(__clang__)
+    constexpr std::string_view kName{__PRETTY_FUNCTION__ + 59, sizeof(__PRETTY_FUNCTION__) - 61};
+#elif defined(__GNUC__)
+    constexpr std::string_view kName{__PRETTY_FUNCTION__ + 74, sizeof(__PRETTY_FUNCTION__) - 76};
 #elif defined(_MSC_VER)
-    constexpr std::string_view kSig{__FUNCSIG__};
-    constexpr std::string_view kMarkerStart = "::raw_type_name<";
-    constexpr std::string_view kMarkerEnd = ">(void)";
-    constexpr auto kSp = kSig.find(kMarkerStart);
-    constexpr auto kEp = kSig.rfind(kMarkerEnd);
-    if constexpr (kSp == std::string_view::npos || kEp == std::string_view::npos || kEp <= kSp + kMarkerStart.size()) {
-      return CString<0>{};
-    } else {
-      constexpr auto kStart = kSp + kMarkerStart.size();
-      constexpr auto kLen = kEp - kStart;
-      constexpr std::string_view kRaw = kSig.substr(kStart, kLen);
-      constexpr std::string_view kName = (!kRaw.empty() && kRaw.back() == ' ') ? kRaw.substr(0, kRaw.size() - 1) : kRaw;
-      return CString<static_cast<uint16_t>(kName.size())>{kName};
-    }
+    constexpr std::string_view kName{__FUNCSIG__ + 56,
+                                     sizeof(__FUNCSIG__) - 64 - (__FUNCSIG__[sizeof(__FUNCSIG__) - 9] == ' ' ? 1 : 0)};
 #else
-    return CString<0>{};
+    constexpr auto kName = std::string_view{};
 #endif
+    return CString<static_cast<uint16_t>(kName.size())>{kName};
   } else {
     return CString<0>{};
   }

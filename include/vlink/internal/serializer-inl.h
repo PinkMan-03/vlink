@@ -42,12 +42,12 @@
 
 // fastcdr
 #if __has_include(<fastcdr/Cdr.h>)
-[[maybe_unused]] static constexpr bool kRtHasFastcdr = true;
+[[maybe_unused]] static constexpr bool kVlinkHasFastcdr = true;
 
 #include <fastcdr/Cdr.h>
 #else
 #define FASTCDR_VERSION_MAJOR 1
-[[maybe_unused]] static constexpr bool kRtHasFastcdr = false;
+[[maybe_unused]] static constexpr bool kVlinkHasFastcdr = false;
 
 namespace eprosima::fastcdr {
 
@@ -77,20 +77,25 @@ class Cdr {
 
 // protobuf
 #if __has_include(<google/protobuf/message_lite.h>)
-[[maybe_unused]] static constexpr bool kRtHasProtobuf = true;
+[[maybe_unused]] static constexpr bool kVlinkHasProtobuf = true;
+
+#include <google/protobuf/message_lite.h>
 
 #if __has_include(<google/protobuf/stubs/common.h>)
 #include <google/protobuf/stubs/common.h>
 #endif
 
-#include <google/protobuf/message_lite.h>
+#if __has_include(<google/protobuf/arena.h>)
+#include <google/protobuf/arena.h>
+#endif
+
 #else
 
 #ifndef GOOGLE_PROTOBUF_VERSION
 #define GOOGLE_PROTOBUF_VERSION 0
 #endif
 
-[[maybe_unused]] static constexpr bool kRtHasProtobuf = false;
+[[maybe_unused]] static constexpr bool kVlinkHasProtobuf = false;
 
 namespace google::protobuf {
 
@@ -107,11 +112,11 @@ struct Arena {
 
 // flatbuffers
 #if __has_include(<flatbuffers/flatbuffers.h>)
-[[maybe_unused]] static constexpr bool kRtHasFlatbuffers = true;
+[[maybe_unused]] static constexpr bool kVlinkHasFlatbuffers = true;
 
 #include <flatbuffers/flatbuffers.h>
 #else
-[[maybe_unused]] static constexpr bool kRtHasFlatbuffers = false;
+[[maybe_unused]] static constexpr bool kVlinkHasFlatbuffers = false;
 
 namespace flatbuffers {
 
@@ -675,38 +680,40 @@ template <typename T>
 inline constexpr bool is_cdr_type() noexcept {
   using RealType = typename Traits::RemoveSharedPtr<T>::Type;
 
-  return kRtHasFastcdr && ((VLINK_HAS_MEMBER(RealType, serialize(std::declval<eprosima::fastcdr::Cdr&>())) &&
-                            VLINK_HAS_MEMBER(RealType, deserialize(std::declval<eprosima::fastcdr::Cdr&>()))) ||
-                           Helpers::contains_substring(NameDetector::get<RealType>(), VLINK_FASTDDS_IDL_PREFIX));
+  return kVlinkHasFastcdr && ((VLINK_HAS_MEMBER(RealType, serialize(std::declval<eprosima::fastcdr::Cdr&>())) &&
+                               VLINK_HAS_MEMBER(RealType, deserialize(std::declval<eprosima::fastcdr::Cdr&>()))) ||
+                              Helpers::contains_substring(NameDetector::get<RealType>(), VLINK_FASTDDS_IDL_PREFIX));
 }
 
 template <typename T>
 inline constexpr bool is_proto_type() noexcept {
   using RealType = typename Traits::RemoveSharedPtr<T>::Type;
-  return kRtHasProtobuf && VLINK_HAS_MEMBER(RealType, SerializeToArray(0, 0)) &&
+  return kVlinkHasProtobuf && VLINK_HAS_MEMBER(RealType, SerializeToArray(0, 0)) &&
          VLINK_HAS_MEMBER(RealType, ParseFromArray(0, 0));
 }
 
 template <typename T>
 inline constexpr bool is_proto_ptr_type() noexcept {
-  return kRtHasProtobuf && std::is_pointer_v<T> && VLINK_HAS_MEMBER(std::remove_pointer_t<T>, SerializeToArray(0, 0)) &&
+  return kVlinkHasProtobuf && std::is_pointer_v<T> &&
+         VLINK_HAS_MEMBER(std::remove_pointer_t<T>, SerializeToArray(0, 0)) &&
          VLINK_HAS_MEMBER(std::remove_pointer_t<T>, ParseFromArray(0, 0));
 }
 
 template <typename T>
 inline constexpr bool is_flat_table_type() noexcept {
   using RealType = typename Traits::RemoveSharedPtr<T>::Type;
-  return kRtHasFlatbuffers && std::is_base_of_v<flatbuffers::NativeTable, RealType>;
+  return kVlinkHasFlatbuffers && std::is_base_of_v<flatbuffers::NativeTable, RealType>;
 }
 
 template <typename T>
 inline constexpr bool is_flat_builder_type() noexcept {
-  return kRtHasFlatbuffers && VLINK_HAS_MEMBER(T, fbb_) && VLINK_HAS_MEMBER(T, Finish());
+  return kVlinkHasFlatbuffers && VLINK_HAS_MEMBER(T, fbb_) && VLINK_HAS_MEMBER(T, Finish());
 }
 
 template <typename T>
 inline constexpr bool is_flat_ptr_type() noexcept {
-  return kRtHasFlatbuffers && std::is_pointer_v<T> && std::is_base_of_v<flatbuffers::Table, std::remove_pointer_t<T>>;
+  return kVlinkHasFlatbuffers && std::is_pointer_v<T> &&
+         std::is_base_of_v<flatbuffers::Table, std::remove_pointer_t<T>>;
 }
 
 template <typename T>
