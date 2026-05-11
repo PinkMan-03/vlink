@@ -954,7 +954,33 @@ void PlayerWindow::on_toolButton_play_clicked() {
     return;
   }
 
-  wait_widget_->start_wait();
+#ifdef VLINK_SUPPORT_SHM
+  if (check_has_shm()) {
+    bool has_roudi_running = false;
+
+    if (vlink::ShmConf::has_roudi_running()) {
+      has_roudi_running = true;
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+      if (vlink::ShmConf::has_roudi_running()) {
+        has_roudi_running = true;
+      } else {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        has_roudi_running = vlink::ShmConf::has_roudi_running();
+      }
+    }
+
+    if (!has_roudi_running) {
+      if (QMessageBox::warning(this, tr("Warning"),
+                               tr("The proxy does not seem to be running. Do you want to continue?"),
+                               QMessageBox::StandardButtons(QMessageBox::Yes | QMessageBox::No)) != QMessageBox::Yes) {
+        return;
+      }
+    }
+  }
+#endif
 
   bool is_black_mode = ui->checkBox_black->isChecked();
 
@@ -968,35 +994,9 @@ void PlayerWindow::on_toolButton_play_clicked() {
     filter_urls_.clear();
   }
 
-  // #ifdef VLINK_SUPPORT_SHM
-  //   bool has_roudi_running = false;
-
-  //   if (vlink::ShmConf::has_roudi_running()) {
-  //     has_roudi_running = true;
-  //   } else {
-  //     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-  //     if (vlink::ShmConf::has_roudi_running()) {
-  //       has_roudi_running = true;
-  //     } else {
-  //       std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-  //       has_roudi_running = vlink::ShmConf::has_roudi_running();
-  //     }
-  //   }
-
-  //   if (!has_roudi_running) {
-  //     if (QMessageBox::warning(this, tr("Warning"), tr("The proxy does not seem to be running. Do you want to
-  //     continue?"),
-  //                              QMessageBox::StandardButtons(QMessageBox::Yes | QMessageBox::No)) != QMessageBox::Yes)
-  //                              {
-  //       wait_widget_->stop_wait();
-  //       return;
-  //     }
-  //   }
-  // #endif
-
   play_timer_->stop();
+
+  wait_widget_->start_wait();
 
   player_->post_task([is_black_mode, filter_list, this]() {
     has_played_ = false;
@@ -2029,6 +2029,20 @@ void PlayerWindow::reload() {
   int times = ui->checkBox_loop->isChecked() ? 0 : 1;
 
   player_->jump(player_->get_timestamp(), rate, times, false);
+}
+
+bool PlayerWindow::check_has_shm() {
+  if (!player_) {
+    return false;
+  }
+
+  for (const auto& url_meta : player_->get_info().url_metas) {
+    if (vlink::Helpers::has_startwith(url_meta.url, "shm://")) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // NOLINTEND

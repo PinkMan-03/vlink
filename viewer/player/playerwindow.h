@@ -145,6 +145,8 @@ class PlayerWindow : public QMainWindow {
 
   void reload();
 
+  bool check_has_shm();
+
   inline static PlayerWindow* instance_{nullptr};
 
   Ui::PlayerWindow* ui;
