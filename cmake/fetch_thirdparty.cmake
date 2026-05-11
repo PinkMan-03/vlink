@@ -194,7 +194,7 @@ cpmaddpackage(
   NAME
   iceoryx
   URL
-  "https://github.com/eclipse-iceoryx/iceoryx/archive/refs/tags/v2.0.6.zip"
+  "https://github.com/eclipse-iceoryx/iceoryx/archive/refs/tags/v2.0.7.zip"
   PATCHES
   "${CMAKE_SOURCE_DIR}/tools/patch/iceoryx_2.0.x.patch"
   SOURCE_SUBDIR

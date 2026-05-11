@@ -31,7 +31,7 @@ index 000000000..456b29bd8
 +
 +add_subdirectory(iceoryx_meta)
 diff --git a/iceoryx_hoofs/CMakeLists.txt b/iceoryx_hoofs/CMakeLists.txt
-index f7cb43bd9..a257c6fe9 100644
+index b08bd32c0..fa7453e29 100644
 --- a/iceoryx_hoofs/CMakeLists.txt
 +++ b/iceoryx_hoofs/CMakeLists.txt
 @@ -204,7 +204,16 @@ target_link_libraries(iceoryx_hoofs
@@ -81,7 +81,7 @@ index 0a3b0e8cd..f5317867d 100644
  elseif(APPLE)
 diff --git a/iceoryx_hoofs/include/iceoryx_hoofs/internal/concurrent/condition_variable.hpp b/iceoryx_hoofs/include/iceoryx_hoofs/internal/concurrent/condition_variable.hpp
 new file mode 100644
-index 000000000..6b3fc3fc3
+index 000000000..0eeff4b60
 --- /dev/null
 +++ b/iceoryx_hoofs/include/iceoryx_hoofs/internal/concurrent/condition_variable.hpp
 @@ -0,0 +1,291 @@
@@ -492,41 +492,6 @@ index 168b79c73..3b03aef1b 100644
  }
  
  
-diff --git a/iceoryx_hoofs/include/iceoryx_hoofs/internal/cxx/variant_queue.inl b/iceoryx_hoofs/include/iceoryx_hoofs/internal/cxx/variant_queue.inl
-index 9c5e6dcbc..b48964a91 100644
---- a/iceoryx_hoofs/include/iceoryx_hoofs/internal/cxx/variant_queue.inl
-+++ b/iceoryx_hoofs/include/iceoryx_hoofs/internal/cxx/variant_queue.inl
-@@ -17,6 +17,7 @@
- #ifndef IOX_HOOFS_CXX_VARIANT_QUEUE_INL
- #define IOX_HOOFS_CXX_VARIANT_QUEUE_INL
- 
-+#include "iceoryx_hoofs/cxx/variant_queue.hpp"
- #include "iceoryx_hoofs/error_handling/error_handling.hpp"
- 
- namespace iox
-@@ -49,6 +50,11 @@ inline VariantQueue<ValueType, Capacity>::VariantQueue(const VariantQueueTypes t
-     }
- }
- 
-+#if (defined(__GNUC__) && __GNUC__ >= 13 && !defined(__clang__))
-+#pragma GCC diagnostic push
-+#pragma GCC diagnostic ignored "-Wstringop-overflow"
-+#endif
-+
- template <typename ValueType, uint64_t Capacity>
- optional<ValueType> VariantQueue<ValueType, Capacity>::push(const ValueType& value) noexcept
- {
-@@ -90,6 +96,10 @@ optional<ValueType> VariantQueue<ValueType, Capacity>::push(const ValueType& val
-     return cxx::nullopt;
- }
- 
-+#if (defined(__GNUC__) && __GNUC__ >= 13 && !defined(__clang__))
-+#pragma GCC diagnostic pop
-+#endif
-+
- template <typename ValueType, uint64_t Capacity>
- inline optional<ValueType> VariantQueue<ValueType, Capacity>::pop() noexcept
- {
 diff --git a/iceoryx_hoofs/platform/linux/include/iceoryx_hoofs/platform/semaphore.hpp b/iceoryx_hoofs/platform/linux/include/iceoryx_hoofs/platform/semaphore.hpp
 index 7b5d22be9..b8597313c 100644
 --- a/iceoryx_hoofs/platform/linux/include/iceoryx_hoofs/platform/semaphore.hpp
@@ -601,19 +566,6 @@ index 2fbdabb72..aeea29924 100644
  }
  
  inline int iox_sem_close(iox_sem_t* sem)
-diff --git a/iceoryx_hoofs/platform/win/source/time.cpp b/iceoryx_hoofs/platform/win/source/time.cpp
-index 4c2ab2d11..f9f3dccbf 100644
---- a/iceoryx_hoofs/platform/win/source/time.cpp
-+++ b/iceoryx_hoofs/platform/win/source/time.cpp
-@@ -17,6 +17,8 @@
- 
- #include "iceoryx_hoofs/platform/time.hpp"
- 
-+#include <chrono>
-+
- static std::chrono::nanoseconds getNanoSeconds(const timespec& value)
- {
-     static constexpr uint64_t NANOSECONDS = 1000000000u;
 diff --git a/iceoryx_hoofs/source/posix_wrapper/message_queue.cpp b/iceoryx_hoofs/source/posix_wrapper/message_queue.cpp
 index a329d0388..82ad7017d 100644
 --- a/iceoryx_hoofs/source/posix_wrapper/message_queue.cpp
@@ -731,19 +683,18 @@ index a20b6d993..e49d0aceb 100644
  option(INTROSPECTION "Builds the introspection client which requires the ncurses library with an activated terminfo feature" OFF)
  option(ONE_TO_MANY_ONLY "Restricts communication to 1:n pattern" OFF)
 diff --git a/iceoryx_posh/CMakeLists.txt b/iceoryx_posh/CMakeLists.txt
-index 6c62492c9..f768ebe59 100644
+index 5892fc010..4c6abe68d 100644
 --- a/iceoryx_posh/CMakeLists.txt
 +++ b/iceoryx_posh/CMakeLists.txt
-@@ -337,8 +337,8 @@ if(TOML_CONFIG)
+@@ -337,7 +337,7 @@ if(TOML_CONFIG)
          iceoryx_posh::iceoryx_posh
          iceoryx_hoofs::iceoryx_hoofs
          iceoryx_posh::iceoryx_posh_roudi
 -        cpptoml
-         ${ICEORYX_SANITIZER_FLAGS}
 +        $<BUILD_INTERFACE:cpptoml>
+         ${ICEORYX_SANITIZER_FLAGS}
      )
  
-     target_compile_options(iceoryx_posh_config PRIVATE ${ICEORYX_WARNINGS} ${ICEORYX_SANITIZER_FLAGS})
 diff --git a/iceoryx_posh/cmake/Config.cmake.in b/iceoryx_posh/cmake/Config.cmake.in
 index 0f74ce4f6..071dd0802 100644
 --- a/iceoryx_posh/cmake/Config.cmake.in
@@ -768,125 +719,3 @@ index 51e90c9f6..1b4beebb7 100644
  #define ICEORYX_SHA1                      "@ICEORYX_SHA1@"
  
  #include "iceoryx_posh/internal/log/posh_logging.hpp"
-diff --git a/iceoryx_posh/include/iceoryx_posh/internal/popo/building_blocks/chunk_distributor.inl b/iceoryx_posh/include/iceoryx_posh/internal/popo/building_blocks/chunk_distributor.inl
-index 0758daa9a..ff1955494 100644
---- a/iceoryx_posh/include/iceoryx_posh/internal/popo/building_blocks/chunk_distributor.inl
-+++ b/iceoryx_posh/include/iceoryx_posh/internal/popo/building_blocks/chunk_distributor.inl
-@@ -132,6 +132,11 @@ inline bool ChunkDistributor<ChunkDistributorDataType>::hasStoredQueues() const
-     return !getMembers()->m_queues.empty();
- }
- 
-+#if (defined(__GNUC__) && __GNUC__ >= 13 && !defined(__clang__))
-+#pragma GCC diagnostic push
-+#pragma GCC diagnostic ignored "-Warray-bounds"
-+#endif
-+
- template <typename ChunkDistributorDataType>
- inline uint64_t ChunkDistributor<ChunkDistributorDataType>::deliverToAllStoredQueues(mepoo::SharedChunk chunk) noexcept
- {
-@@ -209,6 +214,10 @@ inline uint64_t ChunkDistributor<ChunkDistributorDataType>::deliverToAllStoredQu
-     return numberOfQueuesTheChunkWasDeliveredTo;
- }
- 
-+#if (defined(__GNUC__) && __GNUC__ >= 13 && !defined(__clang__))
-+#pragma GCC diagnostic pop
-+#endif
-+
- template <typename ChunkDistributorDataType>
- inline bool ChunkDistributor<ChunkDistributorDataType>::pushToQueue(cxx::not_null<ChunkQueueData_t* const> queue,
-                                                                     mepoo::SharedChunk chunk) noexcept
-diff --git a/iceoryx_posh/source/popo/publisher_options.cpp b/iceoryx_posh/source/popo/publisher_options.cpp
-index 66562a75b..1112fa812 100644
---- a/iceoryx_posh/source/popo/publisher_options.cpp
-+++ b/iceoryx_posh/source/popo/publisher_options.cpp
-@@ -36,7 +36,7 @@ PublisherOptions::deserialize(const cxx::Serialization& serialized) noexcept
-     using ConsumerTooSlowPolicyUT = std::underlying_type_t<ConsumerTooSlowPolicy>;
- 
-     PublisherOptions publisherOptions;
--    ConsumerTooSlowPolicyUT subscriberTooSlowPolicy;
-+    ConsumerTooSlowPolicyUT subscriberTooSlowPolicy{0};
- 
-     auto deserializationSuccessful = serialized.extract(publisherOptions.historyCapacity,
-                                                         publisherOptions.nodeName,
-diff --git a/iceoryx_posh/source/popo/subscriber_options.cpp b/iceoryx_posh/source/popo/subscriber_options.cpp
-index a6b80144f..aa6985f66 100644
---- a/iceoryx_posh/source/popo/subscriber_options.cpp
-+++ b/iceoryx_posh/source/popo/subscriber_options.cpp
-@@ -37,7 +37,7 @@ SubscriberOptions::deserialize(const cxx::Serialization& serialized) noexcept
-     using QueueFullPolicyUT = std::underlying_type_t<QueueFullPolicy>;
- 
-     SubscriberOptions subscriberOptions;
--    QueueFullPolicyUT queueFullPolicy;
-+    QueueFullPolicyUT queueFullPolicy{0};
- 
-     auto deserializationSuccessful = serialized.extract(subscriberOptions.queueCapacity,
-                                                         subscriberOptions.historyRequest,
-diff --git a/mkdocs.yml b/mkdocs.yml
-index fb5658bab..bb5fc6cf6 100644
---- a/mkdocs.yml
-+++ b/mkdocs.yml
-@@ -15,8 +15,8 @@ markdown_extensions:
-   - markdown_include.include
-   - admonition
-   - pymdownx.emoji:
--      emoji_index: !!python/name:materialx.emoji.twemoji
--      emoji_generator: !!python/name:materialx.emoji.to_svg
-+      emoji_index: !!python/name:material.extensions.emoji.twemoji
-+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
-   - pymdownx.tasklist:
-       custom_checkbox: true
- plugins:
-diff --git a/tools/ci/build-test-macos-with-sanitizers.sh b/tools/ci/build-test-macos-with-sanitizers.sh
-index 76debc3ad..0baa574df 100755
---- a/tools/ci/build-test-macos-with-sanitizers.sh
-+++ b/tools/ci/build-test-macos-with-sanitizers.sh
-@@ -31,20 +31,14 @@ $(clang --version)"
- 
- msg "building and installing dependencies"
- # tinfo library which is required by iceoryx_introspection isn't available in mac
--brew install ncurses wget
--mkdir -p bison_build
--cd bison_build
--wget https://ftp.gnu.org/gnu/bison/bison-3.5.1.tar.gz
--tar -xvf bison-3.5.1.tar.gz
--cd bison-3.5.1
--./configure
--make
--sudo make install
-+brew install ncurses bison
- cd "${WORKSPACE}"
- 
- msg "building sources"
--export LDFLAGS="-L/usr/local/opt/ncurses/lib"
--export CFLAGS="-I/usr/local/opt/ncurses/include"
-+export PATH="$(brew --prefix bison)/bin:$PATH"
-+export LDFLAGS="$LDFLAGS -L/usr/local/opt/bison/lib"
-+export LDFLAGS="$LDFLAGS -L/usr/local/opt/ncurses/lib"
-+export CFLAGS="$CFLAGS -I/usr/local/opt/ncurses/include"
- ./tools/iceoryx_build_test.sh build-strict build-all sanitize
- 
- msg "running tests (excluding timing_tests)"
-diff --git a/tools/scripts/ice_env.sh b/tools/scripts/ice_env.sh
-index fb8ebfc0c..030d3ba59 100755
---- a/tools/scripts/ice_env.sh
-+++ b/tools/scripts/ice_env.sh
-@@ -87,6 +87,7 @@ start_docker() {
-     docker run --name $CONTAINER_NAME \
-                --mount type=bind,source=${ICEORYX_PATH},target=/iceoryx \
-                --hostname ${OS_VERSION} \
-+               --network host \
-                -dt --memory $CONTAINER_MEMORY_SIZE \
-                --shm-size $CONTAINER_SHM_MEMORY_SIZE ${OS_VERSION}
-     echo iceoryx development environment started
-diff --git a/tools/website/export-docu-to-website.sh b/tools/website/export-docu-to-website.sh
-index 566b0ea07..a6d241f10 100755
---- a/tools/website/export-docu-to-website.sh
-+++ b/tools/website/export-docu-to-website.sh
-@@ -114,5 +114,6 @@ if [ "$TYPE" == "publish" ]; then
-         git clone $WEBREPO
-     fi
-     cd "$WORKSPACE"/../iceoryx-web
--    mike deploy --branch main --config-file ../iceoryx/mkdocs.yml --push --update-aliases "$VERSION" latest
-+    mike deploy --branch main --config-file ../iceoryx/mkdocs.yml --update-aliases "$VERSION" latest
-+    echo "you need to push the changes to upstream"
- fi
