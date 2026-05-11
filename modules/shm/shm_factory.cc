@@ -55,6 +55,7 @@ namespace vlink {
 struct ShmGlobal final {
   std::atomic_bool has_roudi_inited{false};
   std::atomic_bool has_runtime_inited{false};
+  std::atomic_bool has_factory_inited{false};
   class ShmRuntime* runtime_instance{nullptr};
   std::unique_ptr<shm::runtime::PoshRuntime> shm_runtime;
   shm::RuntimeName_t shm_runtime_name;
@@ -101,6 +102,8 @@ class ShmRuntime final : public shm::runtime::PoshRuntimeImpl {
 // ShmFactory
 ShmFactory::ShmFactory() {
   static auto& global_instance = ShmGlobal::get();
+
+  global_instance.has_factory_inited.store(true);
 
   Bytes::init_memory_pool();
 
@@ -404,20 +407,24 @@ void ShmFactory::deinit_runtime() {
   bool expected = true;
 
   if VLIKELY (global_instance.has_runtime_inited.compare_exchange_strong(expected, false)) {
-    static auto& factory = ShmFactory::get();
+    if (global_instance.has_factory_inited.load()) {
+      auto& factory = ShmFactory::get();
 
-    {
-      std::lock_guard lock(factory.listener_mtx_);
-      factory.listener_map_.clear();
+      {
+        std::lock_guard lock(factory.listener_mtx_);
+        factory.listener_map_.clear();
+      }
+
+      factory.port_sub_.reset();
+
+      Utils::yield_cpu();
     }
 
-    factory.port_sub_.reset();
-
-    Utils::yield_cpu();
-
 #if SHM_USE_RUNTIME_IMPL
-    global_instance.shm_runtime->shutdown();
-    global_instance.shm_runtime.reset();
+    if (global_instance.shm_runtime) {
+      global_instance.shm_runtime->shutdown();
+      global_instance.shm_runtime.reset();
+    }
 #endif
   }
 }
