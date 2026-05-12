@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    WORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-else
-    WORK_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
-fi
-
+WORK_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 INIT_SCRIPT="$(mktemp)"
 
 cat <<EOF > "$INIT_SCRIPT"

@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    VLINK_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-else
-    VLINK_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
-fi
+VLINK_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 export VLINK_ROOT_DIR="$(cd "$VLINK_BIN_DIR/.." && pwd)"
 export VLINK_ETC_DIR="$VLINK_ROOT_DIR/etc"
 export VLINK_COMPLETIONS="$VLINK_ETC_DIR/vlink/vlink-completions.sh"

@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    VLINK_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-else
-    VLINK_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
-fi
+VLINK_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 VLINK_ROOT_DIR="$(cd "$VLINK_BIN_DIR/.." && pwd)"
 
 cd "$VLINK_ROOT_DIR"

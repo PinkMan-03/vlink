@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    WORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-else
-    WORK_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
-fi
+WORK_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 export VLINK_ROOT_DIR="$WORK_DIR"
 if [ ! -x "$VLINK_ROOT_DIR/bin/vlink-info" ] && [ -x "$WORK_DIR/../bin/vlink-info" ]; then
