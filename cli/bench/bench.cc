@@ -1505,6 +1505,14 @@ bool ensure_parent_dir(const std::string& file_path, std::string& error) {
     return false;
   }
 
+#ifndef _WIN32
+  std::filesystem::permissions(parent,
+                               std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+                                   std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+                                   std::filesystem::perms::others_exec,
+                               std::filesystem::perm_options::replace, ec);
+#endif
+
   return true;
 }
 
@@ -2733,6 +2741,14 @@ bool run_process_pubsub_case(const Bench::RunOptions& options, const Bench::Scen
     error = ec.message();
     return false;
   }
+
+#ifndef _WIN32
+  std::filesystem::permissions(temp_dir,
+                               std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+                                   std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+                                   std::filesystem::perms::others_exec,
+                               std::filesystem::perm_options::replace, ec);
+#endif
 
   auto cleanup = [&temp_dir]() {
     std::error_code remove_ec;
