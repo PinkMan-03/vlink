@@ -53,6 +53,7 @@
 
 #ifndef _WIN32
 #include <sys/resource.h>
+#include <sys/wait.h>
 #endif
 
 #if defined(__linux__) || defined(__ANDROID__)
