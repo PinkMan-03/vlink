@@ -59,6 +59,10 @@
 #cmakedefine VLINK_ENABLE_CLI_BAG
 #endif
 
+#ifndef VLINK_ENABLE_CLI_BENCH
+#cmakedefine VLINK_ENABLE_CLI_BENCH
+#endif
+
 #ifndef VLINK_ENABLE_CLI_EPROTO
 #cmakedefine VLINK_ENABLE_CLI_EPROTO
 #endif
@@ -107,8 +111,20 @@
 #cmakedefine VLINK_ENABLE_VIEWER
 #endif
 
+#ifndef VLINK_ENABLE_WEBVIZ
+#cmakedefine VLINK_ENABLE_WEBVIZ
+#endif
+
+#ifndef VLINK_ENABLE_COMPLETIONS
+#cmakedefine VLINK_ENABLE_COMPLETIONS
+#endif
+
 #ifndef VLINK_ENABLE_EXAMPLES
 #cmakedefine VLINK_ENABLE_EXAMPLES
+#endif
+
+#ifndef VLINK_ENABLE_WHOLE_EXAMPLES
+#cmakedefine VLINK_ENABLE_WHOLE_EXAMPLES
 #endif
 
 #ifndef VLINK_ENABLE_TEST

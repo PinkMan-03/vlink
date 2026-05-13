@@ -53,7 +53,7 @@ auto a = GraphTask::create("A", []() { load_data(); });
 auto b = GraphTask::create("B", []() { process_data(); });
 auto c = GraphTask::create("C", []() { save_results(); });
 
-// 操作符语法
+// 操作符语法（A 先跑、B 次之、C 最后）
 a-- > b-- > c;
 
 // 等效的 API 调用
@@ -71,7 +71,7 @@ auto b = GraphTask::create("B", path1_task);
 auto c = GraphTask::create("C", path2_task);
 auto d = GraphTask::create("D", merge_task);
 
-a->precede(b);  // A -> B
+a->precede(b);  // A -> B（A 先跑，B 后跑）
 a->precede(c);  // A -> C
 b->precede(d);  // B -> D
 c->precede(d);  // C -> D
@@ -88,8 +88,8 @@ auto branch = GraphTask::create_condition("Branch", [&condition]() -> int {
     return condition;  // 返回值选择后继分支
 });
 
-branch->precede(path_0);  // 返回 0 时执行
-branch->precede(path_1);  // 返回 1 时执行
+branch->precede(path_0);  // branch 返回 0 时跑 path_0
+branch->precede(path_1);  // branch 返回 1 时跑 path_1
 ```
 
 条件任务返回一个整数索引，选择激活哪个后继分支。未被选中的分支被跳过。
@@ -100,7 +100,7 @@ branch->precede(path_1);  // 返回 1 时执行
 auto source = GraphTask::create("Source", generate_data);
 for (int i = 0; i < 8; ++i) {
     auto worker = GraphTask::create("Worker" + std::to_string(i), process_chunk);
-    source->precede(worker);
+    source->precede(worker);   // source 先跑，worker 后跑
 }
 ```
 
@@ -122,18 +122,23 @@ auto cond = GraphTask::create_condition("name", []() -> int { return 0; });
 
 ### 依赖声明
 
-三种等效的依赖声明方式：
+**API 含义以代码为准**：
+
+| 调用              | 含义                                                          |
+| ----------------- | ------------------------------------------------------------- |
+| `X->precede(Y)`   | Y 是 X 的后继（X 先跑，Y 后跑）— Y 进入 X.succeed_task_list   |
+| `X->succeed(Y)`   | Y 是 X 的前驱（Y 先跑，X 后跑）— Y 进入 X.precede_task_list   |
+| `X -- > Y`        | 等价于 `X->precede(Y)`                                        |
+| `X -- < Y`        | 等价于 `X->succeed(Y)`                                        |
 
 ```cpp
-// 方式 1：precede（A 在 B 之前完成）
+// "A 先跑，B 后跑" 的三种等价写法：
 a->precede(b);
-
-// 方式 2：succeed（B 在 A 之后执行）
 b->succeed(a);
-
-// 方式 3：运算符语法
-a-- > b;  // 等效于 a->precede(b)
+a-- > b;
 ```
+
+> `execute()` 必须从根节点（无前驱节点）发起；从子节点 `execute()` 只会运行该子节点和它的后继子图。
 
 ### 执行策略
 
@@ -167,9 +172,14 @@ task->execute(&engine);
 ### 状态回调
 
 ```cpp
-task->register_status_callback([](const std::string& name, GraphTask::Status status) {
-    // status: kStatusInActive -> kStatusPending -> kStatusRunning -> kStatusDone
-});
+// 支持多订阅者；返回 id 用于注销
+uint32_t id = task->register_status_callback(
+    [](const std::string& name, GraphTask::Status status) {
+        // status: kStatusInActive -> kStatusPending -> kStatusRunning -> kStatusDone
+    });
+
+task->unregister_status_callback(id);   // 按 id 注销
+task->clear_status_callbacks();         // 清空全部
 ```
 
 任务状态转换：
@@ -178,13 +188,21 @@ task->register_status_callback([](const std::string& name, GraphTask::Status sta
 3. **Running**：正在执行回调
 4. **Done**：执行完成
 
+> **回调限制**（内部锁非递归）：回调内**不可**对同一任务调 `register_status_callback`/
+> `unregister_status_callback`/`clear_status_callbacks`/`cancel()`；可安全调 `set_name`/`get_name`/
+> `get_status` 或操作其它任务。回调抛出的异常会被捕获并打日志，**不影响其它订阅者继续触发**。
+
 ### 环路检测
 
 ```cpp
 bool has_cycle = task->has_cycle();
 ```
 
-使用深度优先搜索（DFS）配合三色标记法检测环路。存在环路的图在运行时会导致任务永远处于 Pending 状态（死锁）。**应在 execute() 前检查**。
+使用深度优先搜索（DFS）配合三色标记法检测环路。
+
+**自动检测**：`precede()` / `succeed()` 在每次加边后会自动在受影响子图上跑一次环检测；
+若新边导致成环则被静默回滚并记录错误日志（best-effort，并发构图时应当作单写阶段处理）。
+`has_cycle()` 仍可用于显式校验。
 
 ### DOT 导出
 
@@ -225,24 +243,26 @@ LoadConfig ──> InitNetwork ──┐
 ### 错误 1：循环依赖
 
 ```cpp
+// 建链：a -> b -> c
 a->precede(b);
 b->precede(c);
-c->precede(a);  // 环路！a->b->c->a
 
-// 必须在 execute 前检查
-if (a->has_cycle()) {
-    VLOG_E("Cycle detected!");
-    return;
-}
+// c->precede(a) 会形成环路 a->b->c->a；
+// precede/succeed 内部已自动检测，这条调用会被静默回滚并记日志，无需手动处理。
+c->precede(a);
+
+// 仍可显式校验
+assert(!a->has_cycle());
 ```
 
 ### 错误 2：忘记设置 kPolicyWaitAll
 
 ```cpp
-a->precede(d);
-b->precede(d);
-// 默认策略下，d 在 a 或 b 任一完成后就执行
-// 如果需要等待所有前驱：
+// 表达 a, b 完成后再跑 d：
+a->precede(d);   // a 先跑，d 后跑（d 进 a.succeed_list）
+b->precede(d);   // b 先跑，d 后跑
+
+// 默认策略下 d 在 a 或 b 任一完成后就开始执行；如需等待全部前驱：
 d->set_policy(GraphTask::kPolicyWaitAll);
 ```
 

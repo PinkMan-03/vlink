@@ -37,7 +37,7 @@
 | `VLINK_URL_REMAP`       | 文件路径 | URL 重映射 JSON 文件路径（子串匹配，详见 [传输后端 7.7](07-transport.md#77-url-重映射)） |
 | `VLINK_INTRA_BIND`      | 字符串   | 把所有 `intra://` URL 重定向到其他 scheme（值为 `shm`、`dds` 等；源码 `src/impl/url.cc:392`）；不同于 `VLINK_DDS_BIND` 的"仅 DDS 家族互转"语义 |
 | `VLINK_QOS_CONFIG`      | 文件路径 | QoS 配置文件路径                                                  |
-| `VLINK_MEMORY_LEVEL`    | 数字     | `vlink::MemoryPool` 默认 16 阶金字塔的分级（`0`..`9`，默认 `3` Balanced）。`0` = bypass 模式：跳过所有 tier，每次 `allocate` 直接 `::operator new`、每次 `deallocate` 直接 `::operator delete`。`1..9` 选择内置金字塔，等级越高每档预留 block 越多；`9` 满载占用 ≈ 480 MiB（严格在 500 MiB 以下）。非数字或越界值钳到 `[0, 9]` 并打 warning。仅在首次构造全局池时读取，由 `Bytes::init_memory_pool()` / `MemoryPool::global_instance(true)` 触发。 |
+| `VLINK_MEMORY_LEVEL`    | 数字     | `vlink::MemoryPool` 默认 19 阶金字塔的分级（`0`..`9`，默认 `3` Balanced）。`0` = bypass 模式：跳过所有 tier，每次 `allocate` 直接 `::operator new`、每次 `deallocate` 直接 `::operator delete`。`1..9` 选择内置金字塔，等级越高每档预留 block 越多；`9` 满载占用 ≈ 704 MiB。非数字或越界值钳到 `[0, 9]` 并打 warning。仅在首次构造全局池时读取，由 `Bytes::init_memory_pool()` / `MemoryPool::global_instance(true)` 触发。 |
 | `VLINK_MEMORY_PREALLOC` | `1`      | 设为 `1` 时，全局 `MemoryPool` 在构造时为每个 tier 一次性预分配满额 `blocks_per_chunk` 的 chunk（best-effort），消除热路径上的所有上游分配延迟。其它值或未设置保持懒加载（按几何增长）。仅 `MemoryPool::global_instance(true)` 首次构造时读取。 |
 
 ```bash

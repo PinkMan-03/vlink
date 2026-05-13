@@ -95,6 +95,8 @@ WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(std::make_s
     VLOG_F("WheelTimer: Slots and interval_ms must be greater than 0.");
   }
 
+  MemoryPool::global_instance();
+
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   impl_->wheels.emplace(&MemoryResource::global_instance());
 #else

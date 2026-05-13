@@ -26,10 +26,12 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <utility>
 
 #include "./base/condition_variable.h"
 #include "./base/logger.h"
+#include "./base/memory_pool.h"
 #include "./base/message_loop.h"
 
 namespace vlink {
@@ -60,9 +62,12 @@ struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
 };
 
 // Timer
-Timer::Timer() : impl_(std::make_unique<Impl>()) {}
+Timer::Timer() : impl_(std::make_unique<Impl>()) { MemoryPool::global_instance(); }
 
-Timer::Timer(MessageLoop* message_loop) : impl_(std::make_unique<Impl>()) { attach(message_loop); }
+Timer::Timer(MessageLoop* message_loop) : impl_(std::make_unique<Impl>()) {
+  MemoryPool::global_instance();
+  attach(message_loop);
+}
 
 Timer::Timer(MessageLoop* message_loop, uint32_t interval_ms, int32_t loop_count, Callback&& callback)
     : impl_(std::make_unique<Impl>()) {
@@ -70,6 +75,8 @@ Timer::Timer(MessageLoop* message_loop, uint32_t interval_ms, int32_t loop_count
   impl_->loop_count = loop_count;
   impl_->remain_loop_count = loop_count;
   impl_->callback = std::move(callback);
+
+  MemoryPool::global_instance();
 
   attach(message_loop);
 }
@@ -79,6 +86,8 @@ Timer::Timer(uint32_t interval_ms, int32_t loop_count, Callback&& callback) : im
   impl_->loop_count = loop_count;
   impl_->remain_loop_count = loop_count;
   impl_->callback = std::move(callback);
+
+  MemoryPool::global_instance();
 }
 
 Timer::~Timer() {
@@ -103,7 +112,15 @@ bool Timer::call_once(MessageLoop* message_loop, uint32_t interval_ms, Callback&
     return false;
   }
 
-  auto timer = std::make_unique<Timer>(interval_ms, 1, std::move(callback));
+  auto& pool = MemoryPool::global_instance();
+  void* mem = pool.allocate(sizeof(Timer), alignof(Timer));
+
+  if VUNLIKELY (!mem) {
+    VLOG_E("Timer: MemoryPool allocate failed for call_once.");
+    return false;
+  }
+
+  auto* timer = new (mem) Timer(interval_ms, 1, std::move(callback));
 
   timer->impl_->is_once_type = true;
 
@@ -111,13 +128,13 @@ bool Timer::call_once(MessageLoop* message_loop, uint32_t interval_ms, Callback&
     timer->set_priority(priority);
   }
 
-  bool ret = timer->attach(message_loop);
-
-  if (ret) {
+  if (timer->attach(message_loop)) {
     timer->start();
-    timer.release();  // NOLINT(bugprone-unused-return-value)
-    return true;      // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    return true;
   }
+
+  timer->~Timer();
+  pool.deallocate(mem, sizeof(Timer), alignof(Timer));
 
   return false;
 }

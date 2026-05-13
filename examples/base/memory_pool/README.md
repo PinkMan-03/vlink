@@ -20,20 +20,20 @@ cmake --build . --target example_memory_pool
 
 ## VLINK_MEMORY_LEVEL 环境变量
 
-`MemoryPool::get_default_config()` 返回的 16 阶金字塔由 `VLINK_MEMORY_LEVEL`（整数 `0..9`，默认 `3`）从一张编译期常量表中按行索引。Tier 大小为 `128B / 256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB / 256KB / 512KB / 4MB / 8MB / 16MB`。等级越高，每档 `blocks_per_chunk` 越大，常驻内存越多，但 upstream 分配次数越少。`0` 是 bypass 哨兵（不走池）；`1` 把 `4MB / 8MB / 16MB` 三个大 tier 全部留为 sentinel；`2` 启用 `4MB`；`3` 启用 `8MB`；`4` 起激活 `16MB` ceiling。非数字或越界的取值会被钳到 `[0, 9]` 区间并打印 warning。
+`MemoryPool::get_default_config()` 返回的 19 阶金字塔由 `VLINK_MEMORY_LEVEL`（整数 `0..9`，默认 `3`）从一张编译期常量表中按行索引。Tier 大小为 `64B / 128B / 256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB / 256KB / 512KB / 1MB / 4MB / 8MB / 16MB / 32MB`。等级越高，每档 `blocks_per_chunk` 越大，常驻内存越多，但 upstream 分配次数越少。每级内 `blocks_per_chunk` 从最小档（`64B`）开始严格减半，使倍增档（`64B..512KB`）各档常驻字节预算大致相等；尾部 `1MB / 4MB / 8MB / 16MB / 32MB` 各激活后每级 block 数翻倍。`0` 是 bypass 哨兵（不走池）；`1` 把 `1MB / 4MB / 8MB / 16MB / 32MB` 五个大 tier 全部留为 sentinel；`2` 启用 `1MB`；`3` 起激活 `4MB`；`5` 起激活 `8MB`；`6` 起激活 `16MB`；`8` 起激活 `32MB`。非数字或越界的取值会被钳到 `[0, 9]` 区间并打印 warning。
 
 | 等级 | 风格      | 满载占用 (≈) | 适用场景                                                                          |
 | ---- | --------- | ------------ | --------------------------------------------------------------------------------- |
 | `0`  | Bypass    | 0 MiB        | 关闭池：每次 `allocate` 直接 `::operator new`、每次 `deallocate` 直接 `::operator delete`；oversized 计数照常增长，所有 tier 计数为 0 |
-| `1`  | Tiny      | 4 MiB        | 端侧/嵌入式：仅小/中 tier 生效，`4MB / 8MB / 16MB` 大 tier 全部 sentinel           |
-| `2`  | Small     | 12 MiB       | 受限设备：启用 `4MB` tier，仍保留 `8MB / 16MB` sentinel                            |
-| `3`  | Balanced  | 32 MiB       | **默认**：启用 `8MB` tier，`16MB` ceiling 仍 sentinel（4K 帧走 oversized 直通）     |
-| `4`  | Large     | 70 MiB       | 服务器/高吞吐：首次激活 `16MB` ceiling                                              |
-| `5`  | XLarge    | 124 MiB      | 大批量小消息                                                                      |
-| `6`  | Massive   | 212 MiB      | 重 IO/视频流；中段 tier block 翻倍                                                |
-| `7`  | Heavy     | 280 MiB      | 长时间高负载；小 tier 进一步倍增                                                  |
-| `8`  | Saturate  | 432 MiB      | 接近饱和的多生产者场景                                                            |
-| `9`  | Peak      | 480 MiB      | 高吞吐峰值；满载占用上限严格在 500 MiB 以下                                       |
+| `1`  | Tiny      | 3.75 MiB     | 端侧/嵌入式：仅小/中 tier 生效，`1MB / 4MB / 8MB / 16MB / 32MB` 大 tier 全部 sentinel |
+| `2`  | Small     | 8 MiB        | 受限设备：启用 `1MB` tier，仍保留 `4MB / 8MB / 16MB / 32MB` sentinel               |
+| `3`  | Balanced  | 20 MiB       | **默认**：初步引入 `4MB` tier（1 个 block，4K 帧走 oversized 直通）                  |
+| `4`  | Large     | 40 MiB       | 服务器/高吞吐：尾部 block 翻倍                                                      |
+| `5`  | XLarge    | 88 MiB       | 大批量小消息：初步引入 `8MB` tier（1 个 block）                                      |
+| `6`  | Massive   | 192 MiB      | 重 IO/视频流：初步引入 `16MB` tier（1 个 block）                                     |
+| `7`  | Heavy     | 256 MiB      | 长时间高负载：尾部 block 进一步增加                                                 |
+| `8`  | Saturate  | 544 MiB      | 接近饱和的多生产者场景：初步引入 `32MB` tier（1 个 block）                           |
+| `9`  | Peak      | 704 MiB      | 高吞吐峰值：尾部 block 进一步翻倍                                                    |
 
 ```bash
 # 切到 Large 等级（每档 block 数比默认更多）
@@ -76,7 +76,7 @@ class MemoryPool final {
   // 仅首次调用决定配置：
   //   use_env_level=true（默认）：按 VLINK_MEMORY_LEVEL 选 tier；env=0 时 bypass；
   //                              VLINK_MEMORY_PREALLOC=1 时同时启用满额预分配。
-  //   use_env_level=false：使用 level-3 默认 16 阶金字塔，不读环境变量、不预分配。
+  //   use_env_level=false：使用 level-3 默认 19 阶金字塔，不读环境变量、不预分配。
   static MemoryPool& global_instance(bool use_env_level = true);
   [[nodiscard]] static Config get_default_config();
 
@@ -118,7 +118,7 @@ class MemoryPool final {
 
 ## 演示流程
 
-1. **get_default_config()**：读取当前 `VLINK_MEMORY_LEVEL` 对应的 16 阶金字塔，构造本地池，分配 48B / 96B / 1 KiB / 1 MiB 四种典型尺寸，打印 per-tier 统计。
+1. **get_default_config()**：读取当前 `VLINK_MEMORY_LEVEL` 对应的 19 阶金字塔，构造本地池，分配 48B / 96B / 1 KiB / 1 MiB 四种典型尺寸，打印 per-tier 统计。
 2. **Oversized passthrough**：构造一个最大 tier 仅 1 KiB 的小池子，请求 32 MiB，观察 oversized 计数。
 3. **Custom tier configuration**：3 阶配置（64B / 4 KiB / 64 KiB）批量分配 32 个 4 KiB 页，演示 chunk 几何增长与 `reset_stats()`。
 4. **global_instance(true)**：调用一次全局池（等价于 `Bytes::init_memory_pool()`），随后用 `Bytes::create()` 分配 2 KiB 与 64 KiB，验证 `Bytes` 的堆缓冲确实从同一个池里来。

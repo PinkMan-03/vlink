@@ -81,6 +81,11 @@ Schedule::Status& Schedule::Status::on_execution_timeout(Callback&& callback) {
   if VLIKELY (is_valid()) {
     std::lock_guard lock(impl_->mtx);
 
+    if VUNLIKELY (impl_->dispatched.load(std::memory_order_acquire)) {
+      VLOG_E("Schedule: on_execution_timeout registered after dispatch; ignored.");
+      return *this;
+    }
+
     if VUNLIKELY (impl_->execution_timeout_callback) {
       VLOG_E("Schedule: Execution timeout callback is already set.");
       return *this;
@@ -96,6 +101,11 @@ Schedule::Status& Schedule::Status::on_schedule_timeout(Callback&& callback) {
   if VLIKELY (is_valid()) {
     std::lock_guard lock(impl_->mtx);
 
+    if VUNLIKELY (impl_->dispatched.load(std::memory_order_acquire)) {
+      VLOG_E("Schedule: on_schedule_timeout registered after dispatch; ignored.");
+      return *this;
+    }
+
     if VUNLIKELY (impl_->schedule_timeout_callback) {
       VLOG_E("Schedule: Schedule timeout callback is already set.");
       return *this;
@@ -110,6 +120,11 @@ Schedule::Status& Schedule::Status::on_schedule_timeout(Callback&& callback) {
 Schedule::Status& Schedule::Status::on_catch(CatchCallback&& callback) {
   if VLIKELY (is_valid()) {
     std::lock_guard lock(impl_->mtx);
+
+    if VUNLIKELY (impl_->dispatched.load(std::memory_order_acquire)) {
+      VLOG_E("Schedule: on_catch registered after dispatch; ignored.");
+      return *this;
+    }
 
     if VUNLIKELY (impl_->catch_callback) {
       VLOG_E("Schedule: Catch callback is already set.");
@@ -127,6 +142,11 @@ Schedule::Status& Schedule::RetStatus::on_else(Callback&& callback) {
   if VLIKELY (is_valid()) {
     std::lock_guard lock(impl_->mtx);
 
+    if VUNLIKELY (impl_->dispatched.load(std::memory_order_acquire)) {
+      VLOG_E("Schedule: on_else registered after dispatch; ignored.");
+      return *this;
+    }
+
     if VUNLIKELY (impl_->else_callback) {
       VLOG_E("Schedule: Else callback is already set.");
       return *this;
@@ -141,6 +161,11 @@ Schedule::Status& Schedule::RetStatus::on_else(Callback&& callback) {
 Schedule::RetStatus& Schedule::RetStatus::on_then(RetCallback&& callback) {
   if VLIKELY (is_valid()) {
     std::lock_guard lock(impl_->mtx);
+
+    if VUNLIKELY (impl_->dispatched.load(std::memory_order_acquire)) {
+      VLOG_E("Schedule: on_then registered after dispatch; ignored.");
+      return *this;
+    }
 
     impl_->then_callback_list.emplace_back(std::move(callback));
   }
@@ -173,10 +198,26 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
   auto submit_time = std::chrono::steady_clock::now();
 
   wrapper_callback = [callback = std::move(callback), config, submit_time, impl = status.impl_]() mutable {
-    std::lock_guard lock(impl->mtx);
+    Schedule::Callback schedule_timeout_cb;
+    Schedule::Callback execution_timeout_cb;
+    Schedule::CatchCallback catch_cb;
+    Schedule::Callback else_cb;
+    std::vector<Schedule::RetCallback> then_callbacks;
 
-    if VUNLIKELY (!impl->is_valid) {
-      return;
+    {
+      std::lock_guard lock(impl->mtx);
+
+      if VUNLIKELY (!impl->is_valid) {
+        return;
+      }
+
+      schedule_timeout_cb = std::move(impl->schedule_timeout_callback);
+      execution_timeout_cb = std::move(impl->execution_timeout_callback);
+      catch_cb = std::move(impl->catch_callback);
+      else_cb = std::move(impl->else_callback);
+      then_callbacks = std::move(impl->then_callback_list);
+
+      impl->dispatched.store(true, std::memory_order_release);
     }
 
     auto now = std::chrono::steady_clock::now();
@@ -185,8 +226,8 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
       auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - submit_time).count();
 
       if (static_cast<uint32_t>(wait_ms) > config.schedule_timeout_ms + config.delay_ms) {
-        if (impl->schedule_timeout_callback) {
-          impl->schedule_timeout_callback();
+        if (schedule_timeout_cb) {
+          schedule_timeout_cb();
         }
 
         return;
@@ -205,8 +246,8 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
       try {
         result = exe_callback();
       } catch (std::exception& e) {
-        if (impl->catch_callback) {
-          impl->catch_callback(e);
+        if (catch_cb) {
+          catch_cb(e);
 
           return std::nullopt;
         }
@@ -218,8 +259,8 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
         auto exec_ms = std::chrono::duration_cast<std::chrono::milliseconds>(exec_end - exec_start).count();
 
         if (static_cast<uint32_t>(exec_ms) > config.execution_timeout_ms) {
-          if (impl->execution_timeout_callback) {
-            impl->execution_timeout_callback();
+          if (execution_timeout_cb) {
+            execution_timeout_cb();
           }
 
           return std::nullopt;
@@ -236,14 +277,14 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
     }
 
     if (!main_ret.value()) {
-      if (impl->else_callback) {
-        impl->else_callback();
+      if (else_cb) {
+        else_cb();
       }
 
       return;
     }
 
-    for (auto& then_callback : impl->then_callback_list) {
+    for (auto& then_callback : then_callbacks) {
       auto then_ret = run_with_timeout(then_callback);
 
       if (!then_ret.has_value()) {
@@ -251,8 +292,8 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
       }
 
       if (!then_ret.value()) {
-        if (impl->else_callback) {
-          impl->else_callback();
+        if (else_cb) {
+          else_cb();
         }
 
         return;

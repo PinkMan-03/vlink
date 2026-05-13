@@ -589,7 +589,7 @@ iceoryx/2.0.6
 
 # 条件依赖
 flatbuffers/25.9.23    (当 enable_cli_efbs=True 时)
-ffmpeg/8.1             (当 enable_viewer=True 且 enable_viewer_ffmpeg=True 时)
+ffmpeg/8.1.1           (当 enable_viewer=True 且 enable_viewer_ffmpeg=True 时)
 ```
 
 当 `enable_cpm_build=True` 时，仅通过 Conan 安装核心依赖（sqlite3、openssl、protobuf），

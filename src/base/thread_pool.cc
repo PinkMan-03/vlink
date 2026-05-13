@@ -85,6 +85,8 @@ ThreadPool::ThreadPool(size_t thread_count) : impl_(std::make_unique<Impl>()) {
   impl_->name = "ThreadPool_" + std::to_string(ThreadPoolGlobal::get().instance_index++);
   impl_->thread_count = thread_count;
 
+  MemoryPool::global_instance();
+
   init();
 }
 
@@ -92,6 +94,8 @@ ThreadPool::ThreadPool(size_t thread_count, Type type) : impl_(std::make_unique<
   impl_->name = "ThreadPool_" + std::to_string(ThreadPoolGlobal::get().instance_index++);
   impl_->thread_count = thread_count;
   impl_->type = type;
+
+  MemoryPool::global_instance();
 
   init();
 }

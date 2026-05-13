@@ -118,7 +118,7 @@ class VLinkConan(ConanFile):
         if self.options.enable_cli_efbs:
             self.requires("flatbuffers/25.9.23")
         if self.options.enable_viewer and self.options.enable_viewer_ffmpeg:
-            self.requires("ffmpeg/8.1")
+            self.requires("ffmpeg/8.1.1")
 
     def layout(self):
         cmake_layout(self)

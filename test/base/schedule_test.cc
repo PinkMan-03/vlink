@@ -410,7 +410,7 @@ TEST_SUITE("base-Schedule") {
     std::atomic<bool> caught{false};
     std::atomic<bool> then_ran{false};
 
-    loop.exec_task(Schedule::Config{},
+    loop.exec_task(Schedule::Config{100},
                    []() -> bool {
                      throw std::logic_error("boom");
                      return true;
@@ -685,6 +685,42 @@ TEST_SUITE("base-Schedule") {
     }
 
     CHECK(chain_count.load() == 3);
+
+    loop.quit();
+    loop.wait_for_quit();
+  }
+
+  TEST_CASE("on_then registered after dispatch is rejected (not silently accepted)") {
+    MessageLoop loop;
+    loop.async_run();
+
+    std::atomic<int> first_then_count{0};
+    std::atomic<int> late_then_count{0};
+
+    auto status = loop.exec_task(Schedule::Config{}, []() -> bool { return true; });
+
+    status.on_then([&first_then_count]() -> bool {
+      first_then_count.fetch_add(1);
+      return true;
+    });
+
+    for (int attempt = 0; attempt < 300 && first_then_count.load() == 0; ++attempt) {
+      loop.wait_for_idle();
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    REQUIRE(first_then_count.load() == 1);
+
+    status.on_then([&late_then_count]() -> bool {
+      late_then_count.fetch_add(1);
+      return true;
+    });
+
+    CHECK(late_then_count.load() == 0);
+
+    loop.wait_for_idle();
+
+    CHECK(late_then_count.load() == 0);
 
     loop.quit();
     loop.wait_for_quit();

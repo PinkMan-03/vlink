@@ -319,25 +319,28 @@ alignof(std::max_align_t)` 时走 oversized 直通路径，直接 `::operator ne
 
 ### 默认 Tier 表与 VLINK_MEMORY_LEVEL
 
-`MemoryPool::get_default_config()` 返回 16 阶金字塔配置（tier 大小为 `128B /
-256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB / 256KB /
-512KB / 4MB / 8MB / 16MB`，覆盖 Function/MoveFunction 及 Bytes 的常见尺寸），
-由环境变量 `VLINK_MEMORY_LEVEL`（`0`..`9`，默认 `3`）从一张编译期常量表中按
-行索引。`1..3` 渐进激活大 tier：`1` 把 `4MB / 8MB / 16MB` 留为 sentinel；
-`2` 启用 `4MB`；`3` 启用 `8MB`；`4` 起激活 `16MB` ceiling。
+`MemoryPool::get_default_config()` 返回 19 阶金字塔配置（tier 大小为 `64B /
+128B / 256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB /
+256KB / 512KB / 1MB / 4MB / 8MB / 16MB / 32MB`，覆盖 Function/MoveFunction 及
+Bytes 的常见尺寸），由环境变量 `VLINK_MEMORY_LEVEL`（`0`..`9`，默认 `3`）
+从一张编译期常量表中按行索引。`1..8` 渐进激活大 tier：`1` 把
+`1MB / 4MB / 8MB / 16MB / 32MB` 全部留为 sentinel；`2` 启用 `1MB`；
+`3` 起激活 `4MB`；`5` 起激活 `8MB`；`6` 起激活 `16MB`；`8` 起激活 `32MB`。
+每级内 `blocks_per_chunk` 从最小档 `64B` 起严格减半，倍增小档（`64B..512KB`）
+共享相等字节预算；尾部 `1MB..32MB` 各档激活时块数为 `1`，之后每升一级翻倍。
 
 | Level | 风格      | 满载占用 (≈) | 适用场景                                                                              |
 | ----- | --------- | ------------ | ------------------------------------------------------------------------------------- |
 | `0`   | Bypass    | 0 MiB        | 完全不走池：每次 `allocate` 直接 `::operator new`、每次 `deallocate` 直接 `::operator delete`。oversized 计数照常增长，所有 tier 计数为 0 |
-| `1`   | Tiny      | 4 MiB        | 端侧/嵌入式：仅小/中 tier 生效，`4MB / 8MB / 16MB` 大 tier 全部 sentinel              |
-| `2`   | Small     | 12 MiB       | 受限设备：启用 `4MB` tier，仍保留 `8MB / 16MB` sentinel（精确值 12 MiB）              |
-| `3`   | Balanced  | 32 MiB       | **默认**：启用 `8MB` tier，`16MB` ceiling 仍 sentinel（4K 帧走 oversized 直通）        |
-| `4`   | Large     | 70 MiB       | 服务器/高吞吐：首次激活 `16MB` ceiling                                                |
-| `5`   | XLarge    | 124 MiB      | 大批量小消息                                                                          |
-| `6`   | Massive   | 212 MiB      | 重 IO/视频流；中段 tier block 翻倍                                                    |
-| `7`   | Heavy     | 280 MiB      | 长时间高负载；小 tier 进一步倍增                                                      |
-| `8`   | Saturate  | 432 MiB      | 接近饱和的多生产者场景                                                                |
-| `9`   | Peak      | 480 MiB      | 高吞吐峰值；满载占用上限严格在 500 MiB 以下                                           |
+| `1`   | Tiny      | 3.75 MiB     | 端侧/嵌入式：仅小/中 tier 生效，`1MB / 4MB / 8MB / 16MB / 32MB` 大 tier 全部 sentinel |
+| `2`   | Small     | 8 MiB        | 受限设备：启用 `1MB` tier，仍保留 `4MB / 8MB / 16MB / 32MB` sentinel                  |
+| `3`   | Balanced  | 20 MiB       | **默认**：初步引入 `4MB` tier（1 个 block，4K 帧走 oversized 直通）                    |
+| `4`   | Large     | 40 MiB       | 服务器/高吞吐：尾部 block 翻倍                                                        |
+| `5`   | XLarge    | 88 MiB       | 大批量小消息：初步引入 `8MB` tier（1 个 block）                                        |
+| `6`   | Massive   | 192 MiB      | 重 IO/视频流：初步引入 `16MB` tier（1 个 block）                                       |
+| `7`   | Heavy     | 256 MiB      | 长时间高负载：尾部 block 进一步增加                                                   |
+| `8`   | Saturate  | 544 MiB      | 接近饱和的多生产者场景：初步引入 `32MB` tier（1 个 block）                             |
+| `9`   | Peak      | 704 MiB      | 高吞吐峰值：尾部 block 进一步翻倍                                                      |
 
 非数字、超出 `[0, 9]` 的取值会被钳到合法区间，并打印 warning。
 
@@ -380,7 +383,7 @@ class MemoryPool final {
   MemoryPool();
 
   // 按 level 从内置 10 行 tier 表（L0..L9，L0 是空哨兵 = bypass）取一行。
-  // 越界值钳到 [0, 9]。L9 满载占用 ≈ 480 MiB（严格在 500 MiB 以下）。
+  // 越界值钳到 [0, 9]。L9 满载占用 ≈ 704 MiB。
   explicit MemoryPool(int level, bool prealloc = false);
 
   // 块默认对齐，等价于 alignof(std::max_align_t)，作为 allocate/deallocate
@@ -3399,12 +3402,20 @@ loop.exec_task(vlink::Schedule::Config{},
 
 `GraphTask` 重载了 `-- >` 和 `-- <` 运算符用于声明依赖关系：
 
-| 表达式      | 等价调用             | 含义                          |
-| ----------- | -------------------- | ----------------------------- |
-| `A -- > B`  | `A->succeed(B)`      | B 是 A 的前驱（B 先执行）    |
-| `A -- < B`  | `A->precede(B)`      | A 是 B 的前驱（A 先执行）    |
+| 表达式      | 等价调用             | 含义                            |
+| ----------- | -------------------- | ------------------------------- |
+| `A -- > B`  | `A->precede(B)`      | A 先执行（B 是 A 的后继）       |
+| `A -- < B`  | `A->succeed(B)`      | B 先执行（B 是 A 的前驱）       |
 
 也可以使用 `precede()` / `succeed()` 方法直接声明依赖。
+
+> 注：API 含义以代码为准 — `X->precede(Y)` 等价 "X 先跑，Y 后跑"（Y 进入 X 的 succeed_task_list）；
+> `X->succeed(Y)` 等价 "Y 先跑，X 后跑"（Y 进入 X 的 precede_task_list）。两者描述的是同一条边，
+> 仅书写视角不同。`execute()` 必须从图的根（无前驱节点）发起。
+
+**环路检测**：每次 `precede()` / `succeed()` 添加边后会自动在受影响子图上检测环；
+若新边会导致环路则被静默回滚并记录错误日志。并发构图时这是 best-effort，
+图构建应当作单写入阶段处理。
 
 #### 执行策略
 
@@ -3431,22 +3442,21 @@ auto clean = vlink::GraphTask::create("clean", [] { cleanup();    });
 
 // 声明依赖：load -> proc -> save
 //                             -> clean
-// 注意：A-- >B 表示 "B 必须在 A 之前完成"（B 是 A 的前驱）
-// 所以要表达 load->proc->save，需要反向书写：
-save -- > proc -- > load;
-clean -- > proc;
+// A-- >B 表示 "A 必须在 B 之前完成"（A 进入 B 的 precede_task_list / B 进入 A 的 succeed_task_list）
+load -- > proc -- > save;
+proc -- > clean;
 
 // 检测环
-assert(!save->has_cycle());
+assert(!load->has_cycle());
 
-// 监听状态变化
-save->register_status_callback([](const std::string& name,
-                                   vlink::GraphTask::Status s) {
+// 监听状态变化（可注册多个；订阅 id 用于 unregister_status_callback）
+uint32_t id = load->register_status_callback([](const std::string& name,
+                                                 vlink::GraphTask::Status s) {
     VLOG_D("task ", name, " status=", (int)s);
 });
 
-// 从终端节点提交执行（会自动遍历整个可达子图，从根节点开始执行）
-save->execute(&engine);
+// 从根节点（无前驱）提交执行，遍历整个可达子图
+load->execute(&engine);
 
 // 条件分支示例
 auto check = vlink::GraphTask::create_condition("check",
@@ -3458,14 +3468,14 @@ auto branch_a = vlink::GraphTask::create("branch_a", [] { handle_valid(); });
 auto branch_b = vlink::GraphTask::create("branch_b", [] { handle_invalid(); });
 
 // check 是两个分支的前驱：check 执行后根据返回值选择分支
-branch_a -- > check;   // 分支 0（check 返回 0 时执行 branch_a）
-branch_b -- > check;   // 分支 1（check 返回 1 时执行 branch_b）
+check -- > branch_a;   // 分支 0（check 返回 0 时执行 branch_a）
+check -- > branch_b;   // 分支 1（check 返回 1 时执行 branch_b）
 
-// 从任一分支提交即可遍历整个图
-branch_a->execute(&engine);
+// 从根节点 check 提交执行
+check->execute(&engine);
 
-// DOT 可视化导出
-std::string dot = save->export_to_dot();
+// DOT 可视化导出（从根节点导出整个子图）
+std::string dot = load->export_to_dot();
 ```
 
 ---

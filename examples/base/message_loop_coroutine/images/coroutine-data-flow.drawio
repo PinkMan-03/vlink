@@ -1,0 +1,81 @@
+<mxfile host="app.diagrams.net" agent="vlink-example" version="24.0.0">
+  <diagram name="Coroutine data flow" id="coro-flow">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="780" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Coroutine data flow (purely additive over MessageLoop)" style="text;html=1;align=center;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1020" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- User Task body -->
+        <mxCell id="user" value="User coroutine&#10;Task&lt;T&gt; body" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="220" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Awaiter -->
+        <mxCell id="aw" value="Awaiter&#10;(Schedule / Yield / Delay / Future&#10; / GraphAwaiter / exec)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="380" y="80" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- MessageLoop -->
+        <mxCell id="loop" value="MessageLoop public API&#10;post_task / post_task_with_priority&#10;exec_task / Timer::call_once&#10;GraphTask::register_status_callback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="760" y="60" width="280" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Dispatcher thread -->
+        <mxCell id="dispatch" value="MessageLoop dispatcher thread&#10;(single worker, FIFO or priority)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="760" y="260" width="280" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Resume lambda -->
+        <mxCell id="resume" value="Resume lambda&#10;[handle]() { handle.resume(); }" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="380" y="260" width="280" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- MemoryPool -->
+        <mxCell id="pool" value="MemoryPool::global_instance()&#10;(default coroutine frame allocator)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fad7ac;strokeColor=#b46504;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="60" y="420" width="320" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Frame -->
+        <mxCell id="frame" value="Coroutine frame on heap&#10;(promise + locals + parameters)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fad7ac;strokeColor=#b46504;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="420" y="420" width="320" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ARROWS -->
+        <mxCell id="e1" value="(1) co_await awaiter" style="endArrow=classic;html=1;fontSize=12;fontStyle=1;" edge="1" parent="1" source="user" target="aw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="(2) await_suspend posts a lambda" style="endArrow=classic;html=1;fontSize=12;fontStyle=1;" edge="1" parent="1" source="aw" target="loop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="(3) loop dispatches" style="endArrow=classic;html=1;fontSize=12;fontStyle=1;" edge="1" parent="1" source="loop" target="dispatch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="(4) invoke lambda" style="endArrow=classic;html=1;fontSize=12;fontStyle=1;" edge="1" parent="1" source="dispatch" target="resume">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="(5) handle.resume()" style="endArrow=classic;html=1;fontSize=12;fontStyle=1;" edge="1" parent="1" source="resume" target="user">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="170" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="e_alloc" value="allocate (via promise::operator new)" style="endArrow=classic;html=1;fontSize=11;fontStyle=2;dashed=1;" edge="1" parent="1" source="user" target="pool">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_frame" value="frame storage" style="endArrow=classic;html=1;fontSize=11;fontStyle=2;dashed=1;" edge="1" parent="1" source="pool" target="frame">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note" value="Solid arrows = control flow.  Dashed arrows = storage / allocation.&#10;Co::await_future is the only awaiter that uses a one-shot detached helper thread to wait on std::future, then posts the resume back through MessageLoop." style="text;html=1;align=left;verticalAlign=middle;whiteSpace=wrap;fontSize=12;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="540" width="980" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

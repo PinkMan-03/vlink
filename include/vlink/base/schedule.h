@@ -232,6 +232,7 @@ struct VLINK_EXPORT Schedule final {
 
     struct Impl final {
       std::atomic_bool is_valid{false};
+      std::atomic_bool dispatched{false};
       std::recursive_mutex mtx;
       Callback schedule_timeout_callback;
       Callback execution_timeout_callback;

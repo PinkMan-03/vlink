@@ -71,16 +71,16 @@ TEST_SUITE("base-MemoryResource - construction") {
     REQUIRE(pool.get_tier_count() >= 4u);
 
     auto stats_before = pool.get_stats();
-    CHECK(stats_before.front().max_size == 128u);
+    CHECK(stats_before.front().max_size == 64u);
 
-    void* p = res.allocate(128);
+    void* p = res.allocate(64);
     REQUIRE(p != nullptr);
 
     auto stats = pool.get_stats();
     CHECK(stats[0].hit_count == 1u);
     CHECK(pool.get_oversized_stats().alloc_count == 0u);
 
-    res.deallocate(p, 128);
+    res.deallocate(p, 64);
   }
 
   TEST_CASE("MemoryResource(level=0) owns a bypass pool") {
@@ -133,7 +133,7 @@ TEST_SUITE("base-MemoryResource - global instance") {
 
     auto over_before = pool.get_oversized_stats();
 
-    constexpr size_t kHuge = 32u * 1024u * 1024u;  // larger than the 16 MiB top tier
+    constexpr size_t kHuge = 32u * 1024u * 1024u;  // larger than the L3 default 4 MiB top live tier
     void* p = res.allocate(kHuge);
     REQUIRE(p != nullptr);
 

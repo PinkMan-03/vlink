@@ -110,22 +110,25 @@ TEST_SUITE("base-GraphTask") {
     auto b = GraphTask::create("B", [] {});
     auto c = GraphTask::create("C", [] {});
 
-    a->precede(b);
-    b->precede(c);
+    a->succeed(b);
+    b->succeed(c);
 
     CHECK(!a->has_cycle());
   }
 
-  TEST_CASE("has_cycle returns true when a back-edge creates a cycle") {
+  TEST_CASE("back-edge that would create a cycle is auto-rejected by precede/succeed") {
     auto a = GraphTask::create("A", [] {});
     auto b = GraphTask::create("B", [] {});
     auto c = GraphTask::create("C", [] {});
 
     a->precede(b);
     b->precede(c);
+
+    REQUIRE(!a->has_cycle());
+
     c->precede(a);
 
-    CHECK(a->has_cycle());
+    CHECK(!a->has_cycle());
   }
 
   TEST_CASE("has_cycle returns false for diamond DAG") {
@@ -134,10 +137,10 @@ TEST_SUITE("base-GraphTask") {
     auto c = GraphTask::create("C", [] {});
     auto d = GraphTask::create("D", [] {});
 
-    a->precede(b);
-    a->precede(c);
-    b->precede(d);
-    c->precede(d);
+    a->succeed(b);
+    a->succeed(c);
+    b->succeed(d);
+    c->succeed(d);
 
     CHECK(!a->has_cycle());
   }
@@ -146,7 +149,7 @@ TEST_SUITE("base-GraphTask") {
     auto a = GraphTask::create("node_alpha", [] {});
     auto b = GraphTask::create("node_beta", [] {});
 
-    a->precede(b);
+    a->succeed(b);
 
     std::string dot = b->export_to_dot();
 
@@ -161,9 +164,11 @@ TEST_SUITE("base-GraphTask") {
     CHECK(!dot.empty());
   }
 
-  TEST_CASE("self-loop precede throws exception") {
+  TEST_CASE("self-loop precede throws via VLOG_F and leaves graph untouched") {
     auto a = GraphTask::create("A", [] {});
     CHECK_THROWS(a->precede(a));
+    CHECK(a->get_succeed_task_list().empty());
+    CHECK(a->get_precede_task_list().empty());
   }
 
   TEST_CASE("get_condition_number and set_condition_number") {
@@ -211,43 +216,43 @@ TEST_SUITE("base-GraphTask") {
     auto b = GraphTask::create("B", [] {});
     auto c = GraphTask::create("C", [] {});
 
-    a->precede(b);
-    c->succeed(a);
+    a->succeed(b);
+    c->precede(a);
 
     auto succ_list = a->get_precede_task_list();
     CHECK(succ_list.size() == 2U);
   }
 
-  TEST_CASE("remove_precede_task shrinks dependency list") {
+  TEST_CASE("remove_succeed_task shrinks task's succeed_task_list-side dependency") {
     auto a = GraphTask::create("A", [] {});
     auto b = GraphTask::create("B", [] {});
 
-    a->precede(b);
+    a->succeed(b);
     CHECK(b->get_succeed_task_list().size() == 1U);
 
-    a->remove_precede_task(b);
+    a->remove_succeed_task(b);
     CHECK(b->get_succeed_task_list().empty());
   }
 
-  TEST_CASE("remove_precede_task shrinks successor list") {
+  TEST_CASE("remove_succeed_task shrinks self's precede_task_list-side dependency") {
     auto a = GraphTask::create("A", [] {});
     auto b = GraphTask::create("B", [] {});
 
-    a->precede(b);
+    a->succeed(b);
     CHECK(a->get_precede_task_list().size() == 1U);
 
-    a->remove_precede_task(b);
+    a->remove_succeed_task(b);
     CHECK(a->get_precede_task_list().empty());
   }
 
-  TEST_CASE("remove_succeed_task shrinks predecessor list") {
+  TEST_CASE("remove_precede_task shrinks self's succeed_task_list-side dependency") {
     auto a = GraphTask::create("A", [] {});
     auto b = GraphTask::create("B", [] {});
 
-    b->succeed(a);
+    b->precede(a);
     CHECK(b->get_succeed_task_list().size() == 1U);
 
-    b->remove_succeed_task(a);
+    b->remove_precede_task(a);
     CHECK(b->get_succeed_task_list().empty());
   }
 
@@ -265,7 +270,7 @@ TEST_SUITE("base-GraphTask") {
     auto a = GraphTask::create("A", [] {});
     auto b = GraphTask::create("B", [] {});
 
-    a->succeed(b);
+    a->precede(b);
     b->cancel();
     CHECK(b->get_status() == GraphTask::kStatusInActive);
   }
@@ -274,7 +279,7 @@ TEST_SUITE("base-GraphTask") {
     auto a = GraphTask::create("src", [] {});
     auto b = GraphTask::create("dst", [] {});
 
-    a->precede(b);
+    a->succeed(b);
 
     std::string dot = b->export_to_dot();
     CHECK(!dot.empty());
@@ -294,8 +299,8 @@ TEST_SUITE("base-GraphTask") {
     auto b = GraphTask::create("B", [] {});
     auto c = GraphTask::create("C", [] {});
 
-    a->precede(b);
-    a->precede(c);
+    a->succeed(b);
+    a->succeed(c);
 
     CHECK(a->get_precede_task_list().size() == 2U);
     CHECK(b->get_succeed_task_list().size() == 1U);
@@ -351,8 +356,8 @@ TEST_SUITE("base-GraphTask - execution") {
       order->push_back(2);
     });
 
-    ta->succeed(tb);
-    tb->succeed(tc);
+    ta->precede(tb);
+    tb->precede(tc);
 
     run_graph(ta);
 
@@ -379,8 +384,8 @@ TEST_SUITE("base-GraphTask - execution") {
       c_done->store(1);
     });
 
-    ta->succeed(tb);
-    ta->succeed(tc);
+    ta->precede(tb);
+    ta->precede(tc);
 
     run_graph(ta);
 
@@ -407,10 +412,10 @@ TEST_SUITE("base-GraphTask - execution") {
       d_done->store(1);
     });
 
-    ta->succeed(tb);
-    ta->succeed(tc);
-    tb->succeed(td);
-    tc->succeed(td);
+    ta->precede(tb);
+    ta->precede(tc);
+    tb->precede(td);
+    tc->precede(td);
     td->set_policy(GraphTask::kPolicyWaitAll);
 
     run_graph(ta);
@@ -431,10 +436,10 @@ TEST_SUITE("base-GraphTask - execution") {
     auto tc = GraphTask::create("C", [c_ran] { c_ran->store(1); });
     auto td = GraphTask::create("D", [d_ran] { d_ran->store(1); });
 
-    ta->succeed(tb);
-    ta->succeed(tc);
-    tb->succeed(td);
-    tc->succeed(td);
+    ta->precede(tb);
+    ta->precede(tc);
+    tb->precede(td);
+    tc->precede(td);
     td->set_policy(GraphTask::kPolicyWaitAll);
 
     run_graph(ta);
@@ -455,10 +460,10 @@ TEST_SUITE("base-GraphTask - execution") {
     auto tc = GraphTask::create("C", [c_ran] { c_ran->store(1); });
     auto td = GraphTask::create("D", [d_ran] { d_ran->store(1); });
 
-    ta->succeed(tb);
-    ta->succeed(tc);
-    tb->succeed(td);
-    tc->succeed(td);
+    ta->precede(tb);
+    ta->precede(tc);
+    tb->precede(td);
+    tc->precede(td);
     td->set_policy(GraphTask::kPolicyWaitAll);
 
     run_graph(ta);
@@ -477,8 +482,8 @@ TEST_SUITE("base-GraphTask - execution") {
     auto b1 = GraphTask::create("branch_1", [branch1] { branch1->store(1); });
 
     b1->set_condition_number(1);
-    cond->succeed(b0);
-    cond->succeed(b1);
+    cond->precede(b0);
+    cond->precede(b1);
 
     run_graph(cond);
 
@@ -495,8 +500,8 @@ TEST_SUITE("base-GraphTask - execution") {
     auto b1 = GraphTask::create("branch_1", [branch1] { branch1->store(1); });
 
     b1->set_condition_number(1);
-    cond->succeed(b0);
-    cond->succeed(b1);
+    cond->precede(b0);
+    cond->precede(b1);
 
     run_graph(cond);
 
@@ -513,8 +518,8 @@ TEST_SUITE("base-GraphTask - execution") {
     auto b1 = GraphTask::create("branch_1", [branch1] { branch1->store(1); });
 
     b1->set_condition_number(1);
-    cond->succeed(b0);
-    cond->succeed(b1);
+    cond->precede(b0);
+    cond->precede(b1);
 
     run_graph(cond);
 
@@ -603,7 +608,7 @@ TEST_SUITE("base-GraphTask - execution") {
     std::vector<GraphTaskPtr> leaves;
     for (int i = 0; i < kFanOut; ++i) {
       auto leaf = GraphTask::create("leaf_" + std::to_string(i), [count] { count->fetch_add(1); });
-      root->succeed(leaf);
+      root->precede(leaf);
       leaves.push_back(leaf);
     }
 
@@ -622,14 +627,300 @@ TEST_SUITE("base-GraphTask - execution") {
     auto after = GraphTask::create("after", [after_branch0] { after_branch0->store(1); });
 
     b1->set_condition_number(1);
-    cond->succeed(b0);
-    cond->succeed(b1);
-    b0->succeed(after);
+    cond->precede(b0);
+    cond->precede(b1);
+    b0->precede(after);
 
     run_graph(cond);
 
     CHECK(branch0_count->load() == 1);
     CHECK(after_branch0->load() == 1);
+  }
+
+  TEST_CASE("throwing callback is caught; task transitions to kStatusDone and downstream runs") {
+    auto downstream_ran = std::make_shared<std::atomic<int>>(0);
+
+    auto a = GraphTask::create("A", [] { throw std::runtime_error("boom"); });
+    auto b = GraphTask::create("B", [downstream_ran] { downstream_ran->store(1); });
+
+    a->precede(b);
+
+    run_graph(a);
+
+    CHECK(a->get_status() == GraphTask::kStatusDone);
+    CHECK(downstream_ran->load() == 1);
+  }
+
+  TEST_CASE("register_status_callback supports multiple subscribers; both fire") {
+    auto subA_calls = std::make_shared<std::atomic<int>>(0);
+    auto subB_calls = std::make_shared<std::atomic<int>>(0);
+
+    auto task = GraphTask::create("multi", [] {});
+
+    uint32_t id_a = task->register_status_callback(
+        [subA_calls](const std::string&, GraphTask::Status) { subA_calls->fetch_add(1); });
+    uint32_t id_b = task->register_status_callback(
+        [subB_calls](const std::string&, GraphTask::Status) { subB_calls->fetch_add(1); });
+
+    CHECK(id_a != 0);
+    CHECK(id_b != 0);
+    CHECK(id_a != id_b);
+
+    run_graph(task);
+
+    // Both subscribers see Pending->Running->Done transitions
+    CHECK(subA_calls->load() >= 1);
+    CHECK(subB_calls->load() >= 1);
+    CHECK(subA_calls->load() == subB_calls->load());
+  }
+
+  TEST_CASE("unregister_status_callback removes a specific subscription") {
+    auto subA_calls = std::make_shared<std::atomic<int>>(0);
+    auto subB_calls = std::make_shared<std::atomic<int>>(0);
+
+    auto task = GraphTask::create("unreg", [] {});
+
+    uint32_t id_a = task->register_status_callback(
+        [subA_calls](const std::string&, GraphTask::Status) { subA_calls->fetch_add(1); });
+    task->register_status_callback([subB_calls](const std::string&, GraphTask::Status) { subB_calls->fetch_add(1); });
+
+    CHECK(task->unregister_status_callback(id_a) == true);
+    CHECK(task->unregister_status_callback(id_a) == false);  // second unregister is a no-op
+
+    run_graph(task);
+
+    CHECK(subA_calls->load() == 0);
+    CHECK(subB_calls->load() >= 1);
+  }
+
+  TEST_CASE("register_status_callback returns 0 for empty callback") {
+    auto task = GraphTask::create("empty_cb", [] {});
+
+    GraphTask::StatusCallback empty;
+    uint32_t id = task->register_status_callback(std::move(empty));
+
+    CHECK(id == 0);
+  }
+
+  TEST_CASE("throwing condition_callback gracefully disables all branches (no deadlock)") {
+    auto b0_ran = std::make_shared<std::atomic<int>>(0);
+    auto b1_ran = std::make_shared<std::atomic<int>>(0);
+
+    auto cond = GraphTask::create_condition("cond", []() -> int { throw std::runtime_error("boom"); }, 2);
+    auto b0 = GraphTask::create("b0", [b0_ran] { b0_ran->store(1); });
+    auto b1 = GraphTask::create("b1", [b1_ran] { b1_ran->store(1); });
+
+    b1->set_condition_number(1);
+    cond->precede(b0);
+    cond->precede(b1);
+
+    run_graph(cond);
+
+    CHECK(cond->get_status() == GraphTask::kStatusDone);
+    CHECK(b0_ran->load() == 0);
+    CHECK(b1_ran->load() == 0);
+  }
+
+  TEST_CASE("succeed that would create a transitive cycle is rejected with rollback") {
+    auto a = GraphTask::create("a", [] {});
+    auto b = GraphTask::create("b", [] {});
+    auto c = GraphTask::create("c", [] {});
+
+    a->precede(b);
+    b->precede(c);
+
+    REQUIRE(!a->has_cycle());
+
+    // a.succeed(c) means c precedes a → adds edge c→a, closing cycle a→b→c→a
+    a->succeed(c);
+
+    CHECK(!a->has_cycle());
+    CHECK(a->get_precede_task_list().empty());
+
+    auto c_succ = c->get_succeed_task_list();
+    bool c_has_a_edge = false;
+
+    for (const auto& w : c_succ) {
+      auto p = w.lock();
+
+      if (p && p.get() == a.get()) {
+        c_has_a_edge = true;
+      }
+    }
+
+    CHECK(!c_has_a_edge);
+  }
+
+  TEST_CASE("precede that would create a transitive cycle is rejected with rollback") {
+    auto a = GraphTask::create("a", [] {});
+    auto b = GraphTask::create("b", [] {});
+    auto c = GraphTask::create("c", [] {});
+
+    a->precede(b);
+    b->precede(c);
+
+    REQUIRE(!c->has_cycle());
+
+    // c.precede(a) means c before a → adds edge c→a, closing cycle a→b→c→a
+    c->precede(a);
+
+    CHECK(!c->has_cycle());
+    CHECK(a->get_precede_task_list().empty());
+
+    auto c_succ = c->get_succeed_task_list();
+    bool c_has_a_edge = false;
+
+    for (const auto& w : c_succ) {
+      auto p = w.lock();
+
+      if (p && p.get() == a.get()) {
+        c_has_a_edge = true;
+      }
+    }
+
+    CHECK(!c_has_a_edge);
+  }
+
+  TEST_CASE("throwing status_callback is caught; remaining subscribers still fire") {
+    auto throwing_calls = std::make_shared<std::atomic<int>>(0);
+    auto safe_calls = std::make_shared<std::atomic<int>>(0);
+
+    auto task = GraphTask::create("throw_sub", [] {});
+
+    task->register_status_callback([throwing_calls](const std::string&, GraphTask::Status) {
+      throwing_calls->fetch_add(1);
+      throw std::runtime_error("boom_from_status_callback");
+    });
+
+    task->register_status_callback([safe_calls](const std::string&, GraphTask::Status) { safe_calls->fetch_add(1); });
+
+    run_graph(task);
+
+    CHECK(task->get_status() == GraphTask::kStatusDone);
+    CHECK(throwing_calls->load() >= 1);
+    CHECK(safe_calls->load() >= 1);
+    CHECK(safe_calls->load() == throwing_calls->load());
+  }
+
+  TEST_CASE("status callback may call set_name and get_name without deadlock") {
+    auto task = GraphTask::create("original", [] {});
+    auto saw_name_in_done = std::make_shared<std::string>();
+    std::weak_ptr<GraphTask> weak = task;
+
+    task->register_status_callback([weak, saw_name_in_done](const std::string&, GraphTask::Status status) {
+      auto t = weak.lock();
+
+      if (!t) {
+        return;
+      }
+
+      if (status == GraphTask::kStatusRunning) {
+        t->set_name("renamed_in_callback");
+      }
+
+      if (status == GraphTask::kStatusDone) {
+        *saw_name_in_done = t->get_name();
+      }
+    });
+
+    run_graph(task);
+
+    CHECK(task->get_status() == GraphTask::kStatusDone);
+    CHECK(task->get_name() == "renamed_in_callback");
+    CHECK(*saw_name_in_done == "renamed_in_callback");
+  }
+
+  TEST_CASE("kPolicyWaitAll fires exactly once after all predecessors complete") {
+    auto fired = std::make_shared<std::atomic<int>>(0);
+
+    auto root = GraphTask::create("root", [] {});
+    auto p1 = GraphTask::create("p1", [] {});
+    auto p2 = GraphTask::create("p2", [] {});
+    auto p3 = GraphTask::create("p3", [] {});
+    auto sink = GraphTask::create("sink", [fired] { fired->fetch_add(1); });
+
+    sink->set_policy(GraphTask::kPolicyWaitAll);
+
+    root->precede(p1);
+    root->precede(p2);
+    root->precede(p3);
+
+    p1->precede(sink);
+    p2->precede(sink);
+    p3->precede(sink);
+
+    run_graph(root, 100);
+
+    CHECK(sink->get_status() == GraphTask::kStatusDone);
+    CHECK(fired->load() == 1);
+  }
+
+  TEST_CASE("precede cycle pre-check never mutates lists (no transient invalid edge)") {
+    auto a = GraphTask::create("a", [] {});
+    auto b = GraphTask::create("b", [] {});
+    auto c = GraphTask::create("c", [] {});
+
+    a->precede(b);
+    b->precede(c);
+
+    REQUIRE(a->get_succeed_task_list().size() == 1U);
+    REQUIRE(b->get_succeed_task_list().size() == 1U);
+    REQUIRE(c->get_succeed_task_list().empty());
+
+    c->precede(a);
+
+    CHECK(a->get_succeed_task_list().size() == 1U);
+    CHECK(b->get_succeed_task_list().size() == 1U);
+    CHECK(c->get_succeed_task_list().empty());
+    CHECK(a->get_precede_task_list().empty());
+    CHECK(c->get_precede_task_list().size() == 1U);
+  }
+
+  TEST_CASE("succeed cycle pre-check never mutates lists (no transient invalid edge)") {
+    auto a = GraphTask::create("a", [] {});
+    auto b = GraphTask::create("b", [] {});
+    auto c = GraphTask::create("c", [] {});
+
+    a->precede(b);
+    b->precede(c);
+
+    a->succeed(c);
+
+    CHECK(a->get_succeed_task_list().size() == 1U);
+    CHECK(b->get_succeed_task_list().size() == 1U);
+    CHECK(c->get_succeed_task_list().empty());
+    CHECK(a->get_precede_task_list().empty());
+  }
+
+  TEST_CASE("register_status_callback assigns unique non-zero ids across many registrations") {
+    auto task = GraphTask::create("uniq", [] {});
+
+    std::unordered_set<uint32_t> ids;
+
+    for (int i = 0; i < 256; ++i) {
+      uint32_t id = task->register_status_callback([](const std::string&, GraphTask::Status) {});
+      REQUIRE(id != 0U);
+      CHECK(ids.insert(id).second);
+    }
+
+    for (uint32_t id : ids) {
+      CHECK(task->unregister_status_callback(id));
+    }
+  }
+
+  TEST_CASE("cancel cascades to reachable successors") {
+    auto a = GraphTask::create("a", [] {});
+    auto b = GraphTask::create("b", [] {});
+    auto c = GraphTask::create("c", [] {});
+
+    a->precede(b);
+    b->precede(c);
+
+    a->cancel();
+
+    CHECK(a->get_status() == GraphTask::kStatusInActive);
+    CHECK(b->get_status() == GraphTask::kStatusInActive);
+    CHECK(c->get_status() == GraphTask::kStatusInActive);
   }
 }
 

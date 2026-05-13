@@ -61,11 +61,11 @@ int main() {
     VLOG_I("=== Section 1: get_default_config() ===");
 
     auto config = vlink::MemoryPool::get_default_config();
-    // config.tiers.size() reports raw entries (always 16 here, including any
+    // config.tiers.size() reports raw entries (always 19 here, including any
     // sentinel rows whose blocks_per_chunk == 0); pool.get_tier_count() below
-    // reports live tiers after the constructor strips sentinels (e.g. L1=13,
-    // L2=14, L3=15, L4..L9=16).  The two numbers can differ for VLINK_MEMORY_LEVEL
-    // < 4 -- that's expected, not a bug.
+    // reports live tiers after the constructor strips sentinels (e.g. L1=14,
+    // L2=15, L3..L4=16, L5=17, L6..L7=18, L8..L9=19).  The two numbers can
+    // differ for VLINK_MEMORY_LEVEL < 8 -- that's expected, not a bug.
     MLOG_I("  VLINK_MEMORY_LEVEL produced {} tiers (prealloc={})", config.tiers.size(), config.prealloc);
     for (size_t i = 0; i < config.tiers.size(); ++i) {
       MLOG_I("    cfg[{}]: max_size={} blocks_per_chunk={}", i, config.tiers[i].max_size,

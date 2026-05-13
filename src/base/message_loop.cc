@@ -38,6 +38,7 @@
 
 #include "./base/condition_variable.h"
 #include "./base/logger.h"
+#include "./base/memory_pool.h"
 #include "./base/memory_resource.h"
 #include "./base/mpmc_queue.h"
 #include "./base/utils.h"
@@ -133,6 +134,8 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
 MessageLoop::MessageLoop() : impl_(std::make_unique<Impl>()) {
   impl_->name = "MessageLoop_" + std::to_string(MessageLoopGlobal::get().instance_index++);
 
+  MemoryPool::global_instance();
+
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   impl_->normal_queue.emplace(&MemoryResource::global_instance());
 #else
@@ -143,6 +146,8 @@ MessageLoop::MessageLoop() : impl_(std::make_unique<Impl>()) {
 MessageLoop::MessageLoop(Type type) : impl_(std::make_unique<Impl>()) {
   impl_->name = "MessageLoop_" + std::to_string(MessageLoopGlobal::get().instance_index++);
   impl_->type = type;
+
+  MemoryPool::global_instance();
 
   if (impl_->type == kNormalType) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
@@ -202,7 +207,8 @@ MessageLoop::~MessageLoop() {
   }
 
   for (auto* timer : timers_to_delete) {
-    delete timer;
+    timer->~Timer();
+    MemoryPool::global_instance().deallocate(timer, sizeof(Timer), alignof(Timer));
   }
   // NOLINTEND
 }
@@ -540,6 +546,11 @@ uint64_t MessageLoop::get_current_nano_time() {
 
 bool MessageLoop::add_timer(Timer* timer) {
   std::lock_guard lock(impl_->mtx);
+
+  if VUNLIKELY (impl_->quit_flag) {
+    return false;
+  }
+
   if VUNLIKELY (impl_->timer_set.size() >= get_max_timer_count()) {
     CLOG_W("MessageLoop: Timer is full (%s).", impl_->name.c_str());
     return false;
@@ -1107,7 +1118,8 @@ bool MessageLoop::process_timer_task(int64_t& next_sleep_time) {
 
         if (timer->is_once_type()) {
           iter = impl_->timer_set.erase(iter);
-          delete timer;
+          timer->~Timer();
+          MemoryPool::global_instance().deallocate(timer, sizeof(Timer), alignof(Timer));
           has_erase = true;
           break;
         }

@@ -297,11 +297,11 @@ int main() {
 
     // VLINK_MEMORY_LEVEL: Tier configuration level for vlink::MemoryPool.
     //   Integer in [0, 9]; 0 = bypass mode (every allocation goes straight to
-    //   ::operator new / delete). 1..9 select the built-in 16-tier pyramid;
+    //   ::operator new / delete). 1..9 select the built-in 19-tier pyramid;
     //   higher levels reserve more blocks per tier, trading resident footprint
-    //   for fewer upstream allocations.  L9 saturates around 480 MiB (strictly
-    //   below 500 MiB). Out-of-range or non-numeric values clamp to [0, 9].
-    //   Default: 3 (Balanced, ~32 MiB)
+    //   for fewer upstream allocations.  L9 saturates around 704 MiB.
+    //   Out-of-range or non-numeric values clamp to [0, 9].
+    //   Default: 3 (Balanced, ~20 MiB)
     //   Shell: export VLINK_MEMORY_LEVEL=4
     show_env("VLINK_MEMORY_LEVEL", "MemoryPool tier level (0..9, default 3; 0 = bypass)");
 

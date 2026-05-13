@@ -308,6 +308,11 @@ set_target_properties(
 )
 if(ENABLE_CXX_STD_20)
   target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
+  target_compile_options(
+    ${PROJECT_NAME}
+    PUBLIC
+      $<$<AND:$<CXX_COMPILER_ID:GNU>,$<VERSION_GREATER_EQUAL:$<CXX_COMPILER_VERSION>,10>,$<VERSION_LESS:$<CXX_COMPILER_VERSION>,11>>:-fcoroutines>
+  )
 else()
   target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 endif()

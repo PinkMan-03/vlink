@@ -186,7 +186,7 @@ class VLINK_EXPORT MemoryPool final {
    * mode (no pool, every alloc goes through @c ::operator @c new); the
    * @p prealloc flag is ignored in bypass mode (no tiers to fill).
    * At level @c 9 the fully-saturated resident footprint is approximately
-   * 480 MiB.
+   * 704 MiB.
    *
    * Equivalent to @c MemoryPool(Config{tiers_for(level), prealloc}); see the
    * @c Config-based constructor for the full validation, fallback, and
@@ -274,10 +274,13 @@ class VLINK_EXPORT MemoryPool final {
    *         @c blocks_per_chunk == 0 sentinel).  The count reflects only
    *         live (managed) tiers: sentinel entries are stripped at
    *         construction and do not appear here.  Built-in pyramid level
-   *         @c 1 yields @c 13 live tiers (4 MiB / 8 MiB / 16 MiB ceilings
-   *         are sentinels); level @c 2 yields @c 14 (8 MiB / 16 MiB
-   *         sentinels); level @c 3 yields @c 15 (16 MiB sentinel); levels
-   *         @c 4..9 yield all @c 16 live tiers.
+   *         @c 1 yields @c 14 live tiers (1 MiB / 4 MiB / 8 MiB / 16 MiB /
+   *         32 MiB ceilings are sentinels); level @c 2 yields @c 15
+   *         (4 MiB / 8 MiB / 16 MiB / 32 MiB sentinels); levels @c 3..4
+   *         yield @c 16 (8 MiB / 16 MiB / 32 MiB sentinels); level @c 5
+   *         yields @c 17 (16 MiB / 32 MiB sentinels); levels @c 6..7 yield
+   *         @c 18 (32 MiB sentinel); levels @c 8..9 yield all @c 19 live
+   *         tiers.
    */
   [[nodiscard]] size_t get_tier_count() const noexcept;
 
@@ -357,14 +360,19 @@ class VLINK_EXPORT MemoryPool final {
    * Each level (0..9) maps to a hand-coded row of {max_size, blocks_per_chunk}
    * pairs -- nothing is computed at runtime.  Level @c 0 returns an
    * all-sentinel row (every entry has @c blocks_per_chunk == 0) which the
-   * constructor then strips into bypass mode.  Levels @c 1..9 return 16
-   * entries spanning 128 B .. 16 MiB; the 4 MiB / 8 MiB / 16 MiB ceilings
-   * are sentinels at low levels (4 MiB activates at L2, 8 MiB at L3,
-   * 16 MiB at L4) and yield 13..16 live tiers post-construction depending
-   * on level.
+   * constructor then strips into bypass mode.  Levels @c 1..9 return 19
+   * entries spanning 64 B .. 32 MiB; the 1 MiB / 4 MiB / 8 MiB / 16 MiB /
+   * 32 MiB ceilings are sentinels at low levels (1 MiB activates at L2,
+   * 4 MiB at L3, 8 MiB at L5, 16 MiB at L6, 32 MiB at L8) and yield
+   * 14..19 live tiers post-construction depending on level.
+   * Within each level, @c blocks_per_chunk halves cleanly across the
+   * doubling-size tiers (64 B .. 512 KiB), so each tier holds a
+   * roughly constant aggregate byte budget; the live 1 MiB / 4 MiB /
+   * 8 MiB / 16 MiB / 32 MiB tail tiers grow per-level by doubling
+   * from their activation count (= 1 block) within monotone constraints.
    * Non-numeric or out-of-range @c VLINK_MEMORY_LEVEL values are clamped to
    * @c [0, 9] with a warning.  At level @c 9 the fully-saturated footprint
-   * is approximately 480 MiB.
+   * is approximately 704 MiB.
    *
    * @c VLINK_MEMORY_PREALLOC populates the @c prealloc flag of the
    * returned config.  Only the literal value @c "1" enables preallocation;

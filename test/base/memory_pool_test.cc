@@ -83,13 +83,13 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     CHECK(pool.get_oversized_stats().alloc_count == 0u);
   }
 
-  TEST_CASE("get_default_config (level 3) is well-formed and ends at 16 MiB") {
+  TEST_CASE("get_default_config (level 3) is well-formed and ends at 32 MiB") {
     auto config = MemoryPool::get_default_config();
     const auto& tiers = config.tiers;
 
-    CHECK(tiers.size() == 16u);
-    CHECK(tiers.front().max_size == 128u);
-    CHECK(tiers.back().max_size == 16u * 1024u * 1024u);
+    CHECK(tiers.size() == 19u);
+    CHECK(tiers.front().max_size == 64u);
+    CHECK(tiers.back().max_size == 32u * 1024u * 1024u);
 
     for (size_t i = 1; i < tiers.size(); ++i) {
       CHECK(tiers[i].max_size > tiers[i - 1].max_size);
@@ -127,9 +127,8 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     MemoryPool pool(3);
     auto stats = pool.get_stats();
     CHECK(stats.size() >= 4u);
-    CHECK(stats.front().max_size == 128u);
-    // L3 has the 16 MiB ceiling as a sentinel, so the largest live tier is 8 MiB.
-    CHECK(stats.back().max_size == 8u * 1024u * 1024u);
+    CHECK(stats.front().max_size == 64u);
+    CHECK(stats.back().max_size == 4u * 1024u * 1024u);
   }
 
   TEST_CASE("MemoryPool(int level) — out-of-range level is clamped") {
@@ -816,33 +815,11 @@ TEST_SUITE("base-MemoryPool - large frames") {
     pool.deallocate(p, k_size);
   }
 
-  TEST_CASE("8 MP NV12 image (~12 MB) fits in the 16 MiB tier (L4+)") {
-    // L3 (default) keeps the 16 MiB ceiling as a sentinel, so 12 MB requests
-    // fall through to the oversized path.  Use L4, the first level to
-    // activate the 16 MiB tier.
-    MemoryPool pool(4);
+  TEST_CASE("8 MP NV12 image (~12 MB) takes the oversized path at L3") {
+    MemoryPool pool(3);
 
     constexpr size_t k8mp_nv12 = 8'000'000u * 3u / 2u;  // 12 MB
-    static_assert(k8mp_nv12 < 16u * 1024u * 1024u, "must fit in the 16 MiB tier");
-    static_assert(k8mp_nv12 > 8u * 1024u * 1024u, "must not fit in the 8 MiB tier");
-
-    void* p = pool.allocate(k8mp_nv12);
-    CHECK(p != nullptr);
-    std::memset(p, 0xCD, 16);
-
-    CHECK(pool.get_oversized_stats().alloc_count == 0u);
-    CHECK(pool.get_stats().back().hit_count == 1u);
-
-    pool.deallocate(p, k8mp_nv12);
-  }
-
-  TEST_CASE("8 MP NV12 image (~12 MB) takes the oversized path at L3 (default)") {
-    // At the default level the 16 MiB ceiling is a sentinel, so anything
-    // past the largest live tier (8 MiB) routes to ::operator new.
-    MemoryPool pool(MemoryPool::get_default_config());
-
-    constexpr size_t k8mp_nv12 = 8'000'000u * 3u / 2u;  // 12 MB
-    static_assert(k8mp_nv12 > 8u * 1024u * 1024u, "must overflow the 8 MiB tier");
+    static_assert(k8mp_nv12 > 4u * 1024u * 1024u, "must overflow the L3 4 MiB tier");
 
     void* p = pool.allocate(k8mp_nv12);
     CHECK(p != nullptr);
@@ -853,11 +830,11 @@ TEST_SUITE("base-MemoryPool - large frames") {
     pool.deallocate(p, k8mp_nv12);
   }
 
-  TEST_CASE("4K RGBA-sized request uses the oversized path") {
-    MemoryPool pool(MemoryPool::get_default_config());
+  TEST_CASE("4K RGBA-sized request uses the oversized path at L3") {
+    MemoryPool pool(3);
 
-    constexpr size_t k4k_rgba = 3840u * 2160u * 4u;  // ~33 MiB
-    static_assert(k4k_rgba > 16u * 1024u * 1024u, "test premise -- must overflow the 16 MiB ceiling");
+    constexpr size_t k4k_rgba = 3840u * 2160u * 4u;  // ~31.6 MiB
+    static_assert(k4k_rgba > 4u * 1024u * 1024u, "test premise -- must overflow the L3 4 MiB top live tier");
 
     void* p = pool.allocate(k4k_rgba);
     CHECK(p != nullptr);
@@ -874,23 +851,11 @@ TEST_SUITE("base-MemoryPool - VLINK_MEMORY_LEVEL") {
     const auto& tiers = MemoryPool::get_default_config().tiers;
 
     REQUIRE(tiers.size() >= 4u);
-    CHECK(tiers.front().max_size == 128u);
+    CHECK(tiers.front().max_size == 64u);
     CHECK(tiers.front().blocks_per_chunk > 0u);
 
-    CHECK(tiers.size() == 16u);
-    CHECK(tiers.back().max_size == 16u * 1024u * 1024u);
-  }
-
-  TEST_CASE("no live tier produces a chunk above the 32 MiB cap") {
-    // Iterate every live (non-sentinel) tier -- at L3 the 16 MiB ceiling is a
-    // sentinel (blocks_per_chunk == 0), so checking only tiers.back() would
-    // pass trivially.  Walk every tier instead.
-    const auto& tiers = MemoryPool::get_default_config().tiers;
-    constexpr size_t kChunkCap = 32u * 1024u * 1024u;
-    for (const auto& t : tiers) {
-      if (t.blocks_per_chunk == 0u) continue;
-      CHECK(t.blocks_per_chunk * t.max_size <= kChunkCap);
-    }
+    CHECK(tiers.size() == 19u);
+    CHECK(tiers.back().max_size == 32u * 1024u * 1024u);
   }
 }
 

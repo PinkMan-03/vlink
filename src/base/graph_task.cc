@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -43,7 +44,12 @@
 
 namespace vlink {
 
-[[maybe_unused]] static std::atomic<uint32_t> global_graph_task_count = 0;
+static std::atomic<uint32_t> global_graph_task_count = 0;
+
+static std::recursive_mutex& topology_mutex() {
+  static std::recursive_mutex mtx;
+  return mtx;
+}
 
 // GraphTask::Impl
 struct GraphTask::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
@@ -70,7 +76,10 @@ struct GraphTask::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddi
 
   GraphTask::Callback callback;
   GraphTask::ConditionCallback condition_callback;
-  GraphTask::StatusCallback status_callback;
+
+  std::mutex status_callbacks_mtx;
+  std::atomic<uint32_t> next_status_callback_id{1};
+  std::unordered_map<uint32_t, GraphTask::StatusCallback> status_callbacks;
 
   bool is_condition_task{false};
 };
@@ -98,6 +107,8 @@ std::shared_ptr<GraphTask> GraphTask::create_condition(const std::string& name, 
 }
 
 void GraphTask::cancel() {
+  std::lock_guard topology_lock(topology_mutex());
+
   std::stack<std::shared_ptr<GraphTask>> task_stack;
   task_stack.emplace(shared_from_this());
 
@@ -105,16 +116,22 @@ void GraphTask::cancel() {
     auto current_task = task_stack.top();
     task_stack.pop();
 
-    std::lock_guard lock(current_task->impl_->mtx);
+    std::vector<std::weak_ptr<GraphTask>> succ_snapshot;
 
-    if (current_task->impl_->status == kStatusInActive) {
-      continue;
+    {
+      std::lock_guard lock(current_task->impl_->mtx);
+
+      if (current_task->impl_->status == kStatusInActive) {
+        continue;
+      }
+
+      succ_snapshot = current_task->impl_->succeed_task_list;
     }
 
     current_task->update_status(kStatusInActive);
     current_task->impl_->cv.notify_all();
 
-    for (const auto& weak_task : current_task->impl_->succeed_task_list) {
+    for (const auto& weak_task : succ_snapshot) {
       if (auto task_ptr = weak_task.lock()) {
         task_stack.emplace(task_ptr);
       }
@@ -128,28 +145,7 @@ void GraphTask::precede(const std::shared_ptr<GraphTask>& task) {
     return;
   }
 
-  std::unique_lock lock1(this->impl_->mtx, std::defer_lock);
-  std::unique_lock lock2(task->impl_->mtx, std::defer_lock);
-  std::lock(lock1, lock2);
-
-  if (std::find_if(impl_->precede_task_list.begin(), impl_->precede_task_list.end(), [&task](const auto& weak_task) {
-        return weak_task.lock() == task;
-      }) != impl_->precede_task_list.end()) {
-    VLOG_F("GraphTask: Task already added.");
-
-    return;
-  }
-
-  impl_->precede_task_list.emplace_back(task);
-
-  task->impl_->succeed_task_list.emplace_back(shared_from_this());
-}
-
-void GraphTask::succeed(const std::shared_ptr<GraphTask>& task) {
-  if VUNLIKELY (!task || task.get() == this) {
-    VLOG_F("GraphTask: Invalid task for succeed.");
-    return;
-  }
+  std::lock_guard topology_lock(topology_mutex());
 
   std::unique_lock lock1(this->impl_->mtx, std::defer_lock);
   std::unique_lock lock2(task->impl_->mtx, std::defer_lock);
@@ -159,18 +155,85 @@ void GraphTask::succeed(const std::shared_ptr<GraphTask>& task) {
         return weak_task.lock() == task;
       }) != impl_->succeed_task_list.end()) {
     VLOG_F("GraphTask: Task already added.");
+    return;
+  }
 
+  if VUNLIKELY (reaches_via_successors(task.get(), task->impl_->succeed_task_list, this)) {
+    VLOG_E("GraphTask: precede would create a cycle; edge rejected.");
     return;
   }
 
   impl_->succeed_task_list.emplace_back(task);
-
   task->impl_->precede_task_list.emplace_back(shared_from_this());
 }
 
-void GraphTask::register_status_callback(StatusCallback&& callback) {
-  std::lock_guard lock(impl_->shared_mtx);
-  impl_->status_callback = std::move(callback);
+void GraphTask::succeed(const std::shared_ptr<GraphTask>& task) {
+  if VUNLIKELY (!task || task.get() == this) {
+    VLOG_F("GraphTask: Invalid task for succeed.");
+    return;
+  }
+
+  std::lock_guard topology_lock(topology_mutex());
+
+  std::unique_lock lock1(this->impl_->mtx, std::defer_lock);
+  std::unique_lock lock2(task->impl_->mtx, std::defer_lock);
+  std::lock(lock1, lock2);
+
+  if (std::find_if(impl_->precede_task_list.begin(), impl_->precede_task_list.end(), [&task](const auto& weak_task) {
+        return weak_task.lock() == task;
+      }) != impl_->precede_task_list.end()) {
+    VLOG_F("GraphTask: Task already added.");
+    return;
+  }
+
+  if VUNLIKELY (reaches_via_successors(this, impl_->succeed_task_list, task.get())) {
+    VLOG_E("GraphTask: succeed would create a cycle; edge rejected.");
+    return;
+  }
+
+  impl_->precede_task_list.emplace_back(task);
+  task->impl_->succeed_task_list.emplace_back(shared_from_this());
+}
+
+uint32_t GraphTask::register_status_callback(StatusCallback&& callback) {
+  if VUNLIKELY (!callback) {
+    return 0;
+  }
+
+  std::lock_guard lock(impl_->status_callbacks_mtx);
+
+  uint32_t id = 0;
+
+  for (uint32_t attempts = 0; attempts < std::numeric_limits<uint32_t>::max(); ++attempts) {
+    id = impl_->next_status_callback_id.fetch_add(1, std::memory_order_relaxed);
+
+    if VUNLIKELY (id == 0) {
+      continue;
+    }
+
+    if VLIKELY (impl_->status_callbacks.find(id) == impl_->status_callbacks.end()) {
+      break;
+    }
+  }
+
+  if VUNLIKELY (id == 0) {
+    VLOG_E("GraphTask: status_callback id space exhausted.");
+    return 0;
+  }
+
+  impl_->status_callbacks.emplace(id, std::move(callback));
+
+  return id;
+}
+
+bool GraphTask::unregister_status_callback(uint32_t id) {
+  std::lock_guard lock(impl_->status_callbacks_mtx);
+  return impl_->status_callbacks.erase(id) > 0;
+}
+
+void GraphTask::clear_status_callbacks() {
+  std::lock_guard lock(impl_->status_callbacks_mtx);
+  impl_->status_callbacks.clear();
 }
 
 void GraphTask::set_name(const std::string& name) {
@@ -213,9 +276,48 @@ GraphTask::Status GraphTask::get_status() const { return impl_->status; }
 
 void GraphTask::remove_precede_task(const std::shared_ptr<GraphTask>& task) {
   if VUNLIKELY (!task) {
-    VLOG_F("GraphTask: Invalid task provided to remove_preceding_task.");
+    VLOG_F("GraphTask: Invalid task provided to remove_precede_task.");
     return;
   }
+
+  std::lock_guard topology_lock(topology_mutex());
+
+  std::unique_lock lock1(this->impl_->mtx, std::defer_lock);
+  std::unique_lock lock2(task->impl_->mtx, std::defer_lock);
+  std::lock(lock1, lock2);
+
+  auto iter_succeed = std::remove_if(impl_->succeed_task_list.begin(), impl_->succeed_task_list.end(),
+                                     [&task](const std::weak_ptr<GraphTask>& weak_task) {
+                                       auto locked_task = weak_task.lock();
+                                       return locked_task == task;
+                                     });
+
+  if VLIKELY (iter_succeed != impl_->succeed_task_list.end()) {
+    impl_->succeed_task_list.erase(iter_succeed, impl_->succeed_task_list.end());
+  } else {
+    VLOG_F("GraphTask: Task not found in succeed_task_list.");
+  }
+
+  auto iter_precede = std::remove_if(task->impl_->precede_task_list.begin(), task->impl_->precede_task_list.end(),
+                                     [this](const std::weak_ptr<GraphTask>& weak_task) {
+                                       auto locked_task = weak_task.lock();
+                                       return locked_task.get() == this;
+                                     });
+
+  if VLIKELY (iter_precede != task->impl_->precede_task_list.end()) {
+    task->impl_->precede_task_list.erase(iter_precede, task->impl_->precede_task_list.end());
+  } else {
+    VLOG_F("GraphTask: Current task not found in task's precede_task_list.");
+  }
+}
+
+void GraphTask::remove_succeed_task(const std::shared_ptr<GraphTask>& task) {
+  if VUNLIKELY (!task) {
+    VLOG_F("GraphTask: Invalid task provided to remove_succeed_task.");
+    return;
+  }
+
+  std::lock_guard topology_lock(topology_mutex());
 
   std::unique_lock lock1(this->impl_->mtx, std::defer_lock);
   std::unique_lock lock2(task->impl_->mtx, std::defer_lock);
@@ -231,41 +333,6 @@ void GraphTask::remove_precede_task(const std::shared_ptr<GraphTask>& task) {
                                      [this](const auto& weak_task) { return weak_task.lock().get() == this; });
   if (iter_succeed != task->impl_->succeed_task_list.end()) {
     task->impl_->succeed_task_list.erase(iter_succeed, task->impl_->succeed_task_list.end());
-  }
-}
-
-void GraphTask::remove_succeed_task(const std::shared_ptr<GraphTask>& task) {
-  if VUNLIKELY (!task) {
-    VLOG_F("GraphTask: Invalid task provided to remove_succeeding_task.");
-    return;
-  }
-
-  std::unique_lock lock1(this->impl_->mtx, std::defer_lock);
-  std::unique_lock lock2(task->impl_->mtx, std::defer_lock);
-  std::lock(lock1, lock2);
-
-  auto iter_precede = std::remove_if(impl_->succeed_task_list.begin(), impl_->succeed_task_list.end(),
-                                     [&task](const std::weak_ptr<GraphTask>& weak_task) {
-                                       auto locked_task = weak_task.lock();
-                                       return locked_task == task;
-                                     });
-
-  if VLIKELY (iter_precede != impl_->succeed_task_list.end()) {
-    impl_->succeed_task_list.erase(iter_precede, impl_->succeed_task_list.end());
-  } else {
-    VLOG_F("GraphTask: Task not found in succeeding list.");
-  }
-
-  auto iter_succeed = std::remove_if(task->impl_->precede_task_list.begin(), task->impl_->precede_task_list.end(),
-                                     [this](const std::weak_ptr<GraphTask>& weak_task) {
-                                       auto locked_task = weak_task.lock();
-                                       return locked_task.get() == this;
-                                     });
-
-  if VLIKELY (iter_succeed != task->impl_->precede_task_list.end()) {
-    task->impl_->precede_task_list.erase(iter_succeed, task->impl_->precede_task_list.end());
-  } else {
-    VLOG_F("GraphTask: Current task not found in task's preceding list.");
   }
 }
 
@@ -388,8 +455,73 @@ void GraphTask::process_and_traverse(FindTaskCallback&& callback) {
 bool GraphTask::has_cycle() const {
   std::unordered_set<const GraphTask*> visited;
   std::unordered_set<const GraphTask*> recursion_stack;
+  uint32_t depth = 0;
+  const uint32_t max_depth = impl_->max_recursion_depth.load(std::memory_order_relaxed);
 
-  return detect_cycle(this, visited, recursion_stack);
+  return detect_cycle(this, visited, recursion_stack, depth, max_depth);
+}
+
+bool GraphTask::reaches_via_successors(const GraphTask* start_node,
+                                       const std::vector<std::weak_ptr<GraphTask>>& start_successors,
+                                       const GraphTask* target) const {
+  std::unordered_set<const GraphTask*> visited;
+  visited.insert(start_node);
+  visited.insert(target);
+
+  std::stack<std::shared_ptr<GraphTask>> stack;
+
+  for (const auto& w : start_successors) {
+    auto p = w.lock();
+
+    if VUNLIKELY (!p) {
+      continue;
+    }
+
+    if (p.get() == target) {
+      return true;
+    }
+
+    if (visited.insert(p.get()).second) {
+      stack.push(std::move(p));
+    }
+  }
+
+  const uint32_t max_depth = impl_->max_recursion_depth.load(std::memory_order_relaxed);
+  uint32_t visit_count = 0;
+
+  while (!stack.empty()) {
+    auto cur = std::move(stack.top());
+    stack.pop();
+
+    if VUNLIKELY (++visit_count > max_depth) {
+      CLOG_F("GraphTask: reaches() exceeded max_recursion_depth (%u).", max_depth);
+      return true;
+    }
+
+    std::vector<std::weak_ptr<GraphTask>> succ_copy;
+    {
+      std::lock_guard lock(cur->impl_->mtx);
+      succ_copy = cur->impl_->succeed_task_list;
+    }
+
+    for (const auto& w : succ_copy) {
+      auto p = w.lock();
+
+      if VUNLIKELY (!p) {
+        continue;
+      }
+
+      if (p.get() == target) {
+        return true;
+      }
+
+      if (visited.insert(p.get()).second) {
+        stack.push(std::move(p));
+      }
+    }
+  }
+
+  return false;
 }
 
 std::string GraphTask::export_to_dot() const {
@@ -506,7 +638,13 @@ int GraphTask::invoke(bool once) {
   update_status(kStatusRunning);
 
   if (!impl_->is_condition_task && impl_->callback) {
-    impl_->callback();
+    try {
+      impl_->callback();
+    } catch (const std::exception& e) {
+      CLOG_E("GraphTask: callback (%s) threw an exception: %s.", impl_->name.c_str(), e.what());
+    } catch (...) {
+      CLOG_E("GraphTask: callback (%s) threw a non-std exception.", impl_->name.c_str());
+    }
 
     update_status(kStatusDone);
 
@@ -514,9 +652,24 @@ int GraphTask::invoke(bool once) {
   }
 
   if (impl_->is_condition_task && impl_->condition_callback) {
-    int ret = impl_->condition_callback();
+    int ret = 0;
+    bool failed = false;
+
+    try {
+      ret = impl_->condition_callback();
+    } catch (const std::exception& e) {
+      failed = true;
+      CLOG_E("GraphTask: condition_callback (%s) threw an exception: %s.", impl_->name.c_str(), e.what());
+    } catch (...) {
+      failed = true;
+      CLOG_E("GraphTask: condition_callback (%s) threw a non-std exception.", impl_->name.c_str());
+    }
 
     update_status(kStatusDone);
+
+    if (failed) {
+      return std::numeric_limits<int>::max();
+    }
 
     return ret;
   }
@@ -566,14 +719,20 @@ void GraphTask::notify(int condition_number) {
 
         invoke_list.emplace_back(task);
       } else if (task_ptr->impl_->policy == kPolicyWaitAll) {
-        size_t old_val = task_ptr->impl_->pending_index.fetch_sub(1);
+        size_t expected = task_ptr->impl_->pending_index.load(std::memory_order_acquire);
+        bool fired = false;
 
-        if (old_val == 0) {
-          task_ptr->impl_->pending_index.fetch_add(1);
-          continue;
+        while (expected > 0) {
+          size_t desired = expected - 1;
+
+          if (task_ptr->impl_->pending_index.compare_exchange_weak(expected, desired, std::memory_order_acq_rel,
+                                                                   std::memory_order_acquire)) {
+            fired = (desired == 0);
+            break;
+          }
         }
 
-        if (old_val != 1) {
+        if (!fired) {
           continue;
         }
 
@@ -596,24 +755,51 @@ void GraphTask::notify(int condition_number) {
 }
 
 void GraphTask::update_status(Status status) {
-  if (impl_->status != status) {
-    impl_->status = status;
+  if (impl_->status == status) {
+    return;
+  }
 
+  impl_->status = status;
+
+  std::string name_copy;
+  {
     std::shared_lock lock(impl_->shared_mtx);
-    if (impl_->status_callback) {
-      impl_->status_callback(impl_->name, status);
+    name_copy = impl_->name;
+  }
+
+  std::lock_guard lock(impl_->status_callbacks_mtx);
+
+  for (auto& [id, cb] : impl_->status_callbacks) {
+    (void)id;
+
+    if VUNLIKELY (!cb) {
+      continue;
+    }
+
+    try {
+      cb(name_copy, status);
+    } catch (const std::exception& e) {
+      CLOG_E("GraphTask: status_callback (%s) threw an exception: %s.", name_copy.c_str(), e.what());
+    } catch (...) {
+      CLOG_E("GraphTask: status_callback (%s) threw a non-std exception.", name_copy.c_str());
     }
   }
 }
 
 bool GraphTask::detect_cycle(const GraphTask* task, std::unordered_set<const GraphTask*>& visited,
-                             std::unordered_set<const GraphTask*>& recursion_stack) const {
+                             std::unordered_set<const GraphTask*>& recursion_stack, uint32_t& depth,
+                             uint32_t max_depth) const {
   if VUNLIKELY (recursion_stack.count(task)) {
     return true;
   }
 
   if (visited.count(task)) {
     return false;
+  }
+
+  if VUNLIKELY (++depth > max_depth) {
+    CLOG_F("GraphTask: detect_cycle exceeded max_recursion_depth (%u).", max_depth);
+    return true;
   }
 
   visited.insert(task);
@@ -628,16 +814,17 @@ bool GraphTask::detect_cycle(const GraphTask* task, std::unordered_set<const Gra
   for (const auto& weak_task : succ_copy) {
     auto next_task = weak_task.lock();
 
-    if (!next_task) {
+    if VUNLIKELY (!next_task) {
       continue;
     }
 
-    if VUNLIKELY (detect_cycle(next_task.get(), visited, recursion_stack)) {
+    if VUNLIKELY (detect_cycle(next_task.get(), visited, recursion_stack, depth, max_depth)) {
       return true;
     }
   }
 
   recursion_stack.erase(task);
+  --depth;
 
   return false;
 }
