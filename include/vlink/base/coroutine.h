@@ -619,29 +619,38 @@ Task<std::vector<TypeT>> when_all(MessageLoop& loop, std::vector<Task<TypeT>> ta
 VLINK_EXPORT Task<void> when_all(MessageLoop& loop, std::vector<Task<void>> tasks);
 
 /**
- * @brief Awaits the first @c Task<TypeT> in @p tasks to complete; returns its
- * index and result.
+ * @brief Records the index and result of the first @c Task<TypeT> in @p tasks
+ * to complete; waits for all remaining tasks to finish before returning.
  *
  * @details
- * All tasks continue running even after one wins -- their results are dropped.
- * No cancellation propagation is performed.  If every sub-task throws,
- * @c std::future_error propagates through the awaiting @c co_await.
+ * The "winner" (first task to complete) is captured by an atomic compare-exchange;
+ * losing tasks continue running until completion and their results are dropped.
+ * @c when_any does not return until **every** sub-task has finished -- this is
+ * required to avoid leaking the orphaned sub-task frames (there is no
+ * cross-coroutine cancellation in this layer).  If you need an "abandon
+ * losers" semantics with bounded latency, ensure each sub-task itself respects
+ * a deadline.  If every sub-task throws, @c std::future_error propagates
+ * through the awaiting @c co_await.
  *
  * @throws std::invalid_argument if @p tasks is empty.  Because @c when_any is
  *         itself a coroutine the exception is observed at the awaiting
  *         @c co_await site (not synchronously at the @c when_any() call site).
  *
- * @return @c {winning_index, result}
+ * @return @c {winning_index, winning_result}
  */
 template <typename TypeT>
 Task<std::pair<size_t, TypeT>> when_any(MessageLoop& loop, std::vector<Task<TypeT>> tasks);
 
 /**
- * @brief Awaits the first @c Task<void> in @p tasks to complete; returns its index.
+ * @brief Records the index of the first @c Task<void> in @p tasks to complete;
+ * waits for all remaining tasks to finish before returning.
  *
  * @details
- * Other tasks continue to run; their completion is ignored.  If every sub-task
- * throws, @c std::future_error propagates.
+ * The "winner" (first task to complete) is captured by an atomic compare-exchange;
+ * losing tasks continue running until completion.  @c when_any does not return
+ * until **every** sub-task has finished -- this is required to avoid leaking the
+ * orphaned sub-task frames (there is no cross-coroutine cancellation in this
+ * layer).  If every sub-task throws, @c std::future_error propagates.
  *
  * @throws std::invalid_argument if @p tasks is empty.  Surfaces through the
  *         awaiting @c co_await (when_any is itself a coroutine).
@@ -920,21 +929,30 @@ inline Task<std::pair<size_t, TypeT>> when_any(MessageLoop& loop, std::vector<Ta
     throw std::invalid_argument("vlink::Coroutine::when_any: tasks must not be empty");
   }
 
-  auto promise_ptr = std::make_shared<std::promise<std::pair<size_t, TypeT>>>();
-  auto fut = promise_ptr->get_future();
-  auto fired = std::make_shared<std::atomic_bool>(false);
+  struct State final {
+    std::promise<std::pair<size_t, TypeT>> promise;
+    std::atomic_bool fired{false};
+    std::atomic<size_t> remaining;
+    std::optional<std::pair<size_t, TypeT>> winner;
+  };
+
+  auto state = std::make_shared<State>();
+  state->remaining.store(tasks.size(), std::memory_order_relaxed);
+  auto fut = state->promise.get_future();
 
   for (size_t i = 0; i < tasks.size(); ++i) {
-    co_spawn(loop, std::move(tasks[i]), [promise_ptr, fired, i](TypeT value) {
+    co_spawn(loop, std::move(tasks[i]), [state, i](TypeT value) {
       bool expected = false;
 
-      if (fired->compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        promise_ptr->set_value({i, std::move(value)});
+      if (state->fired.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        state->winner.emplace(i, std::move(value));
+      }
+
+      if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        state->promise.set_value(std::move(*state->winner));
       }
     });
   }
-
-  promise_ptr.reset();
 
   co_return co_await await_future(loop, std::move(fut));
 }

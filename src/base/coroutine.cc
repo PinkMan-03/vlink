@@ -312,21 +312,30 @@ Task<size_t> when_any(MessageLoop& loop, std::vector<Task<void>> tasks) {
     throw std::invalid_argument("vlink::Coroutine::when_any: tasks must not be empty");
   }
 
-  auto promise_ptr = std::make_shared<std::promise<size_t>>();
-  auto fut = promise_ptr->get_future();
-  auto fired = std::make_shared<std::atomic_bool>(false);
+  struct State final {
+    std::promise<size_t> promise;
+    std::atomic_bool fired{false};
+    std::atomic<size_t> remaining;
+    size_t winner_idx{0};
+  };
+
+  auto state = std::make_shared<State>();
+  state->remaining.store(tasks.size(), std::memory_order_relaxed);
+  auto fut = state->promise.get_future();
 
   for (size_t i = 0; i < tasks.size(); ++i) {
-    co_spawn(loop, std::move(tasks[i]), [promise_ptr, fired, i]() {
+    co_spawn(loop, std::move(tasks[i]), [state, i]() {
       bool expected = false;
 
-      if VUNLIKELY (fired->compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        promise_ptr->set_value(i);
+      if (state->fired.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        state->winner_idx = i;
+      }
+
+      if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        state->promise.set_value(state->winner_idx);
       }
     });
   }
-
-  promise_ptr.reset();
 
   co_return co_await await_future(loop, std::move(fut));
 }

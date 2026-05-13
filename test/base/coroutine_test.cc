@@ -431,6 +431,16 @@ Task<> body_when_any_void_empty_throws(MessageLoop* loop, std::atomic<bool>* cau
   co_return;
 }
 
+Task<> body_schedule_throws_on_post_fail(MessageLoop* target, std::atomic<bool>* caught, std::promise<void>* done) {
+  try {
+    co_await Coroutine::schedule(*target);
+  } catch (const std::runtime_error&) {
+    caught->store(true, std::memory_order_release);
+  }
+  done->set_value();
+  co_return;
+}
+
 Task<> body_three_priority_awaits(MessageLoop* loop, std::promise<void>* done) {
   co_await schedule(*loop, MessageLoop::kNormalPriority);
   co_await yield(*loop, MessageLoop::kHighestPriority);
@@ -762,7 +772,7 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("when_any<int> returns the first completed sub-task") {
+  TEST_CASE("when_any<int> records the first completed sub-task as winner") {
     MessageLoop loop;
     loop.async_run();
 
@@ -812,7 +822,7 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("when_any<void> returns the first index to complete") {
+  TEST_CASE("when_any<void> records the first index to complete as winner") {
     MessageLoop loop;
     loop.async_run();
 
@@ -1168,7 +1178,7 @@ TEST_SUITE("base-Coroutine") {
     loop_b.wait_for_quit();
   }
 
-  TEST_CASE("when_any returns the already-completed sub-task immediately") {
+  TEST_CASE("when_any picks the already-completed sub-task as winner (still awaits all)") {
     MessageLoop loop;
     loop.async_run();
 
@@ -1292,32 +1302,17 @@ TEST_SUITE("base-Coroutine") {
     loop.quit();
     loop.wait_for_quit();
 
-    bool caught_runtime = false;
-
-    auto body = [&](MessageLoop* ll) -> Task<> {
-      try {
-        co_await Coroutine::schedule(*ll);
-      } catch (const std::runtime_error&) {
-        caught_runtime = true;
-      }
-
-      co_return;
-    };
-
     MessageLoop driver;
     driver.async_run();
 
+    std::atomic<bool> caught_runtime{false};
     std::promise<void> done;
     auto fut = done.get_future();
 
-    co_spawn(driver, [&]() -> Task<> {
-      co_await body(&loop);
-      done.set_value();
-    }());
+    co_spawn(driver, body_schedule_throws_on_post_fail(&loop, &caught_runtime, &done));
 
-    fut.wait();
     fut.get();
-    CHECK(caught_runtime);
+    CHECK(caught_runtime.load(std::memory_order_acquire));
 
     driver.quit();
     driver.wait_for_quit();

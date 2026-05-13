@@ -223,13 +223,13 @@ std::vector<int> results = co_await Co::when_all<int>(loop, std::move(tasks));
 - 结果按输入顺序排列
 - 如果某个 sub-task 抛异常 → 它的 on_complete 不会触发 → 其余 sub-task 跑完后通过 `std::future_error(broken_promise)` 从 `co_await` 抛出（不是永久挂起，但拿不到原始异常类型）
 
-### when_any -- 第一个完成
+### when_any -- 记录第一个完成者，等全部跑完才返回
 
 ```cpp
 auto [idx, value] = co_await Co::when_any<int>(loop, std::move(tasks));
 ```
 
-返回第一个完成的索引和结果。其他 task **不会被取消**，它们继续在后台跑完，结果被丢弃。
+返回值是"winner"——第一个完成的 task 的索引和结果。但 `when_any` **必须等所有 sub-task 都跑完才返回**：这是为了让每个 task 的协程帧能正常析构，避免遗留挂起协程造成的内存泄漏（本层没有跨协程取消机制）。其他 task **不会被取消**，结果被丢弃。如需"loser 一旦 winner 出来就退场"的有界延迟语义，请让每个子 task 自己尊重 deadline。
 
 ### sequence -- 串行执行
 
@@ -384,7 +384,7 @@ auto results = co_await Co::when_all<int>(loop, { t1() /* ... */ });
 6 & 7. **schedule + await_future**：外部线程通过 promise 推送数据，协程 await 接收
 8. **Section 8**：`exec` 把 `Schedule::Config(delay=50ms)` 封装进协程
 9. **Section 9**：三节点链式 `GraphTask` A→B→C，协程 await 叶子完成
-10. **Section 10**：`when_any` 取最快完成的；`when_all` 并发执行收集结果
+10. **Section 10**：`when_any` 记录最快完成者并等全部跑完后返回；`when_all` 并发执行收集结果
 11. **Section 11**：`kPriorityType` 队列上验证 `kHighestPriority` 比 `kLowestPriority` 先跑
 
 ## 相关示例
