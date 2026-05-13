@@ -1315,6 +1315,7 @@ TEST_SUITE("base-Coroutine") {
       done.set_value();
     }());
 
+    fut.wait();
     fut.get();
     CHECK(caught_runtime);
 

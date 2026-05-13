@@ -104,14 +104,15 @@ detail::DetachedTask detail::DetachedTask::promise_type::get_return_object() noe
   return DetachedTask{std::coroutine_handle<promise_type>::from_promise(*this)};
 }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static) -- coroutine protocol hook
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::suspend_always detail::DetachedTask::promise_type::initial_suspend() noexcept { return {}; }
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static) -- coroutine protocol hook
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 std::suspend_never detail::DetachedTask::promise_type::final_suspend() noexcept { return {}; }
 
 void detail::DetachedTask::promise_type::return_void() noexcept {}
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void detail::DetachedTask::promise_type::unhandled_exception() noexcept {
   try {
     auto eptr = std::current_exception();
@@ -177,7 +178,8 @@ void YieldAwaiter::await_resume() {
 bool DelayAwaiter::await_ready() noexcept { return false; }
 
 bool DelayAwaiter::await_suspend(std::coroutine_handle<> handle) {
-  failed = !Timer::call_once(loop, ms, [handle]() { handle.resume(); }, priority);
+  failed = !Timer::call_once(
+      loop, ms, [handle]() { handle.resume(); }, priority);
   return !failed;
 }
 

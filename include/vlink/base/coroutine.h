@@ -194,7 +194,7 @@ struct TaskPromise<void> final : TaskPromiseBase<void> {
 };
 
 struct VLINK_EXPORT DetachedTask final {
-  struct VLINK_EXPORT promise_type final {  // NOLINT(readability-identifier-naming) -- coroutine protocol name
+  struct VLINK_EXPORT promise_type final {  // NOLINT(readability-identifier-naming)
     static void* operator new(size_t size) { return detail::allocate_frame(size); }
 
     static void operator delete(void* ptr, size_t size) noexcept { detail::deallocate_frame(ptr, size); }
@@ -664,7 +664,7 @@ VLINK_EXPORT Task<void> sequence(MessageLoop& loop, std::vector<Task<void>> task
 
 namespace detail {
 
-// NOLINTNEXTLINE(readability-convert-member-functions-to-static) -- coroutine protocol hook
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 inline bool FinalAwaiter::await_ready() const noexcept { return false; }
 
 template <typename PromiseT>
