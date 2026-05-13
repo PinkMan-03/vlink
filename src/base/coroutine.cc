@@ -178,8 +178,7 @@ void YieldAwaiter::await_resume() {
 bool DelayAwaiter::await_ready() noexcept { return false; }
 
 bool DelayAwaiter::await_suspend(std::coroutine_handle<> handle) {
-  failed = !Timer::call_once(
-      loop, ms, [handle]() { handle.resume(); }, priority);
+  failed = !Timer::call_once(loop, ms, [handle]() { handle.resume(); }, priority);
   return !failed;
 }
 

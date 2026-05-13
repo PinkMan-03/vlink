@@ -114,6 +114,7 @@ inline Client<ReqT, RespT, SecT>::~Client() {
     future_map_.clear();
   }
 
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   this->deinit();
 }
 

@@ -88,6 +88,7 @@ inline Setter<ValueT, SecT>::Setter(const std::string& url_str, InitType type)
 
 template <typename ValueT, SecurityType SecT>
 inline Setter<ValueT, SecT>::~Setter() {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   this->deinit();
 }
 

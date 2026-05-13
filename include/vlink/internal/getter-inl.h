@@ -89,6 +89,7 @@ inline Getter<ValueT, SecT>::Getter(const std::string& url_str, InitType type)
 
 template <typename ValueT, SecurityType SecT>
 inline Getter<ValueT, SecT>::~Getter() {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   this->deinit();
 }
 
