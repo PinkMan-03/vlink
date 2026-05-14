@@ -31,6 +31,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <future>
 #include <memory>
 #include <stdexcept>
@@ -374,15 +375,24 @@ Task<int> body_throws_runtime_error() {
   co_return 0;
 }
 
-Task<> body_when_all_with_throwing(MessageLoop* loop, std::atomic<bool>* caught, std::promise<void>* done) {
+Task<> body_when_all_with_throwing(MessageLoop* loop, std::atomic<bool>* caught_runtime_error,
+                                   std::atomic<bool>* caught_future_error, std::atomic<bool>* what_matches,
+                                   std::atomic<bool>* caught_other, std::promise<void>* done) {
   std::vector<Task<int>> tasks;
   tasks.emplace_back(body_throws_runtime_error());
   tasks.emplace_back(body_int_const(1));
 
   try {
     (void)co_await when_all<int>(*loop, std::move(tasks));
+  } catch (const std::future_error&) {
+    caught_future_error->store(true, std::memory_order_release);
+  } catch (const std::runtime_error& e) {
+    caught_runtime_error->store(true, std::memory_order_release);
+    if (std::strcmp(e.what(), "forced") == 0) {
+      what_matches->store(true, std::memory_order_release);
+    }
   } catch (...) {
-    caught->store(true, std::memory_order_release);
+    caught_other->store(true, std::memory_order_release);
   }
   done->set_value();
   co_return;
@@ -428,6 +438,44 @@ Task<> body_when_any_void_empty_throws(MessageLoop* loop, std::atomic<bool>* cau
     caught->store(true, std::memory_order_release);
   }
   done->set_value();
+  co_return;
+}
+
+Task<int> body_throws_runtime_error_with(const char* msg) {
+  throw std::runtime_error(msg);
+  co_return 0;
+}
+
+Task<> body_when_any_all_throw(MessageLoop* loop, std::atomic<bool>* caught_runtime_error,
+                               std::atomic<bool>* caught_future_error, std::atomic<bool>* what_in_set,
+                               std::atomic<bool>* caught_other, std::promise<void>* done) {
+  std::vector<Task<int>> tasks;
+  tasks.emplace_back(body_throws_runtime_error_with("first"));
+  tasks.emplace_back(body_throws_runtime_error_with("second"));
+
+  try {
+    (void)co_await when_any<int>(*loop, std::move(tasks));
+  } catch (const std::future_error&) {
+    caught_future_error->store(true, std::memory_order_release);
+  } catch (const std::runtime_error& e) {
+    caught_runtime_error->store(true, std::memory_order_release);
+    if (std::strcmp(e.what(), "first") == 0 || std::strcmp(e.what(), "second") == 0) {
+      what_in_set->store(true, std::memory_order_release);
+    }
+  } catch (...) {
+    caught_other->store(true, std::memory_order_release);
+  }
+  done->set_value();
+  co_return;
+}
+
+Task<> body_when_any_partial_fail(MessageLoop* loop, std::promise<std::pair<size_t, int>>* done) {
+  std::vector<Task<int>> tasks;
+  tasks.emplace_back(body_throws_runtime_error());
+  tasks.emplace_back(body_int_const(42));
+
+  auto winner = co_await when_any<int>(*loop, std::move(tasks));
+  done->set_value(winner);
   co_return;
 }
 
@@ -1195,19 +1243,70 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("when_all<int> with a throwing sub-task surfaces std::future_error, does not hang") {
+  TEST_CASE("when_all<int> with a throwing sub-task rethrows the original exception type, not future_error") {
     MessageLoop loop;
     loop.async_run();
 
+    std::atomic<bool> caught_runtime_error{false};
     std::atomic<bool> caught_future_error{false};
+    std::atomic<bool> what_matches{false};
+    std::atomic<bool> caught_other{false};
     std::promise<void> done;
     auto fut = done.get_future();
 
-    co_spawn(loop, body_when_all_with_throwing(&loop, &caught_future_error, &done));
+    co_spawn(loop, body_when_all_with_throwing(&loop, &caught_runtime_error, &caught_future_error, &what_matches,
+                                               &caught_other, &done));
 
     auto status = fut.wait_for(std::chrono::seconds(2));
     CHECK(status == std::future_status::ready);
-    CHECK(caught_future_error.load(std::memory_order_acquire));
+    CHECK(caught_runtime_error.load(std::memory_order_acquire));
+    CHECK(what_matches.load(std::memory_order_acquire));
+    CHECK_FALSE(caught_future_error.load(std::memory_order_acquire));
+    CHECK_FALSE(caught_other.load(std::memory_order_acquire));
+
+    loop.quit();
+    loop.wait_for_quit();
+  }
+
+  TEST_CASE("when_any<int> with all sub-tasks throwing rethrows the first observed exception, not future_error") {
+    MessageLoop loop;
+    loop.async_run();
+
+    std::atomic<bool> caught_runtime_error{false};
+    std::atomic<bool> caught_future_error{false};
+    std::atomic<bool> what_in_set{false};
+    std::atomic<bool> caught_other{false};
+    std::promise<void> done;
+    auto fut = done.get_future();
+
+    co_spawn(loop, body_when_any_all_throw(&loop, &caught_runtime_error, &caught_future_error, &what_in_set,
+                                           &caught_other, &done));
+
+    auto status = fut.wait_for(std::chrono::seconds(2));
+    CHECK(status == std::future_status::ready);
+    CHECK(caught_runtime_error.load(std::memory_order_acquire));
+    CHECK(what_in_set.load(std::memory_order_acquire));
+    CHECK_FALSE(caught_future_error.load(std::memory_order_acquire));
+    CHECK_FALSE(caught_other.load(std::memory_order_acquire));
+
+    loop.quit();
+    loop.wait_for_quit();
+  }
+
+  TEST_CASE("when_any<int> with a failing and a succeeding sub-task returns the successful winner") {
+    MessageLoop loop;
+    loop.async_run();
+
+    std::promise<std::pair<size_t, int>> done;
+    auto fut = done.get_future();
+
+    co_spawn(loop, body_when_any_partial_fail(&loop, &done));
+
+    auto status = fut.wait_for(std::chrono::seconds(2));
+    CHECK(status == std::future_status::ready);
+    auto winner = fut.get();
+    CHECK(winner.first == 1);
+    CHECK(winner.second == 42);
 
     loop.quit();
     loop.wait_for_quit();

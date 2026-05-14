@@ -25,7 +25,11 @@
 
 #ifdef VLINK_ENABLE_COROUTINE
 
+#include <chrono>
+#include <mutex>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #include "./base/graph_task.h"
 #include "./base/logger.h"
@@ -36,7 +40,7 @@
 namespace vlink {
 namespace Coroutine {  // NOLINT(readability-identifier-naming)
 
-[[maybe_unused]] static constexpr size_t kMaxTaskSize = 10000U;
+[[maybe_unused]] static constexpr size_t kMaxTaskSize = 5000U;
 
 // FutureWaitLoop
 class FutureWaitLoop final : public MessageLoop {
@@ -48,25 +52,25 @@ class FutureWaitLoop final : public MessageLoop {
 
   [[nodiscard]] size_t get_max_task_count() const override { return kMaxTaskSize; }
 
-  static void start(MoveFunction<bool()>&& poll) {
-    instance().post_task([poll = std::move(poll)]() mutable { poll_once(std::move(poll)); });
-  }
+  static void register_poll(MoveFunction<bool()>&& poll) {
+    auto& self = instance();
+    bool need_post = false;
 
-  static void poll_once(MoveFunction<bool()> poll) {
-    bool done = false;
+    {
+      std::lock_guard lock(self.mtx_);
+      self.pending_.push_back(std::move(poll));
 
-    try {
-      done = poll();
-    } catch (const std::exception& e) {
-      CLOG_E("FutureWaitLoop: poll closure threw an exception: %s.", e.what());
-      done = true;
-    } catch (...) {
-      CLOG_E("FutureWaitLoop: poll closure threw a non-std exception.");
-      done = true;
+      if (!self.running_) {
+        self.running_ = true;
+        need_post = true;
+      }
     }
 
-    if VLIKELY (!done) {
-      instance().post_task([poll = std::move(poll)]() mutable { poll_once(std::move(poll)); });
+    if (need_post) {
+      if VUNLIKELY (!self.post_task([]() { instance().poll_iteration(); })) {
+        std::lock_guard lock(self.mtx_);
+        self.running_ = false;
+      }
     }
   }
 
@@ -80,6 +84,71 @@ class FutureWaitLoop final : public MessageLoop {
     quit();
     wait_for_quit();
   }
+
+  void poll_iteration() {
+    std::vector<MoveFunction<bool()>> snapshot;
+
+    {
+      std::lock_guard lock(mtx_);
+
+      if VUNLIKELY (pending_.empty()) {
+        running_ = false;
+        return;
+      }
+
+      snapshot.swap(pending_);
+    }
+
+    std::vector<MoveFunction<bool()>> not_done;
+    not_done.reserve(snapshot.size());
+
+    for (auto& poll : snapshot) {
+      bool done = false;
+
+      try {
+        done = poll();
+      } catch (const std::exception& e) {
+        CLOG_E("FutureWaitLoop: poll closure threw an exception: %s.", e.what());
+        done = true;
+      } catch (...) {
+        CLOG_E("FutureWaitLoop: poll closure threw a non-std exception.");
+        done = true;
+      }
+
+      if (!done) {
+        not_done.push_back(std::move(poll));
+      }
+    }
+
+    bool need_post = false;
+
+    {
+      std::lock_guard lock(mtx_);
+
+      for (auto& poll : not_done) {
+        pending_.push_back(std::move(poll));
+      }
+
+      if (pending_.empty()) {
+        running_ = false;
+      } else {
+        need_post = true;
+      }
+    }
+
+    if (need_post) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+      if VUNLIKELY (!post_task([]() { instance().poll_iteration(); })) {
+        std::lock_guard lock(mtx_);
+        running_ = false;
+      }
+    }
+  }
+
+  std::mutex mtx_;
+  std::vector<MoveFunction<bool()>> pending_;
+  bool running_{false};
 };
 
 void* detail::allocate_frame(size_t size) {
@@ -131,7 +200,7 @@ void detail::DetachedTask::promise_type::unhandled_exception() noexcept {
 
 detail::DetachedTask detail::co_spawn_void_impl(Task<void> task) { co_await std::move(task); }
 
-void detail::register_future_wait(MoveFunction<bool()>&& poll) { FutureWaitLoop::start(std::move(poll)); }
+void detail::register_future_wait(MoveFunction<bool()>&& poll) { FutureWaitLoop::register_poll(std::move(poll)); }
 
 bool detail::post_resume(MessageLoop& loop, std::coroutine_handle<> handle, uint16_t priority) {
   if (priority != 0 && loop.get_type() == MessageLoop::kPriorityType) {
@@ -283,25 +352,147 @@ GraphAwaiter await_graph(MessageLoop& loop, GraphTaskPtr graph) {
   return GraphAwaiter{&loop, std::move(graph)};
 }
 
+namespace detail {
+
+struct WhenAllVoidState final {
+  std::atomic<size_t> remaining{0};
+  std::mutex exc_mtx;
+  std::exception_ptr first_exc;
+  std::promise<void> promise;
+};
+
+struct WhenAllVoidGuard final {
+  std::shared_ptr<WhenAllVoidState> state;
+  bool completed_normally{false};
+
+  explicit WhenAllVoidGuard(std::shared_ptr<WhenAllVoidState> s) noexcept : state(std::move(s)) {}
+
+  WhenAllVoidGuard(WhenAllVoidGuard&& other) noexcept
+      : state(std::move(other.state)), completed_normally(other.completed_normally) {}
+
+  WhenAllVoidGuard(const WhenAllVoidGuard&) = delete;
+  WhenAllVoidGuard& operator=(const WhenAllVoidGuard&) = delete;
+  WhenAllVoidGuard& operator=(WhenAllVoidGuard&&) = delete;
+
+  ~WhenAllVoidGuard() {
+    if (!state) {
+      return;
+    }
+
+    if (!completed_normally) {
+      std::lock_guard lock(state->exc_mtx);
+
+      if (!state->first_exc) {
+        state->first_exc = std::make_exception_ptr(
+            std::runtime_error("vlink::Coroutine::when_all: sub-task aborted before completion"));
+      }
+    }
+
+    if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      if (state->first_exc) {
+        state->promise.set_exception(state->first_exc);
+      } else {
+        state->promise.set_value();
+      }
+    }
+  }
+};
+
+static Task<void> when_all_void_runner(Task<void> task, WhenAllVoidGuard guard) {
+  try {
+    co_await std::move(task);
+  } catch (...) {
+    std::lock_guard lock(guard.state->exc_mtx);
+
+    if (!guard.state->first_exc) {
+      guard.state->first_exc = std::current_exception();
+    }
+  }
+
+  guard.completed_normally = true;
+}
+
+struct WhenAnyVoidState final {
+  std::atomic_bool fired{false};
+  std::atomic<size_t> remaining{0};
+  std::mutex exc_mtx;
+  std::exception_ptr first_exc;
+  size_t winner_idx{0};
+  bool has_winner{false};
+  std::promise<size_t> promise;
+};
+
+struct WhenAnyVoidGuard final {
+  std::shared_ptr<WhenAnyVoidState> state;
+  bool completed_normally{false};
+
+  explicit WhenAnyVoidGuard(std::shared_ptr<WhenAnyVoidState> s) noexcept : state(std::move(s)) {}
+
+  WhenAnyVoidGuard(WhenAnyVoidGuard&& other) noexcept
+      : state(std::move(other.state)), completed_normally(other.completed_normally) {}
+
+  WhenAnyVoidGuard(const WhenAnyVoidGuard&) = delete;
+  WhenAnyVoidGuard& operator=(const WhenAnyVoidGuard&) = delete;
+  WhenAnyVoidGuard& operator=(WhenAnyVoidGuard&&) = delete;
+
+  ~WhenAnyVoidGuard() {
+    if (!state) {
+      return;
+    }
+
+    if (!completed_normally) {
+      std::lock_guard lock(state->exc_mtx);
+
+      if (!state->first_exc) {
+        state->first_exc = std::make_exception_ptr(
+            std::runtime_error("vlink::Coroutine::when_any: sub-task aborted before completion"));
+      }
+    }
+
+    if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      if (state->has_winner) {
+        state->promise.set_value(state->winner_idx);
+      } else {
+        state->promise.set_exception(state->first_exc);
+      }
+    }
+  }
+};
+
+static Task<void> when_any_void_runner(Task<void> task, size_t i, WhenAnyVoidGuard guard) {
+  try {
+    co_await std::move(task);
+    bool expected = false;
+
+    if (guard.state->fired.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      guard.state->winner_idx = i;
+      guard.state->has_winner = true;
+    }
+  } catch (...) {
+    std::lock_guard lock(guard.state->exc_mtx);
+
+    if (!guard.state->first_exc) {
+      guard.state->first_exc = std::current_exception();
+    }
+  }
+
+  guard.completed_normally = true;
+}
+
+}  // namespace detail
+
 Task<void> when_all(MessageLoop& loop, std::vector<Task<void>> tasks) {
   if VUNLIKELY (tasks.empty()) {
     co_return;
   }
 
-  const size_t count = tasks.size();
-  auto remaining = std::make_shared<std::atomic<size_t>>(count);
-  auto promise_ptr = std::make_shared<std::promise<void>>();
-  auto fut = promise_ptr->get_future();
+  auto state = std::make_shared<detail::WhenAllVoidState>();
+  state->remaining.store(tasks.size(), std::memory_order_relaxed);
+  auto fut = state->promise.get_future();
 
   for (auto& task : tasks) {
-    co_spawn(loop, std::move(task), [remaining, promise_ptr]() {
-      if VUNLIKELY (remaining->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        promise_ptr->set_value();
-      }
-    });
+    co_spawn(loop, detail::when_all_void_runner(std::move(task), detail::WhenAllVoidGuard{state}));
   }
-
-  promise_ptr.reset();
 
   co_await await_future(loop, std::move(fut));
   co_return;
@@ -312,29 +503,12 @@ Task<size_t> when_any(MessageLoop& loop, std::vector<Task<void>> tasks) {
     throw std::invalid_argument("vlink::Coroutine::when_any: tasks must not be empty");
   }
 
-  struct State final {
-    std::promise<size_t> promise;
-    std::atomic_bool fired{false};
-    std::atomic<size_t> remaining;
-    size_t winner_idx{0};
-  };
-
-  auto state = std::make_shared<State>();
+  auto state = std::make_shared<detail::WhenAnyVoidState>();
   state->remaining.store(tasks.size(), std::memory_order_relaxed);
   auto fut = state->promise.get_future();
 
   for (size_t i = 0; i < tasks.size(); ++i) {
-    co_spawn(loop, std::move(tasks[i]), [state, i]() {
-      bool expected = false;
-
-      if (state->fired.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        state->winner_idx = i;
-      }
-
-      if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        state->promise.set_value(state->winner_idx);
-      }
-    });
+    co_spawn(loop, detail::when_any_void_runner(std::move(tasks[i]), i, detail::WhenAnyVoidGuard{state}));
   }
 
   co_return co_await await_future(loop, std::move(fut));
@@ -346,12 +520,11 @@ Task<void> sequence(MessageLoop& loop, std::vector<Task<void>> tasks) {
       continue;
     }
 
-    auto promise_ptr = std::make_shared<std::promise<void>>();
-    auto fut = promise_ptr->get_future();
+    auto state = std::make_shared<detail::WhenAllVoidState>();
+    state->remaining.store(1, std::memory_order_relaxed);
+    auto fut = state->promise.get_future();
 
-    co_spawn(loop, std::move(task), [promise_ptr]() { promise_ptr->set_value(); });
-
-    promise_ptr.reset();
+    co_spawn(loop, detail::when_all_void_runner(std::move(task), detail::WhenAllVoidGuard{state}));
 
     co_await await_future(loop, std::move(fut));
   }

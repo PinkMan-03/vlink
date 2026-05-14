@@ -221,15 +221,23 @@ std::vector<int> results = co_await Co::when_all<int>(loop, std::move(tasks));
 - 每个 sub-task 通过 `co_spawn` 并行启动
 - 全部完成后才 resume
 - 结果按输入顺序排列
-- 如果某个 sub-task 抛异常 → 它的 on_complete 不会触发 → 其余 sub-task 跑完后通过 `std::future_error(broken_promise)` 从 `co_await` 抛出（不是永久挂起，但拿不到原始异常类型）
+- 如果某个 sub-task 抛异常 → 该异常被 runner 捕获并记录到共享 state 的 `first_exc` → 其余 sub-task 跑完后从 `co_await` rethrow 第一个观察到的原始异常（保留异常类型，后续 sibling 的异常被丢弃）
 
-### when_any -- 记录第一个完成者，等全部跑完才返回
+### when_any -- 记录第一个**成功完成者**，等全部跑完才返回
 
 ```cpp
 auto [idx, value] = co_await Co::when_any<int>(loop, std::move(tasks));
 ```
 
-返回值是"winner"——第一个完成的 task 的索引和结果。但 `when_any` **必须等所有 sub-task 都跑完才返回**：这是为了让每个 task 的协程帧能正常析构，避免遗留挂起协程造成的内存泄漏（本层没有跨协程取消机制）。其他 task **不会被取消**，结果被丢弃。如需"loser 一旦 winner 出来就退场"的有界延迟语义，请让每个子 task 自己尊重 deadline。
+返回值是"winner"——第一个**成功完成**的 task 的索引和结果。语义细节：
+
+- 只有**成功完成**的 sub-task 参与 winner 抢占（用 atomic CAS）；抛异常的 sub-task **不参与**。
+- 至少有一个 sub-task 成功 → 返回最先成功那个的 `{idx, value}`，其余成功者的结果被丢弃。
+- **全部** sub-task 都抛异常 → 抛出第一个观察到的原始异常（异常类型保留，不是 `std::future_error`）。
+
+`when_any` **必须等所有 sub-task 都跑完才返回**：这是为了让每个 task 的协程帧能正常析构，避免遗留挂起协程造成的内存泄漏（本层没有跨协程取消机制）。其他 task **不会被取消**，结果被丢弃。如需"loser 一旦 winner 出来就退场"的有界延迟语义，请让每个子 task 自己尊重 deadline。
+
+> 注意：本语义是 "first **success**"，**不是** "first completion of any kind"。如果需要"任何完成（含失败）即触发"，目前 vlink 没有对应原语，可以让每个 task 内部把异常转成 sentinel 结果值再用 `when_any`。
 
 ### sequence -- 串行执行
 
@@ -357,16 +365,16 @@ co_await Co::await_graph(loop, a);  // 永远不会 resume — a 还没 execute(
 
 要么先 `execute()`，要么把 execute() 也写在协程内。
 
-### 错误 4：sub-task 抛异常只能拿到 `broken_promise`
+### 错误 4：当多个 sub-task 抛异常，只能拿到第一个
 
 ```cpp
 auto t1 = []() -> Co::Task<int> { throw std::runtime_error("x"); co_return 0; };
-auto results = co_await Co::when_all<int>(loop, { t1() /* ... */ });
-// t1 抛异常 → on_done 不触发 → 其余 sub-task 完成后通过 std::future_error 抛出
-// （不是原异常类型 — 拿不到 t1 的 std::runtime_error）
+auto t2 = []() -> Co::Task<int> { throw std::logic_error("y"); co_return 0; };
+auto results = co_await Co::when_all<int>(loop, { t1(), t2() });
+// when_all 捕获第一个观察到的异常并 rethrow，第二个异常被丢弃。
 ```
 
-如果需要保留原始异常类型，让 sub-task 用 try/catch 在内部把异常转成 sentinel 值，或者把异常存到外部共享状态里。
+异常的原始类型会被保留（runner 用 `std::exception_ptr` 透传）。如果需要收集所有 sub-task 的异常，让 sub-task 用 try/catch 在内部把异常转成结果值（如 `std::variant<T, std::exception_ptr>`）。
 
 ## 线程模型与同步
 

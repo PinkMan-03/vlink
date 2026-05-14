@@ -113,15 +113,19 @@
 
 #ifdef VLINK_ENABLE_COROUTINE
 
+#include <atomic>
 #include <chrono>
 #include <coroutine>
 #include <cstdint>
 #include <exception>
 #include <future>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "./functional.h"
 #include "./graph_task.h"
@@ -483,7 +487,21 @@ FutureAwaiter<TypeT> await_future(MessageLoop& loop, std::future<TypeT> fut) noe
  * @details
  * The coroutine begins executing on @p loop's thread.  Ownership of the task
  * frame is transferred to an internal detached coroutine that destroys it on
- * completion.  Exceptions thrown from the task are swallowed.
+ * completion.  Exceptions thrown from the task are swallowed (logged via
+ * @c DetachedTask::unhandled_exception).
+ *
+ * @par Joining from synchronous code
+ * Use the three-argument @c co_spawn overload with a callback to bridge to a
+ * @c std::promise / @c std::future, then wait on the future:
+ * @code
+ *   std::promise<void> p;
+ *   auto fut = p.get_future();
+ *   Co::co_spawn(loop, my_void_task(), [&p]() { p.set_value(); });
+ *   fut.wait();
+ * @endcode
+ * Note: if @c my_void_task throws, the callback is NOT invoked and @c fut
+ * never becomes ready.  Catch inside @c my_void_task or use a value-returning
+ * task that converts errors into a sentinel result.
  */
 VLINK_EXPORT void co_spawn(MessageLoop& loop, Task<void>&& task);
 
@@ -500,7 +518,29 @@ VLINK_EXPORT void co_spawn_with_priority(MessageLoop& loop, Task<void>&& task, u
  * @details
  * The coroutine begins executing on @p loop's thread.  When the task completes
  * successfully, @p on_complete is invoked on the loop thread with the result.
- * Exceptions thrown from the task are swallowed and the callback is not run.
+ *
+ * @warning **Exceptions thrown by the task are SWALLOWED** — they are logged
+ *          via @c DetachedTask::unhandled_exception and @p on_complete is NOT
+ *          invoked.  This API is unsuitable for code that must observe task
+ *          failure.  To observe failure either:
+ *          - Catch inside the task body and convert to a sentinel result, or
+ *          - Bridge with @c std::promise + @c await_future:
+ *            @code
+ *              auto pp = std::make_shared<std::promise<TypeT>>();
+ *              auto fut = pp->get_future();
+ *              Co::co_spawn(loop, task_that_may_throw(),
+ *                           [pp](TypeT v) { pp->set_value(std::move(v)); });
+ *              try {
+ *                TypeT result = co_await Co::await_future(loop, std::move(fut));
+ *              } catch (...) { // still does not see the original exception
+ *              }
+ *            @endcode
+ *            (Note: the future never resolves on task exception either; this
+ *            pattern still only handles the success path.)  For full
+ *            error observability, use the @c when_all / @c when_any /
+ *            @c sequence orchestrators, which capture the original exception
+ *            via the runner+guard machinery, or @c co_await the @c Task
+ *            directly from a parent coroutine.
  */
 template <typename TypeT, typename CallbackT,
           // NOLINTNEXTLINE(modernize-use-constraints)
@@ -590,15 +630,11 @@ Task<void> exec(MessageLoop& loop, const Schedule::Config& config, CallbackT&& c
  *
  * @details
  * Each task is dispatched via @c co_spawn on @p loop.  Results are stored in
- * the order of the input vector.  If any sub-task throws, its completion
- * callback is never invoked and its captured @c shared_ptr<promise> reference
- * is dropped on detached-coroutine destruction; the awaiting @c co_await
- * surfaces @c std::future_error (@c std::future_errc::broken_promise) as soon
- * as the last @c shared_ptr<promise> reference is released, which may occur
- * BEFORE all remaining sub-tasks have observably completed.  Result ordering
- * relative to sibling completions is therefore non-deterministic when any
- * sub-task throws — callers wanting strict "all-finished-first" semantics
- * must explicitly join via per-task @c co_spawn + @c await_future.
+ * the order of the input vector.  @c when_all waits for **every** sub-task to
+ * finish (success or failure) before completing.  If any sub-task throws, the
+ * first exception observed is rethrown from the awaiting @c co_await; the
+ * exception type and identity match what the sub-task threw.  Subsequent
+ * exceptions from sibling tasks are dropped.
  *
  * @note @p TypeT must be default-constructible (slot for each task is
  *       pre-sized via @c std::vector<TypeT>(count)).
@@ -610,27 +646,26 @@ Task<std::vector<TypeT>> when_all(MessageLoop& loop, std::vector<Task<TypeT>> ta
  * @brief Awaits all @c Task<void> in @p tasks to complete.
  *
  * @details
- * If any sub-task throws, @c std::future_error surfaces through the awaiting
- * @c co_await as soon as the last @c shared_ptr<promise> reference drops; the
- * surfacing may race with sibling sub-task completion and is therefore not
- * guaranteed to occur "after all siblings finish".  See the value-returning
- * @c when_all overload for the strict-join workaround.
+ * Waits for every sub-task to finish.  If any sub-task throws, the first
+ * exception observed is rethrown from the awaiting @c co_await; subsequent
+ * exceptions are dropped.
  */
 VLINK_EXPORT Task<void> when_all(MessageLoop& loop, std::vector<Task<void>> tasks);
 
 /**
  * @brief Records the index and result of the first @c Task<TypeT> in @p tasks
- * to complete; waits for all remaining tasks to finish before returning.
+ * to complete successfully; waits for all remaining tasks to finish before
+ * returning.
  *
  * @details
- * The "winner" (first task to complete) is captured by an atomic compare-exchange;
- * losing tasks continue running until completion and their results are dropped.
- * @c when_any does not return until **every** sub-task has finished -- this is
- * required to avoid leaking the orphaned sub-task frames (there is no
- * cross-coroutine cancellation in this layer).  If you need an "abandon
- * losers" semantics with bounded latency, ensure each sub-task itself respects
- * a deadline.  If every sub-task throws, @c std::future_error propagates
- * through the awaiting @c co_await.
+ * The "winner" (first successful completion) is captured by an atomic
+ * compare-exchange; losing tasks continue running until completion and their
+ * results are dropped.  @c when_any does not return until **every** sub-task
+ * has finished -- this is required to avoid leaking the orphaned sub-task
+ * frames (there is no cross-coroutine cancellation in this layer).  If you
+ * need an "abandon losers" semantics with bounded latency, ensure each
+ * sub-task itself respects a deadline.  If every sub-task throws, the first
+ * exception observed is rethrown from the awaiting @c co_await.
  *
  * @throws std::invalid_argument if @p tasks is empty.  Because @c when_any is
  *         itself a coroutine the exception is observed at the awaiting
@@ -642,15 +677,16 @@ template <typename TypeT>
 Task<std::pair<size_t, TypeT>> when_any(MessageLoop& loop, std::vector<Task<TypeT>> tasks);
 
 /**
- * @brief Records the index of the first @c Task<void> in @p tasks to complete;
- * waits for all remaining tasks to finish before returning.
+ * @brief Records the index of the first @c Task<void> in @p tasks to complete
+ * successfully; waits for all remaining tasks to finish before returning.
  *
  * @details
- * The "winner" (first task to complete) is captured by an atomic compare-exchange;
- * losing tasks continue running until completion.  @c when_any does not return
- * until **every** sub-task has finished -- this is required to avoid leaking the
- * orphaned sub-task frames (there is no cross-coroutine cancellation in this
- * layer).  If every sub-task throws, @c std::future_error propagates.
+ * The "winner" (first successful completion) is captured by an atomic
+ * compare-exchange; losing tasks continue running until completion.
+ * @c when_any does not return until **every** sub-task has finished -- this is
+ * required to avoid leaking the orphaned sub-task frames (there is no
+ * cross-coroutine cancellation in this layer).  If every sub-task throws, the
+ * first exception observed is rethrown from the awaiting @c co_await.
  *
  * @throws std::invalid_argument if @p tasks is empty.  Surfaces through the
  *         awaiting @c co_await (when_any is itself a coroutine).
@@ -661,9 +697,12 @@ VLINK_EXPORT Task<size_t> when_any(MessageLoop& loop, std::vector<Task<void>> ta
  * @brief Runs @p tasks sequentially, awaiting each one before starting the next.
  *
  * @details
- * Convenience for composing a linear pipeline of @c Task<void>.  If a task
- * throws, the broken inner promise surfaces as @c std::future_error through
- * the awaiting @c co_await and remaining tasks are skipped.
+ * Convenience for composing a linear pipeline of @c Task<void>.  Each task is
+ * spawned on @p loop via the same runner+guard machinery used by @c when_all,
+ * and joined through @c await_future, so both the success path and any
+ * exception thrown by a sub-task resume the caller on @p loop's thread.  If a
+ * task throws, the exception is rethrown from the awaiting @c co_await with
+ * its original type preserved and remaining tasks are skipped.
  */
 VLINK_EXPORT Task<void> sequence(MessageLoop& loop, std::vector<Task<void>> tasks);
 
@@ -823,7 +862,7 @@ inline void FutureAwaiter<TypeT>::await_suspend(std::coroutine_handle<> handle) 
       return true;
     }
 
-    if (fut_ptr->wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+    if (fut_ptr->wait_for(std::chrono::nanoseconds::zero()) != std::future_status::ready) {
       return false;
     }
 
@@ -891,6 +930,141 @@ inline Task<void> exec(MessageLoop& loop, const Schedule::Config& config, Callba
   co_return;
 }
 
+namespace detail {
+
+template <typename TypeT>
+struct WhenAllState final {
+  std::vector<TypeT> results;
+  std::atomic<size_t> remaining{0};
+  std::mutex exc_mtx;
+  std::exception_ptr first_exc;
+  std::promise<void> promise;
+};
+
+template <typename TypeT>
+struct WhenAllGuard final {
+  std::shared_ptr<WhenAllState<TypeT>> state;
+  bool completed_normally{false};
+
+  explicit WhenAllGuard(std::shared_ptr<WhenAllState<TypeT>> s) noexcept : state(std::move(s)) {}
+
+  WhenAllGuard(WhenAllGuard&& other) noexcept
+      : state(std::move(other.state)), completed_normally(other.completed_normally) {}
+
+  WhenAllGuard(const WhenAllGuard&) = delete;
+  WhenAllGuard& operator=(const WhenAllGuard&) = delete;
+  WhenAllGuard& operator=(WhenAllGuard&&) = delete;
+
+  ~WhenAllGuard() {
+    if (!state) {
+      return;
+    }
+
+    if (!completed_normally) {
+      std::lock_guard lock(state->exc_mtx);
+
+      if (!state->first_exc) {
+        state->first_exc = std::make_exception_ptr(
+            std::runtime_error("vlink::Coroutine::when_all: sub-task aborted before completion"));
+      }
+    }
+
+    if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      if (state->first_exc) {
+        state->promise.set_exception(state->first_exc);
+      } else {
+        state->promise.set_value();
+      }
+    }
+  }
+};
+
+template <typename TypeT>
+inline Task<void> when_all_runner(Task<TypeT> task, size_t i, WhenAllGuard<TypeT> guard) {
+  try {
+    auto value = co_await std::move(task);
+    guard.state->results[i] = std::move(value);
+  } catch (...) {
+    std::lock_guard lock(guard.state->exc_mtx);
+
+    if (!guard.state->first_exc) {
+      guard.state->first_exc = std::current_exception();
+    }
+  }
+
+  guard.completed_normally = true;
+}
+
+template <typename TypeT>
+struct WhenAnyState final {
+  std::atomic_bool fired{false};
+  std::atomic<size_t> remaining{0};
+  std::mutex exc_mtx;
+  std::exception_ptr first_exc;
+  std::optional<std::pair<size_t, TypeT>> winner;
+  std::promise<std::pair<size_t, TypeT>> promise;
+};
+
+template <typename TypeT>
+struct WhenAnyGuard final {
+  std::shared_ptr<WhenAnyState<TypeT>> state;
+  bool completed_normally{false};
+
+  explicit WhenAnyGuard(std::shared_ptr<WhenAnyState<TypeT>> s) noexcept : state(std::move(s)) {}
+
+  WhenAnyGuard(WhenAnyGuard&& other) noexcept
+      : state(std::move(other.state)), completed_normally(other.completed_normally) {}
+
+  WhenAnyGuard(const WhenAnyGuard&) = delete;
+  WhenAnyGuard& operator=(const WhenAnyGuard&) = delete;
+  WhenAnyGuard& operator=(WhenAnyGuard&&) = delete;
+
+  ~WhenAnyGuard() {
+    if (!state) {
+      return;
+    }
+
+    if (!completed_normally) {
+      std::lock_guard lock(state->exc_mtx);
+
+      if (!state->first_exc) {
+        state->first_exc = std::make_exception_ptr(
+            std::runtime_error("vlink::Coroutine::when_any: sub-task aborted before completion"));
+      }
+    }
+
+    if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      if (state->winner) {
+        state->promise.set_value(std::move(*state->winner));
+      } else {
+        state->promise.set_exception(state->first_exc);
+      }
+    }
+  }
+};
+
+template <typename TypeT>
+inline Task<void> when_any_runner(Task<TypeT> task, size_t i, WhenAnyGuard<TypeT> guard) {
+  try {
+    auto value = co_await std::move(task);
+    bool expected = false;
+
+    if (guard.state->fired.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      guard.state->winner.emplace(i, std::move(value));
+    }
+  } catch (...) {
+    std::lock_guard lock(guard.state->exc_mtx);
+
+    if (!guard.state->first_exc) {
+      guard.state->first_exc = std::current_exception();
+    }
+  }
+
+  guard.completed_normally = true;
+}
+
+}  // namespace detail
+
 template <typename TypeT>
 inline Task<std::vector<TypeT>> when_all(MessageLoop& loop, std::vector<Task<TypeT>> tasks) {
   static_assert(std::is_default_constructible_v<TypeT>,
@@ -901,26 +1075,18 @@ inline Task<std::vector<TypeT>> when_all(MessageLoop& loop, std::vector<Task<Typ
   }
 
   const size_t count = tasks.size();
-  auto results = std::make_shared<std::vector<TypeT>>(count);
-  auto remaining = std::make_shared<std::atomic<size_t>>(count);
-  auto promise_ptr = std::make_shared<std::promise<void>>();
-  auto fut = promise_ptr->get_future();
+  auto state = std::make_shared<detail::WhenAllState<TypeT>>();
+  state->results.resize(count);
+  state->remaining.store(count, std::memory_order_relaxed);
+  auto fut = state->promise.get_future();
 
   for (size_t i = 0; i < count; ++i) {
-    co_spawn(loop, std::move(tasks[i]), [results, remaining, promise_ptr, i](TypeT value) {
-      (*results)[i] = std::move(value);
-
-      if (remaining->fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        promise_ptr->set_value();
-      }
-    });
+    co_spawn(loop, detail::when_all_runner<TypeT>(std::move(tasks[i]), i, detail::WhenAllGuard<TypeT>{state}));
   }
-
-  promise_ptr.reset();
 
   co_await await_future(loop, std::move(fut));
 
-  co_return std::move(*results);
+  co_return std::move(state->results);
 }
 
 template <typename TypeT>
@@ -929,29 +1095,12 @@ inline Task<std::pair<size_t, TypeT>> when_any(MessageLoop& loop, std::vector<Ta
     throw std::invalid_argument("vlink::Coroutine::when_any: tasks must not be empty");
   }
 
-  struct State final {
-    std::promise<std::pair<size_t, TypeT>> promise;
-    std::atomic_bool fired{false};
-    std::atomic<size_t> remaining;
-    std::optional<std::pair<size_t, TypeT>> winner;
-  };
-
-  auto state = std::make_shared<State>();
+  auto state = std::make_shared<detail::WhenAnyState<TypeT>>();
   state->remaining.store(tasks.size(), std::memory_order_relaxed);
   auto fut = state->promise.get_future();
 
   for (size_t i = 0; i < tasks.size(); ++i) {
-    co_spawn(loop, std::move(tasks[i]), [state, i](TypeT value) {
-      bool expected = false;
-
-      if (state->fired.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-        state->winner.emplace(i, std::move(value));
-      }
-
-      if (state->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-        state->promise.set_value(std::move(*state->winner));
-      }
-    });
+    co_spawn(loop, detail::when_any_runner<TypeT>(std::move(tasks[i]), i, detail::WhenAnyGuard<TypeT>{state}));
   }
 
   co_return co_await await_future(loop, std::move(fut));
