@@ -39,22 +39,19 @@
 #include "./base/message_loop.h"
 
 namespace vlink {
+
 namespace Coroutine {  // NOLINT(readability-identifier-naming)
 
-namespace {
-
 template <typename T, typename... Args>
-inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&vlink::MemoryResource::global_instance());
+  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
 
   return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
 #else
   return std::make_shared<T>(std::forward<Args>(args)...);
 #endif
 }
-
-}  // namespace
 
 // PostedCallbackState
 struct PostedCallbackState final {
@@ -1124,6 +1121,7 @@ Task<void> sequence(MessageLoop& loop, std::vector<Task<void>> tasks) {
 }
 
 }  // namespace Coroutine
+
 }  // namespace vlink
 
 #endif  // VLINK_ENABLE_COROUTINE

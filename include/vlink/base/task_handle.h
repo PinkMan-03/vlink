@@ -341,7 +341,7 @@ class VLINK_EXPORT TaskHandle final {
 
   friend class MessageLoop;
   friend class ThreadPool;
-  friend class detail::TrackedTask;
+  friend class TrackedTask;
 };
 
 }  // namespace vlink

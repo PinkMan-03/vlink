@@ -24,56 +24,97 @@
 #include "./base/exception.h"
 
 namespace vlink {
-namespace Exception {
 
+namespace Exception {  // NOLINT(readability-identifier-naming)
+
+// RuntimeError
 RuntimeError::RuntimeError(const std::string& what_arg) : std::runtime_error(what_arg) {}
+
 RuntimeError::RuntimeError(const char* what_arg) : std::runtime_error(what_arg) {}
+
 RuntimeError::~RuntimeError() = default;
+
 const char* RuntimeError::what() const noexcept { return std::runtime_error::what(); }
 
+// OutOfRange
 OutOfRange::OutOfRange(const std::string& what_arg) : std::out_of_range(what_arg) {}
+
 OutOfRange::OutOfRange(const char* what_arg) : std::out_of_range(what_arg) {}
+
 OutOfRange::~OutOfRange() = default;
+
 const char* OutOfRange::what() const noexcept { return std::out_of_range::what(); }
 
+// InvalidArgument
 InvalidArgument::InvalidArgument(const std::string& what_arg) : std::invalid_argument(what_arg) {}
+
 InvalidArgument::InvalidArgument(const char* what_arg) : std::invalid_argument(what_arg) {}
+
 InvalidArgument::~InvalidArgument() = default;
+
 const char* InvalidArgument::what() const noexcept { return std::invalid_argument::what(); }
 
+// LogicError
 LogicError::LogicError(const std::string& what_arg) : std::logic_error(what_arg) {}
+
 LogicError::LogicError(const char* what_arg) : std::logic_error(what_arg) {}
+
 LogicError::~LogicError() = default;
+
 const char* LogicError::what() const noexcept { return std::logic_error::what(); }
 
+// DomainError
 DomainError::DomainError(const std::string& what_arg) : std::domain_error(what_arg) {}
+
 DomainError::DomainError(const char* what_arg) : std::domain_error(what_arg) {}
+
 DomainError::~DomainError() = default;
+
 const char* DomainError::what() const noexcept { return std::domain_error::what(); }
 
+// LengthError
 LengthError::LengthError(const std::string& what_arg) : std::length_error(what_arg) {}
+
 LengthError::LengthError(const char* what_arg) : std::length_error(what_arg) {}
+
 LengthError::~LengthError() = default;
+
 const char* LengthError::what() const noexcept { return std::length_error::what(); }
 
+// RangeError
 RangeError::RangeError(const std::string& what_arg) : std::range_error(what_arg) {}
+
 RangeError::RangeError(const char* what_arg) : std::range_error(what_arg) {}
+
 RangeError::~RangeError() = default;
+
 const char* RangeError::what() const noexcept { return std::range_error::what(); }
 
+// OverflowError
 OverflowError::OverflowError(const std::string& what_arg) : std::overflow_error(what_arg) {}
+
 OverflowError::OverflowError(const char* what_arg) : std::overflow_error(what_arg) {}
+
 OverflowError::~OverflowError() = default;
+
 const char* OverflowError::what() const noexcept { return std::overflow_error::what(); }
 
+// UnderflowError
 UnderflowError::UnderflowError(const std::string& what_arg) : std::underflow_error(what_arg) {}
+
 UnderflowError::UnderflowError(const char* what_arg) : std::underflow_error(what_arg) {}
+
 UnderflowError::~UnderflowError() = default;
+
 const char* UnderflowError::what() const noexcept { return std::underflow_error::what(); }
 
-OperationCancelled::OperationCancelled() noexcept = default;
+// OperationCancelled
+OperationCancelled::OperationCancelled() = default;
+
 OperationCancelled::~OperationCancelled() = default;
+
 const char* OperationCancelled::what() const noexcept { return "vlink operation cancelled"; }
 
 }  // namespace Exception
+
 }  // namespace vlink

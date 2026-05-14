@@ -33,10 +33,8 @@
 
 namespace vlink {
 
-namespace {
-
 template <typename T, typename... Args>
-inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
 
@@ -45,8 +43,6 @@ inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 #endif
 }
-
-}  // namespace
 
 [[maybe_unused]] static bool is_terminal(TaskExecutionState state) noexcept {
   return state == TaskExecutionState::kCompleted || state == TaskExecutionState::kCancelled ||
@@ -60,6 +56,7 @@ template <typename StateT>
   registration = std::move(state.parent_registration);
 }
 
+// TaskHandle::State
 struct TaskHandle::State final {
   mutable std::mutex mtx;
   ConditionVariable cv;
@@ -68,8 +65,7 @@ struct TaskHandle::State final {
   CancellationRegistration parent_registration;
 };
 
-namespace detail {
-
+// TrackedTask
 class TrackedTask final {
  public:
   TrackedTask(TaskHandle handle, MoveFunction<void()>&& callback) noexcept
@@ -130,8 +126,7 @@ class TrackedTask final {
   VLINK_DISALLOW_COPY_AND_ASSIGN(TrackedTask)
 };
 
-}  // namespace detail
-
+// TaskHandle
 TaskHandle::TaskHandle() noexcept = default;
 
 TaskHandle::~TaskHandle() = default;
@@ -215,7 +210,7 @@ TaskHandle TaskHandle::make_task_handle(const CancellationToken& parent_token) {
 }
 
 MoveFunction<void()> TaskHandle::make_tracked_task(TaskHandle handle, MoveFunction<void()>&& callback) {
-  return detail::TrackedTask{std::move(handle), std::move(callback)};
+  return TrackedTask{std::move(handle), std::move(callback)};
 }
 
 void TaskHandle::mark_task_queued(const TaskHandle& handle) {

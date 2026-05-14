@@ -55,10 +55,8 @@ static constexpr size_t kMaxTimerSize = 100U;
 static constexpr uint32_t kMaxElapsedTime = 0U;
 static constexpr int kMaxLockfreePushRetry = 32;
 
-namespace {
-
 template <typename T, typename... Args>
-inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
 
@@ -67,8 +65,6 @@ inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 #endif
 }
-
-}  // namespace
 
 template <typename TypeT, typename TimeT, typename ReturnT>
 static ReturnT get_current_time() noexcept {
@@ -560,9 +556,7 @@ bool MessageLoop::wakeup() {
   }
 
   // Pair the first pending wakeup with the wait mutex so a concurrent waiter cannot miss the notify.
-  {
-    std::lock_guard lock(impl_->mtx);
-  }
+  { std::lock_guard lock(impl_->mtx); }
   impl_->cv.notify_all();
 
   return true;

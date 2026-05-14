@@ -36,10 +36,8 @@
 
 namespace vlink {
 
-namespace {
-
 template <typename T, typename... Args>
-inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
 
@@ -48,8 +46,6 @@ inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 #endif
 }
-
-}  // namespace
 
 // Schedule::Config
 Schedule::Config::Config() = default;

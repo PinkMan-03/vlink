@@ -109,9 +109,7 @@
 namespace vlink {
 namespace webviz {
 
-namespace {
-
-bool is_flatbuffers_schema_encoding(std::string_view encoding) {
+[[maybe_unused]] static bool is_flatbuffers_schema_encoding(std::string_view encoding) {
   std::string normalized{encoding};
 
   std::transform(normalized.begin(), normalized.end(), normalized.begin(),
@@ -121,8 +119,6 @@ bool is_flatbuffers_schema_encoding(std::string_view encoding) {
 }
 
 constexpr std::string_view kFoxgloveFlatbufferEncoding = "flatbuffer";
-
-}  // namespace
 
 flatbuffers::Offset<flatbuffers::Vector<uint8_t>> FoxgloveConverter::create_proto_repeated_byte_vector(
     flatbuffers::FlatBufferBuilder& builder, const google::protobuf::Message& msg,

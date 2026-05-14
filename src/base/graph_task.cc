@@ -45,10 +45,8 @@
 
 namespace vlink {
 
-namespace {
-
 template <typename T, typename... Args>
-inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
 
@@ -57,8 +55,6 @@ inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 #endif
 }
-
-}  // namespace
 
 static std::atomic<uint32_t> global_graph_task_count = 0;
 
@@ -654,9 +650,7 @@ std::string GraphTask::export_to_dot() const {
 
     visited.insert(task);
 
-    {
-      groups[task->get_group_name()].emplace_back(task);
-    }
+    { groups[task->get_group_name()].emplace_back(task); }
 
     {
       std::lock_guard lock(task->impl_->mtx);

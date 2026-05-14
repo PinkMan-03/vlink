@@ -34,10 +34,8 @@
 
 namespace vlink {
 
-namespace {
-
 template <typename T, typename... Args>
-inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
 
@@ -46,8 +44,6 @@ inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 #endif
 }
-
-}  // namespace
 
 [[maybe_unused]] static void invoke_cancellation_callback(MoveFunction<void()>& callback) noexcept {
   if VUNLIKELY (!callback) {
@@ -63,6 +59,7 @@ inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
   }
 }
 
+// CancellationRegistration::State
 struct CancellationRegistration::State final {
   mutable std::mutex mtx;
   bool cancelled{false};
@@ -70,6 +67,7 @@ struct CancellationRegistration::State final {
   std::unordered_map<size_t, MoveFunction<void()>> callbacks;
 };
 
+// CancellationRegistration
 CancellationRegistration::CancellationRegistration() noexcept = default;
 
 CancellationRegistration::~CancellationRegistration() { reset(); }
@@ -125,6 +123,7 @@ bool CancellationRegistration::valid() const noexcept {
 CancellationRegistration::CancellationRegistration(std::weak_ptr<State> state, size_t id) noexcept
     : state_(std::move(state)), id_(id) {}
 
+// CancellationToken
 CancellationToken::CancellationToken() noexcept = default;
 
 bool CancellationToken::valid() const noexcept { return state_ != nullptr; }
@@ -169,6 +168,7 @@ void CancellationToken::throw_if_cancellation_requested() const {
 
 CancellationToken::CancellationToken(std::shared_ptr<State> state) noexcept : state_(std::move(state)) {}
 
+// CancellationSource
 CancellationSource::CancellationSource() : state_(pool_make_shared<State>()) {}
 
 CancellationToken CancellationSource::token() const noexcept { return CancellationToken{state_}; }

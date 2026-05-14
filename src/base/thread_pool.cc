@@ -46,10 +46,8 @@ namespace vlink {
 static constexpr size_t kMaxTaskSize = 10000U;
 static constexpr int kMaxLockfreePushRetry = 32;
 
-namespace {
-
 template <typename T, typename... Args>
-inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
 #ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
 
@@ -58,8 +56,6 @@ inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
   return std::make_shared<T>(std::forward<Args>(args)...);
 #endif
 }
-
-}  // namespace
 
 // ThreadPoolGlobal
 struct ThreadPoolGlobal final {
@@ -414,9 +410,7 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
 
     if (notify_waiter) {
       // Pair the empty-to-non-empty transition with the wait mutex so workers cannot miss the notify.
-      {
-        std::lock_guard lock(impl_->mtx);
-      }
+      { std::lock_guard lock(impl_->mtx); }
       impl_->cv.notify_one();
     }
   }
