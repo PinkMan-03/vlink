@@ -32,9 +32,25 @@
 #include "./base/condition_variable.h"
 #include "./base/logger.h"
 #include "./base/memory_pool.h"
+#include "./base/memory_resource.h"
 #include "./base/message_loop.h"
 
 namespace vlink {
+
+namespace {
+
+template <typename T, typename... Args>
+inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
+
+  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
+#else
+  return std::make_shared<T>(std::forward<Args>(args)...);
+#endif
+}
+
+}  // namespace
 
 // Timer::Impl
 struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
@@ -58,7 +74,7 @@ struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::recursive_mutex recursive_mtx;
   ConditionVariable cv;
 
-  std::shared_ptr<std::atomic_bool> alive_flag{std::make_shared<std::atomic_bool>(true)};
+  std::shared_ptr<std::atomic_bool> alive_flag{pool_make_shared<std::atomic_bool>(true)};
 };
 
 // Timer

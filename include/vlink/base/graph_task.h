@@ -267,16 +267,16 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
    * @brief Registers a callback invoked whenever this task's status changes.
    *
    * @details
-   * Each call appends a new subscriber.  Multiple subscribers fire in
-   * unspecified order on every status transition.  Callbacks MUST NOT
-   * register / unregister / clear status callbacks on the same task, nor
-   * call @c cancel() on the same task — these self-recursions deadlock the
-   * internal non-recursive @c status_callbacks_mtx.  Calling @c set_name /
-   * @c get_name / @c get_status / @c has_cycle on the same task, or any
-   * operation (including @c precede / @c succeed / @c cancel) on a DIFFERENT
-   * task, is safe (the global topology mutex is recursive and per-task
-   * @c status_callbacks_mtx are independent).  Exceptions thrown from a
-   * callback are caught and logged; remaining subscribers still fire.
+   * Each call appends a new subscriber.  On every status transition the task
+   * takes a snapshot of the current subscriber set under
+   * @c status_callbacks_mtx, releases the lock, and then invokes the
+   * snapshotted callbacks in unspecified order.  Because callbacks fire with
+   * @c status_callbacks_mtx already released, a callback is free to call
+   * @c register_status_callback, @c unregister_status_callback or
+   * @c clear_status_callbacks on the same task without self-deadlock; such
+   * mutations take effect for the @b next transition, not the current one.
+   * Exceptions thrown from a callback are caught and logged; remaining
+   * snapshotted subscribers still fire.
    *
    * @param callback  Called with (name, new_status) on every status transition.
    * @return Subscription id (>0).  Returns 0 if @p callback is empty.  Pass

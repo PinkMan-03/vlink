@@ -316,10 +316,17 @@ Co::co_spawn(loop, my_routine(loop, &state));
 | 场景 | 行为 |
 |------|------|
 | `Task<T>` body 抛异常 | 存在 promise 中；外层 `co_await` 时重新抛出 |
-| `co_spawn(loop, task)` 顶层抛异常 | 被 `DetachedTask::unhandled_exception` 静默吞掉 |
+| `co_spawn(loop, task)` 顶层抛异常 | 被 `DetachedTask::unhandled_exception` 静默吞掉并 `CLOG_E` 记录 |
 | `co_spawn(loop, task, on_done)` 抛异常 | 同上吞掉；`on_done` **不会**被调用 |
 | `exec(loop, cfg, fn)` 的 fn 抛异常 | 通过 promise 传递；在 `co_await exec(...)` 处重新抛出 |
 | `await_future` 的 future 抛异常 | `fut.get()` 时抛出，可在协程内 try/catch |
+| `schedule` / `yield` / `delay_ms` 投递重试耗尽（`kMaxResumePostRetry=30000`） | `await_resume` 抛 `std::runtime_error("vlink::Coroutine::xxx: post_task to loop failed")` |
+| `await_graph` 投递重试耗尽 / loop 已死 | `await_resume` 抛 `vlink::OperationCancelled` |
+| `MessageLoop` 在挂起期间析构 | 借助 `MessageLoopAliveState` 把恢复路径切到 fail 分支（同上） |
+
+> **lock-free `MessageLoop` 的特殊性**：恢复使用 `kProtected` + `kReject` 投递选项。`kProtected`
+> 在 lock-free 队列上不生效，但 `kReject` 仍能避免队列满时入队；如果连续 30000 次重试仍失败，
+> 才会走到上述异常路径。常规负载下这条路径不会被触发。
 
 ## 内存分配
 

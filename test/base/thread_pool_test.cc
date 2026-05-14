@@ -370,6 +370,19 @@ TEST_SUITE("base-ThreadPool") {
     CHECK(counter.load() == 5);
   }
 
+  TEST_CASE("destructor is safe when called from a worker task") {
+    auto pool = std::make_unique<ThreadPool>(1);
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    CHECK(pool->post_task([&] {
+      pool.reset();
+      done.set_value();
+    }));
+
+    CHECK(done_fut.wait_for(1s) == std::future_status::ready);
+  }
+
   TEST_CASE("double shutdown is safe") {
     ThreadPool pool(2);
     pool.post_task([] {});
@@ -554,6 +567,249 @@ TEST_SUITE("base-ThreadPool") {
   TEST_CASE("kLockfreeType get_max_task_count returns positive") {
     ThreadPool pool(2, ThreadPool::kLockfreeType);
     CHECK(pool.get_max_task_count() > 0);
+    pool.shutdown();
+  }
+
+  // ---
+
+  class TwoTaskLockfreeThreadPool final : public ThreadPool {
+   public:
+    using ThreadPool::ThreadPool;
+
+    [[nodiscard]] size_t get_max_task_count() const override { return 2U; }
+  };
+
+  class SmallQueueLockfreeThreadPool final : public ThreadPool {
+   public:
+    using ThreadPool::ThreadPool;
+
+    [[nodiscard]] size_t get_max_task_count() const override { return 1U; }
+  };
+
+  TEST_CASE("kLockfreeType with kBlockStrategy blocks producer until consumer drains") {
+    TwoTaskLockfreeThreadPool pool(1U, ThreadPool::kLockfreeType);
+    pool.set_strategy(ThreadPool::kBlockStrategy);
+
+    std::atomic<bool> release_worker{false};
+    std::atomic<bool> worker_started{false};
+    std::atomic<int> executed{0};
+
+    CHECK(pool.post_task([&] {
+      worker_started.store(true, std::memory_order_release);
+      while (!release_worker.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      executed.fetch_add(1, std::memory_order_acq_rel);
+    }));
+
+    while (!worker_started.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+
+    CHECK(pool.post_task([&] { executed.fetch_add(1, std::memory_order_acq_rel); }));
+    CHECK(pool.post_task([&] { executed.fetch_add(1, std::memory_order_acq_rel); }));
+
+    std::atomic<bool> producer_done{false};
+    std::atomic<bool> producer_accepted{false};
+
+    std::thread producer([&] {
+      producer_accepted.store(pool.post_task([&] { executed.fetch_add(1, std::memory_order_acq_rel); }),
+                              std::memory_order_release);
+      producer_done.store(true, std::memory_order_release);
+    });
+
+    std::this_thread::sleep_for(30ms);
+    CHECK_FALSE(producer_done.load(std::memory_order_acquire));
+
+    release_worker.store(true, std::memory_order_release);
+    producer.join();
+
+    CHECK(producer_done.load(std::memory_order_acquire));
+    CHECK(producer_accepted.load(std::memory_order_acquire));
+
+    pool.shutdown();
+    CHECK(executed.load(std::memory_order_acquire) == 4);
+  }
+
+  TEST_CASE("kLockfreeType with kPopStrategy drops tasks under overflow via TaskHandle") {
+    SmallQueueLockfreeThreadPool pool(1U, ThreadPool::kLockfreeType);
+    pool.set_strategy(ThreadPool::kPopStrategy);
+
+    std::atomic<bool> release_worker{false};
+    std::atomic<bool> worker_started{false};
+
+    CHECK(pool.post_task([&] {
+      worker_started.store(true, std::memory_order_release);
+      while (!release_worker.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+    }));
+
+    while (!worker_started.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+
+    std::vector<TaskHandle> handles;
+    handles.reserve(8);
+    for (int i = 0; i < 8; ++i) {
+      handles.push_back(pool.post_task_handle([] {}));
+    }
+
+    bool any_dropped = false;
+    for (const auto& h : handles) {
+      if (h.state() == TaskExecutionState::kDropped) {
+        any_dropped = true;
+        break;
+      }
+    }
+    CHECK(any_dropped);
+
+    release_worker.store(true, std::memory_order_release);
+    pool.shutdown();
+  }
+
+  TEST_CASE("kLockfreeType high concurrency stress with many producers") {
+    ThreadPool pool(4U, ThreadPool::kLockfreeType);
+    std::atomic<int> counter{0};
+    static constexpr int kProducers = 4;
+    static constexpr int kTasksPerProducer = 100;
+
+    std::vector<std::thread> producers;
+    producers.reserve(kProducers);
+    for (int t = 0; t < kProducers; ++t) {
+      producers.emplace_back([&pool, &counter] {
+        for (int i = 0; i < kTasksPerProducer; ++i) {
+          pool.post_task([&counter] { counter.fetch_add(1, std::memory_order_relaxed); });
+        }
+      });
+    }
+
+    for (auto& t : producers) {
+      t.join();
+    }
+
+    pool.shutdown();
+    CHECK(counter.load() == kProducers * kTasksPerProducer);
+  }
+
+  TEST_CASE("kNormalType with kBlockStrategy blocks producer until queue drains") {
+    SmallQueueThreadPool pool(1);
+    pool.set_strategy(ThreadPool::kBlockStrategy);
+
+    std::atomic<bool> release_worker{false};
+    std::atomic<bool> worker_started{false};
+    std::atomic<int> executed{0};
+
+    CHECK(pool.post_task([&] {
+      worker_started.store(true, std::memory_order_release);
+      while (!release_worker.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      executed.fetch_add(1, std::memory_order_acq_rel);
+    }));
+
+    while (!worker_started.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+
+    CHECK(pool.post_task([&] { executed.fetch_add(1, std::memory_order_acq_rel); }));
+
+    std::atomic<bool> producer_done{false};
+    std::atomic<bool> producer_accepted{false};
+
+    std::thread producer([&] {
+      producer_accepted.store(pool.post_task([&] { executed.fetch_add(1, std::memory_order_acq_rel); }),
+                              std::memory_order_release);
+      producer_done.store(true, std::memory_order_release);
+    });
+
+    std::this_thread::sleep_for(30ms);
+    CHECK_FALSE(producer_done.load(std::memory_order_acquire));
+
+    release_worker.store(true, std::memory_order_release);
+    producer.join();
+
+    CHECK(producer_done.load(std::memory_order_acquire));
+    CHECK(producer_accepted.load(std::memory_order_acquire));
+
+    pool.shutdown();
+    CHECK(executed.load(std::memory_order_acquire) == 3);
+  }
+
+  TEST_CASE("invoke_task future becomes broken_promise after shutdown") {
+    ThreadPool pool(2);
+    pool.shutdown();
+
+    auto fut = pool.invoke_task([] { return 7; });
+    CHECK(fut.wait_for(100ms) == std::future_status::ready);
+    CHECK_THROWS_AS(fut.get(), std::future_error);
+  }
+
+  TEST_CASE("kLockfreeType multiple workers process tasks concurrently") {
+    constexpr int kWorkers = 4;
+    ThreadPool pool(kWorkers, ThreadPool::kLockfreeType);
+    std::atomic<int> counter{0};
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    std::vector<std::future<void>> futures;
+    futures.reserve(kWorkers);
+    for (int i = 0; i < kWorkers; ++i) {
+      futures.push_back(pool.invoke_task([&] {
+        std::this_thread::sleep_for(50ms);
+        counter.fetch_add(1, std::memory_order_relaxed);
+      }));
+    }
+
+    for (auto& f : futures) {
+      f.get();
+    }
+
+    auto elapsed = std::chrono::steady_clock::now() - t0;
+    CHECK(counter.load() == kWorkers);
+    CHECK(elapsed < std::chrono::milliseconds(kWorkers * 50 - 20));
+
+    pool.shutdown();
+  }
+
+  TEST_CASE("set_strategy while pool is running takes effect on subsequent posts") {
+    SmallQueueThreadPool pool(1);
+    pool.set_strategy(ThreadPool::kOptimizationStrategy);
+    CHECK(pool.get_strategy() == ThreadPool::kOptimizationStrategy);
+
+    pool.set_strategy(ThreadPool::kPopStrategy);
+    CHECK(pool.get_strategy() == ThreadPool::kPopStrategy);
+
+    std::atomic<bool> release_worker{false};
+    std::atomic<bool> worker_started{false};
+
+    CHECK(pool.post_task([&] {
+      worker_started.store(true, std::memory_order_release);
+      while (!release_worker.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+    }));
+
+    while (!worker_started.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+
+    std::vector<TaskHandle> handles;
+    handles.reserve(4);
+    for (int i = 0; i < 4; ++i) {
+      handles.push_back(pool.post_task_handle([] {}));
+    }
+
+    bool any_dropped = false;
+    for (const auto& h : handles) {
+      if (h.state() == TaskExecutionState::kDropped) {
+        any_dropped = true;
+        break;
+      }
+    }
+    CHECK(any_dropped);
+
+    release_worker.store(true, std::memory_order_release);
     pool.shutdown();
   }
 }

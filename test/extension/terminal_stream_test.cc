@@ -295,19 +295,19 @@ TEST_SUITE("extension-TerminalStream - chaining") {
 TEST_SUITE("extension-TerminalStream - integer edge cases") {
   TEST_CASE("INT_MIN does not crash") {
     TerminalStream& ts = TerminalStream::get();
-    ts << std::numeric_limits<int>::min();
+    ts << std::numeric_limits<int>::min() << TerminalStream::endl;
     CHECK(true);
   }
 
   TEST_CASE("INT_MAX does not crash") {
     TerminalStream& ts = TerminalStream::get();
-    ts << std::numeric_limits<int>::max();
+    ts << std::numeric_limits<int>::max() << TerminalStream::endl;
     CHECK(true);
   }
 
   TEST_CASE("LLONG_MIN does not crash") {
     TerminalStream& ts = TerminalStream::get();
-    ts << std::numeric_limits<long long>::min();  // NOLINT(runtime/int, google-runtime-int)
+    ts << std::numeric_limits<long long>::min() << TerminalStream::endl;  // NOLINT(runtime/int, google-runtime-int)
     CHECK(true);
   }
 }

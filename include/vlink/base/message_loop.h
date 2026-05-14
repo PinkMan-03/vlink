@@ -33,20 +33,20 @@
  *
  * Queue types:
  *
- * | Type              | Queue implementation           | Max tasks        | Notes                          |
- * | ----------------- | ------------------------------ | ---------------- | ------------------------------ |
- * | @c kNormalType    | Mutex-protected std::queue     | 10000            | Default; no priority support   |
- * | @c kLockfreeType  | MpmcQueue (lock-free MPMC)     | 10000            | Fastest single-producer path   |
- * | @c kPriorityType  | Priority queue                 | 10000            | Supports task priority levels  |
+ * | Type             | Backend                       | Cap   | Notes                       |
+ * | ---------------- | ----------------------------- | ----- | --------------------------- |
+ * | @c kNormalType   | mutex + std::deque (or pmr)   | 10000 | default; FIFO               |
+ * | @c kLockfreeType | MpmcQueue (lock-free MPMC)    | 10000 | lowest contention overhead  |
+ * | @c kPriorityType | two pmr/std priority_queue    | 10000 | split droppable / protected |
  *
  * Dispatch strategies (control behaviour when the task queue is FULL on push;
  * idle dispatch is always cv-based, independent of strategy):
  *
  * | Strategy                | Behaviour when push hits the cap                                        |
- * | ----------------------- | ----------------------------------------------------------------------- |
- * | @c kOptimizationStrategy | Retry up to 10 times with 1 ms sleep each; then drop oldest and push  |
- * | @c kPopStrategy         | Drop the oldest entry immediately and push the new task                 |
- * | @c kBlockStrategy       | Retry indefinitely with 1 ms sleep until space is available             |
+ * | ------------------------ | ---------------------------------------------------------------------- |
+ * | @c kOptimizationStrategy | Retry up to 10 times with 1 ms sleep each; then drop one eligible task |
+ * | @c kPopStrategy          | Drop one eligible task immediately and push the new task               |
+ * | @c kBlockStrategy        | Retry indefinitely with 1 ms sleep until space is available            |
  *
  * Run modes:
  * - @c run() -- blocks the calling thread until @c quit() is called.
@@ -61,7 +61,11 @@
  * with @c on_then / @c on_else / @c on_catch / @c on_schedule_timeout callbacks.
  *
  * @note
- * - Maximum task queue depth is 10000 (@c kMaxTaskSize); posts beyond this fail silently.
+ * - Maximum task queue depth is 10000 (@c kMaxTaskSize).  When the queue is at
+ *   capacity, the configured @c Strategy decides between drop, retry-then-drop
+ *   or block-forever; only @c post_task callers using @c TaskOverflowPolicy::kReject
+ *   (via @c post_task_handle) get an immediate failure, in which case the @c bool
+ *   return is @c false and the returned @c TaskHandle reports @c kRejected.
  * - Maximum active timer count is 100 (@c kMaxTimerSize).
  * - @c invoke_task() dispatches a callable and returns a @c std::future for the result.
  *   Blocking on the future from the same thread as the loop will deadlock.
@@ -84,18 +88,55 @@
 
 #pragma once
 
+#include <atomic>
+#include <functional>
 #include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 #include <utility>
 
 #include "./functional.h"
 #include "./schedule.h"
+#include "./task_handle.h"
 #include "./timer.h"
 
 namespace vlink {
+
+namespace detail {
+
+/**
+ * @struct MessageLoopAliveState
+ * @brief Lifetime flag shared between a @c MessageLoop and external observers.
+ *
+ * @details
+ * @c MessageLoopAliveState is a tiny refcounted block published via
+ * @c MessageLoop::get_alive_state() and used by coroutine adapters (and similar
+ * cross-thread bridges) that need to check whether the loop they are about to
+ * resume on is still alive without keeping the @c MessageLoop itself pinned.
+ *
+ * The contract is:
+ *  - @c alive starts at @c true on construction.
+ *  - @c MessageLoop sets @c alive to @c false under @c mtx as the very first
+ *    step of its destructor, before any other teardown.
+ *  - Observers acquire @c mtx, re-check @c alive, and only touch the loop
+ *    (e.g. @c post_task) while still holding the lock.
+ *
+ * Holding @c mtx therefore guarantees the @c MessageLoop has not yet entered
+ * destruction; releasing @c mtx without observing @c alive @c == @c false also
+ * guarantees the next destructor step is still pending.
+ *
+ * @note Internal type.  Not intended for direct user code; obtain it via
+ *       @c MessageLoop::get_alive_state().
+ */
+struct MessageLoopAliveState final {
+  std::mutex mtx;                ///< Serialises destruction against observers.
+  std::atomic_bool alive{true};  ///< @c false once the owning loop has begun destruction.
+};
+
+}  // namespace detail
 
 /**
  * @class MessageLoop
@@ -139,8 +180,8 @@ class VLINK_EXPORT MessageLoop {
    * capacity.  See the class documentation for a comparison table.
    */
   enum Strategy : uint8_t {
-    kOptimizationStrategy = 0,  ///< Balance: when full, retry; after 10 retries drop oldest and push.
-    kPopStrategy = 1,           ///< When full, drop oldest immediately and push the new task.
+    kOptimizationStrategy = 0,  ///< Balance: when full, retry; after 10 retries drop one eligible task and push.
+    kPopStrategy = 1,           ///< When full, drop one eligible task immediately and push the new task.
     kBlockStrategy = 2,         ///< When full, retry indefinitely with 1 ms sleep between attempts.
   };
 
@@ -172,7 +213,7 @@ class VLINK_EXPORT MessageLoop {
   explicit MessageLoop(Type type);
 
   /**
-   * @brief Destructor.  Calls @c quit(true) and waits for the background thread (if any).
+   * @brief Destructor.  Requests quit and waits for the background thread if needed.
    */
   virtual ~MessageLoop();
 
@@ -284,8 +325,7 @@ class VLINK_EXPORT MessageLoop {
    * Behaviour is **per-batch**, not per-task:
    *  - With @p force @c == @c false (default), the loop finishes the current
    *    batch of already-dequeued tasks (the snapshot it is currently iterating)
-   *    and then exits — tasks @b posted after this call return through
-   *    @c post_task() but are not executed.
+   *    and then exits.  Tasks posted after this call are rejected.
    *  - With @p force @c == @c true, the dispatcher additionally aborts the
    *    in-flight batch and drops the remaining tasks in that batch.
    *
@@ -302,9 +342,20 @@ class VLINK_EXPORT MessageLoop {
   /**
    * @brief Waits until the task queue is drained.
    *
+   * @details
+   * "Idle" means: the loop is not currently executing a task and the task
+   * queue is empty.  If the loop has not yet been started — i.e. neither
+   * @c run() nor @c async_run() has been called (or the loop has already
+   * exited) — only the empty-queue condition is required; tasks queued
+   * before the first start still keep the loop non-idle and cause this
+   * function to wait (or time out).
+   *
    * @param ms     Maximum wait time in milliseconds.  @c Timer::kInfinite for unlimited.  Default: @c kInfinite.
-   * @param check  If @c true, also verify the loop is in the idle state.  Default: @c true.
-   * @return @c true if the queue drained within the timeout.
+   * @param check  If @c true, also reject calls made from the loop's own
+   *               thread (which would deadlock).  Default: @c true.
+   * @return @c true if the loop reached the idle state within @p ms;
+   *         @c false on timeout or if @p check is @c true and the call was
+   *         made from the loop thread.
    */
   bool wait_for_idle(int ms = Timer::kInfinite, bool check = true);
 
@@ -321,30 +372,83 @@ class VLINK_EXPORT MessageLoop {
    * @brief Posts a task to the queue for execution on the loop thread.
    *
    * @details
-   * Thread-safe.  Returns @c false only if the loop has been signalled to quit.
-   * When the queue is at the cap (@c kMaxTaskSize), behaviour follows the configured
-   * @c Strategy (drop oldest immediately, retry-then-drop, or retry indefinitely);
-   * none of those paths returns @c false because of fullness.
+   * Thread-safe.  Returns @c false if the loop has been signalled to quit, or if
+   * the configured overflow handling cannot make room for the new task.  When the
+   * queue is at the cap (@c kMaxTaskSize) the behaviour follows the configured
+   * @c Strategy (drop an eligible task immediately, retry-then-drop, or retry
+   * indefinitely).
+   *
+   * On @c kPriorityType loops, tasks posted without an explicit priority use
+   * @c kNormalPriority.
+   *
+   * @note Drop-policy semantics:
+   *  - @c kNormalType and @c kPriorityType queues honour @c TaskDropPolicy::kProtected
+   *    on a per-task basis: protected tasks are never selected as overflow drop
+   *    victims, and if every task currently in the queue is protected the post
+   *    fails and returns @c false.
+   *  - @c kLockfreeType queues do not track per-task drop policy; overflow drop
+   *    simply removes one queued task regardless of how it was submitted.
    *
    * @param callback  Task to execute.
-   * @return @c true if the task was eventually enqueued (possibly after dropping an
-   *         older task or blocking).  @c false if the loop is quitting.
+   * @return @c true if the task was eventually enqueued (possibly after dropping
+   *         an eligible task or blocking); @c false if the loop is quitting or
+   *         no eligible task could be dropped to make room.
    */
   bool post_task(Callback&& callback);
+
+  /**
+   * @brief Posts a tracked task to the queue and returns a @c TaskHandle.
+   *
+   * @details
+   * Tracked counterpart of @c post_task().  The returned @c TaskHandle can be
+   * used to wait for completion, request cooperative cancellation through the
+   * task's @c CancellationToken, and observe whether the task was eventually
+   * rejected (queue closed, no droppable victim available) or dropped before
+   * execution.
+   *
+   * @param callback  Task to execute.
+   * @param options   Optional overflow, drop and cancellation policy.  See
+   *                  @c PostTaskOptions for defaults.
+   * @return Handle associated with the posted task.  The handle remains valid
+   *         even if the post is rejected — query its state to find out.
+   */
+  [[nodiscard]] TaskHandle post_task_handle(Callback&& callback, const PostTaskOptions& options = {});
 
   /**
    * @brief Posts a task with an explicit priority (requires @c kPriorityType loop).
    *
    * @details
    * Tasks with higher priority values are dispatched before lower-priority tasks.
-   * For @c kNormalType and @c kLockfreeType loops, priority is ignored and the task is
-   * enqueued in FIFO order.
+   * Only @c kPriorityType loops honour @p priority; calling this on a
+   * @c kNormalType or @c kLockfreeType loop is rejected and returns @c false.
+   * Overflow behaviour and drop-policy semantics are the same as @c post_task().
    *
    * @param callback  Task to execute.
-   * @param priority  Dispatch priority.
-   * @return @c true if enqueued successfully.
+   * @param priority  Dispatch priority; higher runs first.  Use one of the
+   *                  @c Priority enumerators or any value in
+   *                  @c [kLowestPriority, kHighestPriority].
+   * @return @c true if enqueued successfully; @c false on a non-priority loop,
+   *         if the loop is quitting, or if no eligible task could be dropped.
    */
   bool post_task_with_priority(Callback&& callback, uint16_t priority);
+
+  /**
+   * @brief Posts a tracked task with an explicit priority and returns a @c TaskHandle.
+   *
+   * @details
+   * Tracked counterpart of @c post_task_with_priority().  Requires a
+   * @c kPriorityType loop; on other loop types the post is rejected and the
+   * returned handle reports rejection.  See @c post_task_handle() for the
+   * general semantics of the returned handle.
+   *
+   * @param callback  Task to execute.
+   * @param priority  Dispatch priority; higher values run first.
+   * @param options   Optional overflow, drop and cancellation policy.  See
+   *                  @c PostTaskOptions for defaults.
+   * @return Handle associated with the posted task.
+   */
+  [[nodiscard]] TaskHandle post_task_with_priority_handle(Callback&& callback, uint16_t priority,
+                                                          const PostTaskOptions& options = {});
 
   /**
    * @brief Posts a scheduled task and returns a @c Schedule::Status for chaining callbacks.
@@ -380,18 +484,33 @@ class VLINK_EXPORT MessageLoop {
   Schedule::RetStatus exec_task(const Schedule::Config& config, CallbackT&& callback);
 
   /**
-   * @brief Wakes the loop thread if it is sleeping (e.g., in @c kBlockStrategy).
+   * @brief Wakes the loop thread if it is blocked in its idle @c cv.wait.
    *
-   * @return @c true if the wakeup signal was sent.
+   * @details
+   * Coalesces concurrent calls: only the first call after the loop last cleared
+   * its wakeup-pending flag actually grabs the wait mutex and notifies.  Useful
+   * when external state (other than queue insertion) has changed and the loop
+   * should re-evaluate its idle predicate.
+   *
+   * @return @c true if a wakeup signal is pending for the loop (either sent by
+   *         this call or already pending from a prior call); @c false if the
+   *         loop is not running.
    */
   bool wakeup();
 
   /**
-   * @brief Resets the lock-free queue to its initial capacity.
+   * @brief Re-creates the lock-free queue, clearing all queued tasks and bookkeeping.
    *
    * @details
-   * Only applicable to @c kLockfreeType loops.  Useful after a large burst of tasks
-   * to reclaim internal capacity bookkeeping.
+   * Only applicable to @c kLockfreeType loops.  Re-emplaces the underlying
+   * @c MpmcQueue (so the @c head_ / @c tail_ cursors and the
+   * @c lockfree_task_count counter are reset to zero) and clears the deferred
+   * @c lockfree_needs_reset flag.
+   *
+   * @note The loop **must be stopped** (i.e. @c is_running() returning @c false)
+   *       before calling this function; calls made while the loop is running
+   *       are logged at error level and silently skipped.  On non-lockfree
+   *       loops the call is a no-op.
    */
   void reset_lockfree_capacity();
 
@@ -458,6 +577,27 @@ class VLINK_EXPORT MessageLoop {
    * @return @c true if called from the loop's own thread.
    */
   [[nodiscard]] virtual bool is_in_same_thread() const;
+
+  /**
+   * @brief Returns the shared lifetime flag used by coroutine adapters.
+   *
+   * @details
+   * The returned @c MessageLoopAliveState outlives this @c MessageLoop: its
+   * @c alive member is flipped to @c false under @c mtx as the very first step
+   * of the destructor (see @c MessageLoopAliveState).  Adapters that need to
+   * post a continuation back to this loop from another thread should:
+   *
+   *  1. Capture the @c shared_ptr returned here (cheap, refcounted).
+   *  2. On the resumer thread, lock @c MessageLoopAliveState::mtx, re-check
+   *     @c alive, and only call back into the loop while still holding the
+   *     lock.
+   *
+   * @return Shared handle to this loop's lifetime flag; never null while the
+   *         loop object itself is alive.
+   * @note Internal API for coroutine adapters and similar cross-thread bridges.
+   *       Application code should not need to call this directly.
+   */
+  [[nodiscard]] std::shared_ptr<detail::MessageLoopAliveState> get_alive_state() const;
 
   /**
    * @brief Dispatches a callable to the loop thread and returns a @c std::future for the result.
@@ -557,13 +697,25 @@ class VLINK_EXPORT MessageLoop {
 
   bool remove_timer(Timer* timer);
 
-  bool push_task(Callback&& callback, uint16_t priority);
+  bool push_task(Callback&& callback, uint16_t priority, bool droppable = true,
+                 TaskOverflowPolicy overflow_policy = TaskOverflowPolicy::kUseDispatcherStrategy,
+                 const TaskHandle* submit_handle = nullptr);
 
-  void push_normal_task(Callback&& callback);
+  bool drop_one_normal_task();
+
+  bool drop_one_lockfree_task(bool keep_reserved = false);
+
+  bool drop_one_priority_task();
+
+  bool reserve_lockfree_task();
+
+  void release_lockfree_task();
+
+  void push_normal_task(Callback&& callback, bool droppable = true);
 
   bool push_lockfree_task(Callback&& callback);
 
-  void push_priority_task(Callback&& callback, uint16_t priority);
+  void push_priority_task(Callback&& callback, uint16_t priority, bool droppable = true);
 
   void do_consume();
 
@@ -574,6 +726,8 @@ class VLINK_EXPORT MessageLoop {
   bool process_priority_task(bool block);
 
   bool process_timer_task(int64_t& next_sleep_time);
+
+  void drop_pending_tasks();
 
   friend Timer;
   struct Impl;
@@ -640,24 +794,25 @@ Schedule::RetStatus MessageLoop::exec_task(const Schedule::Config& config, Callb
 
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> MessageLoop::invoke_task(FunctionT&& function, ArgsT&&... args) {
+  auto bound =
+      std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...);  // NOLINT(modernize-avoid-bind)
+
   if constexpr (kIsSupportMoveFunction) {
-    std::packaged_task<ResultT()> task(
-        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+    std::packaged_task<ResultT()> task(std::move(bound));
+    auto res = task.get_future();
 
-    std::future<ResultT> res = task.get_future();
-
-    post_task([t = std::move(task)]() mutable { t(); });
+    if VUNLIKELY (!post_task([task = std::move(task)]() mutable { task(); })) {
+      // Destroying the unposted packaged_task makes the returned future ready with broken_promise.
+    }
 
     return res;
   } else {
-    auto task = std::make_shared<std::packaged_task<ResultT()>>(
-        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+    auto task = std::make_shared<std::packaged_task<ResultT()>>(std::move(bound));
+    auto res = task->get_future();
 
-    std::future<ResultT> res = task->get_future();
-
-    using TaskFunction = bool (MessageLoop::*)(Callback&&);
-
-    std::invoke(static_cast<TaskFunction>(&MessageLoop::post_task), this, [task]() { (*task.get())(); });
+    if VUNLIKELY (!post_task([task]() mutable { (*task)(); })) {
+      task.reset();
+    }
 
     return res;
   }
@@ -666,26 +821,25 @@ inline std::future<ResultT> MessageLoop::invoke_task(FunctionT&& function, ArgsT
 template <class FunctionT, class... ArgsT, typename ResultT>
 inline std::future<ResultT> MessageLoop::invoke_task_with_priority(FunctionT&& function, uint16_t priority,
                                                                    ArgsT&&... args) {
+  auto bound =
+      std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...);  // NOLINT(modernize-avoid-bind)
+
   if constexpr (kIsSupportMoveFunction) {
-    std::packaged_task<ResultT()> task(
-        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+    std::packaged_task<ResultT()> task(std::move(bound));
+    auto res = task.get_future();
 
-    std::future<ResultT> res = task.get_future();
-
-    post_task_with_priority([t = std::move(task)]() mutable { t(); }, priority);
+    if VUNLIKELY (!post_task_with_priority([task = std::move(task)]() mutable { task(); }, priority)) {
+      // Destroying the unposted packaged_task makes the returned future ready with broken_promise.
+    }
 
     return res;
   } else {
-    auto task = std::make_shared<std::packaged_task<ResultT()>>(
-        std::bind(std::forward<FunctionT>(function), std::forward<ArgsT>(args)...));  // NOLINT(modernize-avoid-bind)
+    auto task = std::make_shared<std::packaged_task<ResultT()>>(std::move(bound));
+    auto res = task->get_future();
 
-    std::future<ResultT> res = task->get_future();
-
-    using TaskFunction = bool (MessageLoop::*)(Callback&&, uint16_t);
-
-    std::invoke(
-        static_cast<TaskFunction>(&MessageLoop::post_task_with_priority), this, [task]() { (*task.get())(); },
-        priority);
+    if VUNLIKELY (!post_task_with_priority([task]() mutable { (*task)(); }, priority)) {
+      task.reset();
+    }
 
     return res;
   }

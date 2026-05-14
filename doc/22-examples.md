@@ -36,7 +36,7 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 | 分类              | 目录                         | 示例数量 | 说明                                        |
 | ----------------- | ---------------------------- | -------- | ------------------------------------------- |
 | quickstart        | `examples/quickstart/`       | 3        | 最小化入门示例（PubSub、RPC、Field）        |
-| base              | `examples/base/`             | 20       | 基础库（Logger、Timer、Bytes、内存池、线程池等）|
+| base              | `examples/base/`             | 23       | 基础库（Logger、Timer、Bytes、内存池、线程池、协程、Cancellation、TaskHandle 等）|
 | communication     | `examples/communication/`    | 7        | 三种通信模型的基础和进阶用法                |
 | serialization     | `examples/serialization/`    | 7        | 各序列化类型的独立演示                      |
 | url_guide         | `examples/url_guide/`        | 9        | URL 格式与各传输后端配置指南                |
@@ -247,11 +247,14 @@ ls build/output/bin/
 | `elapsed_timer`          | 耗时计时器                                        |
 | `deadline_timer`         | 截止时间检测器                                    |
 | `message_loop_basic`     | 事件循环基本用法                                  |
-| `message_loop_advanced`  | 事件循环高级用法（优先级队列）                    |
+| `message_loop_advanced`  | 事件循环高级用法（优先级队列、`exec_task` 链式）   |
+| `message_loop_coroutine` | MessageLoop + C++20 协程（`Task<T>` / `co_spawn` / `schedule/yield/delay_ms` / `await_future` / `await_graph` / `when_all/when_any/sequence`，需 `ENABLE_CXX_STD_20=ON`） |
 | `multi_loop`             | 多事件循环并发调度                                |
-| `thread_pool`            | 线程池任务提交                                    |
+| `thread_pool`            | 线程池任务提交（含 `post_task_handle` 与 shutdown 自分离） |
 | `spin_lock`              | 自旋锁使用                                        |
-| `graph_task`             | DAG 任务图调度                                    |
+| `graph_task`             | DAG 任务图调度（状态回调 snapshot 语义）           |
+| `cancellation`           | 协作取消三件套：`CancellationSource` / `Token` / `Registration` + `OperationCancelled` |
+| `task_handle`            | Tracked 任务投递：`post_task_handle` / `PostTaskOptions` / `TaskExecutionState` 全状态机覆盖 |
 | `object_pool`            | 对象池                                            |
 | `memory_pool`            | 内存池（`MemoryPool` 多档分级、预分配）            |
 | `process`                | 进程信息查询                                      |

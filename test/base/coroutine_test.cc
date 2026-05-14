@@ -36,12 +36,15 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "./base/graph_task.h"
 #include "./base/message_loop.h"
 #include "./base/schedule.h"
+#include "./base/task_handle.h"
+#include "./base/thread_pool.h"
 
 //
 #include "../common_test.h"
@@ -60,6 +63,13 @@ using vlink::Co::when_all;
 using vlink::Co::when_any;
 using vlink::Co::yield;
 
+static_assert(!std::is_copy_constructible_v<vlink::Co::ScheduleAwaiter>);
+static_assert(!std::is_copy_constructible_v<vlink::Co::YieldAwaiter>);
+static_assert(!std::is_copy_constructible_v<vlink::Co::DelayAwaiter>);
+static_assert(std::is_move_constructible_v<vlink::Co::ScheduleAwaiter>);
+static_assert(std::is_move_constructible_v<vlink::Co::YieldAwaiter>);
+static_assert(std::is_move_constructible_v<vlink::Co::DelayAwaiter>);
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -71,7 +81,28 @@ using vlink::Co::yield;
 
 namespace {
 
+class SmallQueueMessageLoop final : public MessageLoop {
+ public:
+  using MessageLoop::MessageLoop;
+
+  [[nodiscard]] size_t get_max_task_count() const override { return 1U; }
+};
+
 void sleep_ms(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+
+template <typename PredicateT>
+bool wait_until(PredicateT&& predicate, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (predicate()) {
+      return true;
+    }
+
+    std::this_thread::yield();
+  }
+
+  return predicate();
+}
 
 Task<> body_basic(std::atomic<int>* counter, std::promise<void>* done) {
   counter->fetch_add(1, std::memory_order_release);
@@ -131,6 +162,44 @@ Task<> body_schedule(MessageLoop* loop, std::promise<std::thread::id>* done) {
 Task<> body_await_future(MessageLoop* loop, std::future<int> input, std::promise<int>* output) {
   int value = co_await await_future(*loop, std::move(input));
   output->set_value(value + 1);
+  co_return;
+}
+
+Task<> body_signal_then_await_future(MessageLoop* loop, std::future<int> input, std::promise<void>* awaiting,
+                                     std::promise<int>* output) {
+  awaiting->set_value();
+  int value = co_await await_future(*loop, std::move(input));
+  output->set_value(value);
+  co_return;
+}
+
+Task<> body_signal_then_await_future_cancel(MessageLoop* loop, std::future<int> input, std::promise<void>* awaiting,
+                                            std::atomic<bool>* caught, std::promise<void>* done) {
+  awaiting->set_value();
+  try {
+    (void)co_await await_future(*loop, std::move(input));
+  } catch (const Exception::OperationCancelled&) {
+    caught->store(true, std::memory_order_release);
+  }
+  done->set_value();
+  co_return;
+}
+
+Task<> body_schedule_then_done(MessageLoop* target, std::promise<void>* awaiting, std::promise<void>* done) {
+  awaiting->set_value();
+  co_await schedule(*target);
+  done->set_value();
+  co_return;
+}
+
+Task<> body_yield_after_filling_queue(MessageLoop* loop, std::promise<void>* done) {
+  vlink::PostTaskOptions options;
+  options.drop_policy = vlink::TaskDropPolicy::kProtected;
+  auto filler = loop->post_task_handle([] {}, options);
+  CHECK(filler.state() == vlink::TaskExecutionState::kQueued);
+
+  co_await yield(*loop);
+  done->set_value();
   co_return;
 }
 
@@ -257,6 +326,12 @@ Task<> body_push_order(std::vector<int>* order, int v) {
   co_return;
 }
 
+Task<> body_push_order_done(std::vector<int>* order, int v, std::promise<void>* done) {
+  order->push_back(v);
+  done->set_value();
+  co_return;
+}
+
 Task<> body_delay_push(MessageLoop* loop, uint32_t ms, std::vector<int>* order, int v) {
   co_await delay_ms(*loop, ms);
   order->push_back(v);
@@ -301,6 +376,26 @@ Task<> body_await_done_graph(MessageLoop* loop, vlink::GraphTaskPtr leaf, std::a
                              std::promise<int>* done) {
   co_await await_graph(*loop, leaf);
   done->set_value(step->load(std::memory_order_acquire));
+  co_return;
+}
+
+Task<> body_signal_then_await_graph(MessageLoop* loop, vlink::GraphTaskPtr graph, std::promise<void>* awaiting,
+                                    std::promise<void>* done) {
+  awaiting->set_value();
+  co_await await_graph(*loop, std::move(graph));
+  done->set_value();
+  co_return;
+}
+
+Task<> body_signal_then_await_graph_cancel(MessageLoop* loop, vlink::GraphTaskPtr graph, std::promise<void>* awaiting,
+                                           std::atomic<bool>* caught, std::promise<void>* done) {
+  awaiting->set_value();
+  try {
+    co_await await_graph(*loop, std::move(graph));
+  } catch (const Exception::OperationCancelled&) {
+    caught->store(true, std::memory_order_release);
+  }
+  done->set_value();
   co_return;
 }
 
@@ -657,6 +752,108 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
+  TEST_CASE("await_future retries resume while target queue is temporarily full") {
+    SmallQueueMessageLoop loop(MessageLoop::kNormalType);
+    loop.set_strategy(MessageLoop::kPopStrategy);
+    loop.async_run();
+
+    std::promise<int> input;
+    auto input_fut = input.get_future();
+    std::promise<void> awaiting;
+    auto awaiting_fut = awaiting.get_future();
+    std::promise<int> output;
+    auto output_fut = output.get_future();
+
+    co_spawn(loop, body_signal_then_await_future(&loop, std::move(input_fut), &awaiting, &output));
+    awaiting_fut.get();
+
+    std::atomic<bool> release_loop{false};
+    std::atomic<bool> loop_blocked{false};
+
+    CHECK(loop.post_task([&] {
+      loop_blocked.store(true, std::memory_order_release);
+      while (!release_loop.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+    }));
+
+    CHECK(wait_until([&loop_blocked] { return loop_blocked.load(std::memory_order_acquire); }));
+
+    vlink::PostTaskOptions options;
+    options.drop_policy = vlink::TaskDropPolicy::kProtected;
+    auto filler = loop.post_task_handle([] {}, options);
+    CHECK(filler.state() == vlink::TaskExecutionState::kQueued);
+
+    input.set_value(7);
+    CHECK(output_fut.wait_for(std::chrono::milliseconds(30)) == std::future_status::timeout);
+
+    release_loop.store(true, std::memory_order_release);
+    CHECK(output_fut.get() == 7);
+    CHECK(filler.wait(1000));
+
+    loop.quit();
+    loop.wait_for_quit();
+  }
+
+  TEST_CASE("await_future reports cancellation when target loop closes before resume") {
+    MessageLoop loop;
+    loop.async_run();
+
+    std::promise<int> input;
+    auto input_fut = input.get_future();
+    std::promise<void> awaiting;
+    auto awaiting_fut = awaiting.get_future();
+    std::atomic<bool> caught{false};
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    co_spawn(loop, body_signal_then_await_future_cancel(&loop, std::move(input_fut), &awaiting, &caught, &done));
+    awaiting_fut.get();
+
+    loop.quit();
+    loop.wait_for_quit();
+    input.set_value(11);
+
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(caught.load(std::memory_order_acquire));
+  }
+
+  TEST_CASE("await_future reports cancellation when queued resume is dropped by quit") {
+    MessageLoop loop;
+    loop.async_run();
+
+    std::promise<int> input;
+    auto input_fut = input.get_future();
+    std::promise<void> awaiting;
+    auto awaiting_fut = awaiting.get_future();
+    std::atomic<bool> caught{false};
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    co_spawn(loop, body_signal_then_await_future_cancel(&loop, std::move(input_fut), &awaiting, &caught, &done));
+    awaiting_fut.get();
+
+    std::atomic<bool> release_loop{false};
+    std::atomic<bool> loop_blocked{false};
+    CHECK(loop.post_task([&] {
+      loop_blocked.store(true, std::memory_order_release);
+      while (!release_loop.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+    }));
+    CHECK(wait_until([&loop_blocked] { return loop_blocked.load(std::memory_order_acquire); }));
+
+    input.set_value(11);
+    CHECK(wait_until([&loop] { return loop.get_task_count() != 0; }));
+
+    loop.quit();
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(caught.load(std::memory_order_acquire));
+
+    release_loop.store(true, std::memory_order_release);
+    loop.wait_for_quit();
+  }
+
   TEST_CASE("await_future with already-ready future short-circuits") {
     MessageLoop loop;
     loop.async_run();
@@ -690,6 +887,11 @@ TEST_SUITE("base-Coroutine") {
     CHECK(ran.load(std::memory_order_acquire));
     CHECK(loop.is_running());
 
+    std::promise<void> after;
+    auto after_fut = after.get_future();
+    CHECK(loop.post_task([&after] { after.set_value(); }));
+    CHECK(after_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+
     loop.quit();
     loop.wait_for_quit();
   }
@@ -722,6 +924,90 @@ TEST_SUITE("base-Coroutine") {
 
     sleep_ms(50);
     CHECK_FALSE(ran.load(std::memory_order_acquire));
+  }
+
+  TEST_CASE("co_spawn retries initial resume while target queue is temporarily full") {
+    SmallQueueMessageLoop loop(MessageLoop::kNormalType);
+    loop.set_strategy(MessageLoop::kPopStrategy);
+
+    vlink::PostTaskOptions options;
+    options.drop_policy = vlink::TaskDropPolicy::kProtected;
+    auto filler = loop.post_task_handle([] {}, options);
+    CHECK(filler.state() == vlink::TaskExecutionState::kQueued);
+
+    std::atomic<int> counter{0};
+    std::promise<void> done;
+    auto fut = done.get_future();
+
+    co_spawn(loop, body_basic(&counter, &done));
+    CHECK(fut.wait_for(std::chrono::milliseconds(30)) == std::future_status::timeout);
+
+    loop.async_run();
+
+    CHECK(fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(counter.load(std::memory_order_acquire) == 1);
+    CHECK(filler.wait(1000));
+
+    loop.quit();
+    loop.wait_for_quit();
+  }
+
+  TEST_CASE("schedule retries while target queue is temporarily full") {
+    MessageLoop source;
+    SmallQueueMessageLoop target(MessageLoop::kNormalType);
+    target.set_strategy(MessageLoop::kPopStrategy);
+    source.async_run();
+    target.async_run();
+
+    std::atomic<bool> release_target{false};
+    std::atomic<bool> target_blocked{false};
+
+    CHECK(target.post_task([&] {
+      target_blocked.store(true, std::memory_order_release);
+      while (!release_target.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+    }));
+    CHECK(wait_until([&target_blocked] { return target_blocked.load(std::memory_order_acquire); }));
+
+    vlink::PostTaskOptions options;
+    options.drop_policy = vlink::TaskDropPolicy::kProtected;
+    auto filler = target.post_task_handle([] {}, options);
+    CHECK(filler.state() == vlink::TaskExecutionState::kQueued);
+
+    std::promise<void> awaiting;
+    auto awaiting_fut = awaiting.get_future();
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    co_spawn(source, body_schedule_then_done(&target, &awaiting, &done));
+    CHECK(awaiting_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(30)) == std::future_status::timeout);
+
+    release_target.store(true, std::memory_order_release);
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(filler.wait(1000));
+
+    source.quit();
+    target.quit();
+    source.wait_for_quit();
+    target.wait_for_quit();
+  }
+
+  TEST_CASE("yield retries while target queue is temporarily full") {
+    SmallQueueMessageLoop loop(MessageLoop::kNormalType);
+    loop.set_strategy(MessageLoop::kPopStrategy);
+    loop.async_run();
+
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    co_spawn(loop, body_yield_after_filling_queue(&loop, &done));
+
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+
+    loop.quit();
+    loop.wait_for_quit();
   }
 
   TEST_CASE("Task default-constructs to an invalid state") {
@@ -940,35 +1226,187 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
+  TEST_CASE("await_graph retries resume while target queue is temporarily full") {
+    SmallQueueMessageLoop loop(MessageLoop::kNormalType);
+    loop.set_strategy(MessageLoop::kPopStrategy);
+    loop.async_run();
+
+    vlink::ThreadPool pool(1);
+    auto graph = vlink::GraphTask::create([] {});
+
+    std::promise<void> awaiting;
+    auto awaiting_fut = awaiting.get_future();
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    co_spawn(loop, body_signal_then_await_graph(&loop, graph, &awaiting, &done));
+    awaiting_fut.get();
+
+    std::atomic<bool> release_loop{false};
+    std::atomic<bool> loop_blocked{false};
+
+    CHECK(loop.post_task([&] {
+      loop_blocked.store(true, std::memory_order_release);
+      while (!release_loop.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+    }));
+
+    CHECK(wait_until([&loop_blocked] { return loop_blocked.load(std::memory_order_acquire); }));
+
+    vlink::PostTaskOptions options;
+    options.drop_policy = vlink::TaskDropPolicy::kProtected;
+    auto filler = loop.post_task_handle([] {}, options);
+    CHECK(filler.state() == vlink::TaskExecutionState::kQueued);
+
+    graph->execute(&pool);
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(30)) == std::future_status::timeout);
+
+    release_loop.store(true, std::memory_order_release);
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(filler.wait(1000));
+
+    pool.shutdown();
+    loop.quit();
+    loop.wait_for_quit();
+  }
+
+  TEST_CASE("await_graph reports cancellation when target loop closes before resume") {
+    MessageLoop loop;
+    loop.async_run();
+    ThreadPool pool(1);
+
+    auto graph = GraphTask::create([] {});
+    std::promise<void> awaiting;
+    auto awaiting_fut = awaiting.get_future();
+    std::atomic<bool> caught{false};
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    co_spawn(loop, body_signal_then_await_graph_cancel(&loop, graph, &awaiting, &caught, &done));
+    awaiting_fut.get();
+
+    loop.quit();
+    loop.wait_for_quit();
+    graph->execute(&pool);
+
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(caught.load(std::memory_order_acquire));
+
+    pool.shutdown();
+  }
+
+  TEST_CASE("await_graph reports cancellation when queued resume is dropped by quit") {
+    MessageLoop loop;
+    loop.async_run();
+    ThreadPool pool(1);
+
+    auto graph = GraphTask::create([] {});
+    std::promise<void> awaiting;
+    auto awaiting_fut = awaiting.get_future();
+    std::atomic<bool> caught{false};
+    std::promise<void> done;
+    auto done_fut = done.get_future();
+
+    co_spawn(loop, body_signal_then_await_graph_cancel(&loop, graph, &awaiting, &caught, &done));
+    awaiting_fut.get();
+
+    std::atomic<bool> release_loop{false};
+    std::atomic<bool> loop_blocked{false};
+    CHECK(loop.post_task([&] {
+      loop_blocked.store(true, std::memory_order_release);
+      while (!release_loop.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+    }));
+    CHECK(wait_until([&loop_blocked] { return loop_blocked.load(std::memory_order_acquire); }));
+
+    graph->execute(&pool);
+    CHECK(wait_until([&loop] { return loop.get_task_count() != 0; }));
+
+    loop.quit();
+    CHECK(done_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    CHECK(caught.load(std::memory_order_acquire));
+
+    release_loop.store(true, std::memory_order_release);
+    loop.wait_for_quit();
+    pool.shutdown();
+  }
+
   TEST_CASE("co_spawn_with_priority dispatches at the requested priority level") {
     MessageLoop loop(MessageLoop::kPriorityType);
     loop.async_run();
 
     std::promise<void> release;
-    std::promise<void> primer_ready;
-
-    auto barrier_body = [](MessageLoop* lp, std::future<void> rel, std::promise<void>* primer) -> Task<> {
-      primer->set_value();
-      co_await await_future(*lp, std::move(rel));
-      co_return;
-    };
-
-    co_spawn(loop, barrier_body(&loop, release.get_future(), &primer_ready));
-    primer_ready.get_future().get();
+    std::promise<void> barrier_started;
+    auto release_future = release.get_future();
+    auto barrier_fut = barrier_started.get_future();
+    loop.post_task_with_priority(
+        [release_future = std::move(release_future), &barrier_started]() mutable {
+          barrier_started.set_value();
+          release_future.wait();
+        },
+        MessageLoop::kHighestPriority);
+    REQUIRE(barrier_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
 
     std::atomic<int> first_executed{0};
     std::promise<void> low_done;
     std::promise<void> high_done;
+    auto low_fut = low_done.get_future();
+    auto high_fut = high_done.get_future();
 
     co_spawn_with_priority(loop, body_record_first(&first_executed, 1, &low_done), MessageLoop::kLowestPriority);
     co_spawn_with_priority(loop, body_record_first(&first_executed, 2, &high_done), MessageLoop::kHighestPriority);
 
     release.set_value();
 
-    high_done.get_future().get();
-    low_done.get_future().get();
+    REQUIRE(high_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    REQUIRE(low_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
 
     CHECK(first_executed.load(std::memory_order_acquire) == 2);
+
+    loop.quit();
+    loop.wait_for_quit();
+  }
+
+  TEST_CASE("co_spawn default priority is normal on priority loop") {
+    MessageLoop loop(MessageLoop::kPriorityType);
+    loop.async_run();
+
+    std::promise<void> release;
+    std::promise<void> barrier_started;
+    auto release_future = release.get_future();
+    auto barrier_fut = barrier_started.get_future();
+    loop.post_task_with_priority(
+        [release_future = std::move(release_future), &barrier_started]() mutable {
+          barrier_started.set_value();
+          release_future.wait();
+        },
+        MessageLoop::kHighestPriority);
+    REQUIRE(barrier_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+
+    std::vector<int> order;
+    std::promise<void> default_done;
+    std::promise<void> low_done;
+    std::promise<void> high_done;
+    auto default_fut = default_done.get_future();
+    auto low_fut = low_done.get_future();
+    auto high_fut = high_done.get_future();
+
+    co_spawn(loop, body_push_order_done(&order, 0, &default_done));
+    co_spawn_with_priority(loop, body_push_order_done(&order, 1, &low_done), MessageLoop::kLowestPriority);
+    co_spawn_with_priority(loop, body_push_order_done(&order, 2, &high_done), MessageLoop::kHighestPriority);
+
+    release.set_value();
+
+    REQUIRE(high_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    REQUIRE(default_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    REQUIRE(low_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+
+    REQUIRE(order.size() == 3U);
+    CHECK(order[0] == 2);
+    CHECK(order[1] == 0);
+    CHECK(order[2] == 1);
 
     loop.quit();
     loop.wait_for_quit();
@@ -981,12 +1419,14 @@ TEST_SUITE("base-Coroutine") {
     std::vector<int> order;
     std::promise<void> low_done;
     std::promise<void> high_done;
+    auto low_fut = low_done.get_future();
+    auto high_fut = high_done.get_future();
 
     co_spawn_with_priority(loop, body_yield_high_prio(&loop, &order, &low_done, &high_done),
                            MessageLoop::kHighestPriority);
 
-    high_done.get_future().get();
-    low_done.get_future().get();
+    REQUIRE(high_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
+    REQUIRE(low_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
 
     REQUIRE(order.size() == 2);
     CHECK(order[0] == 1);

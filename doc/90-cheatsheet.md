@@ -799,6 +799,48 @@ vlink::Logger::dump_backtrace();         // 吐出最近 50 条
 double usage = pub.get_cpu_usage();      // 同时会通过 Discovery 广播
 ```
 
+**⑩ Tracked 任务 + 协作取消**：
+```cpp
+#include <vlink/base/task_handle.h>
+#include <vlink/base/cancellation.h>
+
+vlink::CancellationSource src;
+vlink::PostTaskOptions opts;
+opts.cancellation_token = src.token();
+opts.overflow_policy    = vlink::TaskOverflowPolicy::kReject;
+opts.drop_policy        = vlink::TaskDropPolicy::kProtected;   // 仅对非 lock-free 队列生效
+
+auto h = loop.post_task_handle([t = opts.cancellation_token] {
+    while (!t.is_cancellation_requested()) do_step();
+}, opts);
+
+src.request_cancel();           // 翻转父 token，已排队任务被跳过
+h.wait();                       // 等终态
+// h.state() ∈ {kCompleted, kCancelled, kDropped, kRejected, kFailed}
+```
+
+**⑪ C++20 协程串接 Pipeline**：
+```cpp
+#include <vlink/base/coroutine.h>
+
+vlink::Co::Task<void> pipeline(vlink::MessageLoop& loop) {
+    co_await vlink::Co::delay_ms(loop, 50);
+    auto data = co_await vlink::Co::await_future(loop, std::move(fut));
+    co_await vlink::Co::yield(loop);        // 协作让出
+    co_return;
+}
+vlink::Co::co_spawn(loop, pipeline(loop));
+```
+
+**⑫ GraphTask 状态订阅（snapshot 语义）**：
+```cpp
+uint32_t id = task->register_status_callback(
+    [task](const std::string& name, vlink::GraphTask::Status s) {
+        // 安全：可在回调内 register / unregister / clear（影响下次触发）
+        if (s == vlink::GraphTask::kStatusDone) task->unregister_status_callback(id);
+    });
+```
+
 ---
 
 ## 🩺 快速排障

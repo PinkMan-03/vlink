@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -41,8 +40,25 @@
 #include "./base/condition_variable.h"
 #include "./base/helpers.h"
 #include "./base/logger.h"
+#include "./base/memory_pool.h"
+#include "./base/memory_resource.h"
 
 namespace vlink {
+
+namespace {
+
+template <typename T, typename... Args>
+inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
+
+  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
+#else
+  return std::make_shared<T>(std::forward<Args>(args)...);
+#endif
+}
+
+}  // namespace
 
 static std::atomic<uint32_t> global_graph_task_count = 0;
 
@@ -79,31 +95,127 @@ struct GraphTask::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddi
 
   std::mutex status_callbacks_mtx;
   std::atomic<uint32_t> next_status_callback_id{1};
-  std::unordered_map<uint32_t, GraphTask::StatusCallback> status_callbacks;
+  std::unordered_map<uint32_t, std::shared_ptr<GraphTask::StatusCallback>> status_callbacks;
 
   bool is_condition_task{false};
 };
 
 // GraphTask
 std::shared_ptr<GraphTask> GraphTask::create(Callback&& callback, int condition_number) {
-  return std::shared_ptr<GraphTask>(new GraphTask(std::move(callback), condition_number),
-                                    [](GraphTask* task) { delete task; });
+  auto& pool = MemoryPool::global_instance();
+
+  void* mem = pool.allocate(sizeof(GraphTask), alignof(GraphTask));
+
+  if VUNLIKELY (mem == nullptr) {
+    throw std::bad_alloc{};
+  }
+
+  GraphTask* raw = nullptr;
+
+  try {
+    raw = new (mem) GraphTask(std::move(callback), condition_number);
+  } catch (...) {
+    pool.deallocate(mem, sizeof(GraphTask), alignof(GraphTask));
+    throw;
+  }
+
+  return std::shared_ptr<GraphTask>(raw, [](GraphTask* task) {
+    if VUNLIKELY (task == nullptr) {
+      return;
+    }
+
+    task->~GraphTask();
+
+    MemoryPool::global_instance().deallocate(task, sizeof(GraphTask), alignof(GraphTask));
+  });
 }
 
 std::shared_ptr<GraphTask> GraphTask::create(const std::string& name, Callback&& callback, int condition_number) {
-  return std::shared_ptr<GraphTask>(new GraphTask(name, std::move(callback), condition_number),
-                                    [](GraphTask* task) { delete task; });
+  auto& pool = MemoryPool::global_instance();
+
+  void* mem = pool.allocate(sizeof(GraphTask), alignof(GraphTask));
+
+  if VUNLIKELY (mem == nullptr) {
+    throw std::bad_alloc{};
+  }
+
+  GraphTask* raw = nullptr;
+
+  try {
+    raw = new (mem) GraphTask(name, std::move(callback), condition_number);
+  } catch (...) {
+    pool.deallocate(mem, sizeof(GraphTask), alignof(GraphTask));
+    throw;
+  }
+
+  return std::shared_ptr<GraphTask>(raw, [](GraphTask* task) {
+    if VUNLIKELY (task == nullptr) {
+      return;
+    }
+
+    task->~GraphTask();
+
+    MemoryPool::global_instance().deallocate(task, sizeof(GraphTask), alignof(GraphTask));
+  });
 }
 
 std::shared_ptr<GraphTask> GraphTask::create_condition(ConditionCallback&& callback, int condition_number) {
-  return std::shared_ptr<GraphTask>(new GraphTask(std::move(callback), condition_number),
-                                    [](GraphTask* task) { delete task; });
+  auto& pool = MemoryPool::global_instance();
+
+  void* mem = pool.allocate(sizeof(GraphTask), alignof(GraphTask));
+
+  if VUNLIKELY (mem == nullptr) {
+    throw std::bad_alloc{};
+  }
+
+  GraphTask* raw = nullptr;
+
+  try {
+    raw = new (mem) GraphTask(std::move(callback), condition_number);
+  } catch (...) {
+    pool.deallocate(mem, sizeof(GraphTask), alignof(GraphTask));
+    throw;
+  }
+
+  return std::shared_ptr<GraphTask>(raw, [](GraphTask* task) {
+    if VUNLIKELY (task == nullptr) {
+      return;
+    }
+
+    task->~GraphTask();
+
+    MemoryPool::global_instance().deallocate(task, sizeof(GraphTask), alignof(GraphTask));
+  });
 }
 
 std::shared_ptr<GraphTask> GraphTask::create_condition(const std::string& name, ConditionCallback&& callback,
                                                        int condition_number) {
-  return std::shared_ptr<GraphTask>(new GraphTask(name, std::move(callback), condition_number),
-                                    [](GraphTask* task) { delete task; });
+  auto& pool = MemoryPool::global_instance();
+
+  void* mem = pool.allocate(sizeof(GraphTask), alignof(GraphTask));
+
+  if VUNLIKELY (mem == nullptr) {
+    throw std::bad_alloc{};
+  }
+
+  GraphTask* raw = nullptr;
+
+  try {
+    raw = new (mem) GraphTask(name, std::move(callback), condition_number);
+  } catch (...) {
+    pool.deallocate(mem, sizeof(GraphTask), alignof(GraphTask));
+    throw;
+  }
+
+  return std::shared_ptr<GraphTask>(raw, [](GraphTask* task) {
+    if VUNLIKELY (task == nullptr) {
+      return;
+    }
+
+    task->~GraphTask();
+
+    MemoryPool::global_instance().deallocate(task, sizeof(GraphTask), alignof(GraphTask));
+  });
 }
 
 void GraphTask::cancel() {
@@ -221,7 +333,7 @@ uint32_t GraphTask::register_status_callback(StatusCallback&& callback) {
     return 0;
   }
 
-  impl_->status_callbacks.emplace(id, std::move(callback));
+  impl_->status_callbacks.emplace(id, pool_make_shared<StatusCallback>(std::move(callback)));
 
   return id;
 }
@@ -755,29 +867,45 @@ void GraphTask::notify(int condition_number) {
 }
 
 void GraphTask::update_status(Status status) {
-  if (impl_->status == status) {
+  if VUNLIKELY (impl_->status == status) {
     return;
   }
 
   impl_->status = status;
 
   std::string name_copy;
+
   {
     std::shared_lock lock(impl_->shared_mtx);
+
     name_copy = impl_->name;
   }
 
-  std::lock_guard lock(impl_->status_callbacks_mtx);
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  std::pmr::vector<std::shared_ptr<StatusCallback>> callbacks(&MemoryResource::global_instance());
+#else
+  std::vector<std::shared_ptr<StatusCallback>> callbacks;
+#endif
 
-  for (auto& [id, cb] : impl_->status_callbacks) {
-    (void)id;
+  {
+    std::lock_guard lock(impl_->status_callbacks_mtx);
 
-    if VUNLIKELY (!cb) {
+    callbacks.reserve(impl_->status_callbacks.size());
+
+    for (auto& [id, cb] : impl_->status_callbacks) {
+      (void)id;
+
+      callbacks.emplace_back(cb);
+    }
+  }
+
+  for (auto& cb : callbacks) {
+    if VUNLIKELY (!cb || !(*cb)) {
       continue;
     }
 
     try {
-      cb(name_copy, status);
+      (*cb)(name_copy, status);
     } catch (const std::exception& e) {
       CLOG_E("GraphTask: status_callback (%s) threw an exception: %s.", name_copy.c_str(), e.what());
     } catch (...) {

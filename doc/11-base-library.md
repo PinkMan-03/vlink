@@ -42,6 +42,11 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | SysSharemem       | `base/sys_sharemem.h`           | 跨进程命名共享内存区域                         |
 | Schedule          | `base/schedule.h`               | 带延迟、优先级、超时的任务调度包装器           |
 | GraphTask         | `base/graph_task.h`             | 有向无环图任务调度，支持条件分支               |
+| TaskHandle        | `base/task_handle.h`            | `post_task_handle` 返回的句柄，支持取消/等待/状态查询 |
+| PostTaskOptions   | `base/task_handle.h`            | `post_task_handle` 的可选项（cancellation/overflow/drop policy） |
+| CancellationSource / Token / Registration | `base/cancellation.h` | 协作取消三件套（写端/读端/RAII 订阅） |
+| OperationCancelled | `base/exception.h`             | 协作取消的规范化异常类型                       |
+| Coroutine         | `base/coroutine.h`              | C++20 stackless 协程封装（`Task<T>` / `co_spawn` / `schedule` / `await_*` / `when_all/any` / `sequence`） |
 | CpuProfiler       | `base/cpu_profiler.h`           | CPU 利用率分析器                               |
 | CpuProfilerGuard  | `base/cpu_profiler_guard.h`     | CpuProfiler 的 RAII 自动守护                   |
 | FastStream        | `base/fast_stream.h`            | 高性能输出流（Logger 内部引擎）                |
@@ -920,11 +925,11 @@ snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性
 
 ### 队列类型
 
-| 类型（Type）     | 内部实现          | 最大任务数 | 特点                        |
-| ---------------- | ----------------- | ---------- | --------------------------- |
-| `kNormalType`    | mutex + std::queue | 10000     | 默认，FIFO 无优先级         |
-| `kLockfreeType`  | 无锁 MpmcQueue    | 10000      | 单生产者路径最快            |
-| `kPriorityType`  | 优先级队列        | 10000      | 支持任务优先级，数值大先执行|
+| 类型（Type）     | 内部实现                                                       | 最大任务数 | 特点                        |
+| ---------------- | -------------------------------------------------------------- | ---------- | --------------------------- |
+| `kNormalType`    | mutex + `std::deque`（或 `std::pmr::deque`）                    | 10000      | 默认，FIFO 无优先级；可迭代支持 droppable 扫描 |
+| `kLockfreeType`  | 无锁 `MpmcQueue`                                                | 10000      | 多生产者多消费者，竞争低     |
+| `kPriorityType`  | 两个 `std::priority_queue`（按 drop 策略分桶），mutex 保护       | 10000      | 支持任务优先级，数值大先执行；`kProtected` 任务独立堆，不被 overflow drop |
 
 ### 入队策略（队列已满时）
 
@@ -1419,6 +1424,112 @@ loop.wait_for_quit();
 VLOG_I("shutdown complete");
 ```
 
+### Tracked 任务投递（TaskHandle）
+
+`post_task()` 是 fire-and-forget 投递：调用者拿不到任务的执行结果，也无法在任务排队后请求取消、
+等待终止或观察拒绝原因。`post_task_handle()` / `post_task_with_priority_handle()` 是其 **tracked**
+对应版本，返回 `TaskHandle` 共享句柄。
+
+![TaskHandle 状态机](images/task-handle-state-machine.png)
+
+![Tracked 任务管道](images/task-handle-pipeline.png)
+
+```cpp
+#include <vlink/base/message_loop.h>
+#include <vlink/base/task_handle.h>
+
+vlink::MessageLoop loop;
+loop.async_run();
+
+// 1. 最简：等待任务完成
+auto h = loop.post_task_handle([] { heavy(); });
+h.wait();                                     // 阻塞直到任务进入终态
+assert(h.state() == vlink::TaskExecutionState::kCompleted);
+
+// 2. 带 PostTaskOptions 的完整调用
+vlink::PostTaskOptions opts;
+opts.overflow_policy = vlink::TaskOverflowPolicy::kReject;     // 队列满立即拒绝
+opts.drop_policy     = vlink::TaskDropPolicy::kProtected;      // 不被 drop-oldest 选中
+opts.cancellation_token = parent.token();                       // 父级 token
+auto h2 = loop.post_task_handle([token = opts.cancellation_token] {
+    while (!token.is_cancellation_requested()) {
+        do_unit();
+    }
+}, opts);
+
+// 3. 在运行中请求取消（仅翻转 cancellation_source，已排队任务会被跳过；
+//    已开始的回调需自行轮询 token）
+h2.cancel();
+
+// 4. 限时等待
+if (!h2.wait(/*timeout_ms=*/500)) {
+    VLOG_W("task did not finish in 500ms, state=", static_cast<int>(h2.state()));
+}
+```
+
+**`TaskExecutionState` 状态机：**
+
+| 状态 | 终态？ | 进入条件 |
+|------|--------|----------|
+| `kInvalid`   | 否 | 默认构造或未关联任何已排队任务 |
+| `kQueued`    | 否 | 被 dispatcher 接受，等待执行 |
+| `kRunning`   | 否 | 回调正在执行 |
+| `kCompleted` | 是 | 回调正常返回 |
+| `kCancelled` | 是 | 在 `kQueued` 阶段被 `cancel()` / parent token 触发 |
+| `kDropped`   | 是 | overflow drop-oldest 选中此任务，在执行前丢弃 |
+| `kRejected`  | 是 | dispatcher 拒收（quit、无可丢任务、kReject 满） |
+| `kFailed`    | 是 | 回调抛出异常 |
+
+**`TaskOverflowPolicy`：** 单次 post 对队列满行为的覆盖。
+
+| 取值 | 行为 |
+|------|------|
+| `kUseDispatcherStrategy` | 沿用 dispatcher 的 `Strategy` 配置（默认） |
+| `kReject`                | 队列满立即拒绝，返回 `kRejected` 句柄 |
+| `kBlock`                 | 持续 1ms sleep 重试直到入队（绕过 dispatcher 的 drop 行为） |
+
+**`TaskDropPolicy`：** 任务被 dispatcher 选为 drop-oldest 牺牲品的资格。
+
+| 取值 | 行为 |
+|------|------|
+| `kDroppable`  | 可被 drop-oldest 路径选中（默认） |
+| `kProtected`  | 永不被 drop-oldest 选中；若队列全为 `kProtected` 则 post 失败返回 `false` |
+
+> **lock-free 队列的限制**：`kLockfreeType` 队列**不跟踪**每任务的 drop policy，
+> overflow drop 会无差别移除一个已排队任务。对该队列传 `kProtected` 会打印警告日志，
+> 但**不能**真正阻止该任务被丢弃。要确保不被 overflow drop 选中，请使用 `kNormalType`
+> 或 `kPriorityType` 队列。
+>
+> 句柄析构 **不会** 取消任务；dispatcher 自有强引用，会一直跑到终态。
+
+**TaskHandle 锁顺序：** `MessageLoopAliveState::mtx` → `MessageLoop::Impl::mtx`
+→ `TaskHandle::State::mtx` → （取消时再额外取 `CancellationSource::State::mtx`，
+但只在释放 `TaskHandle::State::mtx` 之后）。所有 `wait()` / 终态通知的 cv 都在
+`TaskHandle::State::mtx` 上等待，回调释放 mtx 后再触发。
+
+### get_alive_state -- 跨线程安全引用循环
+
+![MessageLoopAliveState 时序](images/message-loop-alive-state.png)
+
+`get_alive_state()` 返回一个 `std::shared_ptr<detail::MessageLoopAliveState>`，
+内含 `mutex mtx` 与 `atomic_bool alive`。析构函数会在第一步取 `mtx` 并将
+`alive` 翻为 `false`。需要从其他线程异步 post 任务到本循环的桥接层（如协程恢复）
+应：
+
+```cpp
+auto alive = loop.get_alive_state();   // 引用计数极轻
+// 在另一个线程：
+{
+    std::lock_guard lock(alive->mtx);
+    if (alive->alive.load(std::memory_order_acquire) && !loop.is_ready_to_quit()) {
+        loop.post_task([] { /* 安全 */ });
+    }
+    // 出 mtx 后再调用 loop 可能 UAF
+}
+```
+
+这是**内部 API**，协程 awaiter / 跨线程 bridge 才会用到；常规应用代码不必显式使用。
+
 ---
 
 ## 11.6 定时器
@@ -1655,10 +1766,10 @@ dt.reset();
 
 ### 队列类型与入队策略
 
-| 类型（Type）      | 内部队列             | 说明                  |
-| ----------------- | -------------------- | --------------------- |
-| `kNormalType`     | mutex + std::queue   | 默认，通用            |
-| `kLockfreeType`   | 无锁 MPMC 队列        | 低竞争延迟            |
+| 类型（Type）      | 内部队列                                       | 说明                  |
+| ----------------- | ---------------------------------------------- | --------------------- |
+| `kNormalType`     | mutex + `std::deque`（或 `std::pmr::deque`）    | 默认，通用；可迭代支持 droppable 扫描 |
+| `kLockfreeType`   | 无锁 `MpmcQueue`                                | 低竞争延迟            |
 
 `Strategy` 仅在队列已满时影响 `post_task` / `invoke_task` 的入队行为：
 
@@ -1704,6 +1815,66 @@ pool.shutdown();
 
 > **警告**：在线程池的工作线程内调用 `invoke_task(...).get()` 会死锁！
 > 使用 `is_in_work_thread()` 检测，或改用 `post_task()`。
+
+### Tracked 任务投递（TaskHandle）
+
+`ThreadPool::post_task_handle()` 与 `MessageLoop::post_task_handle()` 语义一致，
+返回 `TaskHandle` 供取消、等待、状态查询。`PostTaskOptions` / `TaskOverflowPolicy` /
+`TaskDropPolicy` / `TaskExecutionState` / `CancellationToken` 等类型均共用，
+详见 [11.5 Tracked 任务投递](#tracked-任务投递taskhandle)和 [11.14 协作取消](#1114-协作取消-cancellation)。
+
+```cpp
+#include <vlink/base/thread_pool.h>
+#include <vlink/base/task_handle.h>
+
+vlink::ThreadPool pool(4);
+
+// 父级 token：一次取消整批 worker
+vlink::CancellationSource batch;
+vlink::PostTaskOptions opts;
+opts.cancellation_token = batch.token();
+
+std::vector<vlink::TaskHandle> handles;
+for (int i = 0; i < 32; ++i) {
+    handles.emplace_back(pool.post_task_handle(
+        [token = opts.cancellation_token, i] {
+            while (!token.is_cancellation_requested()) {
+                do_chunk(i);
+                if (chunk_done(i)) return;
+            }
+        }, opts));
+}
+
+// 外部条件触发后整体取消
+if (timeout_or_user_abort) {
+    batch.request_cancel();
+}
+
+// 等待所有任务进入终态
+for (auto& h : handles) h.wait();
+```
+
+> **lock-free ThreadPool 的限制**：与 MessageLoop 一致 — `kLockfreeType` 队列**不跟踪**
+> `kProtected` drop policy，仅打印警告日志，不能阻止 overflow drop。
+
+### shutdown 自我分离（self-detach）
+
+`ThreadPool::shutdown()` 允许从其内部工作线程发起。该工作线程不能 join 自己，因此
+`shutdown` 会自动对其调用 `std::thread::detach()`；其余工作线程仍正常 join。`Impl`
+通过 `std::shared_ptr` 共享，即使整个 `ThreadPool` 对象析构后，已分离的工作线程仍可
+看到合法 state 直至它自然返回。
+
+```cpp
+pool.post_task([&pool] {
+    if (need_emergency_shutdown()) {
+        pool.shutdown();   // 安全：调用方所在的 worker 会被 detach
+    }
+});
+```
+
+`shutdown` 只在**首次**调用时返回 `true` 并实际生效；之后的调用立即返回 `false`，不会
+再等待 join。析构函数会再调一次 `shutdown`，但二次调用是 no-op，已 detach / 已 join
+的 `std::thread` 对象在析构时都是 non-joinable，不会触发 `std::terminate`。
 
 ---
 
@@ -3455,6 +3626,11 @@ uint32_t id = load->register_status_callback([](const std::string& name,
     VLOG_D("task ", name, " status=", (int)s);
 });
 
+// 注：每次状态变更时，GraphTask 会先在 status_callbacks_mtx 下对当前订阅集做一次 snapshot，
+//     释放锁后再串行触发 snapshot 中的回调，因此回调内**可以**安全调用 register_status_callback /
+//     unregister_status_callback / clear_status_callbacks（修改对**本次**触发不生效，仅影响下一次）。
+//     回调抛出的异常会被捕获并记日志，不影响 snapshot 中其余订阅者继续触发。
+
 // 从根节点（无前驱）提交执行，遍历整个可达子图
 load->execute(&engine);
 
@@ -3883,3 +4059,277 @@ vlink::Utils::try_release_sys_memory();
 // 时区偏差（秒）
 int32_t tz = vlink::Utils::get_timezone_diff(); // UTC+8 -> 28800
 ```
+
+---
+
+## 11.14 协作取消 Cancellation
+
+![协作取消模型](images/cancellation-model.png)
+
+VLink 的协作取消基于 **生产者 / 观察者** 模式：写方持有 `CancellationSource` 并通过
+`request_cancel()` 发出取消信号；工作任务持有从同一 source 获得的 `CancellationToken`
+（轻量、可复制、可跨线程），通过轮询或注册回调来响应。
+
+> 头文件：`<vlink/base/cancellation.h>`、`<vlink/base/exception.h>`（`OperationCancelled`）
+
+### 类型概览
+
+| 类型                       | 角色                                                   | 拷贝/移动语义                |
+| -------------------------- | ------------------------------------------------------ | ---------------------------- |
+| `CancellationSource`       | 可变端，发出取消请求                                   | 不可拷贝、不可移动           |
+| `CancellationToken`        | 只读观察者；可轮询、可注册回调                          | 可拷贝、可跨线程共享          |
+| `CancellationRegistration` | RAII 槽，持有一个已注册回调                            | 只可移动                     |
+| `OperationCancelled`       | 已观察到取消请求的异常类型（派生自 `std::exception`） | 终态语义，由调用方抛出      |
+
+### 基本用法
+
+```cpp
+#include <vlink/base/cancellation.h>
+
+vlink::CancellationSource source;
+auto token = source.token();           // 轻量、可拷贝
+
+// 注册一个一次性回调，在 source.request_cancel() 触发时执行
+auto reg = token.register_callback([]() {
+    VLOG_I("cancellation observed");
+});
+
+// 工作线程协作式取消
+std::thread worker([token]() {
+    while (!token.is_cancellation_requested()) {
+        token.throw_if_cancellation_requested();   // 可选：等价 throw OperationCancelled
+        do_unit_of_work();
+    }
+});
+
+// 任意时刻请求取消（线程安全）
+source.request_cancel();
+worker.join();
+```
+
+### 语义要点
+
+- **一次性触发**：`request_cancel()` 首次成功调用返回 `true` 并触发所有已注册回调；
+  后续调用返回 `false` 且不会再触发。
+- **同步触发**：若注册回调时 token 已被取消，回调在 `register_callback` 内部**同步**
+  执行（在当前线程，由调用方持有时间），返回的 `CancellationRegistration` 为空。
+- **异常吞噬**：回调抛出的异常会被 `try { callback(); } catch(...) {}` 捕获并通过
+  `CLOG_E` 记录，**绝不**逃逸到 `request_cancel()` 或注册方。
+- **锁顺序**：触发回调时**不持有**内部 mutex；回调可自由调用同一 token 的
+  `register_callback` / `is_cancellation_requested`，亦可触发**兄弟** source 的
+  `request_cancel`，不会自死锁。
+- **生命周期**：所有类型通过 `shared_ptr<State>` 共享内部状态，`CancellationRegistration`
+  析构或 `reset()` 在 callback 未触发时取消订阅，已触发则为 no-op。`CancellationRegistration`
+  幂等且可重复 `reset()`。
+
+### 与 TaskHandle 集成
+
+`PostTaskOptions::cancellation_token` 是 `TaskHandle` 的父级 token：
+
+- 投递时若 token 已 cancelled，句柄立即进入 `kCancelled`，任务不会入队。
+- 任务排队期间 token 被取消 → dispatcher 出队时跳过该任务，句柄进入 `kCancelled`。
+- 任务正在执行时 token 被取消 → 回调需自行轮询
+  `task_handle.cancellation_token().is_cancellation_requested()` 才能感知。
+- `TaskHandle::cancel()` 仅翻转**任务自身**的 `CancellationSource`，不影响父 token。
+- 任意终态（`kCompleted` / `kCancelled` / `kDropped` / `kRejected` / `kFailed`）下，
+  `release_parent_registration` 会卸下 parent token 的回调，避免 source 链路上的资源
+  长期占用。
+
+### 协作取消的常见用法模式
+
+```cpp
+// 1. fan-out 取消
+vlink::CancellationSource group;
+for (int i = 0; i < 8; ++i) {
+    vlink::PostTaskOptions opts;
+    opts.cancellation_token = group.token();
+    pool.post_task_handle([t = opts.cancellation_token, i] {
+        while (!t.is_cancellation_requested()) work(i);
+    }, opts);
+}
+if (some_global_failure) group.request_cancel();   // 一次性砍掉整组
+
+// 2. 父子链
+vlink::CancellationSource parent;
+auto child_token = parent.token();
+auto child_reg = child_token.register_callback([child_source = std::ref(child)]() {
+    child_source.get().request_cancel();   // 父 → 子级联
+});
+parent.request_cancel();   // 同时取消子链
+
+// 3. 结构化退出
+try {
+    while (!token.is_cancellation_requested()) {
+        token.throw_if_cancellation_requested();
+        ...
+    }
+} catch (const vlink::OperationCancelled&) {
+    cleanup();
+}
+```
+
+### OperationCancelled
+
+`OperationCancelled` 是协作取消的**规范化异常类型**，`what()` 返回固定字符串
+`"vlink operation cancelled"`。任何感知到取消请求且需要中断的代码都应抛出此类型；
+顶层的 `co_spawn` / `GraphTask` 回调均按惯例捕获并仅记日志，不再上抛。
+
+```cpp
+class CancelAwareTask {
+ public:
+    void run(vlink::CancellationToken token) {
+        while (true) {
+            token.throw_if_cancellation_requested();  // 抛 OperationCancelled
+            step();
+        }
+    }
+};
+```
+
+> **不要**用 `OperationCancelled` 表示通用错误；它的语义专门是"协作取消已被观察"。
+> 通用错误使用 `Exception::RuntimeError` 等普通类型。
+
+---
+
+## 11.15 协程 Coroutine
+
+`vlink::Coroutine`（短别名 `vlink::Co`）基于 C++20 stackless 协程构建在 VLink 现有调度
+原语之上，使所有挂起 / 恢复都绕回 `MessageLoop`，因此协程体的所有语句（除 `await_future`
+的等待瞬间外）都在 loop 线程上运行，共享状态无需加锁。
+
+> 头文件：`<vlink/base/coroutine.h>`
+> 构建：需 `ENABLE_CXX_STD_20=ON` 且编译器具备 `__cpp_lib_coroutine`（GCC 10+ / Clang 14+ / MSVC 19.x+）。
+> 帧分配走 `vlink::MemoryPool::global_instance()`，无需额外配置。
+> 端到端教程见 [examples/base/message_loop_coroutine/README.md](../examples/base/message_loop_coroutine/README.md)。
+
+### 三件套
+
+```cpp
+vlink::Co::Task<int> compute(vlink::MessageLoop& loop) {
+    co_await vlink::Co::yield(loop);          // 协作让出
+    co_await vlink::Co::delay_ms(loop, 100);  // 非阻塞睡眠
+    co_return 42;
+}
+```
+
+- `co_await awaiter` —— 唯一挂起点。
+- `co_return value` —— 设置返回值并结束。
+- `co_yield` —— 在 VLink 中通常通过 `vlink::Co::yield()` awaiter 表达。
+
+### Task<T>
+
+由协程函数返回的句柄；可被 `co_await`、可 `valid()` 校验、`move` 转移，不可拷贝。
+
+```cpp
+vlink::Co::Task<void> top(vlink::MessageLoop& loop) {
+    vlink::Co::Task<int> sub = compute(loop);
+    int v = co_await std::move(sub);          // 嵌套 await
+    VLOG_I("got ", v);
+}
+```
+
+### 启动协程：co_spawn
+
+```cpp
+vlink::MessageLoop loop;
+loop.async_run();
+
+// fire-and-forget 提交（默认优先级）
+vlink::Co::co_spawn(loop, top(loop));
+
+// 带优先级（仅 kPriorityType 队列上生效；非优先级队列上 priority 被忽略，
+//          投递仍走 post_task_handle 而不会失败）
+vlink::Co::co_spawn_with_priority(loop, top(loop), vlink::MessageLoop::kHighestPriority);
+
+// 也可附加完成回调（值任务必须用 Task<T>，回调签名为 void(T)；void 任务回调签名为 void()）：
+auto handler = [](int v) { VLOG_I("done v=", v); };
+vlink::Co::co_spawn(loop, compute(loop), handler);
+```
+
+`co_spawn` 接收一个 `Task<void>`（值返回版本用三参数重载并指定 `Task<T>`），注意**不要**把
+临时表达式直接传入；如需在内部嵌套 `co_await`，先 `auto t = top(loop);` 持有再传入。
+完成回调路径下，回调由 `DetachedTask` 顶层 catch 守护，若 `Task` 本身抛异常，回调**不会**被调用。
+
+### Awaiter 总览
+
+| Awaiter                                | 作用                                                       | 失败语义 |
+|----------------------------------------|------------------------------------------------------------|----------|
+| `vlink::Co::schedule(loop, prio=0)`    | 切换到指定 `MessageLoop` 线程继续执行                       | post 失败重试耗尽 → `std::runtime_error("vlink::Coroutine::schedule: post_task to loop failed")` |
+| `vlink::Co::yield(loop, prio=0)`       | 协作让出，相当于 `schedule` 同 loop                         | post 失败重试耗尽 → `std::runtime_error("vlink::Coroutine::yield: post_task to loop failed")` |
+| `vlink::Co::delay_ms(loop, ms, prio=0)`| 非阻塞睡眠 ms 毫秒（基于 `FutureWaitLoop` 轮询）            | post 失败重试耗尽 → `std::runtime_error("vlink::Coroutine::delay_ms: post_task to loop failed")` |
+| `vlink::Co::await_future(loop, fut)`   | 等待 `std::future<T>` 结果并切回 loop 线程                  | 正常路径：`future.get()` 抛出的任意异常透传；loop 关闭无法投递回 resume → `OperationCancelled` |
+| `vlink::Co::await_graph(loop, graph)`  | 等待 `GraphTask` DAG 全部完成；`graph==nullptr` 时构造抛 `std::invalid_argument` | 投递失败 / loop 已死 → `OperationCancelled` |
+
+### 编排：when_all / when_any / sequence
+
+```cpp
+vlink::Co::Task<void> orchestrate(vlink::MessageLoop& loop) {
+    // 并发等所有完成（异常透传，多个异常仅保留首个）
+    co_await vlink::Co::when_all(loop, make_tasks());
+
+    // 并发等任意一个先完成；返回 winner 下标
+    size_t winner = co_await vlink::Co::when_any(loop, make_tasks());
+
+    // 串行执行
+    co_await vlink::Co::sequence(loop, make_tasks());
+}
+```
+
+### Resume 错误语义
+
+协程恢复使用 `kProtected` + `kReject` 选项 post 到 loop：
+
+- **lock-free 类型 MessageLoop 的特殊性**：`kProtected` 在 lock-free 队列上不生效，
+  但 `kReject` 仍然防止队列已满时入队。若 post 因队列瞬时满返回失败，恢复路径会通过
+  `FutureWaitLoop` 在内部最多重试 `kMaxResumePostRetry`（=30000）次后才放弃。
+- **彻底失败**：超时或 loop 已不再 alive：
+  - `schedule` / `yield` / `delay_ms` 的 `await_resume` 会抛
+    `runtime_error("vlink::Coroutine::xxx: post_task to loop failed")`。
+  - `await_graph` 抛 `OperationCancelled`。
+- **lifetime 安全**：所有 awaiter 使用 `MessageLoopAliveState` 在每次 post 前做一次
+  alive-check，loop 析构时这些 await 路径会进入 fail 分支而非 UAF。
+
+### 与 GraphTask 集成
+
+```cpp
+vlink::Co::Task<void> wait_dag(vlink::MessageLoop& loop) {
+    auto root = vlink::GraphTask::create("root", []{ ... });
+    auto leaf = vlink::GraphTask::create("leaf", []{ ... });
+    *root -- > *leaf;
+    root->execute(&loop);
+
+    co_await vlink::Co::await_graph(loop, root);   // 等整张图完成
+    VLOG_I("DAG done");
+}
+```
+
+`await_graph` 在内部 `register_status_callback` 监听 root 的 `kStatusDone`，避免轮询；
+若 graph 已经 `kStatusDone`，`await_ready` 直接返回 `true`，不会挂起。
+
+### 与 std::future 桥接
+
+```cpp
+vlink::Co::Task<int> bridge(vlink::MessageLoop& loop, std::future<int> fut) {
+    int v = co_await vlink::Co::await_future(loop, std::move(fut));
+    co_return v;
+}
+```
+
+`await_future` 通过 `FutureWaitLoop`（单独的后台轮询线程，约 1ms 节拍）等待 future ready，
+ready 后用 `schedule` 切回 loop。**不会**在 loop 线程上 `.get()`，从而避免阻塞 dispatch。
+
+### 错误处理
+
+| 场景                                         | 行为                                                     |
+|----------------------------------------------|----------------------------------------------------------|
+| 协程内异常 throw                              | 沿 `co_await` 链路向外传，`co_spawn` 顶层 catch 并 log    |
+| `Task<T>` 未完成即析构                         | 帧自动释放；如尚有 await 链路则正常 cancellation         |
+| `MessageLoop` 析构时仍有挂起协程               | `MessageLoopAliveState` 让 awaiter 走 fail 分支并放弃     |
+| `kMaxResumePostRetry`（30000）耗尽            | `schedule` / `yield` / `delay_ms` 抛 `std::runtime_error`；`await_graph` / `await_future` 抛 `OperationCancelled` |
+| `co_await invalid_or_moved_Task<T>`           | 抛 `std::logic_error("Task::await_resume on invalid Task ...")` |
+| `await_graph(loop, nullptr)`                  | 抛 `std::invalid_argument`                              |
+| `when_any` 传入空 vector                      | 抛 `std::invalid_argument`                              |
+
+完整运行示例：[examples/base/message_loop_coroutine/](../examples/base/message_loop_coroutine/README.md)。
+
+---

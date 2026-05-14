@@ -35,9 +35,25 @@
 
 #include "./base/condition_variable.h"
 #include "./base/logger.h"
+#include "./base/memory_pool.h"
 #include "./base/memory_resource.h"
 
 namespace vlink {
+
+namespace {
+
+template <typename T, typename... Args>
+inline std::shared_ptr<T> pool_make_shared(Args&&... args) {
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
+  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
+
+  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
+#else
+  return std::make_shared<T>(std::forward<Args>(args)...);
+#endif
+}
+
+}  // namespace
 
 // WheelTimer::Impl
 struct WheelTimer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
@@ -90,7 +106,7 @@ struct WheelTimer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
 };
 
 // WheelTimer
-WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(std::make_shared<Impl>()) {
+WheelTimer::WheelTimer(uint32_t slots, uint32_t interval_ms) : impl_(pool_make_shared<Impl>()) {
   if VUNLIKELY (slots == 0 || interval_ms == 0) {
     VLOG_F("WheelTimer: Slots and interval_ms must be greater than 0.");
   }

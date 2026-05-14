@@ -302,6 +302,20 @@ TEST_SUITE("base-Exception") {
   }
 
   // -------------------------------------------------------------------------
+  TEST_CASE("Exception::OperationCancelled is catchable as std::exception") {
+    bool caught = false;
+
+    try {
+      throw Exception::OperationCancelled{};
+    } catch (const std::exception& e) {
+      caught = true;
+      CHECK(std::string(e.what()) == "vlink operation cancelled");
+    }
+
+    CHECK(caught);
+  }
+
+  // -------------------------------------------------------------------------
   TEST_CASE("all vlink exceptions are catchable as std::exception") {
     auto throw_and_catch = [](auto ex) {
       bool caught = false;
@@ -323,6 +337,7 @@ TEST_SUITE("base-Exception") {
     throw_and_catch(Exception::RangeError("re2"));
     throw_and_catch(Exception::OverflowError("of"));
     throw_and_catch(Exception::UnderflowError("uf"));
+    throw_and_catch(Exception::OperationCancelled{});
   }
 
   // -------------------------------------------------------------------------

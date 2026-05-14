@@ -23,58 +23,95 @@
 
 /**
  * @file coroutine.h
- * @brief C++20 stackless coroutine support layered on top of @c MessageLoop.
+ * @brief C++20 stackless coroutine layer built on top of @c MessageLoop.
  *
  * @details
- * Additive integration layer.  @c MessageLoop itself is not modified; all
- * coroutine machinery is built on top of the existing @c MessageLoop::post_task,
- * @c MessageLoop::exec_task, @c Timer::call_once and @c GraphTask APIs.
+ * This header adds an additive coroutine integration on top of the existing
+ * @c MessageLoop, @c GraphTask and @c Schedule primitives.  No changes are
+ * required in @c MessageLoop itself; every awaiter ultimately posts work back
+ * through @c MessageLoop::post_task / @c MessageLoop::exec_task.
  *
- * Enabled only when @c VLINK_ENABLE_COROUTINE is defined.  The macro is
- * auto-enabled when @c VLINK_ENABLE_CXX_STD_20 is set AND both
- * @c __cpp_impl_coroutine and @c __cpp_lib_coroutine are advertised by the
- * compiler / standard library.  When unavailable this header is empty.
- *
- * @par Public API map
- * ```
- *   [Core types]
- *     Task<TypeT>            -- coroutine return type, lazily started, awaitable
- *
- *   [Awaiters & helpers]
- *     schedule(loop, prio)   -- hop execution onto loop's thread
- *     yield(loop, prio)      -- re-post coroutine to back of the queue
- *     delay_ms(loop, ms, prio) -- suspend N milliseconds via Timer
- *     await_future(loop, fut)  -- suspend until std::future<T> ready
- *
- *   [Top-level entry points]
- *     co_spawn(loop, task)             -- fire-and-forget Task<void>
- *     co_spawn(loop, task, on_done)    -- with completion callback
- *     co_spawn_with_priority(...)      -- explicit priority variants
- *
- *   [vlink primitive bridges]
- *     exec(loop, config, fn)   -- co_await Schedule::Config envelope
- *     await_graph(loop, graph) -- co_await a GraphTask DAG to finish
- *
- *   [Orchestration]
- *     when_all(loop, vector<Task<T>>)  -> Task<vector<T>>
- *     when_any(loop, vector<Task<T>>)  -> Task<{idx, T}>
- *     sequence(loop, vector<Task<void>>) -> Task<void>
- *
- *   [Frame allocator]
- *     (none) -- coroutine frames are always allocated through
- *               vlink::MemoryPool::global_instance() via TaskPromise::operator
- *               new / delete; throws std::bad_alloc on pool exhaustion.
- * ```
+ * The coroutine layer is compiled in only when @c VLINK_ENABLE_COROUTINE is
+ * defined.  The macro is auto-enabled when @c VLINK_ENABLE_CXX_STD_20 is set
+ * and both @c __cpp_impl_coroutine and @c __cpp_lib_coroutine are advertised
+ * by the toolchain.  When the macro is undefined, the header is empty.
  *
  * Two namespace names are provided: @c vlink::Coroutine (canonical) and
- * @c vlink::Co (short alias).  Both refer to the same namespace.
+ * @c vlink::Co (short alias).  They name the same namespace.
+ *
+ * @par Public API map
+ *
+ * | Category      | Symbol                            | Purpose                              |
+ * | ------------- | --------------------------------- | ------------------------------------ |
+ * | Core type     | @c Task<TypeT>                    | Lazily started awaitable             |
+ * | Awaiter       | @c schedule(loop, prio)           | Hop onto @p loop thread              |
+ * | Awaiter       | @c yield(loop, prio)              | Re-post to back of @p loop queue     |
+ * | Awaiter       | @c delay_ms(loop, ms, prio)       | Non-blocking sleep                   |
+ * | Awaiter       | @c await_future(loop, fut)        | Wait on @c std::future               |
+ * | Entry point   | @c co_spawn(loop, task)           | Fire-and-forget @c Task<void>        |
+ * | Entry point   | @c co_spawn(loop, task, on_done)  | Spawn with completion callback       |
+ * | Entry point   | @c co_spawn_with_priority(...)    | Same overloads with priority         |
+ * | Bridge        | @c exec(loop, config, fn)         | Wrap @c MessageLoop::exec_task       |
+ * | Bridge        | @c await_graph(loop, graph)       | Wait on @c GraphTask DAG             |
+ * | Orchestration | @c when_all(loop, tasks)          | Join all, collect results            |
+ * | Orchestration | @c when_any(loop, tasks)          | First success + index                |
+ * | Orchestration | @c sequence(loop, tasks)          | Run in order                         |
+ *
+ * @par Frame allocator
+ * Coroutine frames are always allocated through @c vlink::MemoryPool::global_instance()
+ * via the @c operator @c new / @c operator @c delete overloads on @c TaskPromise
+ * and @c DetachedTask::promise_type.  The allocator throws @c std::bad_alloc on
+ * pool exhaustion; there is no custom-allocator template parameter.
+ *
+ * @par Lock ordering
+ * Coroutine adapters use the following lock order to guarantee deadlock freedom:
+ * @c MessageLoopAliveState::mtx → @c MessageLoop::Impl::mtx → @c TaskHandle::State::mtx
+ * → awaiter state mutex.  @c FutureAwaiter, @c GraphAwaiter, @c ScheduleAwaiter,
+ * @c YieldAwaiter and @c DelayAwaiter each own a shared state object that holds
+ * the coroutine handle.  When the target loop is closed, the handle is released
+ * (via @c await_resume throwing) on the @c FutureWaitLoop helper thread through
+ * a queued retry; callers therefore must not assume that @c await_resume runs
+ * on the original loop thread when the target loop has been quit.
+ *
+ * @par Cooperative cancellation contract
+ * - @c await_future rethrows the promise's stored exception via @c future.get()
+ *   on the normal path.  If the target loop closes before the ready future can
+ *   be posted back, @c await_resume throws @c OperationCancelled instead.
+ * - @c await_graph normally returns @c void.  If the target loop closes after
+ *   the graph reaches @c kStatusDone but before the resume can be posted, the
+ *   coroutine is resumed on the @c FutureWaitLoop thread and @c await_resume
+ *   throws @c OperationCancelled.
+ * - @c schedule, @c yield and @c delay_ms retry posting through the
+ *   @c FutureWaitLoop helper on @c kRetry.  If retries are exhausted or the
+ *   loop is reported @c kClosed, @c await_resume throws @c std::runtime_error
+ *   with a descriptive message.
+ *
+ * @par Retry budget
+ * @c detail::kMaxResumePostRetry is @c 30000.  Each retry tick is approximately
+ * one millisecond (@c FutureWaitLoop's poll cadence), giving a total bound of
+ * roughly 30 seconds before a stuck retry sequence converts into a failure.
+ *
+ * @par Priority remap on full-queue loops
+ * On @c kPriorityType loops, the internal @c post_callback path remaps
+ * @c MessageLoop::kNoPriority to @c MessageLoop::kNormalPriority so default
+ * coroutine resumes do not sink to the bottom of the priority queue.
+ *
+ * @par FutureWaitLoop singleton
+ * @c FutureWaitLoop is a process-wide singleton serving all pending
+ * @c await_future / awaiter retries from a single long-lived helper thread.
+ * High-concurrency use of @c await_future shares this poll thread; per-poll
+ * latency is bounded by the ~1 ms cadence plus target-loop dispatch delay.
+ *
+ * @par Alive-state mutex hold time
+ * @c post_callback_if_alive acquires @c MessageLoopAliveState::mtx only briefly:
+ * the inner @c post_callback path uses @c TaskOverflowPolicy::kReject so the
+ * alive-state mutex is never held across a sleep or backoff.
  *
  * @par Example
  * @code
  * vlink::MessageLoop loop;
  * loop.async_run();
  *
- * // Recommended pattern: a free function whose parameters carry the state.
  * vlink::Co::Task<> my_routine(vlink::MessageLoop& loop, int* counter) {
  *   co_await vlink::Co::delay_ms(loop, 100);
  *   ++(*counter);
@@ -86,14 +123,14 @@
  * vlink::Co::co_spawn(loop, my_routine(loop, &counter));
  * @endcode
  *
- * @warning Do NOT use a coroutine lambda as a temporary, like
+ * @warning Do not pass a coroutine lambda as a temporary, for example
  *          @code co_spawn(loop, []() -> Task<> { co_await ... ; }()) @endcode
  *          The lambda object is destroyed at the end of the full-expression,
  *          long before the coroutine body actually runs.  Any captured state
  *          (including @c [&] and @c [=]) becomes a dangling reference and
  *          access is undefined behaviour.  Always pass state through the
- *          coroutine function's parameters (which the compiler copies into
- *          the coroutine frame and keeps alive for the frame's lifetime).
+ *          coroutine function's parameters; the compiler copies them into the
+ *          coroutine frame and keeps them alive for the frame's lifetime.
  */
 
 #pragma once
@@ -127,6 +164,7 @@
 #include <utility>
 #include <vector>
 
+#include "./exception.h"
 #include "./functional.h"
 #include "./graph_task.h"
 #include "./macros.h"
@@ -135,117 +173,431 @@
 
 namespace vlink {
 
+/**
+ * @namespace vlink::Coroutine
+ * @brief Container namespace for the VLink coroutine integration layer.
+ *
+ * @details
+ * Holds the @c Task template, all awaiters, the @c co_spawn entry points and
+ * the orchestrators (@c when_all, @c when_any, @c sequence).  The short alias
+ * @c vlink::Co refers to the same namespace.
+ */
 namespace Coroutine {  // NOLINT(readability-identifier-naming)
 
 template <typename TypeT = void>
 class Task;
 
+/**
+ * @namespace vlink::Coroutine::detail
+ * @brief Implementation details of the coroutine layer.
+ *
+ * @details
+ * Contents are internal and not part of the public API: promise types, the
+ * detached-task adapter, the @c ResumePostResult enum, the awaiter resume state
+ * and the helpers that bridge a coroutine handle to @c MessageLoop posting.
+ */
 namespace detail {
 
 template <typename TypeT>
 struct TaskPromise;
 
+/**
+ * @brief Allocates a coroutine frame from @c MemoryPool::global_instance().
+ *
+ * @param size  Frame size requested by the compiler.
+ * @return Pointer to the allocated frame.
+ * @throws std::bad_alloc if the global memory pool is exhausted.
+ */
 VLINK_EXPORT void* allocate_frame(size_t size);
 
+/**
+ * @brief Returns a coroutine frame to @c MemoryPool::global_instance().
+ *
+ * @param ptr   Frame previously returned by @c allocate_frame.  May be @c nullptr.
+ * @param size  Original frame size; must match the @c allocate_frame value.
+ */
 VLINK_EXPORT void deallocate_frame(void* ptr, size_t size) noexcept;
 
+/**
+ * @struct FinalAwaiter
+ * @brief Awaiter used at the final suspension point of a @c Task promise.
+ *
+ * @details
+ * Returns the stored @c continuation handle so that the awaiting coroutine is
+ * resumed symmetrically once the inner @c Task completes.  When no continuation
+ * has been registered (the @c Task was never awaited) @c std::noop_coroutine
+ * is returned so the dispatcher unwinds without resuming anything.
+ */
 struct FinalAwaiter final {
+  /**
+   * @brief Always returns @c false; the final suspension is unconditional.
+   *
+   * @return @c false.
+   */
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   bool await_ready() const noexcept;
 
+  /**
+   * @brief Returns the parent coroutine handle for symmetric transfer.
+   *
+   * @tparam PromiseT  Promise type of the finishing coroutine.
+   * @param handle     Handle to the finishing coroutine; its promise carries
+   *                   the @c continuation to resume.
+   * @return The stored continuation, or @c std::noop_coroutine() if none.
+   */
   template <typename PromiseT>
   std::coroutine_handle<> await_suspend(std::coroutine_handle<PromiseT> handle) noexcept;
 
+  /**
+   * @brief No-op resume; the final awaiter never produces a value.
+   */
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   void await_resume() const noexcept;
 };
 
+/**
+ * @struct TaskPromiseBase
+ * @brief Common storage and hooks shared by every @c Task promise.
+ *
+ * @details
+ * Carries the parent @c continuation handle that resumes the awaiter once the
+ * task finishes, and the stored @c std::exception_ptr captured from an
+ * unhandled exception thrown inside the coroutine body.
+ *
+ * @tparam TypeT  Result type of the owning @c Task.
+ */
 template <typename TypeT>
 struct TaskPromiseBase {
-  std::coroutine_handle<> continuation;
-  std::exception_ptr exception;
+  std::coroutine_handle<> continuation;  ///< Awaiting coroutine to resume on completion.
+  std::exception_ptr exception;          ///< Captured unhandled exception, if any.
 
+  /**
+   * @brief Initial suspension hook; always suspends so the task starts lazily.
+   *
+   * @return @c std::suspend_always.
+   */
   std::suspend_always initial_suspend() noexcept;
 
+  /**
+   * @brief Final suspension hook; returns a @c FinalAwaiter for symmetric transfer.
+   *
+   * @return @c FinalAwaiter instance.
+   */
   FinalAwaiter final_suspend() noexcept;
 
+  /**
+   * @brief Stores the currently active exception into @c exception.
+   */
   void unhandled_exception() noexcept;
 };
 
+/**
+ * @struct TaskPromise
+ * @brief Promise type for a value-returning @c Task<TypeT>.
+ *
+ * @details
+ * Allocates the coroutine frame from the global @c MemoryPool and stores the
+ * @c co_return value in @c result.  The result is consumed by @c Task::await_resume.
+ *
+ * @tparam TypeT  Result type produced by the coroutine body.
+ */
 template <typename TypeT>
 struct TaskPromise final : TaskPromiseBase<TypeT> {
-  std::optional<TypeT> result;
+  std::optional<TypeT> result;  ///< Storage for the @c co_return value.
 
-  static void* operator new(size_t size) { return detail::allocate_frame(size); }
+  /**
+   * @brief Allocates the coroutine frame from the global memory pool.
+   *
+   * @param size  Frame size requested by the compiler.
+   * @return Pointer to the allocated frame.
+   */
+  static void* operator new(size_t size);
 
-  static void operator delete(void* ptr, size_t size) noexcept { detail::deallocate_frame(ptr, size); }
+  /**
+   * @brief Returns the coroutine frame to the global memory pool.
+   *
+   * @param ptr   Frame previously allocated by @c operator @c new.
+   * @param size  Original frame size.
+   */
+  static void operator delete(void* ptr, size_t size) noexcept;
 
+  /**
+   * @brief Builds the @c Task object that owns this coroutine.
+   *
+   * @return @c Task<TypeT> wrapping the handle for this promise.
+   */
   Task<TypeT> get_return_object() noexcept;
 
+  /**
+   * @brief Captures the @c co_return value into @c result.
+   *
+   * @tparam UpT  Forwarded value type.
+   * @param v     Value produced by @c co_return.
+   */
   template <typename UpT>
   void return_value(UpT&& v) noexcept(std::is_nothrow_constructible_v<TypeT, UpT&&>);
 };
 
+/**
+ * @struct TaskPromise<void>
+ * @brief Specialisation of @c TaskPromise for @c Task<void>.
+ *
+ * @details
+ * Carries no result slot; @c return_void is a no-op aside from satisfying the
+ * coroutine promise contract.
+ */
 template <>
 struct TaskPromise<void> final : TaskPromiseBase<void> {
-  static void* operator new(size_t size) { return detail::allocate_frame(size); }
+  /**
+   * @brief Allocates the coroutine frame from the global memory pool.
+   *
+   * @param size  Frame size requested by the compiler.
+   * @return Pointer to the allocated frame.
+   */
+  static void* operator new(size_t size);
 
-  static void operator delete(void* ptr, size_t size) noexcept { detail::deallocate_frame(ptr, size); }
+  /**
+   * @brief Returns the coroutine frame to the global memory pool.
+   *
+   * @param ptr   Frame previously allocated by @c operator @c new.
+   * @param size  Original frame size.
+   */
+  static void operator delete(void* ptr, size_t size) noexcept;
 
+  /**
+   * @brief Builds the @c Task<void> that owns this coroutine.
+   *
+   * @return @c Task<void> wrapping the handle for this promise.
+   */
   Task<void> get_return_object() noexcept;
 
+  /**
+   * @brief No-op @c co_return for void tasks.
+   */
   void return_void() noexcept;
 };
 
+/**
+ * @struct DetachedTask
+ * @brief Fire-and-forget coroutine wrapper used internally by @c co_spawn.
+ *
+ * @details
+ * Holds a @c std::coroutine_handle for a coroutine whose frame is owned by the
+ * task itself: the promise type does not suspend at the final point and the
+ * frame is destroyed automatically when the body completes.  Exceptions thrown
+ * by the inner coroutine are caught and logged at error level so that a stray
+ * throw cannot tear down the owning @c MessageLoop.
+ */
 struct VLINK_EXPORT DetachedTask final {
+  /**
+   * @struct promise_type
+   * @brief Promise type that powers @c DetachedTask coroutines.
+   *
+   * @details
+   * Frames are allocated through the global @c MemoryPool.  The coroutine
+   * suspends initially (so the caller can decide where to resume it) and
+   * never suspends at the final point (the frame self-destructs).
+   */
   struct VLINK_EXPORT promise_type final {  // NOLINT(readability-identifier-naming)
-    static void* operator new(size_t size) { return detail::allocate_frame(size); }
+    /**
+     * @brief Allocates the coroutine frame from the global memory pool.
+     *
+     * @param size  Frame size requested by the compiler.
+     * @return Pointer to the allocated frame.
+     */
+    static void* operator new(size_t size);
 
-    static void operator delete(void* ptr, size_t size) noexcept { detail::deallocate_frame(ptr, size); }
+    /**
+     * @brief Returns the coroutine frame to the global memory pool.
+     *
+     * @param ptr   Frame previously allocated by @c operator @c new.
+     * @param size  Original frame size.
+     */
+    static void operator delete(void* ptr, size_t size) noexcept;
 
+    /**
+     * @brief Builds the @c DetachedTask wrapper that holds this promise's handle.
+     *
+     * @return @c DetachedTask wrapping the new coroutine handle.
+     */
     DetachedTask get_return_object() noexcept;
 
+    /**
+     * @brief Initial suspension; the caller decides when to resume.
+     *
+     * @return @c std::suspend_always.
+     */
     std::suspend_always initial_suspend() noexcept;
 
+    /**
+     * @brief Final suspension; never suspends so the frame self-destructs.
+     *
+     * @return @c std::suspend_never.
+     */
     std::suspend_never final_suspend() noexcept;
 
+    /**
+     * @brief No-op @c co_return for detached coroutines.
+     */
     void return_void() noexcept;
 
+    /**
+     * @brief Catches and logs unhandled exceptions thrown by the body.
+     *
+     * @details
+     * Exceptions are intentionally swallowed; the detached frame must not
+     * propagate failures back into the owning @c MessageLoop.
+     */
     void unhandled_exception() noexcept;
   };
 
   using Handle = std::coroutine_handle<promise_type>;
 
-  DetachedTask() noexcept = default;
+  /**
+   * @brief Constructs an empty detached task with no associated frame.
+   */
+  DetachedTask() noexcept;
 
-  explicit DetachedTask(Handle h) noexcept : handle(h) {}
+  /**
+   * @brief Destroys the detached task.  Does not own the frame after release.
+   */
+  ~DetachedTask();
 
-  DetachedTask(DetachedTask&& other) noexcept : handle(std::exchange(other.handle, {})) {}
+  /**
+   * @brief Constructs a detached task that owns @p h.
+   *
+   * @param h  Coroutine handle to take ownership of.
+   */
+  explicit DetachedTask(Handle h) noexcept;
 
-  DetachedTask& operator=(DetachedTask&& other) noexcept {
-    handle = std::exchange(other.handle, {});
-    return *this;
-  }
+  /**
+   * @brief Move-constructs a detached task, transferring frame ownership.
+   *
+   * @param other  Source task; left empty after the move.
+   */
+  DetachedTask(DetachedTask&& other) noexcept;
 
-  ~DetachedTask() = default;
+  /**
+   * @brief Move-assigns a detached task, transferring frame ownership.
+   *
+   * @param other  Source task; left empty after the move.
+   * @return Reference to @c *this.
+   */
+  DetachedTask& operator=(DetachedTask&& other) noexcept;
 
-  Handle handle;
+  Handle handle;  ///< Coroutine handle; @c {} when the task has been released.
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(DetachedTask)
 };
 
+/**
+ * @brief Bridges a @c Task<void> into a @c DetachedTask coroutine.
+ *
+ * @param task  Task to await inside the detached coroutine.
+ * @return @c DetachedTask owning the new frame.
+ */
 VLINK_EXPORT DetachedTask co_spawn_void_impl(Task<void> task);
 
+/**
+ * @brief Bridges a value-returning @c Task<TypeT> with a completion callback.
+ *
+ * @tparam TypeT      Result type produced by the inner task.
+ * @tparam CallbackT  Callable invoked with the task's result on success.
+ * @param task         Inner task to await.
+ * @param on_complete  Callback invoked on the loop thread on successful completion.
+ * @return @c DetachedTask owning the new frame.
+ */
 template <typename TypeT, typename CallbackT>
 DetachedTask co_spawn_value_impl(Task<TypeT> task, CallbackT on_complete);
 
+/**
+ * @brief Bridges a @c Task<void> with a completion callback.
+ *
+ * @tparam CallbackT  Callable invoked after the inner task completes.
+ * @param task         Inner task to await.
+ * @param on_complete  Callback invoked on the loop thread on successful completion.
+ * @return @c DetachedTask owning the new frame.
+ */
 template <typename CallbackT>
 DetachedTask co_spawn_void_with_cb_impl(Task<void> task, CallbackT on_complete);
 
-VLINK_EXPORT bool post_resume(MessageLoop& loop, std::coroutine_handle<> handle, uint16_t priority = 0);
+/**
+ * @enum ResumePostResult
+ * @brief Outcome of attempting to post a coroutine resume back onto a loop.
+ *
+ * @details
+ * Returned by @c post_callback_if_alive (and by the awaiter helpers built on
+ * it).  Drives the retry logic in @c ScheduleAwaiter, @c YieldAwaiter,
+ * @c DelayAwaiter, @c FutureAwaiter and @c GraphAwaiter.
+ */
+enum class ResumePostResult : uint8_t {
+  kPosted = 0,  ///< Resume callback was accepted by the target loop's queue.
+  kRetry,       ///< Target loop is alive but currently full; caller should retry later.
+  kClosed,      ///< Target loop has been (or is about to be) quit; resume cannot be delivered.
+};
 
+struct AwaiterResumeState;
+
+/**
+ * @brief Maximum number of @c kRetry passes before a queued resume is reported as failed.
+ *
+ * @details
+ * Each retry tick is approximately 1 ms (the @c FutureWaitLoop poll cadence),
+ * giving a total bound of roughly 30 seconds before the awaiter converts a
+ * stuck retry sequence into either an @c OperationCancelled or an
+ * @c std::runtime_error, depending on the awaiter type.
+ */
+inline constexpr uint32_t kMaxResumePostRetry = 30000U;
+
+/**
+ * @brief Posts a callback onto @p loop while honouring the alive-state gate.
+ *
+ * @details
+ * If @p loop or @p alive_state is null, or if the loop has been signalled to
+ * quit, @p drop_callback is invoked and @c ResumePostResult::kClosed is
+ * returned.  Otherwise the function takes @p alive_state's mutex briefly and
+ * attempts to post @p resume_callback under @c TaskOverflowPolicy::kReject; on
+ * success it returns @c kPosted, on a full queue it returns @c kRetry without
+ * having held the mutex across any sleep.  On @c kPriorityType loops the
+ * @c MessageLoop::kNoPriority value is remapped to
+ * @c MessageLoop::kNormalPriority so default-priority coroutines do not sink to
+ * the bottom of the priority queue.
+ *
+ * @param loop              Target loop to post onto.
+ * @param alive_state       Loop's alive-state gate; obtained via @c MessageLoop::get_alive_state.
+ * @param resume_callback   Callable invoked on the loop thread on success.
+ * @param drop_callback     Callable invoked when the loop is closed or the task is dropped.
+ * @param priority          Schedule priority; honoured only on @c kPriorityType loops.
+ * @return One of @c kPosted, @c kRetry, @c kClosed.
+ */
+VLINK_EXPORT ResumePostResult post_callback_if_alive(
+    MessageLoop* loop, const std::shared_ptr<vlink::detail::MessageLoopAliveState>& alive_state,
+    MoveFunction<void()>&& resume_callback, MoveFunction<void()>&& drop_callback, uint16_t priority = 0);
+
+/**
+ * @brief Posts the initial resume of a detached coroutine onto @p loop.
+ *
+ * @details
+ * Used by the top-level @c co_spawn entry points.  If the loop is already
+ * closed or its queue cannot accept the resume after @c kMaxResumePostRetry
+ * attempts, the handle is destroyed instead of being resumed.
+ *
+ * @param loop      Target loop on which the coroutine should start running.
+ * @param handle    Detached coroutine handle taking ownership of the frame.
+ * @param priority  Schedule priority; honoured only on @c kPriorityType loops.
+ */
 VLINK_EXPORT void co_spawn_detached_handle(MessageLoop& loop, DetachedTask::Handle handle, uint16_t priority = 0);
 
+/**
+ * @brief Enqueues a poll closure on the shared @c FutureWaitLoop helper thread.
+ *
+ * @details
+ * The closure is invoked repeatedly at the helper's poll cadence (~1 ms).  It
+ * returns @c true when it has finished and may be removed from the queue, or
+ * @c false to be re-polled on the next pass.
+ *
+ * @param poll  Poll closure registered with the helper thread.
+ */
 VLINK_EXPORT void register_future_wait(MoveFunction<bool()>&& poll);
 
 }  // namespace detail
@@ -257,7 +609,7 @@ VLINK_EXPORT void register_future_wait(MoveFunction<bool()>&& poll);
  * @details
  * The coroutine body does not run until the @c Task is either awaited from
  * another coroutine or passed to @c co_spawn().  Moving the @c Task transfers
- * ownership; destroying a still-suspended @c Task destroys the frame.
+ * ownership; destroying a still-suspended @c Task destroys its coroutine frame.
  *
  * @tparam TypeT  Result type produced by @c co_return.  Use @c void for tasks
  *                that produce no value.
@@ -268,40 +620,90 @@ class Task final {
   using promise_type = detail::TaskPromise<TypeT>;
   using Handle = std::coroutine_handle<promise_type>;
 
-  /// @brief Default-constructs an invalid (no-frame) task.
+  /**
+   * @brief Constructs an empty @c Task that does not own a coroutine frame.
+   */
   Task() noexcept = default;
 
-  /// @brief Adopts an existing coroutine handle.
+  /**
+   * @brief Constructs a @c Task that takes ownership of @p handle.
+   *
+   * @param handle  Coroutine handle produced by @c TaskPromise::get_return_object.
+   */
   explicit Task(Handle handle) noexcept;
 
-  /// @brief Move-construct; transfers frame ownership and leaves @p other empty.
+  /**
+   * @brief Move-constructs a @c Task, transferring frame ownership.
+   *
+   * @param other  Source task; left empty after the move.
+   */
   Task(Task&& other) noexcept;
 
-  /// @brief Move-assign; destroys the prior frame (if any) and adopts @p other's.
+  /**
+   * @brief Move-assigns a @c Task, destroying any previously owned frame.
+   *
+   * @param other  Source task; left empty after the move.
+   * @return Reference to @c *this.
+   */
   Task& operator=(Task&& other) noexcept;
 
-  /// @brief Destroys the owned coroutine frame if still valid.
+  /**
+   * @brief Destroys the owned coroutine frame, if any.
+   */
   ~Task();
 
-  /// @brief Returns @c true if this task owns a coroutine frame.
+  /**
+   * @brief Tests whether this task owns a coroutine frame.
+   *
+   * @return @c true if the task is non-empty.
+   */
   [[nodiscard]] bool valid() const noexcept;
 
-  /// @brief Returns @c true if the owned frame has finished executing.
+  /**
+   * @brief Tests whether the owned frame has finished executing.
+   *
+   * @return @c true if the task is valid and the coroutine has run to completion.
+   */
   [[nodiscard]] bool done() const noexcept;
 
-  /// @brief Coroutine protocol hook: ready iff the body already finished.
+  /**
+   * @brief Coroutine awaiter readiness hook.
+   *
+   * @return @c true if the task is empty or already done; otherwise @c false.
+   */
   bool await_ready() const noexcept;
 
-  /// @brief Coroutine protocol hook: links @p awaiter into the promise and tail-calls into the body.
+  /**
+   * @brief Coroutine awaiter suspension hook; performs symmetric transfer.
+   *
+   * @param awaiter  Coroutine handle awaiting this task's completion.
+   * @return The handle of the inner coroutine to resume.
+   */
   std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiter) noexcept;
 
-  /// @brief Coroutine protocol hook: rethrows any captured exception or returns the result.
+  /**
+   * @brief Coroutine awaiter resume hook; extracts the result or rethrows.
+   *
+   * @details
+   * Throws @c std::logic_error when called on an invalid task.  If the inner
+   * coroutine captured an unhandled exception, it is rethrown here.
+   *
+   * @return The value stored by @c co_return for non-void tasks.
+   */
   TypeT await_resume();
 
-  /// @brief Releases ownership of the frame without destroying it; returns the raw handle.
+  /**
+   * @brief Releases ownership of the underlying coroutine handle.
+   *
+   * @return Handle owned by this task; the task is empty after the call.
+   */
   Handle release() noexcept;
 
-  /// @brief Returns the raw coroutine handle without transferring ownership.
+  /**
+   * @brief Returns the underlying coroutine handle without releasing ownership.
+   *
+   * @return Current coroutine handle (may be @c {} for an empty task).
+   */
   [[nodiscard]] Handle native_handle() const noexcept;
 
  private:
@@ -311,82 +713,243 @@ class Task final {
 };
 
 /**
- * @class ScheduleAwaiter
+ * @struct ScheduleAwaiter
  * @brief Awaiter that resumes the coroutine on @p loop's worker thread.
  *
  * @details
- * Uses @c MessageLoop::post_task internally.  After @c co_await schedule(loop),
- * the rest of the coroutine runs on @p loop's thread.
+ * Built on top of @c detail::post_callback_if_alive.  After @c co_await
+ * @c schedule(loop), the remainder of the coroutine runs on @p loop's thread.
+ * If the target loop's queue is currently full, the awaiter retries via the
+ * shared @c FutureWaitLoop helper at a ~1 ms cadence, up to
+ * @c detail::kMaxResumePostRetry attempts.
  *
- * @warning If @p loop is already quitting and @c post_task fails, the awaiting
- *          coroutine's frame is destroyed and no continuation is resumed -- a
- *          parent coroutine awaiting this one via nested @c co_await will be
- *          left permanently suspended.  Same caveat applies to @c YieldAwaiter,
- *          @c DelayAwaiter, and the @c GraphAwaiter resume path.
+ * @warning If @p loop is already quitting or retries are exhausted,
+ *          @c await_resume() throws @c std::runtime_error.  The failure resume
+ *          is delivered on the @c FutureWaitLoop helper thread, not on the
+ *          target loop thread.
  */
 struct VLINK_EXPORT ScheduleAwaiter final {
-  MessageLoop* loop{nullptr};  ///< Target loop on which to resume.
-  uint16_t priority{0};        ///< Schedule priority (honoured only on @c kPriorityType loops).
-  bool failed{false};          ///< Set to @c true if @c post_task to @c loop failed.
+  /**
+   * @brief Constructs an empty awaiter with no target loop.
+   */
+  ScheduleAwaiter() noexcept;
 
-  /// @brief Always @c false — this awaiter always suspends to perform the hop.
+  /**
+   * @brief Constructs an awaiter bound to a target loop and resume state.
+   *
+   * @param loop          Target loop on which to resume.
+   * @param alive_state   Target loop's alive-state gate.
+   * @param state         Shared awaiter resume state.
+   * @param priority      Schedule priority for the resume.
+   */
+  ScheduleAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+                  std::shared_ptr<detail::AwaiterResumeState> state, uint16_t priority) noexcept;
+
+  /**
+   * @brief Move-constructs the awaiter.
+   */
+  ScheduleAwaiter(ScheduleAwaiter&&) noexcept;
+
+  /**
+   * @brief Move-assigns the awaiter.
+   */
+  ScheduleAwaiter& operator=(ScheduleAwaiter&&) noexcept;
+
+  MessageLoop* loop{nullptr};                                         ///< Target loop on which to resume.
+  std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state;  ///< Target loop's alive-state gate.
+  std::shared_ptr<detail::AwaiterResumeState> state;                  ///< Shared resume state holding the handle.
+  uint16_t priority{0};                                               ///< Schedule priority for the resume.
+  bool failed{false};                                                 ///< Set to @c true if posting ultimately failed.
+
+  /**
+   * @brief Awaiter readiness hook.
+   *
+   * @return Always @c false; the hop must be posted asynchronously.
+   */
   static bool await_ready() noexcept;
 
-  /// @brief Posts a resume of @p handle onto @c loop with @c priority.
-  /// @return @c true to stay suspended on success; @c false to resume immediately on post failure.
+  /**
+   * @brief Destructor; abandons any pending retry registered on the helper thread.
+   */
+  ~ScheduleAwaiter();
+
+  /**
+   * @brief Posts the coroutine resume onto the target loop.
+   *
+   * @details
+   * On @c kRetry the awaiter registers a retry closure on the shared
+   * @c FutureWaitLoop helper; on @c kClosed the @c failed flag is raised so
+   * that @c await_resume can throw.
+   *
+   * @param handle  Coroutine handle to resume on success.
+   * @return @c true; the awaiter always stays suspended until a resume fires.
+   */
   bool await_suspend(std::coroutine_handle<> handle);
 
-  /// @brief No-op on success; throws @c std::runtime_error if the post failed.
+  /**
+   * @brief Verifies that the hop succeeded.
+   *
+   * @throws std::runtime_error if the target loop closed or retries were exhausted.
+   */
   void await_resume();
+
+  VLINK_DISALLOW_COPY_AND_ASSIGN(ScheduleAwaiter)
 };
 
 /**
- * @class YieldAwaiter
- * @brief Awaiter that re-posts the coroutine to the end of @p loop's queue.
+ * @struct YieldAwaiter
+ * @brief Awaiter that re-posts the coroutine to the back of @p loop's queue.
  *
  * @details
  * Useful for cooperative yielding inside a long-running coroutine running on
- * the loop thread, so other queued tasks get a chance to run.
+ * the loop thread, allowing other queued tasks a chance to execute.  Built on
+ * top of the same @c post_callback_if_alive machinery as @c ScheduleAwaiter.
+ *
+ * @warning If @p loop is already quitting or retries are exhausted,
+ *          @c await_resume() throws @c std::runtime_error.  The failure resume
+ *          is delivered on the @c FutureWaitLoop helper thread.
  */
 struct VLINK_EXPORT YieldAwaiter final {
-  MessageLoop* loop{nullptr};  ///< Target loop to re-post onto.
-  uint16_t priority{0};        ///< Schedule priority for the re-post.
-  bool failed{false};          ///< Set to @c true if @c post_task to @c loop failed.
+  /**
+   * @brief Constructs an empty awaiter with no target loop.
+   */
+  YieldAwaiter() noexcept;
 
-  /// @brief Always @c false — this awaiter always suspends to yield.
+  /**
+   * @brief Constructs an awaiter bound to a target loop and resume state.
+   *
+   * @param loop          Target loop on which to re-post.
+   * @param alive_state   Target loop's alive-state gate.
+   * @param state         Shared awaiter resume state.
+   * @param priority      Schedule priority for the re-post.
+   */
+  YieldAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+               std::shared_ptr<detail::AwaiterResumeState> state, uint16_t priority) noexcept;
+
+  /**
+   * @brief Move-constructs the awaiter.
+   */
+  YieldAwaiter(YieldAwaiter&&) noexcept;
+
+  /**
+   * @brief Move-assigns the awaiter.
+   */
+  YieldAwaiter& operator=(YieldAwaiter&&) noexcept;
+
+  MessageLoop* loop{nullptr};                                         ///< Target loop to re-post onto.
+  std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state;  ///< Target loop's alive-state gate.
+  std::shared_ptr<detail::AwaiterResumeState> state;                  ///< Shared resume state holding the handle.
+  uint16_t priority{0};                                               ///< Schedule priority for the re-post.
+  bool failed{false};                                                 ///< Set to @c true if posting ultimately failed.
+
+  /**
+   * @brief Awaiter readiness hook.
+   *
+   * @return Always @c false; the yield must complete a queue round-trip.
+   */
   static bool await_ready() noexcept;
 
-  /// @brief Re-posts @p handle to the end of @c loop's queue.
-  /// @return @c true to stay suspended on success; @c false to resume immediately on post failure.
+  /**
+   * @brief Destructor; abandons any pending retry registered on the helper thread.
+   */
+  ~YieldAwaiter();
+
+  /**
+   * @brief Re-posts the coroutine resume onto the target loop.
+   *
+   * @param handle  Coroutine handle to resume on success.
+   * @return @c true; the awaiter always stays suspended until a resume fires.
+   */
   bool await_suspend(std::coroutine_handle<> handle);
 
-  /// @brief No-op on success; throws @c std::runtime_error if the re-post failed.
+  /**
+   * @brief Verifies that the yield round-trip succeeded.
+   *
+   * @throws std::runtime_error if the target loop closed or retries were exhausted.
+   */
   void await_resume();
+
+  VLINK_DISALLOW_COPY_AND_ASSIGN(YieldAwaiter)
 };
 
 /**
- * @class DelayAwaiter
- * @brief Awaiter that suspends for @p ms milliseconds via @c Timer::call_once.
+ * @struct DelayAwaiter
+ * @brief Awaiter that suspends the coroutine for @p ms milliseconds.
  *
  * @details
- * Always suspends and resumes on @p loop's thread, even for @p ms == 0
- * (so that the loop-thread invariant after the resume point is preserved).
+ * On success the coroutine resumes on @p loop's thread, even for @p ms == 0.
+ * Delay completion is observed by the shared @c FutureWaitLoop helper thread
+ * at a ~1 ms polling cadence.  When the deadline is reached the awaiter posts
+ * its resume through @c post_callback_if_alive; full-queue conditions retry up
+ * to @c detail::kMaxResumePostRetry times before failing.
+ *
+ * @warning If @p loop is already quitting or retries are exhausted,
+ *          @c await_resume() throws @c std::runtime_error.  The failure resume
+ *          is delivered on the @c FutureWaitLoop helper thread.
  */
 struct VLINK_EXPORT DelayAwaiter final {
-  MessageLoop* loop{nullptr};  ///< Target loop to resume on after the delay.
-  uint32_t ms{0};              ///< Delay in milliseconds (0 still routes through the loop).
-  uint16_t priority{0};        ///< Schedule priority for the resume post.
-  bool failed{false};          ///< Set to @c true if @c Timer::call_once failed.
+  /**
+   * @brief Constructs an empty awaiter with no target loop.
+   */
+  DelayAwaiter() noexcept;
 
-  /// @brief Always @c false — this awaiter always suspends to schedule the timer.
+  /**
+   * @brief Constructs an awaiter bound to a target loop and delay.
+   *
+   * @param loop          Target loop on which to resume.
+   * @param alive_state   Target loop's alive-state gate.
+   * @param state         Shared awaiter resume state.
+   * @param ms            Delay in milliseconds before the resume is posted.
+   * @param priority      Schedule priority for the resume.
+   */
+  DelayAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+               std::shared_ptr<detail::AwaiterResumeState> state, uint32_t ms, uint16_t priority) noexcept;
+
+  /**
+   * @brief Move-constructs the awaiter.
+   */
+  DelayAwaiter(DelayAwaiter&&) noexcept;
+
+  /**
+   * @brief Move-assigns the awaiter.
+   */
+  DelayAwaiter& operator=(DelayAwaiter&&) noexcept;
+
+  MessageLoop* loop{nullptr};                                         ///< Target loop to resume on.
+  std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state;  ///< Target loop's alive-state gate.
+  std::shared_ptr<detail::AwaiterResumeState> state;                  ///< Shared resume state holding the handle.
+  uint32_t ms{0};                                                     ///< Delay in milliseconds.
+  uint16_t priority{0};                                               ///< Schedule priority for the resume.
+  bool failed{false};                                                 ///< Set to @c true if scheduling failed.
+
+  /**
+   * @brief Awaiter readiness hook.
+   *
+   * @return Always @c false; the delay must elapse asynchronously.
+   */
   static bool await_ready() noexcept;
 
-  /// @brief Schedules a one-shot timer that resumes @p handle on @c loop.
-  /// @return @c true to stay suspended on success; @c false to resume immediately on schedule failure.
+  /**
+   * @brief Destructor; abandons any pending retry registered on the helper thread.
+   */
+  ~DelayAwaiter();
+
+  /**
+   * @brief Registers the delayed resume on the shared @c FutureWaitLoop helper.
+   *
+   * @param handle  Coroutine handle to resume once the delay has elapsed.
+   * @return @c true; the awaiter always stays suspended until a resume fires.
+   */
   bool await_suspend(std::coroutine_handle<> handle);
 
-  /// @brief No-op on success; throws @c std::runtime_error if the schedule failed.
+  /**
+   * @brief Verifies that the delay completed and the resume was posted.
+   *
+   * @throws std::runtime_error if the target loop closed or retries were exhausted.
+   */
   void await_resume();
+
+  VLINK_DISALLOW_COPY_AND_ASSIGN(DelayAwaiter)
 };
 
 /**
@@ -394,64 +957,170 @@ struct VLINK_EXPORT DelayAwaiter final {
  * @brief Awaiter that suspends until a @c std::future becomes ready.
  *
  * @details
- * Backed by a process-wide shared waiter pool (see @c register_future_wait):
- * a single long-lived background thread services all pending @c await_future
- * calls.  The waiter polls each registered future at a short cadence using
- * non-blocking @c wait_for(0) and posts the resume back to @p loop as soon as
- * the future becomes ready.  The future itself remains in the coroutine frame
- * and is read by @c await_resume() on the loop thread.
+ * Backed by the process-wide @c FutureWaitLoop helper thread (see
+ * @c detail::register_future_wait).  A single long-lived helper thread services
+ * all pending @c await_future calls: it polls each registered future at a
+ * ~1 ms cadence using a non-blocking @c wait_for(0) and posts the resume back
+ * to @p loop as soon as the future is ready.  The future is held in shared
+ * waiter state so a destroyed awaiter can retire the pending poll without
+ * leaving a dangling frame pointer in the helper thread.
  *
- * @note No per-await thread is spawned.  Latency is bounded by the pool's
- *       polling interval (≈ 1 ms) plus the @p loop's task dispatch delay.
+ * @note No per-await thread is spawned.  Resume latency is bounded by the
+ *       helper's ~1 ms cadence plus the target loop's task dispatch delay.
  *
- * @warning Lifetime contract: @p loop and the awaiting coroutine frame MUST
- *          remain alive until the future becomes ready AND the waiter has
- *          finished posting the resume.  Specifically, callers MUST NOT
- *          destroy a still-suspended @c Task<> that owns a coroutine awaiting
- *          this awaiter (e.g. holding a @c Task<T> as a named lvalue and
- *          letting it leave scope while suspended), and MUST NOT destroy
- *          @p loop while any @c await_future call is pending.  Violating the
- *          contract races the waiter against frame / loop destruction and
- *          results in undefined behaviour.
+ * @warning If @p loop is closed before the ready future can be posted back,
+ *          the coroutine resumes on the helper thread and @c await_resume()
+ *          throws @c OperationCancelled.  On the normal path, exceptions
+ *          stored in the future propagate via @c future.get().
+ *
+ * @tparam TypeT  Result type produced by the awaited future.
  */
 template <typename TypeT>
 class FutureAwaiter final {
  public:
-  /// @brief Constructs an awaiter that bridges @p fut into @p loop's coroutine model.
+  /**
+   * @brief Constructs an awaiter that bridges @p fut into the coroutine layer.
+   *
+   * @param loop  Target loop on which to resume once @p fut is ready.
+   * @param fut   Future to await; ownership is transferred into the awaiter.
+   */
   FutureAwaiter(MessageLoop* loop, std::future<TypeT> fut) noexcept;
 
-  /// @brief Move-construct; transfers the future and loop pointer.
+  /**
+   * @brief Move-constructs the awaiter.
+   */
   FutureAwaiter(FutureAwaiter&&) noexcept = default;
 
-  /// @brief Move-assign; transfers the future and loop pointer.
+  /**
+   * @brief Move-assigns the awaiter.
+   */
   FutureAwaiter& operator=(FutureAwaiter&&) noexcept = default;
 
-  /// @brief Destructor; the helper thread, if any, completes independently.
-  ~FutureAwaiter() = default;
+  /**
+   * @brief Destructor; abandons the pending helper poll.
+   */
+  ~FutureAwaiter();
 
-  /// @brief Ready iff the future is already in a ready state (short-circuit).
+  /**
+   * @brief Short-circuits when the future is already in a ready state.
+   *
+   * @return @c true if the future is ready or invalid; otherwise @c false.
+   */
   bool await_ready() const noexcept;
 
-  /// @brief Spawns the helper thread that will resume @p handle once @c fut_ is ready.
+  /**
+   * @brief Registers a poll closure on the shared @c FutureWaitLoop helper.
+   *
+   * @param handle  Coroutine handle to resume once the future is ready.
+   */
   void await_suspend(std::coroutine_handle<> handle);
 
-  /// @brief Returns @c fut_.get() (or @c void); rethrows any future-stored exception.
+  /**
+   * @brief Extracts the value from the future or rethrows its exception.
+   *
+   * @return Future result for non-void instantiations.
+   * @throws OperationCancelled if the target loop closed before the resume could be posted.
+   * @throws (anything stored in the future) Whatever @c future.get() rethrows.
+   */
   TypeT await_resume();
 
  private:
+  struct State;
+
   MessageLoop* loop_{nullptr};
-  std::future<TypeT> fut_;
+  std::shared_ptr<State> state_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(FutureAwaiter)
 };
 
 /**
- * @brief Returns an awaiter that hops the coroutine to @p loop's thread.
+ * @class GraphAwaiter
+ * @brief Awaiter that suspends until a @c GraphTask reaches @c kStatusDone.
+ *
+ * @details
+ * Installs a single-shot status callback on the graph; on @c kStatusDone the
+ * coroutine resume is posted back onto @p loop.  If the graph is already done
+ * at the await point, @c await_ready returns @c true and no callback is
+ * registered.  Cancelled or never-started graphs leave the coroutine suspended
+ * indefinitely; the caller must ensure the graph eventually runs.  The status
+ * subscription is unregistered automatically once the awaiter resumes, so
+ * multiple coroutines awaiting the same graph are safe.
+ *
+ * @warning If @p loop closes after the graph becomes done but before the resume
+ *          can be posted, @c await_resume() throws @c OperationCancelled.  The
+ *          failure resume is delivered on the @c FutureWaitLoop helper thread,
+ *          not on the target loop thread.
+ */
+class VLINK_EXPORT GraphAwaiter final {
+ public:
+  /**
+   * @brief Constructs an awaiter that monitors @p graph for completion.
+   *
+   * @param loop   Loop on which to resume the coroutine.
+   * @param graph  Graph task to monitor.
+   */
+  GraphAwaiter(MessageLoop* loop, GraphTaskPtr graph) noexcept;
+
+  /**
+   * @brief Move-constructs the awaiter.
+   */
+  GraphAwaiter(GraphAwaiter&&) noexcept;
+
+  /**
+   * @brief Move-assigns the awaiter.
+   */
+  GraphAwaiter& operator=(GraphAwaiter&&) noexcept;
+
+  /**
+   * @brief Destructor; unregisters the status callback and abandons any pending resume.
+   */
+  ~GraphAwaiter();
+
+  /**
+   * @brief Short-circuits when the graph is empty or already complete.
+   *
+   * @return @c true if @c graph_ is null or already @c kStatusDone.
+   */
+  [[nodiscard]] bool await_ready() const noexcept;
+
+  /**
+   * @brief Registers a single-shot status callback waiting for @c kStatusDone.
+   *
+   * @param handle  Coroutine handle to resume on completion.
+   */
+  void await_suspend(std::coroutine_handle<> handle);
+
+  /**
+   * @brief Verifies that the resume reached the target loop.
+   *
+   * @throws OperationCancelled if the target loop closed before the resume could be posted.
+   */
+  void await_resume() const;
+
+ private:
+  struct State;
+
+  MessageLoop* loop_{nullptr};
+  GraphTaskPtr graph_;
+  std::shared_ptr<State> state_;
+
+  VLINK_DISALLOW_COPY_AND_ASSIGN(GraphAwaiter)
+};
+
+/**
+ * @brief Returns an awaiter that hops the coroutine onto @p loop's thread.
+ *
+ * @details
+ * Use @c co_await @c schedule(loop) to migrate the remainder of a coroutine to
+ * @p loop's thread.  On @c kPriorityType loops the @c MessageLoop::kNoPriority
+ * sentinel is internally remapped to @c MessageLoop::kNormalPriority so default
+ * coroutines do not sink to the bottom of the queue.
  *
  * @param loop      Target loop to resume on.
- * @param priority  Schedule priority -- values from @c MessageLoop::Priority
- *                  (@c kNoPriority = FIFO, @c kNormalPriority = 100, etc.).
- *                  Only honoured on @c kPriorityType loops.
+ * @param priority  Schedule priority.  Values come from @c MessageLoop::Priority
+ *                  (@c kNoPriority is FIFO, @c kNormalPriority is 100, etc.).
+ *                  Honoured only on @c kPriorityType loops.
+ * @return @c ScheduleAwaiter ready to be @c co_await-ed.
  */
 VLINK_EXPORT ScheduleAwaiter schedule(MessageLoop& loop, uint16_t priority = MessageLoop::kNoPriority) noexcept;
 
@@ -459,24 +1128,32 @@ VLINK_EXPORT ScheduleAwaiter schedule(MessageLoop& loop, uint16_t priority = Mes
  * @brief Returns an awaiter that yields once back to @p loop's queue.
  *
  * @param loop      Loop owning the coroutine.
- * @param priority  Re-post priority from @c MessageLoop::Priority
- *                  (only honoured on @c kPriorityType loops).
+ * @param priority  Re-post priority from @c MessageLoop::Priority; honoured only
+ *                  on @c kPriorityType loops.
+ * @return @c YieldAwaiter ready to be @c co_await-ed.
  */
 VLINK_EXPORT YieldAwaiter yield(MessageLoop& loop, uint16_t priority = MessageLoop::kNoPriority) noexcept;
 
 /**
  * @brief Returns an awaiter that suspends for @p ms milliseconds.
  *
- * @param loop      Loop on which the timer is registered.
- * @param ms        Delay in milliseconds.
- * @param priority  Resume priority from @c MessageLoop::Priority,
- *                  forwarded to @c Timer::call_once.
+ * @param loop      Loop on which the coroutine resumes after the delay.
+ * @param ms        Delay in milliseconds.  Zero is allowed and still produces a
+ *                  resume hop through the helper thread.
+ * @param priority  Resume priority from @c MessageLoop::Priority; honoured only
+ *                  on @c kPriorityType loops.
+ * @return @c DelayAwaiter ready to be @c co_await-ed.
  */
 VLINK_EXPORT DelayAwaiter delay_ms(MessageLoop& loop, uint32_t ms,
                                    uint16_t priority = MessageLoop::kNoPriority) noexcept;
 
 /**
  * @brief Returns an awaiter that suspends until @p fut is ready, resuming on @p loop.
+ *
+ * @tparam TypeT  Result type stored in the future.
+ * @param loop  Loop on which the coroutine resumes once @p fut is ready.
+ * @param fut   Future to await; ownership is transferred into the awaiter.
+ * @return @c FutureAwaiter ready to be @c co_await-ed.
  */
 template <typename TypeT>
 FutureAwaiter<TypeT> await_future(MessageLoop& loop, std::future<TypeT> fut) noexcept;
@@ -486,29 +1163,36 @@ FutureAwaiter<TypeT> await_future(MessageLoop& loop, std::future<TypeT> fut) noe
  *
  * @details
  * The coroutine begins executing on @p loop's thread.  Ownership of the task
- * frame is transferred to an internal detached coroutine that destroys it on
- * completion.  Exceptions thrown from the task are swallowed (logged via
- * @c DetachedTask::unhandled_exception).
+ * frame is transferred to an internal @c DetachedTask which destroys the frame
+ * once the body completes.  Exceptions thrown from the task are caught by
+ * @c DetachedTask::unhandled_exception, logged at error level and swallowed:
+ * the loop continues running.
  *
  * @par Joining from synchronous code
  * Use the three-argument @c co_spawn overload with a callback to bridge to a
- * @c std::promise / @c std::future, then wait on the future:
+ * @c std::promise / @c std::future pair, then wait on the future:
  * @code
  *   std::promise<void> p;
  *   auto fut = p.get_future();
  *   Co::co_spawn(loop, my_void_task(), [&p]() { p.set_value(); });
  *   fut.wait();
  * @endcode
- * Note: if @c my_void_task throws, the callback is NOT invoked and @c fut
- * never becomes ready.  Catch inside @c my_void_task or use a value-returning
- * task that converts errors into a sentinel result.
+ *
+ * @note If @c my_void_task throws, the callback is not invoked and @c fut
+ *       never becomes ready.  Either catch inside @c my_void_task or use a
+ *       value-returning task that converts errors into a sentinel result.
+ *
+ * @param loop  Loop on which the coroutine starts running.
+ * @param task  Task to spawn; ownership is transferred into the call.
  */
 VLINK_EXPORT void co_spawn(MessageLoop& loop, Task<void>&& task);
 
 /**
- * @brief Same as @c co_spawn(), with an explicit dispatch priority.
+ * @brief Same as @c co_spawn, with an explicit dispatch priority.
  *
- * @param priority  Schedule priority (only honoured on @c kPriorityType loops).
+ * @param loop      Loop on which the coroutine starts running.
+ * @param task      Task to spawn; ownership is transferred into the call.
+ * @param priority  Schedule priority; honoured only on @c kPriorityType loops.
  */
 VLINK_EXPORT void co_spawn_with_priority(MessageLoop& loop, Task<void>&& task, uint16_t priority);
 
@@ -519,28 +1203,33 @@ VLINK_EXPORT void co_spawn_with_priority(MessageLoop& loop, Task<void>&& task, u
  * The coroutine begins executing on @p loop's thread.  When the task completes
  * successfully, @p on_complete is invoked on the loop thread with the result.
  *
- * @warning **Exceptions thrown by the task are SWALLOWED** — they are logged
- *          via @c DetachedTask::unhandled_exception and @p on_complete is NOT
+ * @warning Exceptions thrown by the task are swallowed: they are logged via
+ *          @c DetachedTask::unhandled_exception and @p on_complete is NOT
  *          invoked.  This API is unsuitable for code that must observe task
  *          failure.  To observe failure either:
  *          - Catch inside the task body and convert to a sentinel result, or
- *          - Bridge with @c std::promise + @c await_future:
- *            @code
- *              auto pp = std::make_shared<std::promise<TypeT>>();
- *              auto fut = pp->get_future();
- *              Co::co_spawn(loop, task_that_may_throw(),
- *                           [pp](TypeT v) { pp->set_value(std::move(v)); });
- *              try {
- *                TypeT result = co_await Co::await_future(loop, std::move(fut));
- *              } catch (...) { // still does not see the original exception
- *              }
- *            @endcode
- *            (Note: the future never resolves on task exception either; this
- *            pattern still only handles the success path.)  For full
- *            error observability, use the @c when_all / @c when_any /
- *            @c sequence orchestrators, which capture the original exception
- *            via the runner+guard machinery, or @c co_await the @c Task
- *            directly from a parent coroutine.
+ *          - Use @c when_all / @c when_any / @c sequence, which capture the
+ *            original exception via the runner+guard machinery, or
+ *          - @c co_await the @c Task directly from a parent coroutine.
+ *
+ * @par Example
+ * @code
+ * auto pp = std::make_shared<std::promise<TypeT>>();
+ * auto fut = pp->get_future();
+ * Co::co_spawn(loop, task_that_may_throw(),
+ *              [pp](TypeT v) { pp->set_value(std::move(v)); });
+ * try {
+ *   TypeT result = co_await Co::await_future(loop, std::move(fut));
+ * } catch (...) {
+ *   // The future still does not see the original exception.
+ * }
+ * @endcode
+ *
+ * @tparam TypeT      Result type produced by the task.
+ * @tparam CallbackT  Callable invoked with the task's result on success.
+ * @param loop         Loop on which the coroutine starts running.
+ * @param task         Task to spawn; ownership is transferred into the call.
+ * @param on_complete  Completion callback invoked on the loop thread on success.
  */
 template <typename TypeT, typename CallbackT,
           // NOLINTNEXTLINE(modernize-use-constraints)
@@ -548,7 +1237,14 @@ template <typename TypeT, typename CallbackT,
 void co_spawn(MessageLoop& loop, Task<TypeT>&& task, CallbackT&& on_complete);
 
 /**
- * @brief Same as the value-returning @c co_spawn(), with an explicit dispatch priority.
+ * @brief Same as the value-returning @c co_spawn, with an explicit dispatch priority.
+ *
+ * @tparam TypeT      Result type produced by the task.
+ * @tparam CallbackT  Callable invoked with the task's result on success.
+ * @param loop         Loop on which the coroutine starts running.
+ * @param task         Task to spawn; ownership is transferred into the call.
+ * @param on_complete  Completion callback invoked on the loop thread on success.
+ * @param priority     Schedule priority; honoured only on @c kPriorityType loops.
  */
 template <typename TypeT, typename CallbackT,
           // NOLINTNEXTLINE(modernize-use-constraints)
@@ -556,140 +1252,110 @@ template <typename TypeT, typename CallbackT,
 void co_spawn_with_priority(MessageLoop& loop, Task<TypeT>&& task, CallbackT&& on_complete, uint16_t priority);
 
 /**
- * @class GraphAwaiter
- * @brief Awaiter that suspends until a @c GraphTask reaches @c kStatusDone.
- *
- * @details
- * Installs a status callback on the graph; on @c kStatusDone the coroutine is
- * posted back onto @p loop.  If the graph is already done at the await point,
- * @c await_ready returns @c true.  Cancelled or never-started graphs leave the
- * coroutine suspended forever -- caller must ensure the graph eventually runs.
- *
- * @details
- * Each @c await_graph call appends a single-shot subscription; the
- * subscription is unregistered automatically once the awaiter resumes.
- * Multiple coroutines awaiting the same graph are safe.
- */
-class VLINK_EXPORT GraphAwaiter final {
- public:
-  /// @brief Constructs an awaiter monitoring @p graph; resume scheduled on @p loop.
-  GraphAwaiter(MessageLoop* loop, GraphTaskPtr graph) noexcept;
-
-  /// @brief Move-construct; transfers loop pointer and graph reference.
-  GraphAwaiter(GraphAwaiter&&) noexcept = default;
-
-  /// @brief Move-assign; transfers loop pointer and graph reference.
-  GraphAwaiter& operator=(GraphAwaiter&&) noexcept = default;
-
-  /// @brief Destructor; outstanding status_callback subscription is removed automatically on fire.
-  ~GraphAwaiter() = default;
-
-  /// @brief Ready iff @c graph_ is null or already @c kStatusDone.
-  [[nodiscard]] bool await_ready() const noexcept;
-
-  /// @brief Registers a one-shot status callback that resumes @p handle on Done.
-  void await_suspend(std::coroutine_handle<> handle);
-
-  /// @brief No-op; the resume was triggered by the status callback.
-  void await_resume() const noexcept;
-
- private:
-  MessageLoop* loop_{nullptr};
-  GraphTaskPtr graph_;
-
-  VLINK_DISALLOW_COPY_AND_ASSIGN(GraphAwaiter)
-};
-
-/**
- * @brief Returns an awaiter that suspends until @p graph reaches a terminal status.
+ * @brief Returns an awaiter that suspends until @p graph reaches @c kStatusDone.
  *
  * @param loop   Loop on which to resume the coroutine.
- * @param graph  Graph task to monitor.
+ * @param graph  Graph task to monitor; must be non-null.
+ * @return @c GraphAwaiter ready to be @c co_await-ed.
+ * @throws std::invalid_argument if @p graph is null.
  */
 VLINK_EXPORT GraphAwaiter await_graph(MessageLoop& loop, GraphTaskPtr graph);
 
 /**
- * @brief Coroutine wrapper around @c MessageLoop::exec_task().
+ * @brief Coroutine wrapper around @c MessageLoop::exec_task.
  *
  * @details
  * Posts @p callback under the given @c Schedule::Config envelope and suspends
- * until the callback has run.  Exceptions thrown by @p callback propagate
- * through the returned task and surface from the awaiting @c co_await.
+ * until the callback has run.  Exceptions thrown by @p callback are stored in
+ * an internal @c std::promise and rethrown from the awaiting @c co_await.  If
+ * the underlying @c exec_task post fails (queue full or loop closed), the
+ * coroutine resumes with an @c std::runtime_error carrying a descriptive
+ * message.
  *
  * @tparam CallbackT  Callable returning @c void.
  * @param loop      Loop on which the callback is scheduled.
  * @param config    Schedule envelope (delay, priority, timeouts).
- * @param callback  Callable to execute.
+ * @param callback  Callable to execute on the loop thread.
  * @return @c Task<void> that completes after @p callback returns.
  */
 template <typename CallbackT>
 Task<void> exec(MessageLoop& loop, const Schedule::Config& config, CallbackT&& callback);
 
 /**
- * @brief Awaits all @c Task<TypeT> in @p tasks to complete; returns their results.
+ * @brief Awaits every @c Task<TypeT> in @p tasks and returns their results.
  *
  * @details
  * Each task is dispatched via @c co_spawn on @p loop.  Results are stored in
- * the order of the input vector.  @c when_all waits for **every** sub-task to
+ * the order of the input vector.  @c when_all waits for every sub-task to
  * finish (success or failure) before completing.  If any sub-task throws, the
- * first exception observed is rethrown from the awaiting @c co_await; the
- * exception type and identity match what the sub-task threw.  Subsequent
- * exceptions from sibling tasks are dropped.
+ * first exception observed is rethrown from the awaiting @c co_await with its
+ * original type preserved; subsequent exceptions from sibling tasks are
+ * dropped.
  *
- * @note @p TypeT must be default-constructible (slot for each task is
- *       pre-sized via @c std::vector<TypeT>(count)).
+ * @note @p TypeT must be default-constructible; the results vector is
+ *       pre-sized via @c std::vector<TypeT>(count).
+ *
+ * @tparam TypeT  Result type produced by every sub-task.
+ * @param loop   Loop on which sub-tasks are spawned and the caller resumes.
+ * @param tasks  Sub-tasks to await; ownership is transferred into the call.
+ * @return @c Task that resolves to a vector of results in input order.
  */
 template <typename TypeT>
 Task<std::vector<TypeT>> when_all(MessageLoop& loop, std::vector<Task<TypeT>> tasks);
 
 /**
- * @brief Awaits all @c Task<void> in @p tasks to complete.
+ * @brief Awaits every @c Task<void> in @p tasks to complete.
  *
  * @details
  * Waits for every sub-task to finish.  If any sub-task throws, the first
- * exception observed is rethrown from the awaiting @c co_await; subsequent
- * exceptions are dropped.
+ * exception observed is rethrown from the awaiting @c co_await with its
+ * original type preserved; subsequent exceptions are dropped.
+ *
+ * @param loop   Loop on which sub-tasks are spawned and the caller resumes.
+ * @param tasks  Sub-tasks to await; ownership is transferred into the call.
+ * @return @c Task<void> that completes once every sub-task has finished.
  */
 VLINK_EXPORT Task<void> when_all(MessageLoop& loop, std::vector<Task<void>> tasks);
 
 /**
- * @brief Records the index and result of the first @c Task<TypeT> in @p tasks
- * to complete successfully; waits for all remaining tasks to finish before
- * returning.
+ * @brief Records the index and result of the first @c Task<TypeT> to complete successfully.
  *
  * @details
- * The "winner" (first successful completion) is captured by an atomic
+ * The winner (first successful completion) is selected by an atomic
  * compare-exchange; losing tasks continue running until completion and their
- * results are dropped.  @c when_any does not return until **every** sub-task
- * has finished -- this is required to avoid leaking the orphaned sub-task
- * frames (there is no cross-coroutine cancellation in this layer).  If you
- * need an "abandon losers" semantics with bounded latency, ensure each
- * sub-task itself respects a deadline.  If every sub-task throws, the first
- * exception observed is rethrown from the awaiting @c co_await.
+ * results are dropped.  @c when_any does not return until every sub-task has
+ * finished — this is required to avoid leaking orphaned sub-task frames, since
+ * this layer offers no cross-coroutine cancellation.  If "abandon losers"
+ * semantics with bounded latency are required, each sub-task itself must
+ * respect a deadline.  If every sub-task throws, the first exception observed
+ * is rethrown from the awaiting @c co_await.
  *
- * @throws std::invalid_argument if @p tasks is empty.  Because @c when_any is
- *         itself a coroutine the exception is observed at the awaiting
- *         @c co_await site (not synchronously at the @c when_any() call site).
- *
- * @return @c {winning_index, winning_result}
+ * @tparam TypeT  Result type produced by every sub-task.
+ * @param loop   Loop on which sub-tasks are spawned and the caller resumes.
+ * @param tasks  Sub-tasks to race; ownership is transferred into the call.
+ * @return @c Task resolving to @c {winning_index, winning_result}.
+ * @throws std::invalid_argument if @p tasks is empty; observed at the awaiting
+ *         @c co_await site (since @c when_any is itself a coroutine).
  */
 template <typename TypeT>
 Task<std::pair<size_t, TypeT>> when_any(MessageLoop& loop, std::vector<Task<TypeT>> tasks);
 
 /**
- * @brief Records the index of the first @c Task<void> in @p tasks to complete
- * successfully; waits for all remaining tasks to finish before returning.
+ * @brief Records the index of the first @c Task<void> to complete successfully.
  *
  * @details
- * The "winner" (first successful completion) is captured by an atomic
- * compare-exchange; losing tasks continue running until completion.
- * @c when_any does not return until **every** sub-task has finished -- this is
- * required to avoid leaking the orphaned sub-task frames (there is no
- * cross-coroutine cancellation in this layer).  If every sub-task throws, the
- * first exception observed is rethrown from the awaiting @c co_await.
+ * The winner (first successful completion) is selected by an atomic
+ * compare-exchange; losing tasks continue running until completion.  @c when_any
+ * does not return until every sub-task has finished — this is required to
+ * avoid leaking orphaned sub-task frames (no cross-coroutine cancellation is
+ * provided).  If every sub-task throws, the first exception observed is
+ * rethrown from the awaiting @c co_await.
  *
- * @throws std::invalid_argument if @p tasks is empty.  Surfaces through the
- *         awaiting @c co_await (when_any is itself a coroutine).
+ * @param loop   Loop on which sub-tasks are spawned and the caller resumes.
+ * @param tasks  Sub-tasks to race; ownership is transferred into the call.
+ * @return @c Task resolving to the winning sub-task's index.
+ * @throws std::invalid_argument if @p tasks is empty; observed at the awaiting
+ *         @c co_await site (since @c when_any is itself a coroutine).
  */
 VLINK_EXPORT Task<size_t> when_any(MessageLoop& loop, std::vector<Task<void>> tasks);
 
@@ -698,11 +1364,15 @@ VLINK_EXPORT Task<size_t> when_any(MessageLoop& loop, std::vector<Task<void>> ta
  *
  * @details
  * Convenience for composing a linear pipeline of @c Task<void>.  Each task is
- * spawned on @p loop via the same runner+guard machinery used by @c when_all,
+ * spawned on @p loop via the same runner+guard machinery used by @c when_all
  * and joined through @c await_future, so both the success path and any
  * exception thrown by a sub-task resume the caller on @p loop's thread.  If a
  * task throws, the exception is rethrown from the awaiting @c co_await with
- * its original type preserved and remaining tasks are skipped.
+ * its original type preserved and the remaining tasks are skipped.
+ *
+ * @param loop   Loop on which sub-tasks are spawned and the caller resumes.
+ * @param tasks  Sub-tasks to run in order; ownership is transferred into the call.
+ * @return @c Task<void> that completes once every sub-task has finished or one threw.
  */
 VLINK_EXPORT Task<void> sequence(MessageLoop& loop, std::vector<Task<void>> tasks);
 
@@ -721,6 +1391,7 @@ inline std::coroutine_handle<> FinalAwaiter::await_suspend(std::coroutine_handle
   return next ? next : std::noop_coroutine();
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 inline void FinalAwaiter::await_resume() const noexcept {}
 
 template <typename TypeT>
@@ -739,6 +1410,16 @@ inline void TaskPromiseBase<TypeT>::unhandled_exception() noexcept {
 }
 
 template <typename TypeT>
+inline void* TaskPromise<TypeT>::operator new(size_t size) {
+  return detail::allocate_frame(size);
+}
+
+template <typename TypeT>
+inline void TaskPromise<TypeT>::operator delete(void* ptr, size_t size) noexcept {
+  detail::deallocate_frame(ptr, size);
+}
+
+template <typename TypeT>
 inline Task<TypeT> TaskPromise<TypeT>::get_return_object() noexcept {
   return Task<TypeT>{std::coroutine_handle<TaskPromise<TypeT>>::from_promise(*this)};
 }
@@ -748,6 +1429,10 @@ template <typename UpT>
 inline void TaskPromise<TypeT>::return_value(UpT&& v) noexcept(std::is_nothrow_constructible_v<TypeT, UpT&&>) {
   result.emplace(std::forward<UpT>(v));
 }
+
+inline void* TaskPromise<void>::operator new(size_t size) { return detail::allocate_frame(size); }
+
+inline void TaskPromise<void>::operator delete(void* ptr, size_t size) noexcept { detail::deallocate_frame(ptr, size); }
 
 inline Task<void> TaskPromise<void>::get_return_object() noexcept {
   return Task<void>{std::coroutine_handle<TaskPromise<void>>::from_promise(*this)};
@@ -843,40 +1528,126 @@ inline typename Task<TypeT>::Handle Task<TypeT>::native_handle() const noexcept 
 }
 
 template <typename TypeT>
+struct FutureAwaiter<TypeT>::State final {
+  explicit State(std::future<TypeT> future) noexcept : fut(std::move(future)) {}
+
+  void set_handle(std::coroutine_handle<> h) {
+    std::lock_guard lock(mtx);
+    if (!abandoned.load(std::memory_order_acquire)) {
+      handle = h;
+    }
+  }
+
+  std::coroutine_handle<> take_handle() {
+    std::lock_guard lock(mtx);
+    return std::exchange(handle, {});
+  }
+
+  void clear_handle() {
+    std::lock_guard lock(mtx);
+    handle = {};
+  }
+
+  void resume_ready() {
+    auto h = take_handle();
+    if (h) {
+      h.resume();
+    }
+  }
+
+  void cancel_and_resume() {
+    target_closed.store(true, std::memory_order_release);
+    auto h = take_handle();
+    if (h) {
+      h.resume();
+    }
+  }
+
+  std::future<TypeT> fut;
+  std::mutex mtx;
+  std::coroutine_handle<> handle;
+  std::atomic_bool abandoned{false};
+  std::atomic_bool target_closed{false};
+};
+
+template <typename TypeT>
 inline FutureAwaiter<TypeT>::FutureAwaiter(MessageLoop* loop, std::future<TypeT> fut) noexcept
-    : loop_(loop), fut_(std::move(fut)) {}
+    : loop_(loop), state_(std::make_shared<State>(std::move(fut))) {}
+
+template <typename TypeT>
+inline FutureAwaiter<TypeT>::~FutureAwaiter() {
+  if (state_) {
+    state_->abandoned.store(true, std::memory_order_release);
+    state_->clear_handle();
+  }
+}
 
 template <typename TypeT>
 inline bool FutureAwaiter<TypeT>::await_ready() const noexcept {
-  return !fut_.valid() || fut_.wait_for(std::chrono::nanoseconds::zero()) == std::future_status::ready;
+  return !state_->fut.valid() || state_->fut.wait_for(std::chrono::nanoseconds::zero()) == std::future_status::ready;
 }
 
 template <typename TypeT>
 inline void FutureAwaiter<TypeT>::await_suspend(std::coroutine_handle<> handle) {
   auto* loop_ptr = loop_;
-  auto* fut_ptr = &fut_;
+  auto loop_alive = loop_ptr->get_alive_state();
+  auto state = state_;
+  state->set_handle(handle);
 
-  detail::register_future_wait(MoveFunction<bool()>([loop_ptr, handle, fut_ptr]() -> bool {
-    if VUNLIKELY (!fut_ptr->valid()) {
-      (void)detail::post_resume(*loop_ptr, handle);
-      return true;
-    }
+  detail::register_future_wait(
+      MoveFunction<bool()>([loop_ptr, loop_alive, state = std::move(state), retry_count = 0U]() mutable -> bool {
+        if VUNLIKELY (state->abandoned.load(std::memory_order_acquire)) {
+          return true;
+        }
 
-    if (fut_ptr->wait_for(std::chrono::nanoseconds::zero()) != std::future_status::ready) {
-      return false;
-    }
+        if (state->fut.valid() && state->fut.wait_for(std::chrono::nanoseconds::zero()) != std::future_status::ready) {
+          return false;
+        }
 
-    (void)detail::post_resume(*loop_ptr, handle);
-    return true;
-  }));
+        const auto result = detail::post_callback_if_alive(
+            loop_ptr, loop_alive, MoveFunction<void()>([state]() { state->resume_ready(); }),
+            MoveFunction<void()>([state]() {
+              detail::register_future_wait(MoveFunction<bool()>([state]() {
+                if (!state->abandoned.load(std::memory_order_acquire)) {
+                  state->cancel_and_resume();
+                }
+                return true;
+              }));
+            }));
+        if (result == detail::ResumePostResult::kPosted) {
+          return true;
+        }
+
+        if (result == detail::ResumePostResult::kRetry) {
+          if (++retry_count >= detail::kMaxResumePostRetry) {
+            detail::register_future_wait(MoveFunction<bool()>([state]() {
+              if (!state->abandoned.load(std::memory_order_acquire)) {
+                state->cancel_and_resume();
+              }
+              return true;
+            }));
+            return true;
+          }
+
+          return false;
+        }
+
+        return true;
+      }));
 }
 
 template <typename TypeT>
 inline TypeT FutureAwaiter<TypeT>::await_resume() {
+  state_->abandoned.store(true, std::memory_order_release);
+  state_->clear_handle();
+  if VUNLIKELY (state_->target_closed.load(std::memory_order_acquire)) {
+    throw Exception::OperationCancelled{};
+  }
+
   if constexpr (std::is_void_v<TypeT>) {
-    fut_.get();
+    state_->fut.get();
   } else {
-    return fut_.get();
+    return state_->fut.get();
   }
 }
 
@@ -952,7 +1723,9 @@ struct WhenAllGuard final {
       : state(std::move(other.state)), completed_normally(other.completed_normally) {}
 
   WhenAllGuard(const WhenAllGuard&) = delete;
+
   WhenAllGuard& operator=(const WhenAllGuard&) = delete;
+
   WhenAllGuard& operator=(WhenAllGuard&&) = delete;
 
   ~WhenAllGuard() {
@@ -1016,7 +1789,9 @@ struct WhenAnyGuard final {
       : state(std::move(other.state)), completed_normally(other.completed_normally) {}
 
   WhenAnyGuard(const WhenAnyGuard&) = delete;
+
   WhenAnyGuard& operator=(const WhenAnyGuard&) = delete;
+
   WhenAnyGuard& operator=(WhenAnyGuard&&) = delete;
 
   ~WhenAnyGuard() {
@@ -1109,7 +1884,8 @@ inline Task<std::pair<size_t, TypeT>> when_any(MessageLoop& loop, std::vector<Ta
 }  // namespace Coroutine
 
 /**
- * @brief Short alias for the @c Coroutine namespace.
+ * @namespace vlink::Co
+ * @brief Short alias for @c vlink::Coroutine.
  *
  * @details
  * Lets user code write @c vlink::Co::Task / @c vlink::Co::yield(loop) etc.

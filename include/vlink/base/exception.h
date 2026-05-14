@@ -27,23 +27,24 @@
  *
  * @details
  * All VLink exception classes are thin @c final wrappers that inherit their
- * constructors from the corresponding standard exception base.  They are grouped
- * inside the @c vlink::Exception namespace to avoid naming conflicts with
- * application code.
+ * constructors from the corresponding standard exception base.  They are
+ * grouped inside the @c vlink::Exception namespace to avoid naming conflicts
+ * with application code.
  *
  * The mapping between VLink exceptions and standard bases is:
  *
- * | VLink exception          | Standard base              | Typical usage                        |
- * | ------------------------ | -------------------------- | ------------------------------------ |
- * | Exception::RuntimeError  | std::runtime_error         | General runtime failures (fatal log) |
- * | Exception::OutOfRange    | std::out_of_range          | Index or iterator out of valid range |
- * | Exception::InvalidArgument | std::invalid_argument    | Bad function argument                |
- * | Exception::LogicError    | std::logic_error           | Violated precondition                |
- * | Exception::DomainError   | std::domain_error          | Value outside the function domain    |
- * | Exception::LengthError   | std::length_error          | Size exceeds implementation limit    |
- * | Exception::RangeError    | std::range_error           | Arithmetic range error               |
- * | Exception::OverflowError | std::overflow_error        | Arithmetic overflow                  |
- * | Exception::UnderflowError| std::underflow_error       | Arithmetic underflow                 |
+ * | VLink exception                | Standard base              | Typical usage                        |
+ * | ------------------------------ | -------------------------- | ------------------------------------ |
+ * | Exception::RuntimeError        | std::runtime_error         | General runtime failures (fatal log) |
+ * | Exception::OutOfRange          | std::out_of_range          | Index or iterator out of valid range |
+ * | Exception::InvalidArgument     | std::invalid_argument      | Bad function argument                |
+ * | Exception::LogicError          | std::logic_error           | Violated precondition                |
+ * | Exception::DomainError         | std::domain_error          | Value outside the function domain    |
+ * | Exception::LengthError         | std::length_error          | Size exceeds implementation limit    |
+ * | Exception::RangeError          | std::range_error           | Arithmetic range error               |
+ * | Exception::OverflowError       | std::overflow_error        | Arithmetic overflow                  |
+ * | Exception::UnderflowError      | std::underflow_error       | Arithmetic underflow                 |
+ * | Exception::OperationCancelled  | std::exception             | Cooperative cancellation observed    |
  *
  * @note
  * @c Exception::RuntimeError is the exception thrown by @c Logger when a
@@ -64,6 +65,7 @@
 
 #pragma once
 
+#include <exception>
 #include <stdexcept>
 
 namespace vlink {
@@ -173,6 +175,18 @@ class OverflowError final : public std::overflow_error {
  */
 class UnderflowError final : public std::underflow_error {
   using std::underflow_error::underflow_error;
+};
+
+/**
+ * @class OperationCancelled
+ * @brief Indicates that an operation observed a cooperative cancellation request.
+ */
+class OperationCancelled final : public std::exception {
+ public:
+  /**
+   * @brief Returns a stable diagnostic string.
+   */
+  [[nodiscard]] const char* what() const noexcept override { return "vlink operation cancelled"; }
 };
 
 }  // namespace Exception
