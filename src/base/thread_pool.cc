@@ -410,7 +410,9 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
 
     if (notify_waiter) {
       // Pair the empty-to-non-empty transition with the wait mutex so workers cannot miss the notify.
-      { std::lock_guard lock(impl_->mtx); }
+      {
+        std::lock_guard lock(impl_->mtx);
+      }
       impl_->cv.notify_one();
     }
   }

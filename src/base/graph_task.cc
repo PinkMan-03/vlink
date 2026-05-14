@@ -650,7 +650,9 @@ std::string GraphTask::export_to_dot() const {
 
     visited.insert(task);
 
-    { groups[task->get_group_name()].emplace_back(task); }
+    {
+      groups[task->get_group_name()].emplace_back(task);
+    }
 
     {
       std::lock_guard lock(task->impl_->mtx);

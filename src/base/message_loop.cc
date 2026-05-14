@@ -556,7 +556,9 @@ bool MessageLoop::wakeup() {
   }
 
   // Pair the first pending wakeup with the wait mutex so a concurrent waiter cannot miss the notify.
-  { std::lock_guard lock(impl_->mtx); }
+  {
+    std::lock_guard lock(impl_->mtx);
+  }
   impl_->cv.notify_all();
 
   return true;
