@@ -96,7 +96,9 @@ void CancellationRegistration::reset() noexcept {
     return;
   }
 
-  if VLIKELY (auto state = state_.lock()) {
+  auto state = state_.lock();
+
+  if VLIKELY (state) {
     std::lock_guard lock(state->mtx);
 
     state->callbacks.erase(id_);
@@ -111,7 +113,9 @@ bool CancellationRegistration::valid() const noexcept {
     return false;
   }
 
-  if VLIKELY (auto state = state_.lock()) {
+  auto state = state_.lock();
+
+  if VLIKELY (state) {
     std::lock_guard lock(state->mtx);
 
     return state->callbacks.find(id_) != state->callbacks.end();

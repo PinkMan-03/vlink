@@ -190,7 +190,9 @@ TaskHandle TaskHandle::make_task_handle(const CancellationToken& parent_token) {
     std::weak_ptr<TaskHandle::State> weak_state = state;
 
     auto registration = parent_token.register_callback([weak_state]() {
-      if VLIKELY (auto locked = weak_state.lock()) {
+      auto locked = weak_state.lock();
+
+      if VLIKELY (locked) {
         (void)TaskHandle::request_cancel(std::move(locked));
       }
     });
