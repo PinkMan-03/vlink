@@ -26,10 +26,16 @@
  * @brief VLink-specific exception types wrapping the C++ standard exception hierarchy.
  *
  * @details
- * All VLink exception classes are thin @c final wrappers that inherit their
- * constructors from the corresponding standard exception base.  They are
- * grouped inside the @c vlink::Exception namespace to avoid naming conflicts
- * with application code.
+ * All VLink exception classes are thin @c final wrappers around the
+ * corresponding standard exception base.  They are grouped inside the
+ * @c vlink::Exception namespace to avoid naming conflicts with application
+ * code.
+ *
+ * To guarantee a single typeinfo / vtable per type across shared library
+ * boundaries (notably on macOS where libc++abi compares typeinfo by pointer
+ * equality), every class is exported via @c VLINK_EXPORT and the constructors
+ * plus the virtual @c what() function are defined out-of-line in
+ * @c exception.cc -- which acts as the key-function translation unit.
  *
  * The mapping between VLink exceptions and standard bases is:
  *
@@ -67,6 +73,9 @@
 
 #include <exception>
 #include <stdexcept>
+#include <string>
+
+#include "./macros.h"
 
 namespace vlink {
 
@@ -79,114 +88,120 @@ namespace Exception {  // NOLINT(readability-identifier-naming)
 /**
  * @class RuntimeError
  * @brief Indicates a general runtime failure.
- *
- * @details
- * Thrown by the Logger when a @c kFatal log level is used.  Inherits all
- * constructors from @c std::runtime_error so it can be constructed with
- * an @c std::string or C-string message.
  */
-class RuntimeError final : public std::runtime_error {
-  using std::runtime_error::runtime_error;
+class VLINK_EXPORT RuntimeError final : public std::runtime_error {
+ public:
+  explicit RuntimeError(const std::string& what_arg);
+  explicit RuntimeError(const char* what_arg);
+  ~RuntimeError() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class OutOfRange
  * @brief Indicates an index or iterator that is outside the valid range.
- *
- * @details
- * Inherits all constructors from @c std::out_of_range.
  */
-class OutOfRange final : public std::out_of_range {
-  using std::out_of_range::out_of_range;
+class VLINK_EXPORT OutOfRange final : public std::out_of_range {
+ public:
+  explicit OutOfRange(const std::string& what_arg);
+  explicit OutOfRange(const char* what_arg);
+  ~OutOfRange() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class InvalidArgument
  * @brief Indicates that a function received an argument with an invalid value.
- *
- * @details
- * Inherits all constructors from @c std::invalid_argument.
  */
-class InvalidArgument final : public std::invalid_argument {
-  using std::invalid_argument::invalid_argument;
+class VLINK_EXPORT InvalidArgument final : public std::invalid_argument {
+ public:
+  explicit InvalidArgument(const std::string& what_arg);
+  explicit InvalidArgument(const char* what_arg);
+  ~InvalidArgument() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class LogicError
  * @brief Indicates a violated program logic precondition.
- *
- * @details
- * Inherits all constructors from @c std::logic_error.
  */
-class LogicError final : public std::logic_error {
-  using std::logic_error::logic_error;
+class VLINK_EXPORT LogicError final : public std::logic_error {
+ public:
+  explicit LogicError(const std::string& what_arg);
+  explicit LogicError(const char* what_arg);
+  ~LogicError() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class DomainError
  * @brief Indicates that a value is outside the domain of a mathematical function.
- *
- * @details
- * Inherits all constructors from @c std::domain_error.
  */
-class DomainError final : public std::domain_error {
-  using std::domain_error::domain_error;
+class VLINK_EXPORT DomainError final : public std::domain_error {
+ public:
+  explicit DomainError(const std::string& what_arg);
+  explicit DomainError(const char* what_arg);
+  ~DomainError() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class LengthError
  * @brief Indicates an attempt to exceed the maximum allowable size or length.
- *
- * @details
- * Inherits all constructors from @c std::length_error.
  */
-class LengthError final : public std::length_error {
-  using std::length_error::length_error;
+class VLINK_EXPORT LengthError final : public std::length_error {
+ public:
+  explicit LengthError(const std::string& what_arg);
+  explicit LengthError(const char* what_arg);
+  ~LengthError() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class RangeError
  * @brief Indicates an arithmetic range error.
- *
- * @details
- * Inherits all constructors from @c std::range_error.
  */
-class RangeError final : public std::range_error {
-  using std::range_error::range_error;
+class VLINK_EXPORT RangeError final : public std::range_error {
+ public:
+  explicit RangeError(const std::string& what_arg);
+  explicit RangeError(const char* what_arg);
+  ~RangeError() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class OverflowError
  * @brief Indicates an arithmetic overflow.
- *
- * @details
- * Inherits all constructors from @c std::overflow_error.
  */
-class OverflowError final : public std::overflow_error {
-  using std::overflow_error::overflow_error;
+class VLINK_EXPORT OverflowError final : public std::overflow_error {
+ public:
+  explicit OverflowError(const std::string& what_arg);
+  explicit OverflowError(const char* what_arg);
+  ~OverflowError() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class UnderflowError
  * @brief Indicates an arithmetic underflow.
- *
- * @details
- * Inherits all constructors from @c std::underflow_error.
  */
-class UnderflowError final : public std::underflow_error {
-  using std::underflow_error::underflow_error;
+class VLINK_EXPORT UnderflowError final : public std::underflow_error {
+ public:
+  explicit UnderflowError(const std::string& what_arg);
+  explicit UnderflowError(const char* what_arg);
+  ~UnderflowError() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 /**
  * @class OperationCancelled
  * @brief Indicates that an operation observed a cooperative cancellation request.
  */
-class OperationCancelled final : public std::exception {
+class VLINK_EXPORT OperationCancelled final : public std::exception {
  public:
-  /**
-   * @brief Returns a stable diagnostic string.
-   */
-  [[nodiscard]] const char* what() const noexcept override { return "vlink operation cancelled"; }
+  OperationCancelled() noexcept;
+  ~OperationCancelled() override;
+  [[nodiscard]] const char* what() const noexcept override;
 };
 
 }  // namespace Exception
