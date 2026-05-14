@@ -1075,8 +1075,8 @@ TEST_SUITE("base-MessageLoop") {
     MessageLoop loop(MessageLoop::kLockfreeType);
     loop.async_run();
 
-    constexpr int kProducerCount = 4;
-    constexpr int kPerProducer = 100;
+    static constexpr int kProducerCount = 4;
+    static constexpr int kPerProducer = 100;
     std::atomic<int> counter{0};
     std::vector<std::thread> producers;
     producers.reserve(kProducerCount);
@@ -1426,14 +1426,14 @@ TEST_SUITE("base-MessageLoop") {
     MessageLoop loop(MessageLoop::kPriorityType);
     loop.async_run();
 
-    const int kPerThread = 50;
-    const int kThreads = 4;
+    static const int kPerThread = 50;
+    static const int kThreads = 4;
     std::atomic<int> running_total{0};
 
     std::vector<std::thread> producers;
     producers.reserve(kThreads);
     for (int t = 0; t < kThreads; ++t) {
-      producers.emplace_back([&loop, &running_total, kPerThread, t] {
+      producers.emplace_back([&loop, &running_total, t] {
         for (int i = 0; i < kPerThread; ++i) {
           const uint16_t prio = static_cast<uint16_t>((t + i + 1) % 100 + 1);
           loop.post_task_with_priority([&running_total] { running_total.fetch_add(1, std::memory_order_acq_rel); },
