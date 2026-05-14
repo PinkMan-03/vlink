@@ -118,14 +118,10 @@ for /f "delims=" %%f in ('dir /b "%INSTALL_DIR%\lib\vlink*.lib" 2^>nul') do cmak
 for /f "delims=" %%d in ('dir /b /ad "%INSTALL_DIR%\lib\cmake\vlink*" 2^>nul') do cmake -E copy_directory "%INSTALL_DIR%/lib/cmake/%%d" "%PACKUP_DIR%/lib/cmake/%%d"
 
 if exist "%INSTALL_DIR%\include\vlink" cmake -E copy_directory "%INSTALL_DIR%/include/vlink" "%PACKUP_DIR%/include/vlink"
-if exist "%INSTALL_DIR%\etc\vlink-options.txt" cmake -E copy "%INSTALL_DIR%/etc/vlink-options.txt" "%PACKUP_DIR%/etc/"
-if exist "%INSTALL_DIR%\etc\vlink-proxy" cmake -E copy_directory "%INSTALL_DIR%/etc/vlink-proxy" "%PACKUP_DIR%/etc/vlink-proxy"
-if exist "%INSTALL_DIR%\etc\vlink-foxglove" cmake -E copy_directory "%INSTALL_DIR%/etc/vlink-foxglove" "%PACKUP_DIR%/etc/vlink-foxglove"
-if exist "%INSTALL_DIR%\etc\vlink-rerun" cmake -E copy_directory "%INSTALL_DIR%/etc/vlink-rerun" "%PACKUP_DIR%/etc/vlink-rerun"
+if exist "%INSTALL_DIR%\etc\vlink" cmake -E copy_directory "%INSTALL_DIR%/etc/vlink" "%PACKUP_DIR%/etc/vlink"
 
 cmake -E copy "%SRC_DIR%/version.txt"   "%PACKUP_DIR%/"
 cmake -E copy "%SRC_DIR%/LICENSE"       "%PACKUP_DIR%/"
-cmake -E copy "%SRC_DIR%/CHANGELOG.md"  "%PACKUP_DIR%/"
 
 for /f "delims=" %%f in ('dir /b "%BUILD_DIR%\output\bin\*avcodec*" 2^>nul') do cmake -E copy "%BUILD_DIR%/output/bin/%%f" "%PACKUP_DIR%/bin/"
 for /f "delims=" %%f in ('dir /b "%BUILD_DIR%\output\bin\*avformat*" 2^>nul') do cmake -E copy "%BUILD_DIR%/output/bin/%%f" "%PACKUP_DIR%/bin/"

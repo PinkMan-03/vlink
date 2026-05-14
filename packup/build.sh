@@ -171,14 +171,10 @@ for d in "$INSTALL_DIR"/lib/cmake/vlink*;do
 done
 
 [ -d "$INSTALL_DIR/include/vlink" ] && cp -rf "$INSTALL_DIR/include/vlink" "$PACKUP_DIR/include/"
-[ -f "$INSTALL_DIR/etc/vlink-options.txt" ] && cp -f "$INSTALL_DIR/etc/vlink-options.txt" "$PACKUP_DIR/etc/"
-[ -d "$INSTALL_DIR/etc/vlink-proxy" ] && cp -rf "$INSTALL_DIR/etc/vlink-proxy" "$PACKUP_DIR/etc/"
-[ -d "$INSTALL_DIR/etc/vlink-foxglove" ] && cp -rf "$INSTALL_DIR/etc/vlink-foxglove" "$PACKUP_DIR/etc/"
-[ -d "$INSTALL_DIR/etc/vlink-rerun" ] && cp -rf "$INSTALL_DIR/etc/vlink-rerun" "$PACKUP_DIR/etc/"
+[ -d "$INSTALL_DIR/etc/vlink" ] && cp -rf "$INSTALL_DIR/etc/vlink" "$PACKUP_DIR/etc/"
 
 cmake -E copy $SRC_DIR/version.txt    $PACKUP_DIR/
 cmake -E copy $SRC_DIR/LICENSE        $PACKUP_DIR/
-cmake -E copy $SRC_DIR/CHANGELOG.md   $PACKUP_DIR/
 
 if [ "$PLATFORM_OS" = "Darwin" ];then
 
