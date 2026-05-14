@@ -794,9 +794,9 @@ bool VlinkConvert::resolve_proto_schema(const std::string& proto_name, std::stri
         }
 
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
-        const std::string_view name = fd->name();
+        std::string_view name = fd->name();
 #else
-        const std::string name = fd->name();
+        const std::string& name = fd->name();
 #endif
 
         if VUNLIKELY (seen.count(name) > 0U) {

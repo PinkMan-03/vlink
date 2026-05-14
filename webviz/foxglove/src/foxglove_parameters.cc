@@ -577,6 +577,7 @@ bool FoxgloveParameters::encode_snapshot(const ParameterMap& state, Bytes& paylo
       return false;
     }
 
+    // NOLINTNEXTLINE(readability-redundant-casting)
     payload = Bytes::create(static_cast<size_t>(byte_size));
     return snapshot.SerializeToArray(payload.data(), static_cast<int>(byte_size));
   }

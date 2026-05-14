@@ -2869,9 +2869,9 @@ bool FoxgloveConverter::resolve_proto_schema(const std::string& proto_name, std:
 
         dfs = [&ordered, &seen, &dfs](const google::protobuf::FileDescriptor* fd) {
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
-          const std::string_view name = fd->name();
+          std::string_view name = fd->name();
 #else
-          const std::string name = fd->name();
+          const std::string& name = fd->name();
 #endif
 
           if (seen.count(name)) {

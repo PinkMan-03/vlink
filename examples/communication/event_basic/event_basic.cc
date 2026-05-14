@@ -99,7 +99,7 @@ int main() {
   // number and publishes it.
   // ---------------------------------------------------------------
   std::atomic<int> publish_count{0};
-  constexpr int kMaxPublish = 10;
+  static constexpr int kMaxPublish = 10;
 
   vlink::Timer timer(&loop, 500, vlink::Timer::kInfinite, [&pub, &publish_count, &running]() {
     if (publish_count >= kMaxPublish) {

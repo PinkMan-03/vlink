@@ -150,7 +150,7 @@ int main() {
     VLOG_I("=== Section 6: fan-out observers ===");
 
     vlink::CancellationSource source;
-    const int kObservers = 6;
+    static const int kObservers = 6;
     std::atomic_int joined{0};
     std::vector<std::thread> workers;
     workers.reserve(kObservers);

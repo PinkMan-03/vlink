@@ -1403,9 +1403,9 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
             bool skip = black_mode ? false : true;
 
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
-            std::string left_str = std::string(field->name());
+            const std::string& left_str = std::string(field->name());
 #else
-            std::string left_str = field->name();
+            const std::string& left_str = field->name();
 #endif
             std::transform(left_str.begin(), left_str.end(), left_str.begin(), [](char& c) { return std::tolower(c); });
             for (const auto& f : filter_list) {

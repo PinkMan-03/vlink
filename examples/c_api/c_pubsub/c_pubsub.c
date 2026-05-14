@@ -12,7 +12,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#define sleep_ms(ms) Sleep(ms)
+#define sleep_ms(ms) Sleep(ms)  // NOLINT(readability-identifier-naming)
 #else
 #include <unistd.h>
 #define sleep_ms(ms) usleep((ms) * 1000)  // NOLINT(readability-identifier-naming)

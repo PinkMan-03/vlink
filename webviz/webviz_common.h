@@ -964,7 +964,7 @@ inline void collect_nested_numeric_fields(const google::protobuf::Descriptor* de
     }
 
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
-    auto field_name = std::string(field->name());
+    auto field_name = field->name();
 #else
     const auto& field_name = field->name();
 #endif
