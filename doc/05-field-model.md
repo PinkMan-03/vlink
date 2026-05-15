@@ -520,11 +520,11 @@ using namespace vlink;
 int main() {
     // SecuritySetter / SecurityGetter 启用自动加解密
     SecuritySetter<Bytes> setter("shm://example_raw/field");
-    setter.set_security_key("my_secret_key");
+    setter.set_security_key("my-aes-128-key!!");
     setter.set(Bytes{0xA, 0xB, 0xC});
 
     SecurityGetter<Bytes> getter("shm://example_raw/field");
-    getter.set_security_key("my_secret_key");
+    getter.set_security_key("my-aes-128-key!!");
 
     if (auto ret = getter.get()) {
         VLOG_I("Getter value:", ret.value());
@@ -604,10 +604,10 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity>;
 
 ```cpp
 SecuritySetter<MyMsg> setter("dds://secure/field");
-setter.set_security_key("my_32byte_aes_key");
+setter.set_security_key("my-aes-128-key!!");
 
 SecurityGetter<MyMsg> getter("dds://secure/field");
-getter.set_security_key("my_32byte_aes_key");
+getter.set_security_key("my-aes-128-key!!");
 ```
 
 完整安全加密配置请参阅 [安全加密](09-security.md)。

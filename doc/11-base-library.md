@@ -324,28 +324,31 @@ alignof(std::max_align_t)` 时走 oversized 直通路径，直接 `::operator ne
 
 ### 默认 Tier 表与 VLINK_MEMORY_LEVEL
 
-`MemoryPool::get_default_config()` 返回 19 阶金字塔配置（tier 大小为 `64B /
-128B / 256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB /
-256KB / 512KB / 1MB / 4MB / 8MB / 16MB / 32MB`，覆盖 Function/MoveFunction 及
+`MemoryPool::get_default_config()` 返回 19 阶金字塔配置（tier 大小为 `32B /
+64B / 128B / 256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB /
+256KB / 512KB / 1MB / 4MB / 8MB / 16MB`，覆盖 Function/MoveFunction 及
 Bytes 的常见尺寸），由环境变量 `VLINK_MEMORY_LEVEL`（`0`..`9`，默认 `3`）
-从一张编译期常量表中按行索引。`1..8` 渐进激活大 tier：`1` 把
-`1MB / 4MB / 8MB / 16MB / 32MB` 全部留为 sentinel；`2` 启用 `1MB`；
-`3` 起激活 `4MB`；`5` 起激活 `8MB`；`6` 起激活 `16MB`；`8` 起激活 `32MB`。
-每级内 `blocks_per_chunk` 从最小档 `64B` 起严格减半，倍增小档（`64B..512KB`）
-共享相等字节预算；尾部 `1MB..32MB` 各档激活时块数为 `1`，之后每升一级翻倍。
+从一张编译期常量表中按行索引。`1..9` 渐进激活大 tier 并加密尾部 block 数：`1` 把
+`1MB / 4MB / 8MB / 16MB` 全部留为 sentinel；`2` 启用 `1MB`；
+`4` 起激活 `4MB`（**L3 默认不激活 4MB**，让 4K 帧走 oversized 直通以节省常驻
+内存）；`5` 起激活 `8MB`；`6` 起激活 `16MB`。每级内 `blocks_per_chunk`
+从最小档 `32B` 起严格减半，倍增小档（`32B..256KB`，14 档）共享相等字节预算；
+`32B` 头档的块数是 `64B` 档的 **两倍**，用于吸纳高密度微小分配；
+尾部 `1MB..16MB` 各档激活时块数为 `1`（L4 的 4MB 起步为 `2`），
+之后每升一级翻倍。
 
 | Level | 风格      | 满载占用 (≈) | 适用场景                                                                              |
 | ----- | --------- | ------------ | ------------------------------------------------------------------------------------- |
 | `0`   | Bypass    | 0 MiB        | 完全不走池：每次 `allocate` 直接 `::operator new`、每次 `deallocate` 直接 `::operator delete`。oversized 计数照常增长，所有 tier 计数为 0 |
-| `1`   | Tiny      | 3.75 MiB     | 端侧/嵌入式：仅小/中 tier 生效，`1MB / 4MB / 8MB / 16MB / 32MB` 大 tier 全部 sentinel |
-| `2`   | Small     | 8 MiB        | 受限设备：启用 `1MB` tier，仍保留 `4MB / 8MB / 16MB / 32MB` sentinel                  |
-| `3`   | Balanced  | 20 MiB       | **默认**：初步引入 `4MB` tier（1 个 block，4K 帧走 oversized 直通）                    |
-| `4`   | Large     | 40 MiB       | 服务器/高吞吐：尾部 block 翻倍                                                        |
-| `5`   | XLarge    | 88 MiB       | 大批量小消息：初步引入 `8MB` tier（1 个 block）                                        |
-| `6`   | Massive   | 192 MiB      | 重 IO/视频流：初步引入 `16MB` tier（1 个 block）                                       |
-| `7`   | Heavy     | 256 MiB      | 长时间高负载：尾部 block 进一步增加                                                   |
-| `8`   | Saturate  | 544 MiB      | 接近饱和的多生产者场景：初步引入 `32MB` tier（1 个 block）                             |
-| `9`   | Peak      | 704 MiB      | 高吞吐峰值：尾部 block 进一步翻倍                                                      |
+| `1`   | Tiny      | 4 MiB        | 端侧/嵌入式：仅小/中 tier 生效，`1MB / 4MB / 8MB / 16MB` 大 tier 全部 sentinel        |
+| `2`   | Small     | 8.5 MiB      | 受限设备：启用 `1MB` tier，仍保留 `4MB / 8MB / 16MB` sentinel                          |
+| `3`   | Balanced  | 16 MiB       | **默认**：仅到 `1MB` tier，`4MB+` 全部走 oversized 直通（4K 帧不常驻）                  |
+| `4`   | Large     | 42 MiB       | 服务器/高吞吐：初步引入 `4MB` tier（2 个 block）                                        |
+| `5`   | XLarge    | 92 MiB       | 大批量小消息：初步引入 `8MB` tier（1 个 block）                                         |
+| `6`   | Massive   | 200 MiB      | 重 IO/视频流：初步引入 `16MB` tier（1 个 block）                                        |
+| `7`   | Heavy     | 264 MiB      | 长时间高负载：尾部 block 进一步增加                                                    |
+| `8`   | Saturate  | 528 MiB      | 接近饱和的多生产者场景：大 tier 块数全部翻倍                                            |
+| `9`   | Peak      | 656 MiB      | 高吞吐峰值：尾部 block 进一步翻倍                                                       |
 
 非数字、超出 `[0, 9]` 的取值会被钳到合法区间，并打印 warning。
 
@@ -378,8 +381,10 @@ class MemoryPool final {
 
   // 显式 Config（tiers + prealloc）：
   //   空 tiers = bypass 模式（每次直通 ::operator new / delete）。
-  //   非空但格式非法（max_size==0 / blocks_per_chunk==0 / 非递增 /
-  //     max_size < sizeof(FreeNode)）= 回退到 level-3 默认金字塔，并打 error。
+  //   非空但格式非法（max_size==0 / 非严格递增 / max_size < sizeof(FreeNode) /
+  //     tiers.size() > kMaxTierCount）= 回退到 level-3 默认金字塔，并打 error。
+  //   blocks_per_chunk==0 是合法 sentinel（构造期跳过该档，不触发回退）；
+  //     若所有档都是 sentinel，等价于 bypass 模式。
   //   prealloc=true 时构造期为每个 tier 预分配满额 blocks_per_chunk 的 chunk（best-effort）。
   //   构造不抛异常（vector 增长例外）。
   explicit MemoryPool(const Config& config);
@@ -388,7 +393,7 @@ class MemoryPool final {
   MemoryPool();
 
   // 按 level 从内置 10 行 tier 表（L0..L9，L0 是空哨兵 = bypass）取一行。
-  // 越界值钳到 [0, 9]。L9 满载占用 ≈ 704 MiB。
+  // 越界值钳到 [0, 9]。L9 满载占用 ≈ 656 MiB。
   explicit MemoryPool(int level, bool prealloc = false);
 
   // 块默认对齐，等价于 alignof(std::max_align_t)，作为 allocate/deallocate
@@ -503,6 +508,14 @@ namespace vlink {
 
 class MemoryResource : public std::pmr::memory_resource {
  public:
+  // 嵌套 Deleter：MemoryResource::make_unique 返回的 unique_ptr 持有它。
+  // 持一份 polymorphic_allocator 拷贝，sizeof(Deleter<T>) == sizeof(void*)。
+  template <typename T>
+  struct Deleter final {
+    std::pmr::polymorphic_allocator<T> alloc;
+    void operator()(T* p) const noexcept;
+  };
+
   // 进程级共享 resource，包装 MemoryPool::global_instance()。
   // 该 resource 不持有底层池；与 Bytes 共享同一个全局池。
   // use_env_level 默认 true，仅首次调用生效。
@@ -527,7 +540,22 @@ class MemoryResource : public std::pmr::memory_resource {
   // 等同于 get_memory_pool().trim()。
   // 仅释放完全空闲的 chunk，活跃分配不受影响；可与 allocate/deallocate 并发。
   void trim() noexcept;
+
+  // 工厂：std::allocate_shared 走 global_instance()，对象与控制块同一次池分配。
+  template <typename T, typename... Args>
+  static std::shared_ptr<T> make_shared(Args&&... args);
+
+  // 工厂：make_unique 走 global_instance()。注意返回的是
+  // unique_ptr<T, Deleter<T>>，不能隐式转为普通 unique_ptr<T>。
+  // 若 T 的构造函数抛异常，已分配的存储会被归还到池。
+  template <typename T, typename... Args>
+  static std::unique_ptr<T, Deleter<T>> make_unique(Args&&... args);
 };
+
+// 当 <memory_resource> 不可用时（旧 stdlib），整个 MemoryResource 类不可见，
+// 只在 vlink::MemoryResource 命名空间下提供 make_shared / make_unique 退化版本，
+// 直接转发到 std::make_shared / std::make_unique；此时 make_unique 返回
+// 普通 unique_ptr<T>。
 
 }  // namespace vlink
 ```
@@ -558,6 +586,15 @@ std::pmr::vector<double> w(&custom);
 // 4) Bypass：无参构造拥有一个 bypass 私有池。
 vlink::MemoryResource bypass;
 std::pmr::vector<int> b(&bypass);       // 每次直通 ::operator new
+
+// 5) 工厂入口：替代 std::make_shared / std::make_unique，对象与控制块同次
+//    池分配。base/impl 内部热路径（coroutine、message_loop、task_handle、
+//    client::async_invoke 的 promise 等）都已迁移到这里。
+struct State { int x; };
+auto sp = vlink::MemoryResource::make_shared<State>(/*x=*/42);
+auto up = vlink::MemoryResource::make_unique<State>(/*x=*/7);
+// up 类型是 std::unique_ptr<State, vlink::MemoryResource::Deleter<State>>，
+// 不可隐式转为 std::unique_ptr<State>。
 ```
 
 ### 语义与生命周期
@@ -637,6 +674,9 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
   Function& operator=(const Function&);
   Function& operator=(Function&&) noexcept;
   Function& operator=(std::nullptr_t) noexcept;     // reset 为空
+
+  template <typename FunctorT /* 可调用且可拷贝 */>
+  Function& operator=(FunctorT&& f);                       // 直接从任意兼容可调用对象赋值
 
   ReturnT operator()(ArgsT...) const;                      // 空时抛 std::bad_function_call
   explicit operator bool() const noexcept;          // 是否持有目标
@@ -2454,7 +2494,7 @@ int main() {
 等待策略：
 
 - 前 32 次（`kFirstSpinTimes`）空转
-- 超过 32 次后调用 `Utils::yield_cpu()`（x86 上是 PAUSE 指令，ARM 上是 WFE/YIELD）
+- 超过 32 次后调用 `Utils::yield_cpu()`（x86 上是 PAUSE 指令，ARM 上是 YIELD 指令，RISC-V 上是 `.word 0x0100000f`；其余架构回退到 `std::this_thread::yield()`）
 
 #### 64 字节对齐防伪共享
 
@@ -2465,12 +2505,11 @@ MpmcQueue 通过以下手段避免伪共享：
 ```
 内存布局（64 字节对齐）:
 
-  [  head_ (atomic, 64B 对齐)  |  padding...  ]   <-- 独占缓存行
-  [  chunk_*, capacity_        |  cv_mtx_     ]
-  [  tail_ (atomic, 64B 对齐)  |  padding...  ]   <-- 独占缓存行
-  [  cv_not_empty_, cv_not_full_              ]
-  [  allocator_                               ]
-  [  quit_flag_ (64B 对齐)     |  padding...  ]   <-- 独占缓存行
+  [  head_ (atomic, 64B 对齐)       |  padding...  ]   <-- 独占缓存行
+  [  chunk_storage_, capacity_      |  cv_mtx_     ]
+  [  tail_ (atomic, 64B 对齐)       |  padding...  ]   <-- 独占缓存行
+  [  cv_not_empty_, cv_not_full_                   ]
+  [  quit_flag_ (64B 对齐)          |  padding...  ]   <-- 独占缓存行
 ```
 
 每个 Chunk 槽位也是 64 字节对齐的：
@@ -2630,7 +2669,7 @@ int main() {
 
 对于 `get()` 和 `get_shared()`，当智能指针析构时，对象自动归还到池中而非被删除。`borrow()` 返回裸指针，必须由调用方手动调用 `give_back()` 归还。
 
-#### ResetPolicy 枚举
+#### Policy 枚举
 
 | 策略             | 获取时重置 | 归还时重置 | 适用场景                   |
 | ---------------- | ---------- | ---------- | -------------------------- |
@@ -2722,12 +2761,22 @@ int main() {
 }
 ```
 
-#### 池耗尽处理
+#### 异常契约
 
-当 `max_size > 0` 且所有对象都被借出时，`get()`、`get_shared()` 和 `borrow()` 会抛出 `std::runtime_error`。建议的处理策略：
+构造期：
+- `initial_size > max_size > 0` 抛 `std::invalid_argument`
+- 预填阶段 `FactoryCallback` 返回 `nullptr` 抛 `std::runtime_error`
+
+获取期：
+- `max_size > 0` 且所有对象都被借出时，`get()` / `get_shared()` / `borrow()` 抛 `std::runtime_error`（池耗尽）
+- 同样三者在 `FactoryCallback` 返回 `nullptr` 时也抛 `std::runtime_error`
+
+`ResetCallback` 抛出的异常会被吞掉，对象在归还路径上被丢弃而非回池；借出计数正确递减，不泄漏（见上方"线程安全保证"）。
+
+#### 池耗尽处理建议
 
 - 设置合理的 `max_size` 上限
-- 使用 try-catch 捕获耗尽异常并做降级处理
+- 使用 try-catch 捕获 `std::runtime_error` 并做降级处理
 - 通过 `stats()` 监控池状态，在接近耗尽前发出告警
 
 ### SpinLock 自旋锁
@@ -2764,11 +2813,12 @@ SpinLock 使用指数退避策略来减少总线竞争：
 
 `yield_cpu()` 在不同平台上映射为不同的指令：
 
-| 平台     | 指令         | 作用                           |
-| -------- | ------------ | ------------------------------ |
-| x86/x64  | PAUSE        | 降低流水线功耗，避免内存序违规 |
-| ARM      | WFE/YIELD    | 让出执行到事件到达             |
-| 其他     | sched_yield  | 系统级让出                     |
+| 平台     | 指令                            | 作用                           |
+| -------- | ------------------------------- | ------------------------------ |
+| x86/x64  | PAUSE (`_mm_pause`)             | 降低流水线功耗，避免内存序违规 |
+| ARM      | YIELD                           | 给 SMT 兄弟核让出执行单元      |
+| RISC-V   | `.word 0x0100000f`（pause hint）| 流水线提示，等价 PAUSE         |
+| 其他     | `std::this_thread::yield()`     | 调度器让出                     |
 
 #### 与 std::mutex 对比
 
@@ -3912,8 +3962,12 @@ int main() {
 
 #### 概述
 
-`vlink::format` 是一个仅头文件的轻量 `{}` 占位符格式化器，专为日志热路径设计。
+`vlink::format` 是一个轻量 `{}` 占位符格式化器，专为日志热路径设计。
 所有格式化写入栈分配缓冲区或用户提供的输出迭代器，**不触及堆**。
+模板分发逻辑在头文件中内联展开，整数/浮点/指针的实际数字写入由
+`src/base/format.cc` 中的非模板符号 (`format_int_to` /
+`format_long_long_to` / `format_double_to` 等) 完成。使用方需链接
+`vlink::vlink` 以解析这些符号。
 
 #### 支持的类型
 
@@ -4006,7 +4060,7 @@ vlink::Utils::set_thread_stick(0b0011); // 绑定到 core 0 和 core 1
 // 获取原生线程 ID
 uint64_t tid = vlink::Utils::get_native_thread_id();
 
-// CPU 让步（最优机器指令：x86 PAUSE, ARM YIELD, RISC-V fence）
+// CPU 让步（最优机器指令：x86 PAUSE, ARM YIELD, RISC-V pause hint）
 vlink::Utils::yield_cpu();
 ```
 
@@ -4076,7 +4130,7 @@ VLink 的协作取消基于 **生产者 / 观察者** 模式：写方持有 `Can
 
 | 类型                       | 角色                                                   | 拷贝/移动语义                |
 | -------------------------- | ------------------------------------------------------ | ---------------------------- |
-| `CancellationSource`       | 可变端，发出取消请求                                   | 不可拷贝、不可移动           |
+| `CancellationSource`       | 可变端，发出取消请求                                   | 可拷贝、可移动（句柄语义：所有副本共享同一取消状态） |
 | `CancellationToken`        | 只读观察者；可轮询、可注册回调                          | 可拷贝、可跨线程共享          |
 | `CancellationRegistration` | RAII 槽，持有一个已注册回调                            | 只可移动                     |
 | `OperationCancelled`       | 已观察到取消请求的异常类型（派生自 `std::exception`） | 终态语义，由调用方抛出      |

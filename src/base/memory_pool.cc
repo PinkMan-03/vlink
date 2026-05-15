@@ -57,6 +57,7 @@ static constexpr size_t kInitialChunkBytesTarget = 64U * 1024U;
 static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCount] = {
     // L0 ~ 0 MiB. (bypass; all entries are sentinels)
     {
+        {32U, 0U},
         {64U, 0U},
         {128U, 0U},
         {256U, 0U},
@@ -75,10 +76,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 0U},
         {8U * 1024U * 1024U, 0U},
         {16U * 1024U * 1024U, 0U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L1 ~ 3.75 MiB.
+    // L1 ~ 4 MiB.
     {
+        {32U, 8U * 1024U},
         {64U, 4U * 1024U},
         {128U, 2U * 1024U},
         {256U, 1U * 1024U},
@@ -97,10 +98,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 0U},
         {8U * 1024U * 1024U, 0U},
         {16U * 1024U * 1024U, 0U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L2 ~ 8 MiB.
+    // L2 ~ 8.5 MiB.
     {
+        {32U, 16U * 1024U},
         {64U, 8U * 1024U},
         {128U, 4U * 1024U},
         {256U, 2U * 1024U},
@@ -119,10 +120,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 0U},
         {8U * 1024U * 1024U, 0U},
         {16U * 1024U * 1024U, 0U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L3 ~ 20 MiB. (Default)
+    // L3 ~ 16 MiB. (Default)
     {
+        {32U, 32U * 1024U},
         {64U, 16U * 1024U},
         {128U, 8U * 1024U},
         {256U, 4U * 1024U},
@@ -137,14 +138,14 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {128U * 1024U, 8U},
         {256U * 1024U, 4U},
         {512U * 1024U, 2U},
-        {1U * 1024U * 1024U, 2U},
-        {4U * 1024U * 1024U, 1U},
+        {1U * 1024U * 1024U, 1U},
+        {4U * 1024U * 1024U, 0U},
         {8U * 1024U * 1024U, 0U},
         {16U * 1024U * 1024U, 0U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L4 ~ 40 MiB.
+    // L4 ~ 42 MiB.
     {
+        {32U, 64U * 1024U},
         {64U, 32U * 1024U},
         {128U, 16U * 1024U},
         {256U, 8U * 1024U},
@@ -163,10 +164,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 2U},
         {8U * 1024U * 1024U, 0U},
         {16U * 1024U * 1024U, 0U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L5 ~ 88 MiB.
+    // L5 ~ 92 MiB.
     {
+        {32U, 128U * 1024U},
         {64U, 64U * 1024U},
         {128U, 32U * 1024U},
         {256U, 16U * 1024U},
@@ -185,10 +186,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 4U},
         {8U * 1024U * 1024U, 1U},
         {16U * 1024U * 1024U, 0U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L6 ~ 192 MiB.
+    // L6 ~ 200 MiB.
     {
+        {32U, 256U * 1024U},
         {64U, 128U * 1024U},
         {128U, 64U * 1024U},
         {256U, 32U * 1024U},
@@ -207,10 +208,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 8U},
         {8U * 1024U * 1024U, 2U},
         {16U * 1024U * 1024U, 1U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L7 ~ 256 MiB.
+    // L7 ~ 264 MiB.
     {
+        {32U, 256U * 1024U},
         {64U, 128U * 1024U},
         {128U, 64U * 1024U},
         {256U, 32U * 1024U},
@@ -229,10 +230,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 16U},
         {8U * 1024U * 1024U, 4U},
         {16U * 1024U * 1024U, 2U},
-        {32U * 1024U * 1024U, 0U},
     },
-    // L8 ~ 544 MiB.
+    // L8 ~ 528 MiB.
     {
+        {32U, 512U * 1024U},
         {64U, 256U * 1024U},
         {128U, 128U * 1024U},
         {256U, 64U * 1024U},
@@ -251,10 +252,10 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 32U},
         {8U * 1024U * 1024U, 8U},
         {16U * 1024U * 1024U, 4U},
-        {32U * 1024U * 1024U, 1U},
     },
-    // L9 ~ 704 MiB.
+    // L9 ~ 656 MiB.
     {
+        {32U, 512U * 1024U},
         {64U, 256U * 1024U},
         {128U, 128U * 1024U},
         {256U, 64U * 1024U},
@@ -273,7 +274,6 @@ static constexpr MemoryPool::Tier kDefaultTierTable[kMaxLevelCount][kMaxTierCoun
         {4U * 1024U * 1024U, 32U},
         {8U * 1024U * 1024U, 16U},
         {16U * 1024U * 1024U, 8U},
-        {32U * 1024U * 1024U, 2U},
     }
 };
 // clang-format on

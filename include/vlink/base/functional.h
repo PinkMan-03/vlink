@@ -192,6 +192,8 @@ template <typename SignatureT>
 struct IsStdMoveOnlyFunction<std::move_only_function<SignatureT>> : std::true_type {};
 #endif
 
+[[noreturn]] VLINK_EXPORT void throw_bad_function_call();
+
 }  // namespace detail
 
 /**
@@ -807,7 +809,7 @@ inline Function<ReturnT(ArgsT...), SboSizeT>::~Function() {
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 inline ReturnT Function<ReturnT(ArgsT...), SboSizeT>::operator()(ArgsT... args) const {
   if VUNLIKELY (vtable_ == nullptr) {
-    throw std::bad_function_call();
+    detail::throw_bad_function_call();
   }
 
   return vtable_->invoke(&storage_, std::forward<ArgsT>(args)...);
@@ -1163,7 +1165,7 @@ inline MoveFunction<ReturnT(ArgsT...), SboSizeT>::~MoveFunction() {
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 inline ReturnT MoveFunction<ReturnT(ArgsT...), SboSizeT>::operator()(ArgsT... args) {
   if VUNLIKELY (vtable_ == nullptr) {
-    throw std::bad_function_call();
+    detail::throw_bad_function_call();
   }
 
   return vtable_->invoke(&storage_, std::forward<ArgsT>(args)...);

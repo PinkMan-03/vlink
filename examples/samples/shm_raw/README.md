@@ -33,7 +33,7 @@ SecurityPublisher  -->  SecuritySubscriber
 ```
 
 - 使用 `SecurityPublisher<Bytes>` 和 `SecuritySubscriber<Bytes>`
-- 通过 `set_security_key("custom_security")` 设置安全密钥
+- 通过 `set_security_key("custom-key-16b!!")` 设置安全密钥（AES-128 要求正好 16 字节）
 - 发布者调用 `wait_for_subscribers()` 等待匹配后再发送
 
 ### 3. 字段模型 (Field) -- 状态读写

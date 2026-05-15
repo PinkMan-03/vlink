@@ -841,6 +841,20 @@ uint32_t id = task->register_status_callback(
     });
 ```
 
+**⑬ pmr 池化的 `make_shared` / `make_unique`**：
+```cpp
+#include <vlink/base/memory_resource.h>
+
+// 热路径上替代 std::make_shared：对象 + 控制块同一次池分配，走全局 MemoryPool。
+auto sp = vlink::MemoryResource::make_shared<State>(/*args*/);
+
+// 返回 unique_ptr<T, MemoryResource::Deleter<T>>，不能隐式转为普通 unique_ptr<T>。
+auto up = vlink::MemoryResource::make_unique<State>(/*args*/);
+
+// 与 std::pmr::vector 等容器搭配：共享全局池，少一份 fragment。
+std::pmr::vector<int> v(&vlink::MemoryResource::global_instance());
+```
+
 ---
 
 ## 🩺 快速排障

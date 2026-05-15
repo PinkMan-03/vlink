@@ -9,6 +9,7 @@
 | 文件 | 说明 |
 |------|------|
 | `object_pool.cc` | ObjectPool 功能演示源码 |
+| `pooled_buffer.h` | 用于演示的 `Buffer` 类型定义（可重置 / 可计数） |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
 
 ## 构建与运行

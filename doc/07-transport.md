@@ -1147,7 +1147,8 @@ pub.publish(80.5f);
 
 int main() {
     // 1. 可选：初始化 Bytes 共享内存池（触发 MemoryPool::global_instance(true)，
-    //    根据 VLINK_MEMORY_LEVEL 选择分级配置）。无对应 release。
+    //    根据 VLINK_MEMORY_LEVEL 选择分级配置）。无显式 deinit，调
+    //    release_memory_pool() 只会触发 trim（释放空闲 chunk）。
     vlink::Bytes::init_memory_pool();
 
     // 2. shm:// 后端：注册进程到 RouDi

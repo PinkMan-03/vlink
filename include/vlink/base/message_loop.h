@@ -99,6 +99,7 @@
 #include <utility>
 
 #include "./functional.h"
+#include "./memory_resource.h"
 #include "./schedule.h"
 #include "./task_handle.h"
 #include "./timer.h"
@@ -807,7 +808,7 @@ inline std::future<ResultT> MessageLoop::invoke_task(FunctionT&& function, ArgsT
 
     return res;
   } else {
-    auto task = std::make_shared<std::packaged_task<ResultT()>>(std::move(bound));
+    auto task = MemoryResource::make_shared<std::packaged_task<ResultT()>>(std::move(bound));
     auto res = task->get_future();
 
     if VUNLIKELY (!post_task([task]() mutable { (*task)(); })) {
@@ -834,7 +835,7 @@ inline std::future<ResultT> MessageLoop::invoke_task_with_priority(FunctionT&& f
 
     return res;
   } else {
-    auto task = std::make_shared<std::packaged_task<ResultT()>>(std::move(bound));
+    auto task = MemoryResource::make_shared<std::packaged_task<ResultT()>>(std::move(bound));
     auto res = task->get_future();
 
     if VUNLIKELY (!post_task_with_priority([task]() mutable { (*task)(); }, priority)) {

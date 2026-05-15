@@ -73,14 +73,14 @@ int main() {
   SecuritySubscriber<Bytes> sub("shm://example_raw/event");
 
   // Set a custom encryption key (publisher and subscriber must use the same key)
-  sub.set_security_key("custom_security");
+  sub.set_security_key("custom-key-16b!!");
   // Register receive callback: convert the received Bytes to a string and print it
   sub.listen([](const Bytes& msg) { VLOG_I("sub:", msg.to_string()); });
 
   SecurityPublisher<Bytes> pub("shm://example_raw/event");
 
   // The publisher must also set the same key
-  pub.set_security_key("custom_security");
+  pub.set_security_key("custom-key-16b!!");
 
   // Wait for at least one subscriber to be ready before publishing
   pub.wait_for_subscribers();

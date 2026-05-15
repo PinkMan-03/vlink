@@ -608,7 +608,7 @@ TEST_CASE("Publisher::publish returns false when no subscribers and force=false"
 | transport 模块数量 | 同上，外加 `doc/07-transport.md` / `doc/00-whitepaper.md` 摘要段落 |
 | 序列化类型数量 | `doc/06-serialization.md` / `include/vlink/serializer.h` / 根 README / `doc/90-cheatsheet.md` |
 | QoS 预设数量 | `include/vlink/extension/qos_profile.h` 的 docstring 表 / `doc/08-qos.md` / `doc/90-cheatsheet.md` / `CHANGELOG.md` |
-| base 库组件数量 | `doc/11-base-library.md` 的表格 + 摘要 |
+| base 库组件数量 | `doc/11-base-library.md` 的表格 + 摘要 / `doc/00-whitepaper.md` "其他实用组件"表 |
 | 示例数量 / 类别 | `doc/22-examples.md` 类别计数 / 各 `examples/<category>/README.md` |
 | 环境变量 | `doc/21-environment-vars.md` / `doc/90-cheatsheet.md` |
 | CMake 选项 | 根 README "Available CMake targets" / `doc/01-build.md` / `doc/00-whitepaper.md` "常用构建选项" |

@@ -37,17 +37,6 @@
 
 namespace vlink {
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 // Timer::Impl
 struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) std::atomic_bool is_busy{false};
@@ -70,7 +59,7 @@ struct Timer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::recursive_mutex recursive_mtx;
   ConditionVariable cv;
 
-  std::shared_ptr<std::atomic_bool> alive_flag{pool_make_shared<std::atomic_bool>(true)};
+  std::shared_ptr<std::atomic_bool> alive_flag{MemoryResource::make_shared<std::atomic_bool>(true)};
 };
 
 // Timer

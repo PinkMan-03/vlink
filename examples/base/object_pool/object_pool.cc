@@ -26,6 +26,7 @@
 #include <vlink/base/logger.h>
 #include <vlink/base/object_pool.h>
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 

@@ -133,7 +133,7 @@ TEST_SUITE("base-MemoryResource - global instance") {
 
     auto over_before = pool.get_oversized_stats();
 
-    constexpr size_t kHuge = 32u * 1024u * 1024u;  // larger than the L3 default 4 MiB top live tier
+    constexpr size_t kHuge = 32u * 1024u * 1024u;  // larger than the L3 default 1 MiB top live tier
     void* p = res.allocate(kHuge);
     REQUIRE(p != nullptr);
 

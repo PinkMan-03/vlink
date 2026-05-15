@@ -48,7 +48,7 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 | proxy             | `examples/proxy/`            | 3        | 代理层 API 和服务器基础用法                 |
 | c_api             | `examples/c_api/`            | 3        | 纯 C 语言绑定（PubSub、RPC、Field）        |
 | node_features     | `examples/node_features/`    | 4        | 节点生命周期、MessageLoop 绑定、属性、状态  |
-| samples           | `examples/samples/`          | 8        | 默认构建的经典综合示例；`dds_idl/` 当前未启用，`images/` 为资源目录 |
+| samples           | `examples/samples/`          | 9（默认构建 8）| 经典综合示例；`dds_idl/` 当前 CMake 未启用，`images/` 为资源目录 |
 
 ### 编译控制
 
@@ -80,7 +80,7 @@ examples/
 │   ├── hello_pubsub/
 │   ├── hello_rpc/
 │   └── hello_field/
-├── base/                       # 基础库示例（20 个项目）
+├── base/                       # 基础库示例（23 个项目）
 │   ├── logger_basic/
 │   ├── logger_advanced/
 │   ├── timer_basic/
@@ -92,12 +92,15 @@ examples/
 │   ├── deadline_timer/
 │   ├── message_loop_basic/
 │   ├── message_loop_advanced/
+│   ├── message_loop_coroutine/
 │   ├── multi_loop/
 │   ├── thread_pool/
 │   ├── spin_lock/
 │   ├── graph_task/
 │   ├── object_pool/
 │   ├── memory_pool/
+│   ├── cancellation/
+│   ├── task_handle/
 │   ├── process/
 │   ├── schedule/
 │   └── utils/
@@ -443,7 +446,7 @@ URL 格式说明和各传输后端的配置指南。
 | `helloworld`    | `examples/samples/helloworld/` | 多后端（可切换）| Protobuf     | Method + Event             | 最全面的入门示例，推荐首先阅读    |
 | `ping_pong`     | `examples/samples/ping_pong/`  | 多后端（可切换）| Bytes（POD）  | Event（双向）              | 端到端延迟测量                    |
 | `shm_raw`       | `examples/samples/shm_raw/`    | `shm://`       | Bytes（原始）| Method + Event + Field     | 零拷贝 + 安全加密全模型演示       |
-| `dds_idl`       | `examples/samples/dds_idl/`    | `dds://`       | FastDDS IDL  | Method + Event             | FastDDS 原生 IDL 类型（CDR 序列化）|
+| `dds_idl`       | `examples/samples/dds_idl/`    | `dds://`       | FastDDS IDL  | Method + Event             | FastDDS 原生 IDL 类型（CDR 序列化）；**当前 CMake 中未启用**，需手动开启 |
 | `ddsc_proto`    | `examples/samples/ddsc_proto/` | `ddsc://`      | Protobuf     | Method + Event + Field     | CycloneDDS + Protobuf 全模型演示  |
 | `dds_dynamic`   | `examples/samples/dds_dynamic/`| `dds://`       | DynamicData  | Method + Event             | 运行时类型擦除，一个 URL 传多类型 |
 | `pub_sub_fbs`   | `examples/samples/pub_sub_fbs/`| `ddsc://`      | FlatBuffers（Pub 用 `UserT`，Sub 用 `User*`） | Event（Pub + Sub） | `pub` 用 MessageLoop + Timer 每 500ms 连续发布；`sub` 用 FlatBuffers 指针类型零拷贝读取 |

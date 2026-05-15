@@ -55,17 +55,6 @@ static constexpr size_t kMaxTimerSize = 100U;
 static constexpr uint32_t kMaxElapsedTime = 0U;
 static constexpr int kMaxLockfreePushRetry = 32;
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 template <typename TypeT, typename TimeT, typename ReturnT>
 static ReturnT get_current_time() noexcept {
   const auto& duration = std::chrono::duration_cast<TimeT>(TypeT::now().time_since_epoch());
@@ -123,7 +112,8 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
   alignas(64) std::atomic_bool is_busy{false};
   alignas(64) std::atomic_bool wakeup_pending{false};
   alignas(64) std::atomic_bool lockfree_needs_reset{false};
-  std::shared_ptr<detail::MessageLoopAliveState> alive_state{pool_make_shared<detail::MessageLoopAliveState>()};
+  std::shared_ptr<detail::MessageLoopAliveState> alive_state{
+      MemoryResource::make_shared<detail::MessageLoopAliveState>()};
 
   std::atomic<std::thread::id> thread_id;
   alignas(64) std::atomic_size_t lockfree_task_count{0U};

@@ -39,6 +39,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -52,6 +53,7 @@
 #include <numeric>
 #include <sstream>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 

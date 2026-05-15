@@ -739,13 +739,13 @@ int main() {
 
 ```cpp
 SecurityServer<Auth::Request, Auth::Response> server("dds://auth/verify");
-server.set_security_key("shared-secret-key");
+server.set_security_key("shared-key-16b!!");
 server.listen([](const Auth::Request& req, Auth::Response& resp) {
     resp.set_token("valid-token-" + req.username());
 });
 
 SecurityClient<Auth::Request, Auth::Response> client("dds://auth/verify");
-client.set_security_key("shared-secret-key");
+client.set_security_key("shared-key-16b!!");
 ```
 
 完整安全加密配置请参阅 [安全加密](09-security.md)。

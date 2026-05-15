@@ -76,7 +76,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -197,64 +196,37 @@ template <typename T>
 struct TypeConstant<T*> : std::integral_constant<Type, Type::kPointer> {};
 // NOLINTEND
 
-template <typename UIntT>
-inline int count_digits(UIntT n) {
-  int count = 1;
+VLINK_EXPORT size_t format_uint_to(char* buf, unsigned value) noexcept;
 
-  while (n >= 10) {
-    n /= 10;
-    ++count;
-  }
+VLINK_EXPORT size_t format_int_to(char* buf, int value) noexcept;
 
-  return count;
-}
+VLINK_EXPORT size_t format_ulong_long_to(char* buf,
+                                         unsigned long long value) noexcept;  // NOLINT(runtime/int,google-runtime-int)
 
-template <typename CharT, typename UIntT>
-inline CharT* write_int_digits(CharT* buf, UIntT value, int num_digits) {
-  CharT* end = buf + num_digits;
+VLINK_EXPORT size_t format_long_long_to(char* buf,
+                                        long long value) noexcept;  // NOLINT(runtime/int,google-runtime-int)
 
-  while (value >= 10) {
-    auto digit = static_cast<unsigned>(value % 10);
-    *--end = static_cast<CharT>('0' + digit);
-    value /= 10;
-  }
+VLINK_EXPORT size_t format_pointer_to(char* buf, const void* ptr) noexcept;
 
-  *--end = static_cast<CharT>('0' + value);
+VLINK_EXPORT size_t format_float_to(char* buf, size_t buflen, float value) noexcept;
 
-  return buf + num_digits;
-}
+VLINK_EXPORT size_t format_double_to(char* buf, size_t buflen, double value) noexcept;
 
-class StringWriter {
+class VLINK_EXPORT StringWriter {
  public:
-  inline StringWriter(char* buf, size_t size) noexcept : begin_(buf), ptr_(buf), end_(buf + size) {}
+  StringWriter(char* buf, size_t size) noexcept;
 
-  inline char* out() const noexcept { return ptr_; }
+  char* out() const noexcept;
 
-  inline size_t written() const noexcept { return static_cast<size_t>(ptr_ - begin_); }
+  size_t written() const noexcept;
 
-  inline size_t total_size() const noexcept { return total_size_; }
+  size_t total_size() const noexcept;
 
-  inline void write(char c) {
-    ++total_size_;
+  void write(char c);
 
-    if (ptr_ < end_) {
-      *ptr_++ = c;
-    }
-  }
+  void write(const char* s, size_t count);
 
-  inline void write(const char* s, size_t count) {
-    total_size_ += count;
-
-    auto avail = static_cast<size_t>(end_ - ptr_);
-    size_t n = (count <= avail) ? count : avail;
-
-    if (n > 0) {
-      std::memcpy(ptr_, s, n);
-      ptr_ += n;
-    }
-  }
-
-  inline void write(std::string_view sv) { write(sv.data(), sv.size()); }
+  void write(std::string_view sv);
 
  private:
   char* begin_{nullptr};
@@ -509,35 +481,27 @@ class FormatWriter {
  private:
   // NOLINTBEGIN
   void write_int(int value) {
-    if (value < 0) {
-      writer_.write('-');
-      write_uint(static_cast<unsigned>(-(value + 1)) + 1);
-    } else {
-      write_uint(static_cast<unsigned>(value));
-    }
+    char buf[11];
+    size_t n = format_int_to(buf, value);
+    writer_.write(buf, n);
   }
 
   void write_uint(unsigned value) {
     char buf[10];
-    int num_digits = count_digits(value);
-    write_int_digits(buf, value, num_digits);
-    writer_.write(buf, static_cast<size_t>(num_digits));
+    size_t n = format_uint_to(buf, value);
+    writer_.write(buf, n);
   }
 
   void write_long_long(long long value) {
-    if (value < 0) {
-      writer_.write('-');
-      write_ulong_long(static_cast<unsigned long long>(-(value + 1)) + 1);
-    } else {
-      write_ulong_long(static_cast<unsigned long long>(value));
-    }
+    char buf[20];
+    size_t n = format_long_long_to(buf, value);
+    writer_.write(buf, n);
   }
 
   void write_ulong_long(unsigned long long value) {
     char buf[20];
-    int num_digits = count_digits(value);
-    write_int_digits(buf, value, num_digits);
-    writer_.write(buf, static_cast<size_t>(num_digits));
+    size_t n = format_ulong_long_to(buf, value);
+    writer_.write(buf, n);
   }
 
   void write_bool(bool value) {
@@ -561,41 +525,22 @@ class FormatWriter {
   void write_string_view(std::string_view sv) { writer_.write(sv); }
 
   void write_pointer(const void* ptr) {
-    static constexpr const char kHexDigits[] = "0123456789abcdef";
-    static_assert(sizeof(uintptr_t) <= 8, "pointer size > 64bit not supported");
-
-    char buf[16];
-    int i = 16;
-    auto value = reinterpret_cast<uintptr_t>(ptr);
-
-    writer_.write("0x", 2);
-
-    do {
-      buf[--i] = kHexDigits[value & 0xF];
-      value >>= 4;
-    } while (value != 0);
-
-    writer_.write(buf + i, static_cast<size_t>(16 - i));
+    char buf[18];
+    size_t n = format_pointer_to(buf, ptr);
+    writer_.write(buf, n);
   }
 
   void write_float(float value) {
     char buf[32];
-    int len = snprintf(buf, sizeof(buf), "%g", static_cast<double>(value));
-
-    if (len > 0 && len < static_cast<int>(sizeof(buf))) {
-      writer_.write(buf, static_cast<size_t>(len));
-    }
+    size_t n = format_float_to(buf, sizeof(buf), value);
+    writer_.write(buf, n);
   }
 
   void write_double(double value) {
     char buf[32];
-    int len = snprintf(buf, sizeof(buf), "%g", value);
-
-    if (len > 0 && len < static_cast<int>(sizeof(buf))) {
-      writer_.write(buf, static_cast<size_t>(len));
-    }
+    size_t n = format_double_to(buf, sizeof(buf), value);
+    writer_.write(buf, n);
   }
-  // NOLINTEND
 
   void write_arg(const FormatArg<CharT>& arg) {
     switch (arg.type()) {
@@ -636,6 +581,7 @@ class FormatWriter {
         break;
     }
   }
+  // NOLINTEND
 
   WriterT writer_;
 };
@@ -670,6 +616,7 @@ struct FString {
 
   // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
   inline operator std::string_view() const { return str; }
+
   std::string_view get() const { return str; }
 };
 
@@ -801,12 +748,14 @@ inline format::FormatToNResult<char*> format::format_to_n(char* out, size_t n, f
   writer.format(fmt.get(), fargs);
 
   size_t total = writer.total_size();
+
   return {writer.out(), total, total > n};
 }
 
 template <size_t NumT, typename... ArgsT>
 inline format::FormatToResult format::format_to(char (&out)[NumT], format_string<ArgsT...> fmt, const ArgsT&... args) {
   auto result = ::vlink::format::format_to_n(out, NumT, fmt, args...);
+
   return {result.out, result.size, result.truncated};
 }
 
@@ -817,11 +766,15 @@ template <typename OutputItT, typename... ArgsT,
 inline format::detail::RemoveCvref<OutputItT> format::format_to(OutputItT&& out, format_string<ArgsT...> fmt,
                                                                 const ArgsT&... args) {
   using ItT = format::detail::RemoveCvref<OutputItT>;
+
   auto arg_store = ::vlink::format::make_format_args(args...);
+
   format::detail::FormatArgs fargs(arg_store);
   format::detail::IteratorWriter<ItT> iter_writer(out);
   format::detail::FormatWriter<char, format::detail::IteratorWriter<ItT>> writer(iter_writer);
+
   writer.format(fmt.get(), fargs);
+
   return writer.out();
 }
 

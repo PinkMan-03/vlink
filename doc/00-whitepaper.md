@@ -687,6 +687,8 @@ SLOG_I << "Connection established";
 | `SpinLock`              | 自旋锁，适用于极短临界区（预期等待时间 < 1μs）                         |
 | `MpmcQueue<T>`          | MPMC 无锁多生产者多消费者队列，内部用于 `kLockfreeType` MessageLoop    |
 | `ObjectPool<T>`         | 对象池，减少频繁构造/析构开销，用于内部消息缓冲区管理                  |
+| `MemoryPool`            | 分级（金字塔）free-list 内存池，Bytes 默认分配器；通过 `VLINK_MEMORY_LEVEL`（0..9）选档，L0 = bypass |
+| `MemoryResource`        | `std::pmr::memory_resource` 适配器，桥接 `MemoryPool`；提供 `make_shared` / `make_unique` 工厂供热路径替换 `std::` 版本 |
 | `Plugin`                | 动态库（`.so`）插件加载器，用于传输后端的动态加载                      |
 | `NameDetector`          | 进程名与线程名检测工具，用于 DiscoveryViewer 的进程识别               |
 | `CachedTimestamp`       | 缓存时间戳，以可配置的时间间隔刷新系统时钟读取，降低高频调用的系统调用开销 |
@@ -759,12 +761,15 @@ if (pub.is_support_loan()) {
     pub.publish(buf);  // 借贷缓冲区在发布后自动归还
 }
 
-// 零拷贝订阅（设置 manual_unloan 手动控制生命周期）
-vlink::Subscriber<LargePointCloud> sub("shm://sensor/lidar");
+// 零拷贝订阅（设置 manual_unloan 手动控制生命周期）。
+// 注：return_loan 接受 const Bytes&，因此手动 unloan 路径需要订阅 Bytes 视图
+// （Subscriber<Bytes>）而非已反序列化的 T；这里 listen 体内只示意异步处理流程。
+vlink::Subscriber<vlink::Bytes> sub("shm://sensor/lidar");
 sub.set_manual_unloan(true);
-sub.listen([&sub](const LargePointCloud& pc) {
-    process_async(pc);  // 异步处理，延迟 unloan
-    // sub.return_loan(pc_bytes);  // 处理完成后手动释放（需传入 Bytes 参数）
+sub.listen([&sub](const vlink::Bytes& raw) {
+    process_async(raw);                 // 异步处理：可把 raw 转交到工作线程
+    // 处理完成后手动归还借出的共享内存帧：
+    // sub.return_loan(raw);
 });
 ```
 
@@ -807,7 +812,7 @@ vlink::Publisher<MyMsg> pub("dds://my/topic");
 
 // 加密发布者（接口完全相同）
 vlink::SecurityPublisher<MyMsg> sec_pub("dds://my/topic");
-sec_pub.set_security_key("vlink-aes128-key");  // AES-128-CBC，仅取前 16 字节作为密钥
+sec_pub.set_security_key("vlink-aes128-key");  // AES-128-CBC，必须正好 16 字节
 
 // 或使用自定义加密/解密回调
 sec_pub.set_security_callbacks(
@@ -1154,7 +1159,7 @@ vlink::Subscriber<int> sub("dds://my/topic");
 ```cpp
 // 先构造，再配置，最后初始化
 vlink::SecuritySubscriber<int> sub("dds://my/topic", vlink::InitType::kWithoutInit);
-sub.set_security_key("my_key");
+sub.set_security_key("my-aes-128-key!!");  // 必须正好 16 字节
 sub.set_discovery_enabled(true);
 sub.init();               // 先初始化
 sub.listen(my_callback);  // 再注册回调（Subscriber 要求 init 后才能 listen）
@@ -1366,7 +1371,7 @@ find_package(vlink REQUIRED COMPONENTS shm dds)
 find_package(Protobuf CONFIG REQUIRED)
 
 # 生成 Protobuf 消息（TARGET 模式）
-file(GLOB PROTO_FILES proto/*.proto)
+file(GLOB PROTO_FILES CONFIGURE_DEPENDS proto/*.proto)
 vlink_generate_cpp(TARGET perception_msgs PROTO ${PROTO_FILES})
 
 # 构建目标

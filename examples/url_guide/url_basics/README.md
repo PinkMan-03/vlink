@@ -20,7 +20,7 @@ transport://host/path?param1=value1&param2=value2#fragment
 
 | 组件 | 说明 | 示例 |
 |------|------|------|
-| transport | 传输协议 | `intra`, `shm`, `dds`, `zenoh`, `someip`, `mqtt`, `fdbus`, `qnx` |
+| transport | 传输协议 | `intra`, `shm`, `shm2`, `dds`, `ddsc`, `ddsr`, `ddst`, `zenoh`, `someip`, `mqtt`, `fdbus`, `qnx` |
 | host | 主题/服务的主地址 | `sensor`, `vehicle`, `0x1234` |
 | path | 主题的子路径 | `/lidar`, `/speed`, `/0x5678` |
 | query | 传输特定的键值参数 | `domain=1&depth=16&qos=sensor` |
@@ -32,9 +32,11 @@ transport://host/path?param1=value1&param2=value2#fragment
 |--------|------|------|---------|---------|
 | `intra://` | 进程内 | 同进程 | 无 | 单元测试、模块解耦 |
 | `shm://` | 共享内存 (Iceoryx) | 同机器 | RouDi 守护进程 | 高性能 IPC |
-| `shm2://` | 共享内存 v2 | 同机器 | RouDi 守护进程 | 改进版 shm |
+| `shm2://` | 共享内存 (Iceoryx2) | 同机器 | 无（Iceoryx2 无中央守护） | 改进版 shm |
 | `dds://` | Fast-DDS | 跨网络 | 无（内置发现） | 车载/工业网络 |
 | `ddsc://` | CycloneDDS | 跨网络 | 无 | 替代 DDS 后端 |
+| `ddsr://` | RTI DDS | 跨网络 | RTI Connext DDS（商用许可） | 安全关键/航空航天 |
+| `ddst://` | TravoDDS | 跨网络 | TravoDDS | 国内 DDS 后端 |
 | `zenoh://` | Eclipse Zenoh | 跨网络/WAN | Zenoh 路由器（可选） | 机器人、边缘计算 |
 | `someip://` | SOME/IP | 跨网络 | vsomeip 守护进程 | AUTOSAR 车载以太网 |
 | `mqtt://` | MQTT | 跨网络/WAN | MQTT Broker | IoT、远程监控 |

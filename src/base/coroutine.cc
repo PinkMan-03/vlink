@@ -42,17 +42,6 @@ namespace vlink {
 
 namespace Coroutine {  // NOLINT(readability-identifier-naming)
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 // PostedCallbackState
 struct PostedCallbackState final {
   explicit PostedCallbackState(MoveFunction<void()>&& callback) noexcept : drop_callback(std::move(callback)) {}
@@ -489,7 +478,7 @@ static bool post_callback(MessageLoop& loop, MoveFunction<void()>&& resume_callb
   options.drop_policy = TaskDropPolicy::kProtected;
   options.overflow_policy = TaskOverflowPolicy::kReject;
 
-  auto state = pool_make_shared<PostedCallbackState>(std::move(drop_callback));
+  auto state = MemoryResource::make_shared<PostedCallbackState>(std::move(drop_callback));
   auto callback = PostedCallback{state, std::move(resume_callback)};
 
   TaskHandle task_handle;
@@ -733,7 +722,7 @@ ScheduleAwaiter::~ScheduleAwaiter() {
 
 bool ScheduleAwaiter::await_suspend(std::coroutine_handle<> handle) {
   if VUNLIKELY (!state) {
-    state = pool_make_shared<detail::AwaiterResumeState>();
+    state = MemoryResource::make_shared<detail::AwaiterResumeState>();
   }
 
   state->set_handle(handle);
@@ -784,7 +773,7 @@ YieldAwaiter::~YieldAwaiter() {
 
 bool YieldAwaiter::await_suspend(std::coroutine_handle<> handle) {
   if VUNLIKELY (!state) {
-    state = pool_make_shared<detail::AwaiterResumeState>();
+    state = MemoryResource::make_shared<detail::AwaiterResumeState>();
   }
 
   state->set_handle(handle);
@@ -835,7 +824,7 @@ DelayAwaiter::~DelayAwaiter() {
 
 bool DelayAwaiter::await_suspend(std::coroutine_handle<> handle) {
   if VUNLIKELY (!state) {
-    state = pool_make_shared<detail::AwaiterResumeState>();
+    state = MemoryResource::make_shared<detail::AwaiterResumeState>();
   }
 
   state->set_handle(handle);
@@ -893,7 +882,7 @@ void DelayAwaiter::await_resume() {
 
 // GraphAwaiter
 GraphAwaiter::GraphAwaiter(MessageLoop* loop, GraphTaskPtr graph) noexcept
-    : loop_(loop), graph_(std::move(graph)), state_(pool_make_shared<State>()) {}
+    : loop_(loop), graph_(std::move(graph)), state_(MemoryResource::make_shared<State>()) {}
 
 GraphAwaiter::GraphAwaiter(GraphAwaiter&&) noexcept = default;
 
@@ -1032,15 +1021,18 @@ void GraphAwaiter::await_resume() const {
 }
 
 ScheduleAwaiter schedule(MessageLoop& loop, uint16_t priority) noexcept {
-  return ScheduleAwaiter{&loop, loop.get_alive_state(), pool_make_shared<detail::AwaiterResumeState>(), priority};
+  return ScheduleAwaiter{&loop, loop.get_alive_state(), MemoryResource::make_shared<detail::AwaiterResumeState>(),
+                         priority};
 }
 
 YieldAwaiter yield(MessageLoop& loop, uint16_t priority) noexcept {
-  return YieldAwaiter{&loop, loop.get_alive_state(), pool_make_shared<detail::AwaiterResumeState>(), priority};
+  return YieldAwaiter{&loop, loop.get_alive_state(), MemoryResource::make_shared<detail::AwaiterResumeState>(),
+                      priority};
 }
 
 DelayAwaiter delay_ms(MessageLoop& loop, uint32_t ms, uint16_t priority) noexcept {
-  return DelayAwaiter{&loop, loop.get_alive_state(), pool_make_shared<detail::AwaiterResumeState>(), ms, priority};
+  return DelayAwaiter{&loop, loop.get_alive_state(), MemoryResource::make_shared<detail::AwaiterResumeState>(), ms,
+                      priority};
 }
 
 void co_spawn(MessageLoop& loop, Task<void>&& task) { co_spawn_with_priority(loop, std::move(task), 0); }
@@ -1067,7 +1059,7 @@ Task<void> when_all(MessageLoop& loop, std::vector<Task<void>> tasks) {
     co_return;
   }
 
-  auto state = pool_make_shared<WhenAllVoidState>();
+  auto state = MemoryResource::make_shared<WhenAllVoidState>();
 
   state->remaining.store(tasks.size(), std::memory_order_relaxed);
 
@@ -1087,7 +1079,7 @@ Task<size_t> when_any(MessageLoop& loop, std::vector<Task<void>> tasks) {
     throw std::invalid_argument("vlink::Coroutine::when_any: tasks must not be empty");
   }
 
-  auto state = pool_make_shared<WhenAnyVoidState>();
+  auto state = MemoryResource::make_shared<WhenAnyVoidState>();
 
   state->remaining.store(tasks.size(), std::memory_order_relaxed);
 
@@ -1106,7 +1098,7 @@ Task<void> sequence(MessageLoop& loop, std::vector<Task<void>> tasks) {
       continue;
     }
 
-    auto state = pool_make_shared<WhenAllVoidState>();
+    auto state = MemoryResource::make_shared<WhenAllVoidState>();
 
     state->remaining.store(1, std::memory_order_relaxed);
 

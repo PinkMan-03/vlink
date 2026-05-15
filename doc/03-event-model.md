@@ -577,10 +577,10 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity>;
 
 ```cpp
 SecurityPublisher<MyMsg> pub("dds://secure/data");
-pub.set_security_key("my-secret-key-256bit");
+pub.set_security_key("my-aes-128-key!!");
 
 SecuritySubscriber<MyMsg> sub("dds://secure/data");
-sub.set_security_key("my-secret-key-256bit");
+sub.set_security_key("my-aes-128-key!!");
 sub.listen([](const MyMsg& msg) { /* 消息已自动解密 */ });
 ```
 

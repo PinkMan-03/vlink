@@ -29,6 +29,7 @@
 
 #include "../base/cpu_profiler_guard.h"
 #include "../base/logger.h"
+#include "../base/memory_resource.h"
 #include "../client.h"
 #include "../impl/url.h"
 #include "../serializer.h"
@@ -277,7 +278,7 @@ inline std::future<RespT> Client<ReqT, RespT, SecT>::async_invoke(const ReqT& re
 
   static_assert(kHasResp, "async_invoke requires a response type.");
 
-  auto pro = std::make_shared<std::promise<RespT>>();
+  auto pro = MemoryResource::make_shared<std::promise<RespT>>();
   auto future = pro->get_future();
 
   bool ret = false;

@@ -46,17 +46,6 @@ namespace vlink {
 static constexpr size_t kMaxTaskSize = 10000U;
 static constexpr int kMaxLockfreePushRetry = 32;
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 // ThreadPoolGlobal
 struct ThreadPoolGlobal final {
   std::atomic<int> instance_index{0};
@@ -103,7 +92,7 @@ struct ThreadPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
 };
 
 // ThreadPool
-ThreadPool::ThreadPool(size_t thread_count) : impl_(pool_make_shared<Impl>()) {
+ThreadPool::ThreadPool(size_t thread_count) : impl_(MemoryResource::make_shared<Impl>()) {
   impl_->name = "ThreadPool_" + std::to_string(ThreadPoolGlobal::get().instance_index++);
   impl_->thread_count = thread_count;
 
@@ -112,7 +101,7 @@ ThreadPool::ThreadPool(size_t thread_count) : impl_(pool_make_shared<Impl>()) {
   init();
 }
 
-ThreadPool::ThreadPool(size_t thread_count, Type type) : impl_(pool_make_shared<Impl>()) {
+ThreadPool::ThreadPool(size_t thread_count, Type type) : impl_(MemoryResource::make_shared<Impl>()) {
   impl_->name = "ThreadPool_" + std::to_string(ThreadPoolGlobal::get().instance_index++);
   impl_->thread_count = thread_count;
   impl_->type = type;

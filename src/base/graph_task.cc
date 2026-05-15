@@ -45,17 +45,6 @@
 
 namespace vlink {
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 static std::atomic<uint32_t> global_graph_task_count = 0;
 
 static std::recursive_mutex& topology_mutex() {
@@ -79,7 +68,7 @@ struct GraphTask::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddi
   std::vector<std::weak_ptr<GraphTask>> succeed_task_list;
 
   mutable std::mutex mtx;
-  vlink::condition_variable cv;
+  vlink::ConditionVariable cv;
 
   std::shared_mutex shared_mtx;
 
@@ -329,7 +318,7 @@ uint32_t GraphTask::register_status_callback(StatusCallback&& callback) {
     return 0;
   }
 
-  impl_->status_callbacks.emplace(id, pool_make_shared<StatusCallback>(std::move(callback)));
+  impl_->status_callbacks.emplace(id, MemoryResource::make_shared<StatusCallback>(std::move(callback)));
 
   return id;
 }

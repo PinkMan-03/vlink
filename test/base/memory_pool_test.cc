@@ -83,13 +83,13 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     CHECK(pool.get_oversized_stats().alloc_count == 0u);
   }
 
-  TEST_CASE("get_default_config (level 3) is well-formed and ends at 32 MiB") {
+  TEST_CASE("get_default_config (level 3) is well-formed and ends at 16 MiB") {
     auto config = MemoryPool::get_default_config();
     const auto& tiers = config.tiers;
 
     CHECK(tiers.size() == 19u);
-    CHECK(tiers.front().max_size == 64u);
-    CHECK(tiers.back().max_size == 32u * 1024u * 1024u);
+    CHECK(tiers.front().max_size == 32u);
+    CHECK(tiers.back().max_size == 16u * 1024u * 1024u);
 
     for (size_t i = 1; i < tiers.size(); ++i) {
       CHECK(tiers[i].max_size > tiers[i - 1].max_size);
@@ -127,8 +127,9 @@ TEST_SUITE("base-MemoryPool - construction & validation") {
     MemoryPool pool(3);
     auto stats = pool.get_stats();
     CHECK(stats.size() >= 4u);
-    CHECK(stats.front().max_size == 64u);
-    CHECK(stats.back().max_size == 4u * 1024u * 1024u);
+    CHECK(stats.front().max_size == 32u);
+    // L3 default leaves 4/8/16 MiB as sentinels; the top live tier is 1 MiB.
+    CHECK(stats.back().max_size == 1u * 1024u * 1024u);
   }
 
   TEST_CASE("MemoryPool(int level) — out-of-range level is clamped") {
@@ -798,8 +799,10 @@ TEST_SUITE("base-MemoryPool - geometric chunk growth") {
 // ---------------------------------------------------------------------------
 
 TEST_SUITE("base-MemoryPool - large frames") {
-  TEST_CASE("4 MiB-sized allocation routes to the largest pooled tier") {
-    MemoryPool pool(MemoryPool::get_default_config());
+  TEST_CASE("4 MiB-sized allocation routes to the largest pooled tier at L4") {
+    // L3 default leaves 4 MiB sentinel; L4 is the first level where the 4 MiB
+    // tier becomes live (count=2), so a 3 MiB request actually hits it.
+    MemoryPool pool(4);
 
     constexpr size_t k_size = 3u * 1024u * 1024u;  // 3 MiB, fits in the 4 MiB tier
     static_assert(k_size <= 4u * 1024u * 1024u, "must fit in 4 MiB tier");
@@ -815,11 +818,26 @@ TEST_SUITE("base-MemoryPool - large frames") {
     pool.deallocate(p, k_size);
   }
 
+  TEST_CASE("1 MiB-sized allocation hits the top live tier at L3 default") {
+    MemoryPool pool(3);
+
+    constexpr size_t k_size = 1u * 1024u * 1024u;  // top live tier at L3
+    void* p = pool.allocate(k_size);
+    CHECK(p != nullptr);
+
+    std::memset(p, 0xCD, k_size);
+    CHECK(static_cast<uint8_t*>(p)[k_size - 1] == 0xCD);
+
+    CHECK(pool.get_oversized_stats().alloc_count == 0u);
+
+    pool.deallocate(p, k_size);
+  }
+
   TEST_CASE("8 MP NV12 image (~12 MB) takes the oversized path at L3") {
     MemoryPool pool(3);
 
     constexpr size_t k8mp_nv12 = 8'000'000u * 3u / 2u;  // 12 MB
-    static_assert(k8mp_nv12 > 4u * 1024u * 1024u, "must overflow the L3 4 MiB tier");
+    static_assert(k8mp_nv12 > 1u * 1024u * 1024u, "must overflow the L3 1 MiB top live tier");
 
     void* p = pool.allocate(k8mp_nv12);
     CHECK(p != nullptr);
@@ -834,7 +852,7 @@ TEST_SUITE("base-MemoryPool - large frames") {
     MemoryPool pool(3);
 
     constexpr size_t k4k_rgba = 3840u * 2160u * 4u;  // ~31.6 MiB
-    static_assert(k4k_rgba > 4u * 1024u * 1024u, "test premise -- must overflow the L3 4 MiB top live tier");
+    static_assert(k4k_rgba > 1u * 1024u * 1024u, "test premise -- must overflow the L3 1 MiB top live tier");
 
     void* p = pool.allocate(k4k_rgba);
     CHECK(p != nullptr);
@@ -851,11 +869,33 @@ TEST_SUITE("base-MemoryPool - VLINK_MEMORY_LEVEL") {
     const auto& tiers = MemoryPool::get_default_config().tiers;
 
     REQUIRE(tiers.size() >= 4u);
-    CHECK(tiers.front().max_size == 64u);
+    CHECK(tiers.front().max_size == 32u);
     CHECK(tiers.front().blocks_per_chunk > 0u);
 
     CHECK(tiers.size() == 19u);
-    CHECK(tiers.back().max_size == 32u * 1024u * 1024u);
+    CHECK(tiers.back().max_size == 16u * 1024u * 1024u);
+  }
+
+  TEST_CASE("32 B head tier carries exactly 2x the blocks_per_chunk of the 64 B tier") {
+    // The 32 B tier is sized at double the 64 B count on every active level
+    // to absorb high-density tiny allocations; verify the invariant on a few
+    // representative non-bypass levels.
+    for (int level : {1, 3, 5, 9}) {
+      MemoryPool pool(level);
+      auto stats = pool.get_stats();
+      REQUIRE(stats.size() >= 2u);
+      REQUIRE(stats[0].max_size == 32u);
+      REQUIRE(stats[1].max_size == 64u);
+      CHECK(stats[0].blocks_per_chunk == 2u * stats[1].blocks_per_chunk);
+    }
+  }
+
+  TEST_CASE("L3 default leaves the 4/8/16 MiB tiers as sentinels (1 MiB top live tier)") {
+    MemoryPool pool(3);
+    auto stats = pool.get_stats();
+    // 16 live tiers: 32 B .. 1 MiB.
+    CHECK(stats.size() == 16u);
+    CHECK(stats.back().max_size == 1u * 1024u * 1024u);
   }
 }
 

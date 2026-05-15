@@ -132,7 +132,7 @@ int main() {
     vlink::Security security;
 
     // Set a custom key
-    security.set_key("direct_test_key");
+    security.set_key("direct-test-16b!");  // AES-128 needs exactly 16 bytes
 
     // Set custom callbacks (overrides AES)
     security.set_callbacks(xor_cipher::encrypt, xor_cipher::decrypt);

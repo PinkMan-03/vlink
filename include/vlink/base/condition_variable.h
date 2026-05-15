@@ -101,11 +101,12 @@
 #ifdef VLINK_ENABLE_BASE_CONDITION
 #include <pthread.h>
 
-#include <cerrno>
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <utility>
+
+#include "./macros.h"
 
 namespace vlink {
 
@@ -120,7 +121,7 @@ namespace vlink {
  *
  * The interface mirrors @c std::condition_variable exactly.
  */
-class ConditionVariable final {
+class VLINK_EXPORT ConditionVariable final {
  public:
   /**
    * @brief The underlying native handle type.
@@ -272,9 +273,8 @@ class ConditionVariable final {
   template <typename TpT, typename UpT>
   static constexpr TpT ceil_impl(const TpT& t, const UpT& u) noexcept;
 
-  template <typename DurationT>
-  std::cv_status wait_until_impl(std::unique_lock<std::mutex>& lock,
-                                 const std::chrono::time_point<std::chrono::steady_clock, DurationT>& atime) noexcept;
+  std::cv_status wait_until_steady(std::unique_lock<std::mutex>& lock,
+                                   const std::chrono::steady_clock::time_point& atime) noexcept;
 
   pthread_cond_t cond_{};
 };
@@ -290,8 +290,12 @@ class ConditionVariable final {
  *
  * Internally uses a shared @c ConditionVariable wrapped in a @c std::mutex
  * to provide the @c BasicLockable compatibility layer.
+ *
+ * @note Behavior is unspecified if the destructor runs concurrently with any
+ *       other member function (matches @c std::condition_variable_any's
+ *       contract, see [thread.condition.condvarany]).
  */
-class ConditionVariableAny final {
+class VLINK_EXPORT ConditionVariableAny final {
  public:
   ConditionVariableAny(const ConditionVariableAny&) noexcept = delete;
 
@@ -416,25 +420,6 @@ class ConditionVariableAny final {
 /// Details
 ////////////////////////////////////////////////////////////////
 
-inline ConditionVariable::ConditionVariable() noexcept {
-  pthread_condattr_t attr;
-
-  pthread_condattr_init(&attr);
-  pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-  pthread_cond_init(&cond_, &attr);
-  pthread_condattr_destroy(&attr);
-}
-
-inline ConditionVariable::~ConditionVariable() noexcept { pthread_cond_destroy(&cond_); }
-
-inline void ConditionVariable::notify_one() noexcept { pthread_cond_signal(&cond_); }
-
-inline void ConditionVariable::notify_all() noexcept { pthread_cond_broadcast(&cond_); }
-
-inline void ConditionVariable::wait(std::unique_lock<std::mutex>& lock) noexcept {
-  pthread_cond_wait(&cond_, lock.mutex()->native_handle());
-}
-
 template <typename PredicateT>
 inline void ConditionVariable::wait(std::unique_lock<std::mutex>& lock, PredicateT p) noexcept {
   while (!p()) {
@@ -446,7 +431,7 @@ template <typename DurationT>
 inline std::cv_status ConditionVariable::wait_until(
     std::unique_lock<std::mutex>& lock,
     const std::chrono::time_point<std::chrono::steady_clock, DurationT>& atime) noexcept {
-  return wait_until_impl(lock, atime);
+  return wait_until_steady(lock, std::chrono::time_point_cast<std::chrono::steady_clock::duration>(atime));
 }
 
 template <typename DurationT>
@@ -464,7 +449,7 @@ inline std::cv_status ConditionVariable::wait_until(std::unique_lock<std::mutex>
   const auto delta = atime - c_entry;
   const auto s_atime = s_entry + ceil<std::chrono::steady_clock::duration>(delta);
 
-  if (wait_until_impl(lock, s_atime) == std::cv_status::no_timeout) {
+  if (wait_until_steady(lock, s_atime) == std::cv_status::no_timeout) {
     return std::cv_status::no_timeout;
   }
 
@@ -501,8 +486,6 @@ inline bool ConditionVariable::wait_for(std::unique_lock<std::mutex>& lock,
                     std::move(p));
 }
 
-inline ConditionVariable::native_handle_type ConditionVariable::native_handle() noexcept { return &cond_; }
-
 template <typename ToDurT, typename RepT, typename PeriodT>
 inline constexpr ToDurT ConditionVariable::ceil(const std::chrono::duration<RepT, PeriodT>& d) noexcept {
   return ceil_impl(std::chrono::duration_cast<ToDurT>(d), d);
@@ -511,41 +494,6 @@ inline constexpr ToDurT ConditionVariable::ceil(const std::chrono::duration<RepT
 template <typename TpT, typename UpT>
 inline constexpr TpT ConditionVariable::ceil_impl(const TpT& t, const UpT& u) noexcept {
   return (t < u) ? (t + TpT{1}) : t;
-}
-
-template <typename DurationT>
-inline std::cv_status ConditionVariable::wait_until_impl(
-    std::unique_lock<std::mutex>& lock,
-    const std::chrono::time_point<std::chrono::steady_clock, DurationT>& atime) noexcept {
-  if (std::chrono::steady_clock::now() >= atime) {
-    return std::cv_status::timeout;
-  }
-
-  auto s = std::chrono::time_point_cast<std::chrono::seconds>(atime);
-  auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(atime - s);
-
-  struct timespec ts = {static_cast<std::time_t>(s.time_since_epoch().count()),
-                        static_cast<long>(ns.count())};  // NOLINT(runtime/int, google-runtime-int)
-
-  int ret = pthread_cond_timedwait(&cond_, lock.mutex()->native_handle(), &ts);
-
-  return (ret == ETIMEDOUT) ? std::cv_status::timeout : std::cv_status::no_timeout;
-}
-
-inline ConditionVariableAny::ConditionVariableAny() noexcept : shared_state_(std::make_shared<SharedState>()) {}
-
-inline ConditionVariableAny::~ConditionVariableAny() noexcept = default;
-
-inline void ConditionVariableAny::notify_one() noexcept {
-  std::shared_ptr<SharedState> state = shared_state_;
-  std::lock_guard lock(state->mtx);
-  state->cv.notify_one();
-}
-
-inline void ConditionVariableAny::notify_all() noexcept {
-  std::shared_ptr<SharedState> state = shared_state_;
-  std::lock_guard lock(state->mtx);
-  state->cv.notify_all();
 }
 
 template <typename LockT>
@@ -655,15 +603,7 @@ inline std::cv_status ConditionVariableAny::wait_until_impl(
     }
   } guard{lock};
 
-  auto s = std::chrono::time_point_cast<std::chrono::seconds>(atime);
-  auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(atime - s);
-
-  struct timespec ts = {static_cast<std::time_t>(s.time_since_epoch().count()),
-                        static_cast<long>(ns.count())};  // NOLINT(runtime/int, google-runtime-int)
-
-  int ret = pthread_cond_timedwait(state->cv.native_handle(), internal_lock.mutex()->native_handle(), &ts);
-
-  return (ret == ETIMEDOUT) ? std::cv_status::timeout : std::cv_status::no_timeout;
+  return state->cv.wait_until(internal_lock, atime);
 }
 
 /**

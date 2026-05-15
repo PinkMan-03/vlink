@@ -151,10 +151,10 @@ class Security final {
 
 ```cpp
 vlink::SecurityPublisher<MyMsg> pub("shm://secure/topic");
-pub.set_security_key("my-32-char-production-secret-key");
+pub.set_security_key("my-16-byte-key!!");  // 必须正好 16 字节
 
 vlink::SecuritySubscriber<MyMsg> sub("shm://secure/topic");
-sub.set_security_key("my-32-char-production-secret-key");
+sub.set_security_key("my-16-byte-key!!");
 sub.listen([](const MyMsg& msg) { /* 已自动解密 */ });
 ```
 
@@ -342,11 +342,11 @@ int main() {
 
     // ----- Event 模型（Publisher/Subscriber），使用自定义密钥 -----
     SecuritySubscriber<Bytes> sub("shm://example_raw/event");
-    sub.set_security_key("custom_security");
+    sub.set_security_key("custom-key-16b!!");
     sub.listen([](const Bytes& msg) { VLOG_I("received:", msg.to_string()); });
 
     SecurityPublisher<Bytes> pub("shm://example_raw/event");
-    pub.set_security_key("custom_security");
+    pub.set_security_key("custom-key-16b!!");
     pub.wait_for_subscribers();
     pub.publish(Bytes::from_string("hello1"));
     pub.publish(Bytes::from_string("hello2"));
@@ -375,7 +375,7 @@ int main() {
 #include <vlink/subscriber.h>
 #include "my_message.pb.h"    // Protobuf 生成的消息类
 
-const std::string kSecretKey = "production-aes-key-32bytes-long!";
+const std::string kSecretKey = "prod-aes-16-key!";  // 必须正好 16 字节
 
 int main() {
     // 安全 Subscriber
@@ -465,7 +465,7 @@ int main() {
     );
 
     // 在 init() 之前配置安全密钥
-    pub.set_security_key("my-app-secret-key-2026");
+    pub.set_security_key("my-aes-128-key!!");
 
     // 手动初始化
     pub.init();
@@ -555,7 +555,7 @@ vlink::SecuritySubscriber<Bytes> sub("dds://topic");
 ```cpp
 // 验证加密/解密对称性
 vlink::Security sec;
-sec.set_key("test-key");
+sec.set_key("test-key-16-byte");  // AES-128 要求正好 16 字节
 
 vlink::Bytes plain = vlink::Bytes::from_string("hello world");
 vlink::Bytes cipher;

@@ -920,7 +920,7 @@ find_package(Flatbuffers CONFIG QUIET)
 # 3. 代码生成（Protobuf 示例）
 # -----------------------------------------------------------------
 if(Protobuf_FOUND)
-  file(GLOB PROTO_FILES ${CMAKE_CURRENT_SOURCE_DIR}/proto/*.proto)
+  file(GLOB PROTO_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/proto/*.proto)
   vlink_generate_cpp(
     TARGET  my_proto_gen          # 生成的目标名
     PROTO                         # 使用 protoc
@@ -933,7 +933,7 @@ endif()
 # 4. 代码生成（FlatBuffers 示例）
 # -----------------------------------------------------------------
 if(TARGET flatbuffers::flatbuffers OR TARGET flatbuffers::flatbuffers_shared)
-  file(GLOB FBS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/fbs/*.fbs)
+  file(GLOB FBS_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fbs/*.fbs)
   vlink_generate_cpp(
     TARGET  my_fbs_gen
     FBS                           # 使用 flatc

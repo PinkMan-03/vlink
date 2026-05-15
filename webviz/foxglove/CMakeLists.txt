@@ -43,7 +43,7 @@ if(NOT protobuf_libs OR NOT flatbuffers_libs)
   return()
 endif()
 
-file(GLOB FOXGLOVE_FBS_FILES ${PROJECT_SOURCE_DIR}/fbs/*.fbs)
+file(GLOB FOXGLOVE_FBS_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/fbs/*.fbs)
 vlink_generate_cpp(
   TARGET
   foxglove_fbs_gen
@@ -55,12 +55,12 @@ vlink_generate_cpp(
   "--bfbs-gen-embed"
 )
 
-file(GLOB FOXGLOVE_PROTO_FILES ${PROJECT_SOURCE_DIR}/proto/*.proto)
+file(GLOB FOXGLOVE_PROTO_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/proto/*.proto)
 vlink_generate_cpp(TARGET foxglove_proto_gen PROTO ${FOXGLOVE_PROTO_FILES})
 
 # src
-file(GLOB PROJECT_HDRS ${PROJECT_SOURCE_DIR}/src/*.h)
-file(GLOB PROJECT_SRCS ${PROJECT_SOURCE_DIR}/src/*.cc)
+file(GLOB PROJECT_HDRS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.h)
+file(GLOB PROJECT_SRCS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cc)
 
 add_executable(${PROJECT_NAME} ${PROJECT_HDRS} ${PROJECT_SRCS})
 

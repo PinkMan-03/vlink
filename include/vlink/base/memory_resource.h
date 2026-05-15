@@ -74,6 +74,8 @@
 
 #pragma once
 
+#include <memory>
+
 #if defined(__linux__) && __has_include(<memory_resource>)
 #include <memory_resource>
 #if !defined(VLINK_ENABLE_BASE_MEMORY_RESOURCE) && defined(__cpp_lib_memory_resource)
@@ -97,6 +99,24 @@ namespace vlink {
  */
 class VLINK_EXPORT MemoryResource : public std::pmr::memory_resource {
  public:
+  /**
+   * @brief Deleter that returns the object to its pmr allocator.
+   *
+   * @details
+   * Used by @c MemoryResource::make_unique().  Carries one
+   * @c polymorphic_allocator copy, so @c sizeof(Deleter<T>)@ ==@ sizeof(void*).
+   */
+  template <typename T>
+  struct Deleter final {
+    std::pmr::polymorphic_allocator<T> alloc;
+
+    void operator()(T* p) const noexcept {
+      if VLIKELY (p) {
+        alloc.delete_object(p);
+      }
+    }
+  };
+
   /**
    * @brief Constructs a bypass-mode resource owning a private bypass pool.
    *
@@ -191,6 +211,27 @@ class VLINK_EXPORT MemoryResource : public std::pmr::memory_resource {
    */
   static MemoryResource& global_instance(bool use_env_level = true);
 
+  /**
+   * @brief @c std::allocate_shared backed by @c global_instance().
+   *
+   * @details
+   * Object and control block share one allocation from the global
+   * @c MemoryPool.
+   */
+  template <typename T, typename... Args>
+  [[maybe_unused]] static std::shared_ptr<T> make_shared(Args&&... args);
+
+  /**
+   * @brief @c make_unique backed by @c global_instance().
+   *
+   * @details
+   * Returns @c std::unique_ptr<T,@ Deleter<T>> -- not convertible to plain
+   * @c std::unique_ptr<T>.  Storage is returned to the pool if @c T's
+   * constructor throws.
+   */
+  template <typename T, typename... Args>
+  [[maybe_unused]] static std::unique_ptr<T, MemoryResource::Deleter<T>> make_unique(Args&&... args);
+
  protected:
   void* do_allocate(size_t bytes, size_t alignment) override;
 
@@ -206,6 +247,69 @@ class VLINK_EXPORT MemoryResource : public std::pmr::memory_resource {
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(MemoryResource)
 };
+
+////////////////////////////////////////////////////////////////
+/// Details
+////////////////////////////////////////////////////////////////
+
+template <typename T, typename... Args>
+std::shared_ptr<T> MemoryResource::make_shared(Args&&... args) {
+  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
+
+  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
+}
+
+template <typename T, typename... Args>
+std::unique_ptr<T, MemoryResource::Deleter<T>> MemoryResource::make_unique(Args&&... args) {
+  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
+
+  T* p = alloc.allocate(1);
+
+  try {
+    std::allocator_traits<decltype(alloc)>::construct(alloc, p, std::forward<Args>(args)...);
+  } catch (...) {
+    alloc.deallocate(p, 1);
+    throw;
+  }
+
+  return std::unique_ptr<T, MemoryResource::Deleter<T>>{p, MemoryResource::Deleter<T>{alloc}};
+}
+
+}  // namespace vlink
+
+#else
+
+namespace vlink {
+
+/**
+ * @namespace vlink::MemoryResource
+ * @brief Fallback shim when @c <memory_resource> is unavailable.
+ *
+ * @details
+ * Only @c make_shared / @c make_unique are emulated, forwarding to the
+ * standard @c std versions.  The @c MemoryResource class, @c Deleter, and
+ * @c global_instance() are not available in this mode.  @c make_unique
+ * here returns @c std::unique_ptr<T>, not @c unique_ptr<T,@ Deleter<T>>.
+ */
+namespace MemoryResource {  // NOLINT(readability-identifier-naming)
+
+/**
+ * @brief Fallback @c make_shared forwarding to @c std::make_shared.
+ */
+template <typename T, typename... Args>
+[[maybe_unused]] std::shared_ptr<T> make_shared(Args&&... args) {
+  return std::make_shared<T>(std::forward<Args>(args)...);
+}
+
+/**
+ * @brief Fallback @c make_unique forwarding to @c std::make_unique.
+ */
+template <typename T, typename... Args>
+[[maybe_unused]] std::unique_ptr<T> make_unique(Args&&... args) {
+  return std::make_unique<T>(std::forward<Args>(args)...);
+}
+
+}  // namespace MemoryResource
 
 }  // namespace vlink
 

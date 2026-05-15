@@ -36,17 +36,6 @@
 
 namespace vlink {
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 // Schedule::Config
 Schedule::Config::Config() = default;
 
@@ -58,7 +47,7 @@ Schedule::Config::Config(uint32_t _delay_ms, uint16_t _priority, uint32_t _sched
       execution_timeout_ms(_execution_timeout_ms) {}
 
 // Schedule::Status
-Schedule::Status::Status() : impl_(pool_make_shared<Schedule::Status::Impl>()) { impl_->is_valid = true; }
+Schedule::Status::Status() : impl_(MemoryResource::make_shared<Schedule::Status::Impl>()) { impl_->is_valid = true; }
 
 Schedule::Status::~Status() = default;
 

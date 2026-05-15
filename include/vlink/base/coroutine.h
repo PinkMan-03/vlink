@@ -168,6 +168,7 @@
 #include "./functional.h"
 #include "./graph_task.h"
 #include "./macros.h"
+#include "./memory_resource.h"
 #include "./message_loop.h"
 #include "./schedule.h"
 
@@ -1572,7 +1573,7 @@ struct FutureAwaiter<TypeT>::State final {
 
 template <typename TypeT>
 inline FutureAwaiter<TypeT>::FutureAwaiter(MessageLoop* loop, std::future<TypeT> fut) noexcept
-    : loop_(loop), state_(std::make_shared<State>(std::move(fut))) {}
+    : loop_(loop), state_(MemoryResource::make_shared<State>(std::move(fut))) {}
 
 template <typename TypeT>
 inline FutureAwaiter<TypeT>::~FutureAwaiter() {
@@ -1680,7 +1681,7 @@ inline void co_spawn_with_priority(MessageLoop& loop, Task<TypeT>&& task, Callba
 
 template <typename CallbackT>
 inline Task<void> exec(MessageLoop& loop, const Schedule::Config& config, CallbackT&& callback) {
-  auto promise_ptr = std::make_shared<std::promise<void>>();
+  auto promise_ptr = MemoryResource::make_shared<std::promise<void>>();
   auto fut = promise_ptr->get_future();
 
   auto status = loop.exec_task(config, [cb = std::forward<CallbackT>(callback), promise_ptr]() mutable {
@@ -1850,7 +1851,7 @@ inline Task<std::vector<TypeT>> when_all(MessageLoop& loop, std::vector<Task<Typ
   }
 
   const size_t count = tasks.size();
-  auto state = std::make_shared<detail::WhenAllState<TypeT>>();
+  auto state = MemoryResource::make_shared<detail::WhenAllState<TypeT>>();
   state->results.resize(count);
   state->remaining.store(count, std::memory_order_relaxed);
   auto fut = state->promise.get_future();
@@ -1870,7 +1871,7 @@ inline Task<std::pair<size_t, TypeT>> when_any(MessageLoop& loop, std::vector<Ta
     throw std::invalid_argument("vlink::Coroutine::when_any: tasks must not be empty");
   }
 
-  auto state = std::make_shared<detail::WhenAnyState<TypeT>>();
+  auto state = MemoryResource::make_shared<detail::WhenAnyState<TypeT>>();
   state->remaining.store(tasks.size(), std::memory_order_relaxed);
   auto fut = state->promise.get_future();
 

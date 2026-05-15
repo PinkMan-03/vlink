@@ -33,17 +33,6 @@
 
 namespace vlink {
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 [[maybe_unused]] static bool is_terminal(TaskExecutionState state) noexcept {
   return state == TaskExecutionState::kCompleted || state == TaskExecutionState::kCancelled ||
          state == TaskExecutionState::kDropped || state == TaskExecutionState::kRejected ||
@@ -184,7 +173,7 @@ bool TaskHandle::wait(int timeout_ms) const {
 TaskHandle::TaskHandle(std::shared_ptr<State> state) noexcept : state_(std::move(state)) {}
 
 TaskHandle TaskHandle::make_task_handle(const CancellationToken& parent_token) {
-  auto state = pool_make_shared<TaskHandle::State>();
+  auto state = MemoryResource::make_shared<TaskHandle::State>();
 
   if VLIKELY (parent_token.valid()) {
     std::weak_ptr<TaskHandle::State> weak_state = state;

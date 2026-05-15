@@ -63,9 +63,9 @@ int main() {
     auto config = vlink::MemoryPool::get_default_config();
     // config.tiers.size() reports raw entries (always 19 here, including any
     // sentinel rows whose blocks_per_chunk == 0); pool.get_tier_count() below
-    // reports live tiers after the constructor strips sentinels (e.g. L1=14,
-    // L2=15, L3..L4=16, L5=17, L6..L7=18, L8..L9=19).  The two numbers can
-    // differ for VLINK_MEMORY_LEVEL < 8 -- that's expected, not a bug.
+    // reports live tiers after the constructor strips sentinels (e.g. L1=15,
+    // L2..L3=16, L4=17, L5=18, L6..L9=19).  The two numbers can differ for
+    // VLINK_MEMORY_LEVEL < 6 -- that's expected, not a bug.
     MLOG_I("  VLINK_MEMORY_LEVEL produced {} tiers (prealloc={})", config.tiers.size(), config.prealloc);
     for (size_t i = 0; i < config.tiers.size(); ++i) {
       MLOG_I("    cfg[{}]: max_size={} blocks_per_chunk={}", i, config.tiers[i].max_size,
@@ -75,25 +75,25 @@ int main() {
     vlink::MemoryPool pool(config);
     MLOG_I("  pool.get_tier_count() = {} (live tiers after sentinel stripping)", pool.get_tier_count());
 
-    // 2 KiB chunk header sized request + 1 KiB hot path + 1 MiB rare path.
-    void* small_a = pool.allocate(48);                  // small header tier
-    void* small_b = pool.allocate(96);                  // small header tier
+    // 24 B tiny-header path + 96 B small tier + 1 KiB hot path + 1 MiB rare path.
+    void* tiny_a = pool.allocate(24);                   // 32 B head tier
+    void* small_b = pool.allocate(96);                  // 128 B tier
     void* one_kib = pool.allocate(1024);                // 1 KiB tier
     void* one_mib = pool.allocate(1U * 1024U * 1024U);  // 1 MiB tier
 
-    if (small_a == nullptr || small_b == nullptr || one_kib == nullptr || one_mib == nullptr) {
+    if (tiny_a == nullptr || small_b == nullptr || one_kib == nullptr || one_mib == nullptr) {
       VLOG_W("  allocate returned nullptr -- upstream OOM, skipping rest");
-      pool.deallocate(small_a, 48);
+      pool.deallocate(tiny_a, 24);
       pool.deallocate(small_b, 96);
       pool.deallocate(one_kib, 1024);
       pool.deallocate(one_mib, 1U * 1024U * 1024U);
     } else {
-      VLOG_I("  Allocated 48B / 96B / 1KiB / 1MiB blocks");
+      VLOG_I("  Allocated 24B / 96B / 1KiB / 1MiB blocks");
       print_tier_stats(pool);
 
       // Same bytes value MUST be passed back -- mismatched sizes route to the
       // wrong tier and corrupt that tier's free-list.
-      pool.deallocate(small_a, 48);
+      pool.deallocate(tiny_a, 24);
       pool.deallocate(small_b, 96);
       pool.deallocate(one_kib, 1024);
       pool.deallocate(one_mib, 1U * 1024U * 1024U);
@@ -118,13 +118,13 @@ int main() {
     };
     vlink::MemoryPool tiny(tiny_cfg);
 
-    constexpr size_t kHuge = 32U * 1024U * 1024U;  // 32 MiB -- way past the 1 KiB top tier
+    constexpr size_t kHuge = 16U * 1024U * 1024U;  // 16 MiB -- way past the 1 KiB top tier
     void* huge = tiny.allocate(kHuge);
 
     if (huge == nullptr) {
       VLOG_W("  Huge allocation failed -- system OOM");
     } else {
-      VLOG_I("  Huge 32 MiB allocation routed to oversized passthrough");
+      VLOG_I("  Huge 16 MiB allocation routed to oversized passthrough");
       tiny.deallocate(huge, kHuge);
       print_tier_stats(tiny);
     }
@@ -209,7 +209,7 @@ int main() {
     void* p = level5_pool.allocate(96);
     if (p != nullptr) {
       level5_pool.deallocate(p, 96);
-      VLOG_I("  level5_pool routed a 96B alloc to tier 0:");
+      VLOG_I("  level5_pool routed a 96B alloc to the first tier with max_size >= 96 (128B tier at L5):");
       print_tier_stats(level5_pool);
     }
   }

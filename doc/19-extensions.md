@@ -769,7 +769,7 @@ dd2 << wire;  // 从 wire 格式恢复
 
 - **缓冲输出**：默认 1 MiB 内部缓冲区，批量 `write()` 减少系统调用
 - **线程安全**：所有操作受 `std::mutex` 保护
-- **无异常**：所有 public 方法标记为 `noexcept`
+- **几乎无异常**：除 `flush()` 外所有 public 方法标记为 `noexcept`（`flush()` 直接调用 OS 写入，错误以返回路径处理而非 `noexcept`）
 - **TTY 检测**：`is_tty()` 判断 stdout 是否连接到终端，可按需启用 ANSI 颜色
 - **跨平台**：Windows 10+ 上启用虚拟终端处理（ANSI 转义码支持）
 

@@ -24,7 +24,7 @@ if(NOT Protobuf_FOUND)
 endif()
 
 # proto
-file(GLOB PROTO_SRCS ${PROJECT_SOURCE_DIR}/proto/*.proto)
+file(GLOB PROTO_SRCS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/proto/*.proto)
 vlink_generate_cpp(TARGET helloworld_gen PROTO ${PROTO_SRCS})
 
 # server

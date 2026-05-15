@@ -34,17 +34,6 @@
 
 namespace vlink {
 
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
-
 [[maybe_unused]] static void invoke_cancellation_callback(MoveFunction<void()>& callback) noexcept {
   if VUNLIKELY (!callback) {
     return;
@@ -173,7 +162,7 @@ void CancellationToken::throw_if_cancellation_requested() const {
 CancellationToken::CancellationToken(std::shared_ptr<State> state) noexcept : state_(std::move(state)) {}
 
 // CancellationSource
-CancellationSource::CancellationSource() : state_(pool_make_shared<State>()) {}
+CancellationSource::CancellationSource() : state_(MemoryResource::make_shared<State>()) {}
 
 CancellationToken CancellationSource::token() const noexcept { return CancellationToken{state_}; }
 

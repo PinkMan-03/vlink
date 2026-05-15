@@ -23,24 +23,12 @@
 
 #include "./impl/ack_manager.h"
 
-#include <memory>
 #include <mutex>
 #include <set>
 
 #include "./base/memory_resource.h"
 
 namespace vlink {
-
-template <typename T, typename... Args>
-[[maybe_unused]] inline static std::shared_ptr<T> pool_make_shared(Args&&... args) {
-#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
-  std::pmr::polymorphic_allocator<T> alloc(&MemoryResource::global_instance());
-
-  return std::allocate_shared<T>(alloc, std::forward<Args>(args)...);
-#else
-  return std::make_shared<T>(std::forward<Args>(args)...);
-#endif
-}
 
 // AckManager
 AckManager::AckManager() noexcept = default;
@@ -50,7 +38,7 @@ AckManager::~AckManager() noexcept = default;
 AckManager::RequestPtr AckManager::create_request() noexcept {
   std::unique_lock manager_lock(mtx_);
 
-  auto request = pool_make_shared<Request>();
+  auto request = MemoryResource::make_shared<Request>();
 
   request->seq = request_seq_++;
 

@@ -26,7 +26,7 @@
 //   1. Default encryption key (built-in 16-byte demo key)
 //   2. Custom encryption key via set_security_key()
 //   3. Key mismatch failure scenario
-// Uses AES-128-CBC encryption. Default IV: "thun.lu@zohomail.cn"
+// Uses AES-128-CBC encryption. Default IV: "thun.lu@zohomail" (16 bytes)
 //
 // WARNING: intra:// does NOT support security encryption (messages stay in-process).
 // Security requires a cross-process transport such as dds://, shm://, zenoh://, mqtt://, etc.
@@ -84,14 +84,14 @@ int main() {
     std::atomic<int> received{0};
 
     vlink::SecuritySubscriber<std::string> sub("dds://security_basic/custom_key");
-    sub.set_security_key("my_secret_key_123");  // Custom 16-byte key
+    sub.set_security_key("my-secret-key-16");  // Custom 16-byte key
     sub.listen([&received](const std::string& msg) {
       received++;
       VLOG_I("[Custom Key] Received:", msg);
     });
 
     vlink::SecurityPublisher<std::string> pub("dds://security_basic/custom_key");
-    pub.set_security_key("my_secret_key_123");  // Must match subscriber's key
+    pub.set_security_key("my-secret-key-16");  // Must match subscriber's key
 
     pub.wait_for_subscribers();
 
@@ -107,25 +107,25 @@ int main() {
   // The subscriber's callback will NOT be invoked for messages it cannot decrypt.
   {
     std::cout << "\n[3] Key Mismatch Failure Demo" << std::endl;
-    std::cout << "   Publisher key: 'key_alpha'" << std::endl;
-    std::cout << "   Subscriber key: 'key_beta' (DIFFERENT)" << std::endl;
+    std::cout << "   Publisher key: 'alpha-key-16byte'" << std::endl;
+    std::cout << "   Subscriber key: 'beta--key-16byte' (DIFFERENT)" << std::endl;
 
     std::atomic<int> received{0};
 
     vlink::SecuritySubscriber<std::string> sub("dds://security_basic/mismatch");
-    sub.set_security_key("key_beta");  // Different key!
+    sub.set_security_key("beta--key-16byte");  // Different key!
     sub.listen([&received](const std::string& msg) {
       received++;
       VLOG_I("[Mismatch] Received (unexpected):", msg);
     });
 
     vlink::SecurityPublisher<std::string> pub("dds://security_basic/mismatch");
-    pub.set_security_key("key_alpha");  // Different from subscriber
+    pub.set_security_key("alpha-key-16byte");  // Different from subscriber
 
     pub.wait_for_subscribers();
 
-    // These messages will be encrypted with "key_alpha"
-    // but the subscriber tries to decrypt with "key_beta" => failure
+    // These messages will be encrypted with "alpha-key-16byte"
+    // but the subscriber tries to decrypt with "beta--key-16byte" => failure
     pub.publish("This message should fail to decrypt");
     pub.publish("Key mismatch prevents decryption");
 
@@ -143,7 +143,7 @@ int main() {
     std::atomic<int> received{0};
 
     vlink::SecuritySubscriber<vlink::Bytes> sub("dds://security_basic/bytes");
-    sub.set_security_key("bytes_key");
+    sub.set_security_key("bytes--key-16b!!");
     sub.listen([&received](const vlink::Bytes& msg) {
       received++;
       // NOLINTNEXTLINE(readability-container-size-empty)
@@ -151,7 +151,7 @@ int main() {
     });
 
     vlink::SecurityPublisher<vlink::Bytes> pub("dds://security_basic/bytes");
-    pub.set_security_key("bytes_key");
+    pub.set_security_key("bytes--key-16b!!");
 
     pub.wait_for_subscribers();
 

@@ -84,7 +84,7 @@ test/
 ├── CMakeLists.txt           # 测试构建配置
 ├── common_test.h            # 公共头文件（vlink 全量 include + 常用类型）
 ├── idl/                     # IDL 定义文件（.proto / .fbs / .idl）
-├── base/                    # base 库测试（logger/bytes/timer/message_loop/thread_pool/spin_lock/mpmc_queue/graph_task/memory_pool/memory_resource/functional/... ）
+├── base/                    # base 库测试（logger/bytes/timer/message_loop/thread_pool/spin_lock/mpmc_queue/graph_task/memory_pool/memory_resource/functional/coroutine/cancellation/task_handle/condition_variable/format/object_pool/... ）
 ├── extension/               # bag / discovery / qos / schema / security / dynamic_data / status / terminal_stream / url_remap 等扩展测试
 ├── impl/                    # NodeImpl / Url / Ssl / AckManager / *Impl 等实现层测试
 ├── modules/                 # 各 transport Conf 解析测试（dds/ddsc/ddsr/ddst/intra/shm/shm2/zenoh/someip/mqtt/fdbus/qnx）
@@ -287,6 +287,9 @@ ctest --output-on-failure
 | `base/macros_test.cc`             | 多个 case 名                               | 宏定义测试                                       |
 | `base/memory_pool_test.cc`        | 多个 case 名                               | 内存池行为                                       |
 | `base/memory_resource_test.cc`    | 多个 case 名                               | `pmr::memory_resource` 适配                      |
+| `base/cancellation_test.cc`       | 多个 case 名                               | `CancellationSource` / `Token` / `Registration` 协作取消语义 |
+| `base/task_handle_test.cc`        | 多个 case 名                               | `post_task_handle` / `TaskExecutionState` 状态机 |
+| `base/coroutine_test.cc`          | 多个 case 名                               | `Task<T>` / `co_spawn` / `schedule` / `yield` / `delay_ms` / `await_future` / `await_graph` / `when_all`/`when_any`/`sequence`（需 `ENABLE_CXX_STD_20=ON`） |
 | `base/name_detector_test.cc`      | 多个 case 名                               | 编译期类型名提取                                 |
 | `base/object_pool_test.cc`        | 多个 case 名                               | 对象池（预分配复用）                             |
 | `base/plugin_test.cc`             | 多个 case 名                               | 动态插件加载器                                   |

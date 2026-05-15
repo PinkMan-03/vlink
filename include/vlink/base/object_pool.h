@@ -84,8 +84,6 @@
 
 #include <memory>
 #include <mutex>
-#include <sstream>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -95,37 +93,19 @@
 namespace vlink {
 
 /**
- * @class ObjectPool
- * @brief Thread-safe object pool for type @p T with RAII acquisition and configurable reset policy.
+ * @class ObjectPoolBase
+ * @brief Non-template base of @c ObjectPool: owns all element-type-independent state and
+ *        provides counter / policy / threading primitives.
  *
  * @details
- * Must be heap-allocated and managed via @c std::shared_ptr, because @c PoolDeleter holds a
- * @c std::weak_ptr to the pool.  Create with @c std::make_shared<ObjectPool<T>>(...).
- *
- * @tparam T  Type of pooled objects.  Must be default-constructible unless a custom
- *            @c FactoryCallback is supplied.
+ * Holds the mutex, the live / borrowed / total counters, the @c max_size limit, and the
+ * @c Policy enum.  The element-type-dependent state (factory callback, reset callback,
+ * free-list vector) lives in @c ObjectPool<T>.  Cold-path validation and error throws are
+ * also implemented here so each instantiation of @c ObjectPool<T> does not duplicate the
+ * @c std::ostringstream / @c std::runtime_error code.
  */
-template <typename T>
-class ObjectPool : public std::enable_shared_from_this<ObjectPool<T>> {
+class VLINK_EXPORT ObjectPoolBase {
  public:
-  /**
-   * @brief Callback type for creating a new instance of @p T.
-   *
-   * @details
-   * Must return a non-null @c unique_ptr<T>.  Throwing or returning @c nullptr causes
-   * the acquisition call to propagate the error to the caller.
-   */
-  using FactoryCallback = MoveFunction<std::unique_ptr<T>()>;
-
-  /**
-   * @brief Callback type for resetting an object before acquisition or after release.
-   *
-   * @details
-   * Called with a reference to the object.  Exceptions thrown here are caught; on release,
-   * the object is discarded (not returned to the pool) if the reset throws.
-   */
-  using ResetCallback = MoveFunction<void(T&)>;
-
   /**
    * @brief Controls when the @c ResetCallback is invoked relative to acquire and release.
    */
@@ -145,6 +125,82 @@ class ObjectPool : public std::enable_shared_from_this<ObjectPool<T>> {
     size_t total_created{0};  ///< Total objects ever created (pool_size + borrowed + destroyed).
     size_t max_size{0};       ///< Maximum allowed total objects.  0 means unlimited.
   };
+
+  /**
+   * @brief Returns the number of objects currently held by callers.
+   */
+  [[nodiscard]] size_t borrowed() const;
+
+  /**
+   * @brief Returns the total number of objects ever created by this pool.
+   */
+  [[nodiscard]] size_t total_created() const;
+
+  /**
+   * @brief Returns the maximum total object count allowed by this pool.
+   */
+  [[nodiscard]] size_t max_size() const noexcept;
+
+ protected:
+  ObjectPoolBase(size_t max_size, size_t initial_size, Policy policy);
+
+  ~ObjectPoolBase() noexcept = default;
+
+  void safe_dec_borrowed_and_live() noexcept;
+
+  [[nodiscard]] bool should_reset_on_acquire() const noexcept;
+
+  [[nodiscard]] bool should_reset_on_release() const noexcept;
+
+  [[noreturn]] static void throw_invalid_size();
+
+  [[noreturn]] static void throw_factory_null_pre_fill();
+
+  [[noreturn]] static void throw_factory_null();
+
+  [[noreturn]] void throw_exhausted(size_t pool_size) const;
+
+  Policy policy_{kPolicyNone};
+  size_t max_size_{0};
+
+  mutable std::mutex mutex_;
+
+  size_t borrowed_{0};
+  size_t live_count_{0};
+  size_t total_created_{0};
+};
+
+/**
+ * @class ObjectPool
+ * @brief Thread-safe object pool for type @p T with RAII acquisition and configurable reset policy.
+ *
+ * @details
+ * Must be heap-allocated and managed via @c std::shared_ptr, because @c PoolDeleter holds a
+ * @c std::weak_ptr to the pool.  Create with @c std::make_shared<ObjectPool<T>>(...).
+ *
+ * @tparam T  Type of pooled objects.  Must be default-constructible unless a custom
+ *            @c FactoryCallback is supplied.
+ */
+template <typename T>
+class ObjectPool : public ObjectPoolBase, public std::enable_shared_from_this<ObjectPool<T>> {
+ public:
+  /**
+   * @brief Callback type for creating a new instance of @p T.
+   *
+   * @details
+   * Must return a non-null @c unique_ptr<T>.  Throwing or returning @c nullptr causes
+   * the acquisition call to propagate the error to the caller.
+   */
+  using FactoryCallback = MoveFunction<std::unique_ptr<T>()>;
+
+  /**
+   * @brief Callback type for resetting an object before acquisition or after release.
+   *
+   * @details
+   * Called with a reference to the object.  Exceptions thrown here are caught; on release,
+   * the object is discarded (not returned to the pool) if the reset throws.
+   */
+  using ResetCallback = MoveFunction<void(T&)>;
 
   /**
    * @struct PoolDeleter
@@ -189,103 +245,33 @@ class ObjectPool : public std::enable_shared_from_this<ObjectPool<T>> {
 
   /**
    * @brief Acquires an object and returns it as a @c unique_ptr with automatic pool return.
-   *
-   * @details
-   * If the pool is non-empty, the most recently returned object is popped (LIFO).
-   * Otherwise a new object is created via the factory callback.
-   * If @c kPolicyAcquire or @c kPolicyBoth is set, the reset callback is applied before
-   * returning the pointer.
-   *
-   * @return A @c unique_ptr<T, PoolDeleter> whose destruction returns the object to the pool.
-   *
-   * @throws std::runtime_error if the pool is exhausted (@c max_size > 0 and all objects are
-   *                            in use), or if the factory callback returns @c nullptr.
    */
   [[nodiscard]] std::unique_ptr<T, typename ObjectPool<T>::PoolDeleter> get();
 
   /**
    * @brief Acquires an object and returns it as a @c shared_ptr with automatic pool return.
-   *
-   * @details
-   * Behaves identically to @c get() but returns a @c shared_ptr.  The custom deleter is
-   * @c PoolDeleter, so the object is returned to the pool when the last @c shared_ptr copy
-   * is destroyed.
-   *
-   * @return A @c shared_ptr<T> that returns the object to the pool on last-reference destruction.
-   *
-   * @throws std::runtime_error if the pool is exhausted or the factory returns @c nullptr.
    */
   [[nodiscard]] std::shared_ptr<T> get_shared();
 
   /**
    * @brief Acquires an object and returns a raw pointer; caller is responsible for returning it.
-   *
-   * @details
-   * Unlike @c get() and @c get_shared(), this method does NOT use RAII.  The caller
-   * MUST call @c give_back() to return the object.  Failure to do so causes a resource leak
-   * and may prevent the pool from reaching @c max_size when needed.
-   *
-   * @return Raw pointer to the acquired object.  Never @c nullptr on success.
-   *
-   * @throws std::runtime_error if the pool is exhausted or the factory returns @c nullptr.
-   *
-   * @warning Pair every @c borrow() with a corresponding @c give_back() call.
    */
   [[nodiscard]] T* borrow();
 
   /**
    * @brief Returns a raw-pointer object previously obtained via @c borrow() to the pool.
-   *
-   * @details
-   * If the reset policy includes @c kPolicyRelease, the reset callback is invoked before
-   * the object re-enters the pool.  If the reset callback throws, the object is discarded
-   * rather than returned.
-   *
-   * @param ptr  Pointer returned by @c borrow().  Passing @c nullptr is a no-op.
-   *
-   * @note Do NOT call @c give_back() on pointers obtained from @c get() or @c get_shared();
-   *       those are managed by their respective deleters.
    */
   void give_back(T* ptr);
 
   /**
    * @brief Returns a snapshot of all pool statistics (thread-safe).
-   *
-   * @return @c Stats struct containing pool_size, borrowed, total_created, max_size.
    */
   [[nodiscard]] Stats stats() const;
 
   /**
    * @brief Returns the number of idle objects currently in the pool.
-   *
-   * @return Number of available objects that can be acquired without allocation.
    */
   [[nodiscard]] size_t size() const;
-
-  /**
-   * @brief Returns the number of objects currently held by callers.
-   *
-   * @return Count of objects acquired and not yet returned.
-   */
-  [[nodiscard]] size_t borrowed() const;
-
-  /**
-   * @brief Returns the total number of objects ever created by this pool.
-   *
-   * @details
-   * Includes objects currently idle, borrowed, and any that were discarded due to
-   * failed reset callbacks.  Never decreases.
-   *
-   * @return Cumulative creation count.
-   */
-  [[nodiscard]] size_t total_created() const;
-
-  /**
-   * @brief Returns the maximum total object count allowed by this pool.
-   *
-   * @return Max size limit.  Returns 0 if the pool is unbounded.
-   */
-  [[nodiscard]] size_t max_size() const;
 
  private:
   static FactoryCallback get_default_factory();
@@ -294,25 +280,9 @@ class ObjectPool : public std::enable_shared_from_this<ObjectPool<T>> {
 
   void release(std::unique_ptr<T> obj) noexcept;
 
-  void safe_dec_borrowed_and_live() noexcept;
-
-  bool should_reset_on_acquire() const noexcept;
-
-  bool should_reset_on_release() const noexcept;
-
-  [[nodiscard]] std::runtime_error exhausted_error_locked() const;
-
   FactoryCallback factory_callback_;
   ResetCallback reset_callback_;
-  Policy policy_{kPolicyNone};
-  size_t max_size_{0};
-
-  mutable std::mutex mutex_;
   std::vector<std::unique_ptr<T>> pool_;
-
-  size_t borrowed_{0};
-  size_t live_count_{0};
-  size_t total_created_{0};
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(ObjectPool)
 };
@@ -324,20 +294,15 @@ class ObjectPool : public std::enable_shared_from_this<ObjectPool<T>> {
 template <typename T>
 inline ObjectPool<T>::ObjectPool(FactoryCallback factory_callback, size_t initial_size, size_t max_size,
                                  ResetCallback reset_callback, Policy policy)
-    : factory_callback_(std::move(factory_callback)),
-      reset_callback_(std::move(reset_callback)),
-      policy_(policy),
-      max_size_(max_size) {
-  if VUNLIKELY (max_size_ > 0 && initial_size > max_size_) {
-    throw std::invalid_argument("initial_size exceeds max_size");
-  }
-
+    : ObjectPoolBase(max_size, initial_size, policy),
+      factory_callback_(std::move(factory_callback)),
+      reset_callback_(std::move(reset_callback)) {
   pool_.reserve(initial_size);
   for (size_t i = 0; i < initial_size; ++i) {
     auto obj = factory_callback_();
 
     if VUNLIKELY (!obj) {
-      throw std::runtime_error("FactoryCallback returned nullptr during pre-fill");
+      throw_factory_null_pre_fill();
     }
 
     if (should_reset_on_release() && reset_callback_) {
@@ -410,7 +375,7 @@ inline void ObjectPool<T>::give_back(T* ptr) {
 }
 
 template <typename T>
-inline typename ObjectPool<T>::Stats ObjectPool<T>::stats() const {
+inline ObjectPoolBase::Stats ObjectPool<T>::stats() const {
   std::lock_guard lock(mutex_);
   return {pool_.size(), borrowed_, total_created_, max_size_};
 }
@@ -419,23 +384,6 @@ template <typename T>
 inline size_t ObjectPool<T>::size() const {
   std::lock_guard lock(mutex_);
   return pool_.size();
-}
-
-template <typename T>
-inline size_t ObjectPool<T>::borrowed() const {
-  std::lock_guard lock(mutex_);
-  return borrowed_;
-}
-
-template <typename T>
-inline size_t ObjectPool<T>::total_created() const {
-  std::lock_guard lock(mutex_);
-  return total_created_;
-}
-
-template <typename T>
-inline size_t ObjectPool<T>::max_size() const {
-  return max_size_;
 }
 
 template <typename T>
@@ -455,7 +403,7 @@ inline std::unique_ptr<T> ObjectPool<T>::acquire() {
   }
 
   if VUNLIKELY (max_size_ > 0 && live_count_ >= max_size_) {
-    throw exhausted_error_locked();
+    throw_exhausted(pool_.size());
   }
 
   ++live_count_;
@@ -469,7 +417,7 @@ inline std::unique_ptr<T> ObjectPool<T>::acquire() {
     new_obj = factory_callback_();
 
     if VUNLIKELY (!new_obj) {
-      throw std::runtime_error("FactoryCallback returned nullptr");
+      throw_factory_null();
     }
   } catch (std::exception&) {
     lock.lock();
@@ -504,41 +452,14 @@ inline void ObjectPool<T>::release(std::unique_ptr<T> obj) noexcept {
       --borrowed_;
     }
 
-    pool_.emplace_back(std::move(obj));
+    try {
+      pool_.emplace_back(std::move(obj));
+    } catch (...) {
+      if (live_count_ > 0) {
+        --live_count_;
+      }
+    }
   }
-}
-
-template <typename T>
-inline void ObjectPool<T>::safe_dec_borrowed_and_live() noexcept {
-  std::lock_guard lock(mutex_);
-
-  if (borrowed_ > 0) {
-    --borrowed_;
-  }
-
-  if (live_count_ > 0) {
-    --live_count_;
-  }
-}
-
-template <typename T>
-inline bool ObjectPool<T>::should_reset_on_acquire() const noexcept {
-  return policy_ == kPolicyAcquire || policy_ == kPolicyBoth;
-}
-
-template <typename T>
-inline bool ObjectPool<T>::should_reset_on_release() const noexcept {
-  return policy_ == kPolicyRelease || policy_ == kPolicyBoth;
-}
-
-template <typename T>
-inline std::runtime_error ObjectPool<T>::exhausted_error_locked() const {
-  std::ostringstream oss;
-
-  oss << "ObjectPool exhausted: max_size=" << max_size_ << " live_count=" << live_count_
-      << " total_created=" << total_created_ << " borrowed=" << borrowed_ << " pool_size=" << pool_.size();
-
-  return std::runtime_error(oss.str());
 }
 
 template <typename T>
