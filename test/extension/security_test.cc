@@ -386,8 +386,8 @@ TEST_SUITE("extension-Security - AES built-in") {
   TEST_CASE("AES-GCM concurrent encrypt/decrypt is thread-safe") {
     Security sec(make_key_cfg("concurrent_seed"));
 
-    constexpr int kThreads = 8;
-    constexpr int kIters = 64;
+    static constexpr int kThreads = 8;
+    static constexpr int kIters = 64;
     std::atomic<int> failures{0};
     std::vector<std::thread> workers;
     workers.reserve(kThreads);
