@@ -4,7 +4,9 @@
 
 VLink C API 提供了一套稳定的、语言无关的纯 C 绑定，封装了 VLink C++ 核心库的三种通信模型。通过 C API，可以在 C 语言、Python、Go、Rust 等不支持直接调用 C++ 模板的语言中使用 VLink 的六个通信原语（Publisher/Subscriber、Client/Server、Setter/Getter）的**数据面**能力。
 
-> **覆盖范围**：C API 只暴露六个原语的数据面接口（创建/销毁、发布/订阅、请求/响应、读写字段）；**不覆盖** QoS、Security、Bag 录制、Discovery 等高级功能，这些仍须通过 C++ API 使用。数据载荷类型统一为 `Bytes`，序列化类型通过 `vlink_schema_info_t` 的 `ser` + `schema` 传入。
+> **覆盖范围**：C API 暴露六个原语的数据面接口（创建/销毁、发布/订阅、请求/响应、读写字段），以及消息级 Security（AES-128-GCM / RSA-OAEP / 自定义回调）和 SSL 选项；**不覆盖** QoS、Bag 录制、Discovery 等高级功能，这些仍须通过 C++ API 使用。数据载荷类型统一为 `Bytes`，序列化类型通过 `vlink_schema_info_t` 的 `ser` + `schema` 传入。
+>
+> 启用加密的节点必须通过 `vlink_create_secure_publisher()` / `vlink_create_secure_subscriber()` / `vlink_create_secure_server()` / `vlink_create_secure_client()` / `vlink_create_secure_setter()` / `vlink_create_secure_getter()` 创建——`Security` 在 `init()` 之前装配完成。C API 不再暴露 `vlink_*_enable_security()` 系列函数。
 
 > **相关文档**：C++ 通信模型参见 [03-event-model.md](03-event-model.md)、[04-method-model.md](04-method-model.md)、[05-field-model.md](05-field-model.md)；传输 URL 格式参见 [07-transport.md](07-transport.md)；C API 示例参见 [22-examples.md](22-examples.md#c_api)。
 
@@ -90,14 +92,16 @@ typedef enum {
 
 ### 句柄类型
 
-所有句柄类型均为 C 结构体，包含一个 `void* native_handle` 和一个 `void* reserved[4]` 数组：
+所有句柄类型均为 C 结构体，包含一个 `void* native_handle` 和一个 `void* reserved[8]` 数组：
 
 ```c
 typedef struct {
     void* native_handle;  // 内部 C++ 对象指针，勿直接操作
-    void* reserved[4];    // 内部保留字段，勿直接操作
+    void* reserved[8];    // 内部保留字段，勿直接操作
 } vlink_publisher_handle_t;
 ```
+
+`reserved[0..4]` 用于内部状态（server callback 协调、Security 实例指针等）；`reserved[5..7]` 用于 Security 替换链表与未来扩展。用户代码不得直接读写。
 
 | 句柄类型                     | 对应 C++ 类型                                   | 用途         |
 | ---------------------------- | ----------------------------------------------- | ------------ |

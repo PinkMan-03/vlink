@@ -262,7 +262,61 @@ class Server : public Node<ServerImpl, SecT> {
 template <typename ReqT, typename RespT = Traits::EmptyType>
 class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
  public:
-  using Server<ReqT, RespT, SecurityType::kWithSecurity>::Server;
+  /** @brief Unique-pointer alias. */
+  using UniquePtr = std::unique_ptr<SecurityServer<ReqT, RespT>>;
+
+  /** @brief Shared-pointer alias. */
+  using SharedPtr = std::shared_ptr<SecurityServer<ReqT, RespT>>;
+
+  /**
+   * @brief Creates a @c SecurityServer on the heap wrapped in a @c unique_ptr.
+   *
+   * @param url_str  Service URL string (e.g. @c "dds://my_service").
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound requests).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c UniquePtr owning the new server.
+   */
+  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Creates a @c SecurityServer on the heap wrapped in a @c shared_ptr.
+   *
+   * @param url_str  Service URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound requests).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c SharedPtr owning the new server.
+   */
+  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityServer from a typed transport configuration object.
+   *
+   * @tparam ConfT  @c Conf-derived configuration type.
+   * @param conf    Populated configuration object.
+   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param type    @c kWithInit to call @c init() immediately (default).
+   */
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+  explicit SecurityServer(const ConfT& conf, const Security::Config& sec_cfg = {}, InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityServer and installs the security configuration in place.
+   *
+   * @details
+   * Always builds the base @c Server with @c InitType::kWithoutInit, then
+   * calls the inherited @c enable_security(sec_cfg) so that @c security_ is
+   * either populated or left empty.  Finally calls @c init() unless the
+   * caller requests deferred initialisation.
+   *
+   * @param url_str  Service URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound requests).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   */
+  explicit SecurityServer(const std::string& url_str, const Security::Config& sec_cfg = {},
+                          InitType type = InitType::kWithInit);
 };
 
 }  // namespace vlink

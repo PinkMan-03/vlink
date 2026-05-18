@@ -334,13 +334,12 @@ inline nb::dict status_to_dict(const vlink::Status::BasePtr& status) {
 
 int bytes_getbuffer(PyObject* obj, Py_buffer* view, int flags) {
   auto* bytes = nb::inst_ptr<vlink::Bytes>(nb::handle(obj));
-  return PyBuffer_FillInfo(view, obj, const_cast<uint8_t*>(bytes->data()), static_cast<Py_ssize_t>(bytes->size()), 0,
-                           flags);
+  return PyBuffer_FillInfo(view, obj, bytes->data(), static_cast<Py_ssize_t>(bytes->size()), 0, flags);
 }
 
 void bytes_releasebuffer(PyObject*, Py_buffer*) {}
 
-PyType_Slot kBytesTypeSlots[] = {
+PyType_Slot bytes_type_slots[] = {
     {Py_bf_getbuffer, reinterpret_cast<void*>(bytes_getbuffer)},
     {Py_bf_releasebuffer, reinterpret_cast<void*>(bytes_releasebuffer)},
     {0, nullptr},
@@ -357,6 +356,28 @@ NodeT* make_url_node(const std::string& url, const std::string& ser_type, vlink:
   }
 
   auto* node = new NodeT(url, vlink::InitType::kWithoutInit);
+
+  if (has_ser_type) {
+    node->set_ser_type(ser_type, schema_type);
+  }
+
+  if (auto_init) {
+    node->init();
+  }
+  return node;
+}
+
+template <typename NodeT>
+NodeT* make_url_security_node(const std::string& url, const vlink::Security::Config& sec_cfg,
+                              const std::string& ser_type, vlink::SchemaType schema_type, bool auto_init) {
+  const bool has_ser_type = !ser_type.empty();
+  const bool has_schema_type = schema_type != vlink::SchemaType::kUnknown;
+
+  if VUNLIKELY (has_ser_type != has_schema_type) {
+    throw nb::value_error("ser_type and schema_type must be provided together");
+  }
+
+  auto* node = new NodeT(url, sec_cfg, vlink::InitType::kWithoutInit);
 
   if (has_ser_type) {
     node->set_ser_type(ser_type, schema_type);
@@ -436,28 +457,25 @@ void bind_node_common(Class& cls) {
 }
 
 template <typename Class, typename NodeT>
-void bind_node_security(Class& cls) {
-  cls.def("set_security_key", &NodeT::set_security_key, "key"_a)
-      .def(
-          "set_security_callbacks",
-          [](NodeT& self, nb::callable encrypt_cb, nb::callable decrypt_cb) {
-            self.set_security_callbacks(
-                make_security_callback(std::move(encrypt_cb), "vlink::Node.set_security_callbacks(encrypt)"),
-                make_security_callback(std::move(decrypt_cb), "vlink::Node.set_security_callbacks(decrypt)"));
-          },
-          "encrypt_callback"_a, "decrypt_callback"_a);
+void bind_node_security_ctor(Class& cls) {
+  cls.def(nb::new_([](const std::string& url, const vlink::Security::Config& sec_cfg, const std::string& ser_type,
+                      vlink::SchemaType schema_type, bool auto_init) {
+            return make_url_security_node<NodeT>(url, sec_cfg, ser_type, schema_type, auto_init);
+          }),
+          "url"_a, "sec_cfg"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
 }
 
 template <typename PubT, typename MsgT, typename Codec = PythonCodec<MsgT>, bool SecurityNode = false>
 void bind_publisher(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<PubT>(m, name, doc);
-  cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
-                      bool auto_init) { return make_url_node<PubT>(url, ser_type, schema_type, auto_init); }),
-          "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
-  bind_node_common<decltype(cls), PubT>(cls);
   if constexpr (SecurityNode) {
-    bind_node_security<decltype(cls), PubT>(cls);
+    bind_node_security_ctor<decltype(cls), PubT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<PubT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   }
+  bind_node_common<decltype(cls), PubT>(cls);
   cls.def(
          "detect_subscribers",
          [](PubT& self, nb::callable callback) {
@@ -487,13 +505,14 @@ void bind_publisher(nb::module_& m, const char* name, const char* doc) {
 template <typename SubT, typename MsgT, typename Codec = PythonCodec<MsgT>, bool SecurityNode = false>
 void bind_subscriber(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<SubT>(m, name, doc);
-  cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
-                      bool auto_init) { return make_url_node<SubT>(url, ser_type, schema_type, auto_init); }),
-          "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
-  bind_node_common<decltype(cls), SubT>(cls);
   if constexpr (SecurityNode) {
-    bind_node_security<decltype(cls), SubT>(cls);
+    bind_node_security_ctor<decltype(cls), SubT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<SubT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   }
+  bind_node_common<decltype(cls), SubT>(cls);
   cls.def(
          "listen",
          [](SubT& self, nb::callable callback) {
@@ -512,13 +531,14 @@ template <typename ServerT, typename ReqT, typename RespT, typename ReqCodec = P
           typename RespCodec = PythonCodec<RespT>, bool SecurityNode = false>
 void bind_server(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<ServerT>(m, name, doc);
-  cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
-                      bool auto_init) { return make_url_node<ServerT>(url, ser_type, schema_type, auto_init); }),
-          "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
-  bind_node_common<decltype(cls), ServerT>(cls);
   if constexpr (SecurityNode) {
-    bind_node_security<decltype(cls), ServerT>(cls);
+    bind_node_security_ctor<decltype(cls), ServerT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<ServerT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   }
+  bind_node_common<decltype(cls), ServerT>(cls);
   cls.def(
          "listen",
          [](ServerT& self, nb::callable callback) {
@@ -565,13 +585,14 @@ template <typename ClientT, typename ReqT, typename RespT, typename ReqCodec = P
           typename RespCodec = PythonCodec<RespT>, bool SecurityNode = false>
 void bind_client(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<ClientT>(m, name, doc);
-  cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
-                      bool auto_init) { return make_url_node<ClientT>(url, ser_type, schema_type, auto_init); }),
-          "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
-  bind_node_common<decltype(cls), ClientT>(cls);
   if constexpr (SecurityNode) {
-    bind_node_security<decltype(cls), ClientT>(cls);
+    bind_node_security_ctor<decltype(cls), ClientT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<ClientT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   }
+  bind_node_common<decltype(cls), ClientT>(cls);
   cls.def(
          "detect_connected",
          [](ClientT& self, nb::callable callback) {
@@ -625,13 +646,14 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
 template <typename SetterT, typename ValueT, typename Codec = PythonCodec<ValueT>, bool SecurityNode = false>
 void bind_setter(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<SetterT>(m, name, doc);
-  cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
-                      bool auto_init) { return make_url_node<SetterT>(url, ser_type, schema_type, auto_init); }),
-          "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
-  bind_node_common<decltype(cls), SetterT>(cls);
   if constexpr (SecurityNode) {
-    bind_node_security<decltype(cls), SetterT>(cls);
+    bind_node_security_ctor<decltype(cls), SetterT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<SetterT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   }
+  bind_node_common<decltype(cls), SetterT>(cls);
   cls.def(
          "set", [](SetterT& self, nb::handle data) { self.set(Codec::from_python_owned(data)); }, "data"_a)
       .def("mark_as_publisher", &SetterT::mark_as_publisher)
@@ -641,13 +663,14 @@ void bind_setter(nb::module_& m, const char* name, const char* doc) {
 template <typename GetterT, typename ValueT, typename Codec = PythonCodec<ValueT>, bool SecurityNode = false>
 void bind_getter(nb::module_& m, const char* name, const char* doc) {
   auto cls = nb::class_<GetterT>(m, name, doc);
-  cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
-                      bool auto_init) { return make_url_node<GetterT>(url, ser_type, schema_type, auto_init); }),
-          "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
-  bind_node_common<decltype(cls), GetterT>(cls);
   if constexpr (SecurityNode) {
-    bind_node_security<decltype(cls), GetterT>(cls);
+    bind_node_security_ctor<decltype(cls), GetterT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<GetterT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
   }
+  bind_node_common<decltype(cls), GetterT>(cls);
   cls.def(
          "listen",
          [](GetterT& self, nb::callable callback) {
@@ -734,7 +757,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .value("Raw", vlink::SchemaType::kRaw)
       .value("ZeroCopy", vlink::SchemaType::kZeroCopy);
 
-  nb::class_<vlink::Bytes>(m, "Bytes", nb::type_slots(kBytesTypeSlots), "Versatile byte buffer")
+  nb::class_<vlink::Bytes>(m, "Bytes", nb::type_slots(bytes_type_slots), "Versatile byte buffer")
       .def(nb::init<>())
       .def_static("init_memory_pool", &vlink::Bytes::init_memory_pool)
       .def_static("release_memory_pool", &vlink::Bytes::release_memory_pool)
@@ -1164,33 +1187,33 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(
           "__init__",
           [](nb::pointer_and_handle<vlink::Timer> v, vlink::MessageLoop* loop, uint32_t interval_ms,
-             int32_t loop_count) { new ((vlink::Timer*)v.p) vlink::Timer(loop, interval_ms, loop_count); },
+             int32_t loop_count) { new (static_cast<vlink::Timer*>(v.p)) vlink::Timer(loop, interval_ms, loop_count); },
           "loop"_a, "interval_ms"_a, "loop_count"_a = vlink::Timer::kInfinite, nb::keep_alive<1, 2>())
       .def(
           "__init__",
           [](nb::pointer_and_handle<vlink::Timer> v, vlink::MessageLoop* loop, uint32_t interval_ms, int32_t loop_count,
              nb::callable callback) {
-            new ((vlink::Timer*)v.p) vlink::Timer(loop, interval_ms, loop_count,
-                                                  make_void_callback(std::move(callback), "vlink::Timer.__init__"));
+            new (static_cast<vlink::Timer*>(v.p)) vlink::Timer(
+                loop, interval_ms, loop_count, make_void_callback(std::move(callback), "vlink::Timer.__init__"));
           },
           "loop"_a, "interval_ms"_a, "loop_count"_a, "callback"_a, nb::keep_alive<1, 2>())
       .def(
           "__init__",
           [](nb::pointer_and_handle<vlink::Timer> v, uint32_t interval_ms, int32_t loop_count) {
-            new ((vlink::Timer*)v.p) vlink::Timer(interval_ms, loop_count);
+            new (static_cast<vlink::Timer*>(v.p)) vlink::Timer(interval_ms, loop_count);
           },
           "interval_ms"_a, "loop_count"_a = vlink::Timer::kInfinite)
       .def(
           "__init__",
           [](nb::pointer_and_handle<vlink::Timer> v, uint32_t interval_ms, nb::callable callback) {
-            new ((vlink::Timer*)v.p) vlink::Timer(interval_ms, vlink::Timer::kInfinite,
-                                                  make_void_callback(std::move(callback), "vlink::Timer.__init__"));
+            new (static_cast<vlink::Timer*>(v.p)) vlink::Timer(
+                interval_ms, vlink::Timer::kInfinite, make_void_callback(std::move(callback), "vlink::Timer.__init__"));
           },
           "interval_ms"_a, "callback"_a)
       .def(
           "__init__",
           [](nb::pointer_and_handle<vlink::Timer> v, uint32_t interval_ms, int32_t loop_count, nb::callable callback) {
-            new ((vlink::Timer*)v.p)
+            new (static_cast<vlink::Timer*>(v.p))
                 vlink::Timer(interval_ms, loop_count, make_void_callback(std::move(callback), "vlink::Timer.__init__"));
           },
           "interval_ms"_a, "loop_count"_a, "callback"_a)
@@ -1846,7 +1869,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_prop_rw(
           "name", [](const vlink::Qos& q) { return std::string(q.name); },
           [](vlink::Qos& q, const std::string& s) {
-            const size_t kMax = sizeof(q.name) - 1;
+            constexpr size_t kMax = sizeof(vlink::Qos::name) - 1;
             const size_t n = std::min(s.size(), kMax);
             std::memcpy(q.name, s.data(), n);
             q.name[n] = '\0';
@@ -1912,43 +1935,39 @@ NB_MODULE(_vlink_nanobind, m) {
   status.def("is_for_writer", &vlink::Status::is_for_writer, "type"_a);
   status.def("is_for_reader", &vlink::Status::is_for_reader, "type"_a);
 
-  nb::class_<vlink::Security>(m, "Security", "AES-128-CBC encryption/decryption")
+  nb::class_<vlink::Security::Config>(m, "SecurityConfig",
+                                      "Aggregate of every parameter accepted by the Security constructor")
       .def(nb::init<>())
-      .def("set_key", &vlink::Security::set_key, "key"_a)
-      .def(
-          "set_callbacks",
-          [](vlink::Security& self, nb::callable encrypt_cb, nb::callable decrypt_cb) {
-            auto enc = std::make_shared<GilSafePyFunction>(std::move(encrypt_cb));
-            auto dec = std::make_shared<GilSafePyFunction>(std::move(decrypt_cb));
-            self.set_callbacks(
-                [enc](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
-                  if (!Py_IsInitialized()) return false;
-                  nb::gil_scoped_acquire gil;
-                  try {
-                    nb::object result = enc->fn(PythonCodec<vlink::Bytes>::to_python(in));
-                    if (result.is_none()) return false;
-                    out = PythonCodec<vlink::Bytes>::from_python_owned(result);
-                    return true;
-                  } catch (std::exception&) {
-                    report_current_exception("vlink::Security.set_callbacks(encrypt)");
-                    return false;
-                  }
-                },
-                [dec](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
-                  if (!Py_IsInitialized()) return false;
-                  nb::gil_scoped_acquire gil;
-                  try {
-                    nb::object result = dec->fn(PythonCodec<vlink::Bytes>::to_python(in));
-                    if (result.is_none()) return false;
-                    out = PythonCodec<vlink::Bytes>::from_python_owned(result);
-                    return true;
-                  } catch (std::exception&) {
-                    report_current_exception("vlink::Security.set_callbacks(decrypt)");
-                    return false;
-                  }
-                });
+      .def_rw("key", &vlink::Security::Config::key)
+      .def_rw("passphrase", &vlink::Security::Config::passphrase)
+      .def_rw("pbkdf2_salt", &vlink::Security::Config::pbkdf2_salt)
+      .def_rw("pbkdf2_iterations", &vlink::Security::Config::pbkdf2_iterations)
+      .def_rw("public_key_pem", &vlink::Security::Config::public_key_pem)
+      .def_rw("private_key_pem", &vlink::Security::Config::private_key_pem)
+      .def_rw("signing_key_pem", &vlink::Security::Config::signing_key_pem)
+      .def_rw("verify_key_pem", &vlink::Security::Config::verify_key_pem)
+      .def_prop_rw(
+          "encrypt_callback",
+          [](const vlink::Security::Config& self) -> nb::object {
+            // The original Python callable has been wrapped into a C++ Function and is no longer
+            // retrievable as a Python object.  Return @c True when a callback is installed, @c None
+            // otherwise, so Python callers can at least query whether the slot is populated.
+            return self.encrypt_callback ? nb::cast(true) : nb::none();
           },
-          "encrypt_callback"_a, "decrypt_callback"_a)
+          [](vlink::Security::Config& self, nb::callable cb) {
+            self.encrypt_callback = make_security_callback(std::move(cb), "vlink::Security::Config.encrypt_callback");
+          })
+      .def_prop_rw(
+          "decrypt_callback",
+          [](const vlink::Security::Config& self) -> nb::object {
+            return self.decrypt_callback ? nb::cast(true) : nb::none();
+          },
+          [](vlink::Security::Config& self, nb::callable cb) {
+            self.decrypt_callback = make_security_callback(std::move(cb), "vlink::Security::Config.decrypt_callback");
+          });
+
+  nb::class_<vlink::Security>(m, "Security", "Authenticated message-level encryption (AEAD)")
+      .def(nb::init<const vlink::Security::Config&>(), "cfg"_a = vlink::Security::Config{})
       .def(
           "encrypt",
           [](vlink::Security& self, nb::handle data) -> nb::object {

@@ -36,6 +36,7 @@
 
 namespace vlink {
 
+// Client<ReqT, RespT>
 template <typename ReqT, typename RespT, SecurityType SecT>
 inline typename Client<ReqT, RespT, SecT>::UniquePtr Client<ReqT, RespT, SecT>::create_unique(
     const std::string& url_str, InitType type) {
@@ -96,7 +97,6 @@ inline Client<ReqT, RespT, SecT>::Client(const ConfT& conf, InitType type) {
 
   if constexpr (SecT == SecurityType::kWithSecurity) {
     this->impl_->is_security_type = true;
-    this->enable_security();
   }
 
   if (type == InitType::kWithInit) {
@@ -460,6 +460,41 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
           }
         },
         timeout);
+  }
+}
+
+// SecurityClient<ReqT, RespT>
+template <typename ReqT, typename RespT>
+inline typename SecurityClient<ReqT, RespT>::UniquePtr SecurityClient<ReqT, RespT>::create_unique(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_unique<SecurityClient<ReqT, RespT>>(url_str, sec_cfg, type);
+}
+
+template <typename ReqT, typename RespT>
+inline typename SecurityClient<ReqT, RespT>::SharedPtr SecurityClient<ReqT, RespT>::create_shared(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_shared<SecurityClient<ReqT, RespT>>(url_str, sec_cfg, type);
+}
+
+template <typename ReqT, typename RespT>
+template <typename ConfT, typename>
+inline SecurityClient<ReqT, RespT>::SecurityClient(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+    : Client<ReqT, RespT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
+}
+
+template <typename ReqT, typename RespT>
+inline SecurityClient<ReqT, RespT>::SecurityClient(const std::string& url_str, const Security::Config& sec_cfg,
+                                                   InitType type)
+    : Client<ReqT, RespT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
 

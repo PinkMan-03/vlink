@@ -72,10 +72,13 @@
  * @endcode
  *
  * @par Security
- * Enable per-message encryption by using @c SecurityType::kWithSecurity:
+ * Enable per-message encryption by using the @c Security* aliases.  The
+ * @c Security::Config aggregate is the second constructor argument; there is
+ * no runtime setter:
  * @code
- * SecurityPublisher<MyMsg> pub("shm://topic");
- * pub.set_security_key("my-secret");
+ * Security::Config cfg;
+ * cfg.key = "my-secret";
+ * SecurityPublisher<MyMsg> pub("shm://topic", cfg);
  * @endcode
  * @note @c intra:// and @c dds:// with CDR serialisation do NOT support security.
  *
@@ -367,17 +370,6 @@ class Node {
   [[nodiscard]] const std::string& get_url() const;
 
   /**
-   * @brief Sets the symmetric encryption key for message security.
-   *
-   * @details
-   * Requires @c SecT == @c kWithSecurity (enforced by @c static_assert).
-   * Not supported for @c intra:// or @c dds:// CDR nodes (triggers fatal log).
-   *
-   * @param key  Encryption key string; interpretation depends on the security impl.
-   */
-  void set_security_key(const std::string& key);
-
-  /**
    * @brief Sets the filesystem path for message bag recording.
    *
    * @details
@@ -387,18 +379,6 @@ class Node {
    * @param path  Path to the recording directory or file.
    */
   void set_record_path(const std::string& path);
-
-  /**
-   * @brief Installs custom encrypt and decrypt callbacks.
-   *
-   * @details
-   * Alternative to @c set_security_key() for custom cipher implementations.
-   * Requires @c SecT == @c kWithSecurity (enforced by @c static_assert).
-   *
-   * @param encrypt_callback  @c bool(const Bytes& in, Bytes& out) -- encrypts a message, returns true on success.
-   * @param decrypt_callback  @c bool(const Bytes& in, Bytes& out) -- decrypts a message, returns true on success.
-   */
-  void set_security_callbacks(Security::Callback&& encrypt_callback, Security::Callback&& decrypt_callback);
 
   /**
    * @brief Overrides the runtime wire metadata for this node.
@@ -545,7 +525,24 @@ class Node {
 
   virtual ~Node();
 
-  void enable_security();
+  /**
+   * @brief Installs a @c Security configuration on this node.
+   *
+   * @details
+   * Internal helper invoked by the @c SecurityPublisher / @c SecuritySubscriber /
+   * @c SecurityServer / @c SecurityClient / @c SecuritySetter / @c SecurityGetter
+   * constructors after the base @c Publisher / @c Subscriber / ... has set up
+   * @c impl_ but before @c init() is called.  Builds a new @c Security from
+   * @p cfg, validates it via @c is_configured(), and only swaps it into
+   * @c security_ when validation passes.  Refuses to install when the transport
+   * does not support security (@c intra:// or @c dds:// with CDR) or when
+   * @c init() has already been called.
+   *
+   * @param cfg  Security configuration aggregate.
+   * @return     @c true on success; @c false on unsupported transport,
+   *             post-init invocation, or unusable @p cfg.
+   */
+  bool enable_security(const Security::Config& cfg);
 
   template <typename CallbackT, typename... ArgsT>
   void invoke_callback(const CallbackT& callback, ArgsT&&... args);

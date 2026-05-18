@@ -319,7 +319,61 @@ class Getter : public Node<GetterImpl, SecT> {
 template <typename ValueT>
 class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
  public:
-  using Getter<ValueT, SecurityType::kWithSecurity>::Getter;
+  /** @brief Unique-pointer alias. */
+  using UniquePtr = std::unique_ptr<SecurityGetter<ValueT>>;
+
+  /** @brief Shared-pointer alias. */
+  using SharedPtr = std::shared_ptr<SecurityGetter<ValueT>>;
+
+  /**
+   * @brief Creates a @c SecurityGetter on the heap wrapped in a @c unique_ptr.
+   *
+   * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound updates).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c UniquePtr owning the new getter.
+   */
+  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Creates a @c SecurityGetter on the heap wrapped in a @c shared_ptr.
+   *
+   * @param url_str  Field URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound updates).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c SharedPtr owning the new getter.
+   */
+  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityGetter from a typed transport configuration object.
+   *
+   * @tparam ConfT  @c Conf-derived configuration type.
+   * @param conf    Populated configuration object.
+   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param type    @c kWithInit to call @c init() immediately (default).
+   */
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+  explicit SecurityGetter(const ConfT& conf, const Security::Config& sec_cfg = {}, InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityGetter and installs the security configuration in place.
+   *
+   * @details
+   * Always builds the base @c Getter with @c InitType::kWithoutInit, then
+   * calls the inherited @c enable_security(sec_cfg) so that @c security_ is
+   * either populated or left empty.  Finally calls @c init() unless the
+   * caller requests deferred initialisation.
+   *
+   * @param url_str  Field URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound updates).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   */
+  explicit SecurityGetter(const std::string& url_str, const Security::Config& sec_cfg = {},
+                          InitType type = InitType::kWithInit);
 };
 
 }  // namespace vlink

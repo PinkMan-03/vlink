@@ -4,9 +4,9 @@
 
 本示例演示 `SecurityPublisher` / `SecuritySubscriber` 的基本用法，覆盖：
 
-1. 使用内置默认密钥的 AES-128-CBC 加密
-2. 通过 `set_security_key()` 注入自定义密钥
-3. 密钥不一致时的解密失败行为
+1. 使用 `Security::Config::key` 配置对称 AES-128-GCM 加密
+2. 在 `SecurityXxx` 构造时通过第二参数一次性传入 `Security::Config`
+3. 双端配置不一致时的解密失败行为
 4. 加密 `Bytes` 原始字节
 5. 安全加密的传输限制
 
@@ -32,31 +32,51 @@ cmake --build build --target example_security_basic
 
 ```cpp
 template <typename T>
-class SecurityPublisher : public Publisher<T, SecurityType::kWithSecurity> { ... };
+class SecurityPublisher : public Publisher<T, SecurityType::kWithSecurity> {
+ public:
+  explicit SecurityPublisher(const std::string& url_str,
+                             const Security::Config& sec_cfg = {},
+                             InitType type = InitType::kWithInit);
+  // 另有 ConfT 重载与 create_unique / create_shared 工厂方法。
+};
 
 template <typename T>
-class SecuritySubscriber : public Subscriber<T, SecurityType::kWithSecurity> { ... };
-
-// 从 Node 基类继承：
-void set_security_key(const std::string& key);  // 必须正好 16 字节
+class SecuritySubscriber : public Subscriber<T, SecurityType::kWithSecurity> {
+ public:
+  explicit SecuritySubscriber(const std::string& url_str,
+                              const Security::Config& sec_cfg = {},
+                              InitType type = InitType::kWithInit);
+};
 ```
 
-| API | 用途 | 调用时机 |
-|-----|------|---------|
-| `set_security_key(key)` | 注入业务密钥，替换内置 demo 密钥 | `init()` 前或后均可 |
-| 不调 `set_security_key` | 沿用内置 demo 密钥（仅用于演示） | — |
+`Security::Config` 是一个 aggregate struct，包含 `key` / `passphrase` / `pbkdf2_salt` /
+RSA PEM 字段 / 自定义回调等。本示例只使用 `key`：
+
+```cpp
+vlink::Security::Config cfg;
+cfg.key = "my-secret";   // 任意长度；SHA-256 截断为 AES-128 key
+
+vlink::SecurityPublisher<std::string> pub("shm://secure/topic", cfg);
+vlink::SecuritySubscriber<std::string> sub("shm://secure/topic", cfg);
+```
+
+| 行为 | 说明 |
+|------|------|
+| 构造时传 cfg | 一次性安装；运行时不再有 `enable_security()` setter，重新配置请销毁重建节点 |
+| 缺省 cfg | 可写 `SecurityXxx(url)` 或 `SecurityXxx(url, {})`，等价于不安装 Security，encrypt/decrypt 始终失败 |
+| 双端配置 | 必须等价（相同 `key`，或相同 `passphrase + pbkdf2_salt`） |
 
 ## 工作原理
 
-1. **加密**：`SecurityPublisher::publish()` 在发送前对 payload 调用 OpenSSL `EVP_aes_128_cbc()` 加密。
-2. **解密**：`SecuritySubscriber` 在分发回调前对收到的 payload 解密；**解密失败时回调不会被触发**（消息被静默丢弃）。
-3. **密钥长度**：底层 OpenSSL 直接读取 16 字节，因此 `set_security_key()` 参数**必须正好 16 字节**——短了会越界读、长了多余被忽略且令变量名误导。
+1. **加密**：`SecurityPublisher::publish()` 在发送前对 payload 调用 OpenSSL `EVP_aes_128_gcm()` 加密，wire 上为 `[12B nonce][N B ciphertext][16B tag]`。
+2. **解密**：`SecuritySubscriber` 在分发回调前对收到的 payload 解密；**GCM tag 校验失败时回调不会被触发**（消息被静默丢弃，日志记录）。
+3. **密钥派生**：`Config::key` 经 SHA-256 截断为 16 字节 AES-128 key，因此可使用任意长度的种子字符串。
 
 ## 注意事项
 
-- 双端密钥必须完全相同；任一端漏调 `set_security_key()` 时会沿用内置 demo 密钥，与显式注入的另一端将无法通信。
-- 内置 demo 密钥/IV 不应在生产中使用，**部署前必须**注入业务密钥。
-- 若要替换 AES 为其它算法（SM4 / ChaCha20 / HSM 等），见 [`../security_custom/`](../security_custom/) 中 `set_security_callbacks()` 用法。
+- 双端 `Config` 必须等价；任一端未在 ctor 传 cfg 或使用不同 `key` 时，GCM tag 校验失败、消息被丢弃。
+- 若要替换 AEAD 为其它算法（SM4 / ChaCha20 / HSM 等），见 [`../security_custom/`](../security_custom/) 中 `encrypt_callback` / `decrypt_callback` 用法。
+- 若要使用 RSA 混合握手（无需预共享对称密钥），见 [doc/09-security.md §9.6](../../../doc/09-security.md#96-非对称模式rsa-混合握手)。
 
 ## 相关文档
 

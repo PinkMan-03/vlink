@@ -112,9 +112,9 @@
  *   matched, useful for transient-local-durability scenarios.
  */
 
-// NOLINTBEGIN
-
 #pragma once
+
+// NOLINTBEGIN
 
 #undef VLINK_C_API_EXPORT
 #ifdef VLINK_C_API_LIBRARY_STATIC
@@ -196,7 +196,7 @@ typedef struct {
  */
 typedef struct {
   void* native_handle; /**< Internal C++ Publisher object pointer. */
-  void* reserved[4];   /**< Reserved for internal use; do not modify. */
+  void* reserved[8];   /**< Reserved for internal use; do not modify. */
 } vlink_publisher_handle_t;
 
 /**
@@ -209,7 +209,7 @@ typedef struct {
  */
 typedef struct {
   void* native_handle; /**< Internal C++ Subscriber object pointer. */
-  void* reserved[4];   /**< Reserved for internal use; do not modify. */
+  void* reserved[8];   /**< Reserved for internal use; do not modify. */
 } vlink_subscriber_handle_t;
 
 /**
@@ -226,10 +226,13 @@ typedef struct {
  * - @c reserved[2]: response byte count (stored as a pointer-sized integer).
  * - @c reserved[3]: non-null while a request is being processed (cleared by
  *   @c vlink_reply()).
+ * - @c reserved[4]: pointer to an attached @c vlink::Security instance, or
+ *   @c NULL when the server was created via @c vlink_create_server() rather
+ *   than @c vlink_create_secure_server().
  */
 typedef struct {
   void* native_handle; /**< Internal C++ Server object pointer. */
-  void* reserved[4];   /**< Internal coordination fields; do not modify. */
+  void* reserved[8];   /**< Internal coordination fields; do not modify. */
 } vlink_server_handle_t;
 
 /**
@@ -242,7 +245,7 @@ typedef struct {
  */
 typedef struct {
   void* native_handle; /**< Internal C++ Client object pointer. */
-  void* reserved[4];   /**< Reserved for internal use; do not modify. */
+  void* reserved[8];   /**< Reserved for internal use; do not modify. */
 } vlink_client_handle_t;
 
 /**
@@ -255,7 +258,7 @@ typedef struct {
  */
 typedef struct {
   void* native_handle; /**< Internal C++ Setter object pointer. */
-  void* reserved[4];   /**< Reserved for internal use; do not modify. */
+  void* reserved[8];   /**< Reserved for internal use; do not modify. */
 } vlink_setter_handle_t;
 
 /**
@@ -268,7 +271,7 @@ typedef struct {
  */
 typedef struct {
   void* native_handle; /**< Internal C++ Getter object pointer. */
-  void* reserved[4];   /**< Reserved for internal use; do not modify. */
+  void* reserved[8];   /**< Reserved for internal use; do not modify. */
 } vlink_getter_handle_t;
 
 /**
@@ -313,6 +316,13 @@ typedef void (*vlink_req_callback_t)(const uint8_t* data, const size_t size, voi
  * @param user_data  Opaque pointer supplied at invocation time.
  */
 typedef void (*vlink_resp_callback_t)(const uint8_t* data, const size_t size, void* user_data);
+
+/* Forward declaration of the Security configuration aggregate.  The full
+ * definition lives further down with the Security API; the forward declaration
+ * here lets the `vlink_create_secure_*()` node creation entry points reference
+ * `const vlink_security_config_t*` before the struct body is in scope. */
+struct vlink_security_config_s;
+typedef struct vlink_security_config_s vlink_security_config_t;
 
 ////////////////////////////////////////////////////////////////
 /// Publisher
@@ -444,6 +454,36 @@ VLINK_C_API_EXPORT int vlink_create_subscriber(const char* url, const vlink_sche
                                                const vlink_msg_callback_t msg_callback, void* user_data);
 
 /**
+ * @brief Atomic create + Security install + listen for a Subscriber node.
+ *
+ * @details
+ * Builds the @c vlink::Security from @p security_cfg @b before the internal
+ * @c listen() registration completes, so every inbound frame goes through
+ * @c Security::decrypt().  Security configuration is one-shot at creation;
+ * there is no separate runtime entry point.
+ *
+ * On failure (bad URL / schema / cfg, no usable cryptographic slot, listen
+ * failure) the handle is left @c NULL and no resources leak.
+ *
+ * @param url           VLink subscriber URL.  Must not be @c NULL.
+ * @param schema_info   Optional bundled @c ser + @c schema metadata.
+ * @param handle        Output handle.  Must not be @c NULL.
+ * @param msg_callback  Message handler.  Must not be @c NULL.
+ * @param user_data     Opaque pointer forwarded to @p msg_callback.
+ * @param security_cfg  Security configuration.  Must not be @c NULL and must
+ *                      contain at least one usable cryptographic slot.
+ * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                      on bad arguments (including an unconfigured @p security_cfg),
+ *                      @c VLINK_RET_MEMORY_ERROR on pool allocation failure,
+ *                      @c VLINK_RET_TRANSFER_ERROR if @c listen() fails, or
+ *                      @c VLINK_RET_RUNTIME_ERROR on construction exception.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_subscriber(const char* url, const vlink_schema_info_t* schema_info,
+                                                      vlink_subscriber_handle_t* handle,
+                                                      const vlink_msg_callback_t msg_callback, void* user_data,
+                                                      const vlink_security_config_t* security_cfg);
+
+/**
  * @brief Destroys a Subscriber node and releases all associated resources.
  *
  * @param handle  Subscriber handle to destroy.  Must not be @c NULL.
@@ -484,6 +524,34 @@ VLINK_C_API_EXPORT int vlink_destroy_subscriber(vlink_subscriber_handle_t* handl
 VLINK_C_API_EXPORT int vlink_create_server(const char* url, const vlink_schema_info_t* schema_info,
                                            vlink_server_handle_t* handle, const vlink_req_callback_t req_callback,
                                            void* user_data);
+
+/**
+ * @brief Atomic create + Security install + listen for a Server node.
+ *
+ * @details
+ * Builds the @c vlink::Security from @p security_cfg @b before the internal
+ * @c listen() registration completes.  Every inbound request goes through
+ * @c Security::decrypt() and every reply written via @c vlink_reply() goes
+ * through @c Security::encrypt().  Security configuration is one-shot at
+ * creation; there is no separate runtime entry point.
+ *
+ * @param url            VLink service URL.  Must not be @c NULL.
+ * @param schema_info    Optional bundled @c ser + @c schema metadata.
+ * @param handle         Output handle.  Must not be @c NULL.
+ * @param req_callback   Request handler.  Must not be @c NULL.
+ * @param user_data      Opaque pointer forwarded to @p req_callback.
+ * @param security_cfg   Security configuration.  Must not be @c NULL and must
+ *                       contain at least one usable cryptographic slot.
+ * @return               @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                       on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
+ *                       allocation failure, @c VLINK_RET_TRANSFER_ERROR if
+ *                       @c listen() fails, or @c VLINK_RET_RUNTIME_ERROR on
+ *                       construction exception.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_server(const char* url, const vlink_schema_info_t* schema_info,
+                                                  vlink_server_handle_t* handle,
+                                                  const vlink_req_callback_t req_callback, void* user_data,
+                                                  const vlink_security_config_t* security_cfg);
 
 /**
  * @brief Destroys a Server node and frees all internal resources including the
@@ -676,6 +744,34 @@ VLINK_C_API_EXPORT int vlink_create_getter(const char* url, const vlink_schema_i
                                            void* user_data);
 
 /**
+ * @brief Atomic create + Security install + listen for a Getter node.
+ *
+ * @details
+ * Builds the @c vlink::Security from @p security_cfg @b before the internal
+ * push-mode @c listen() registration completes.  Polling-mode Getters
+ * (@p msg_callback == @c NULL) see the attached @c Security from the very
+ * first @c vlink_get() call.  Security configuration is one-shot at creation;
+ * there is no separate runtime entry point.
+ *
+ * @param url            VLink field URL.  Must not be @c NULL.
+ * @param schema_info    Optional bundled @c ser + @c schema metadata.
+ * @param handle         Output handle.  Must not be @c NULL.
+ * @param msg_callback   Callback for push-mode updates, or @c NULL for poll mode.
+ * @param user_data      Opaque pointer forwarded to @p msg_callback.
+ * @param security_cfg   Security configuration.  Must not be @c NULL and must
+ *                       contain at least one usable cryptographic slot.
+ * @return               @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                       on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
+ *                       allocation failure, @c VLINK_RET_TRANSFER_ERROR if
+ *                       @c listen() fails, or @c VLINK_RET_RUNTIME_ERROR on
+ *                       construction exception.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_getter(const char* url, const vlink_schema_info_t* schema_info,
+                                                  vlink_getter_handle_t* handle,
+                                                  const vlink_msg_callback_t msg_callback, void* user_data,
+                                                  const vlink_security_config_t* security_cfg);
+
+/**
  * @brief Destroys a Getter node and releases all associated resources.
  *
  * @param handle  Getter handle to destroy.  Must not be @c NULL.
@@ -704,6 +800,387 @@ VLINK_C_API_EXPORT int vlink_destroy_getter(vlink_getter_handle_t* handle);
  *                @c VLINK_RET_INVALID_ERROR on bad arguments.
  */
 VLINK_C_API_EXPORT int vlink_get(const vlink_getter_handle_t handle, uint8_t* data, size_t* size);
+
+////////////////////////////////////////////////////////////////
+/// Security
+////////////////////////////////////////////////////////////////
+
+/**
+ * @brief Opaque handle for a standalone @c Security instance.
+ *
+ * @details
+ * Wraps a heap-allocated @c vlink::Security object that performs authenticated
+ * message-level encryption.  Use @c vlink_security_create() to construct it and
+ * @c vlink_security_destroy() to release it.  The same handle can be used for
+ * both @c vlink_security_encrypt() and @c vlink_security_decrypt() as long as
+ * the configuration supplies the matching key material for each direction.
+ */
+typedef struct vlink_security* vlink_security_handle_t;
+
+/**
+ * @brief Optional user-provided encrypt callback for @c vlink_security_config_t.
+ *
+ * @details
+ * When both @c encrypt_callback and @c decrypt_callback are installed the
+ * built-in AEAD path is bypassed entirely.  Implementations must allocate
+ * @c *out via @c malloc (or another allocator compatible with @c free) and
+ * write the byte count into @c *out_size.  The C API frees the buffer via
+ * @c free() after copying its contents into the destination supplied by the
+ * caller of @c vlink_security_encrypt() / @c vlink_security_decrypt().
+ *
+ * @param in        Plaintext input pointer.
+ * @param in_size   Number of bytes in @p in.
+ * @param out       Output parameter receiving a freshly allocated buffer.
+ * @param out_size  Output parameter receiving the byte count of @p out.
+ * @param user      Opaque pointer supplied via @c callback_user_data.
+ * @return          @c 0 on success, non-zero on failure.
+ *
+ * @note On Windows, the buffer returned via @p out is released inside the
+ *       vlink shared library using its own CRT @c free().  The callback
+ *       implementation MUST therefore allocate @p *out with the matching CRT
+ *       (e.g. the @c msvcrt / UCRT @c malloc linked into the vlink DLL).
+ *       Mixing CRTs across DLL boundaries (calling @c malloc in the host
+ *       application and @c free in the vlink DLL or vice versa) leads to
+ *       heap corruption.  When in doubt, build the callback host with the
+ *       same toolchain / runtime as the vlink shared library, or expose your
+ *       own free helper through @c callback_user_data.
+ */
+typedef int (*vlink_security_callback_t)(const uint8_t* in, size_t in_size, uint8_t** out, size_t* out_size,
+                                         void* user);
+
+/**
+ * @brief Configuration aggregate for @c vlink_security_create() and the
+ *        @c vlink_create_secure_*() node creation entry points.
+ *
+ * @details
+ * Each field maps to the field of the same name on @c vlink::Security::Config.
+ * String fields are null-terminated; @c NULL or empty strings disable the
+ * corresponding slot.  @c pbkdf2_salt is provided as a raw byte buffer with
+ * @c pbkdf2_salt_size bytes; pass @c NULL / @c 0 to leave it empty.  Setting
+ * @c pbkdf2_iterations to @c 0 selects the default (200000).
+ *
+ * @par Mode selection
+ * - When both @c encrypt_callback and @c decrypt_callback are non-NULL the
+ *   custom-callback path overrides every other slot.
+ * - When @c public_key_pem / @c private_key_pem are installed the RSA hybrid
+ *   path is used for outbound / inbound messages.
+ * - Otherwise the symmetric path is used with the key derived from @c key or
+ *   @c passphrase + @c pbkdf2_salt.
+ */
+struct vlink_security_config_s {
+  const char* key;                            /**< Raw symmetric seed (SHA-256 truncated), or @c NULL. */
+  const char* passphrase;                     /**< Low-entropy passphrase fed into PBKDF2, or @c NULL. */
+  const uint8_t* pbkdf2_salt;                 /**< PBKDF2 salt (>=16 bytes), or @c NULL. */
+  size_t pbkdf2_salt_size;                    /**< Byte count of @c pbkdf2_salt. */
+  uint32_t pbkdf2_iterations;                 /**< PBKDF2 iteration count; @c 0 means default (200000). */
+  const char* public_key_pem;                 /**< Peer RSA public key (PEM) for outbound encryption, or @c NULL. */
+  const char* private_key_pem;                /**< Local RSA private key (PEM) for inbound decryption, or @c NULL. */
+  const char* signing_key_pem;                /**< Local RSA private key (PEM) for RSA-PSS signing, or @c NULL. */
+  const char* verify_key_pem;                 /**< Peer RSA public key (PEM) for RSA-PSS verification, or @c NULL. */
+  vlink_security_callback_t encrypt_callback; /**< Custom encrypt callback, or @c NULL. */
+  vlink_security_callback_t decrypt_callback; /**< Custom decrypt callback, or @c NULL. */
+  void* callback_user_data;                   /**< Opaque pointer forwarded to both callbacks. */
+};
+
+/**
+ * @brief Zero-initialises @p cfg and applies the default @c pbkdf2_iterations of 200000.
+ *
+ * @details
+ * Convenience initialiser to avoid relying on @c {0} aggregate initialisation in
+ * client code.  After this call every string pointer is @c NULL, the salt buffer
+ * is empty, both callbacks and @c callback_user_data are @c NULL, and
+ * @c pbkdf2_iterations equals the canonical default.  Safe to call on a stack
+ * variable before populating the fields you actually need.
+ *
+ * @par Example
+ * @code
+ * vlink_security_config_t cfg;
+ * vlink_security_config_init(&cfg);
+ * cfg.passphrase = "correct horse battery staple";
+ * cfg.pbkdf2_salt = my_salt_bytes;
+ * cfg.pbkdf2_salt_size = my_salt_size;
+ * @endcode
+ *
+ * @param cfg  Configuration aggregate to initialise.  No-op when @p cfg is @c NULL.
+ */
+VLINK_C_API_EXPORT void vlink_security_config_init(vlink_security_config_t* cfg);
+
+/**
+ * @brief Creates a standalone @c Security instance from @p cfg.
+ *
+ * @details
+ * Allocates a @c vlink::Security on the heap.  When @p cfg is @c NULL, or when
+ * the supplied configuration yields no usable cryptographic slot (every field
+ * was empty or every non-empty field failed validation), the call returns
+ * @c NULL and logs a warning.  Invalid PEM fields or weak RSA keys are logged
+ * via @c VLOG_W and the offending slot is left empty so long as @b some other
+ * slot validated.
+ *
+ * @par Example
+ * @code
+ * vlink_security_config_t cfg = {0};
+ * cfg.passphrase = "correct horse battery staple";
+ * cfg.pbkdf2_salt = my_salt_bytes;
+ * cfg.pbkdf2_salt_size = my_salt_size;
+ *
+ * vlink_security_handle_t sec = vlink_security_create(&cfg);
+ *
+ * uint8_t* cipher = NULL;
+ * size_t cipher_size = 0;
+ * vlink_security_encrypt(sec, plain, plain_size, &cipher, &cipher_size);
+ * vlink_security_free_buffer(cipher);
+ *
+ * vlink_security_destroy(sec);
+ * @endcode
+ *
+ * @param cfg  Configuration aggregate.  Must contain at least one usable slot
+ *             (callback pair, symmetric key/passphrase, or RSA PEM).
+ * @return     New @c vlink_security_handle_t handle, or @c NULL on @c NULL @p cfg,
+ *             on a configuration with no usable cryptographic slot, on allocation
+ *             failure, or on a C++ construction exception.
+ */
+VLINK_C_API_EXPORT vlink_security_handle_t vlink_security_create(const vlink_security_config_t* cfg);
+
+/**
+ * @brief Destroys a standalone @c Security instance.
+ *
+ * @details
+ * Safe to call with @c NULL @p sec (no-op).  Symmetric key material is zeroised
+ * in place inside the @c vlink::Security destructor before the buffer is freed.
+ *
+ * @param sec  Handle returned by @c vlink_security_create().  May be @c NULL.
+ */
+VLINK_C_API_EXPORT void vlink_security_destroy(vlink_security_handle_t sec);
+
+/**
+ * @brief Encrypts a plaintext buffer using the active mode configured on @p sec.
+ *
+ * @details
+ * The ciphertext is written into a freshly allocated buffer that the caller
+ * owns; release it with @c vlink_security_free_buffer().  Empty inputs
+ * (@c in == NULL or @c in_size == 0) are rejected with
+ * @c VLINK_RET_INVALID_ERROR (AEAD cannot authenticate zero bytes).
+ *
+ * @param sec       Security handle.
+ * @param in        Plaintext input bytes.
+ * @param in_size   Number of bytes in @p in.
+ * @param out       Output pointer receiving the allocated ciphertext buffer.
+ *                  Must not be @c NULL.
+ * @param out_size  Output pointer receiving the byte count of the ciphertext.
+ *                  Must not be @c NULL.
+ * @return          @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                  on bad arguments, or @c VLINK_RET_TRANSFER_ERROR if the
+ *                  underlying @c Security::encrypt() call fails.
+ */
+VLINK_C_API_EXPORT int vlink_security_encrypt(vlink_security_handle_t sec, const uint8_t* in, const size_t in_size,
+                                              uint8_t** out, size_t* out_size);
+
+/**
+ * @brief Decrypts a ciphertext buffer using the active mode configured on @p sec.
+ *
+ * @details
+ * The plaintext is written into a freshly allocated buffer that the caller
+ * owns; release it with @c vlink_security_free_buffer().  Empty inputs are
+ * rejected with @c VLINK_RET_INVALID_ERROR (a valid AEAD ciphertext is at
+ * least 28 bytes: 12B nonce + 16B tag).  Authentication failures (tampered
+ * ciphertext, wrong key, invalid signature) are reported as
+ * @c VLINK_RET_TRANSFER_ERROR.
+ *
+ * @param sec       Security handle.
+ * @param in        Ciphertext input bytes.
+ * @param in_size   Number of bytes in @p in.
+ * @param out       Output pointer receiving the allocated plaintext buffer.
+ *                  Must not be @c NULL.
+ * @param out_size  Output pointer receiving the byte count of the plaintext.
+ *                  Must not be @c NULL.
+ * @return          @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                  on bad arguments, or @c VLINK_RET_TRANSFER_ERROR if the
+ *                  underlying @c Security::decrypt() call fails.
+ */
+VLINK_C_API_EXPORT int vlink_security_decrypt(vlink_security_handle_t sec, const uint8_t* in, const size_t in_size,
+                                              uint8_t** out, size_t* out_size);
+
+/**
+ * @brief Releases a buffer returned by @c vlink_security_encrypt() or
+ *        @c vlink_security_decrypt().
+ *
+ * @details
+ * Safe to call with @c NULL @p buf (no-op).  Buffers obtained from any other
+ * source must not be freed with this function.
+ *
+ * @param buf  Buffer pointer previously written by an encrypt/decrypt call.
+ */
+VLINK_C_API_EXPORT void vlink_security_free_buffer(uint8_t* buf);
+
+/**
+ * @brief Atomic create + Security install for a Publisher node.
+ *
+ * @details
+ * Builds the @c vlink::Security from @p security_cfg @b before @c init()
+ * returns, so the encrypt path is wired up the first time @c vlink_publish()
+ * is called.  There is no separate @c enable_security() entry point: security
+ * configuration is one-shot at creation.
+ *
+ * @param url           VLink topic URL.  Must not be @c NULL.
+ * @param schema_info   Optional bundled @c ser + @c schema metadata.
+ * @param handle        Output handle.  Must not be @c NULL.
+ * @param security_cfg  Security configuration.  Must not be @c NULL and must
+ *                      contain at least one usable cryptographic slot.
+ * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                      on bad arguments (including an unconfigured @p security_cfg),
+ *                      @c VLINK_RET_MEMORY_ERROR on pool allocation failure, or
+ *                      @c VLINK_RET_RUNTIME_ERROR on construction exception.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_publisher(const char* url, const vlink_schema_info_t* schema_info,
+                                                     vlink_publisher_handle_t* handle,
+                                                     const vlink_security_config_t* security_cfg);
+
+/**
+ * @brief Atomic create + Security install for a Client node.
+ *
+ * @details
+ * Builds the @c vlink::Security from @p security_cfg @b before @c init()
+ * returns, so outbound requests through @c vlink_invoke() are encrypted from
+ * the very first call and inbound responses are decrypted before the
+ * @c vlink_resp_callback_t fires.
+ *
+ * @param url           VLink service URL.  Must not be @c NULL.
+ * @param schema_info   Optional bundled @c ser + @c schema metadata.
+ * @param handle        Output handle.  Must not be @c NULL.
+ * @param security_cfg  Security configuration.  Must not be @c NULL and must
+ *                      contain at least one usable cryptographic slot.
+ * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                      on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
+ *                      allocation failure, or @c VLINK_RET_RUNTIME_ERROR on
+ *                      construction exception.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_client(const char* url, const vlink_schema_info_t* schema_info,
+                                                  vlink_client_handle_t* handle,
+                                                  const vlink_security_config_t* security_cfg);
+
+/**
+ * @brief Atomic create + Security install for a Setter node.
+ *
+ * @details
+ * Builds the @c vlink::Security from @p security_cfg @b before @c init()
+ * returns, so the encrypt path is wired up the first time @c vlink_set() is
+ * called.  The Setter retains a heap-allocated cache of the latest ciphertext
+ * (owned by the security state object stored in @c handle->reserved[4]) so
+ * late-joining Getters receive the current value.
+ *
+ * @param url           VLink field URL.  Must not be @c NULL.
+ * @param schema_info   Optional bundled @c ser + @c schema metadata.
+ * @param handle        Output handle.  Must not be @c NULL.
+ * @param security_cfg  Security configuration.  Must not be @c NULL and must
+ *                      contain at least one usable cryptographic slot.
+ * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
+ *                      on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
+ *                      allocation failure, or @c VLINK_RET_RUNTIME_ERROR on
+ *                      construction exception.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_setter(const char* url, const vlink_schema_info_t* schema_info,
+                                                  vlink_setter_handle_t* handle,
+                                                  const vlink_security_config_t* security_cfg);
+
+/**
+ * @brief Transport-layer TLS configuration aggregate.
+ *
+ * @details
+ * Mirrors @c vlink::SslOptions; populated by the caller and passed to the
+ * per-handle @c vlink_*_set_ssl_options() setters.  String fields are
+ * null-terminated; @c NULL or empty strings disable the corresponding slot.
+ * @c verify_peer follows C semantics: non-zero enables peer-certificate
+ * verification, @c 0 disables it.  TLS is considered enabled by the transport
+ * backends when at least @c ca_file or @c cert_file is non-empty.
+ *
+ * @note
+ * This is the transport-layer (channel) TLS configuration.  For application-layer
+ * per-message AEAD encryption see @c vlink_security_config_t.
+ */
+typedef struct {
+  int verify_peer;          /**< Non-zero = verify the server certificate (default); @c 0 = skip. */
+  const char* ca_file;      /**< CA certificate file path (PEM), or @c NULL. */
+  const char* cert_file;    /**< Client certificate file path (PEM), or @c NULL. */
+  const char* key_file;     /**< Client private key file path (PEM), or @c NULL. */
+  const char* key_password; /**< Passphrase for the encrypted private key, or @c NULL. */
+  const char* server_name;  /**< SNI server name override, or @c NULL. */
+  const char* ciphers;      /**< Cipher suite string (OpenSSL format), or @c NULL. */
+} vlink_ssl_options_t;
+
+/**
+ * @brief Zero-initialises @p opt and applies the canonical defaults.
+ *
+ * @details
+ * After this call every string pointer is @c NULL and @c verify_peer equals @c 1
+ * (matching @c vlink::SslOptions defaults).  Safe to call on a stack variable
+ * before populating the fields you actually need.
+ *
+ * @par Example
+ * @code
+ * vlink_ssl_options_t opt;
+ * vlink_ssl_options_init(&opt);
+ * opt.ca_file   = "/etc/certs/ca.pem";
+ * opt.cert_file = "/etc/certs/client.pem";
+ * opt.key_file  = "/etc/certs/client-key.pem";
+ * vlink_publisher_set_ssl_options(&pub, &opt);
+ * @endcode
+ *
+ * @param opt  Options aggregate to initialise.  No-op when @p opt is @c NULL.
+ */
+VLINK_C_API_EXPORT void vlink_ssl_options_init(vlink_ssl_options_t* opt);
+
+/**
+ * @brief Applies TLS options to a Publisher handle.
+ *
+ * @details
+ * Forwards @p opt to @c Node::set_ssl_options() on the underlying transport,
+ * which writes the corresponding @c ssl.* property entries and activates TLS
+ * when @c ca_file or @c cert_file is non-empty.  Must be called before
+ * @c vlink_init() for the setting to take effect on the transport handshake.
+ *
+ * @param handle  Publisher handle.  Must not be @c NULL.
+ * @param opt     Options aggregate.  Must not be @c NULL.
+ * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR on
+ *                bad arguments, or @c VLINK_RET_RUNTIME_ERROR on internal failure.
+ */
+VLINK_C_API_EXPORT int vlink_publisher_set_ssl_options(vlink_publisher_handle_t* handle,
+                                                       const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Applies TLS options to a Subscriber handle.
+ *
+ * @copydetails vlink_publisher_set_ssl_options
+ */
+VLINK_C_API_EXPORT int vlink_subscriber_set_ssl_options(vlink_subscriber_handle_t* handle,
+                                                        const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Applies TLS options to a Server handle.
+ *
+ * @copydetails vlink_publisher_set_ssl_options
+ */
+VLINK_C_API_EXPORT int vlink_server_set_ssl_options(vlink_server_handle_t* handle, const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Applies TLS options to a Client handle.
+ *
+ * @copydetails vlink_publisher_set_ssl_options
+ */
+VLINK_C_API_EXPORT int vlink_client_set_ssl_options(vlink_client_handle_t* handle, const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Applies TLS options to a Setter handle.
+ *
+ * @copydetails vlink_publisher_set_ssl_options
+ */
+VLINK_C_API_EXPORT int vlink_setter_set_ssl_options(vlink_setter_handle_t* handle, const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Applies TLS options to a Getter handle.
+ *
+ * @copydetails vlink_publisher_set_ssl_options
+ */
+VLINK_C_API_EXPORT int vlink_getter_set_ssl_options(vlink_getter_handle_t* handle, const vlink_ssl_options_t* opt);
 
 #ifdef __cplusplus
 }

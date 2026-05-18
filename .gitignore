@@ -5,6 +5,8 @@
 /package.json
 /package-lock.json
 
+CMakeFiles
+CMakeCache.txt
 .kate-swp
 .cache
 .idea

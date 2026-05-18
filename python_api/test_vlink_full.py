@@ -797,8 +797,9 @@ def test_ssl_options():
 
 
 def test_security():
-    sec = _vlink.Security()
-    sec.set_key("my_secret_key_16")
+    cfg = _vlink.SecurityConfig()
+    cfg.key = "my_secret_key_16"
+    sec = _vlink.Security(cfg)
     plain = b"Hello VLink Security!"
     encrypted = sec.encrypt(plain)
     assert encrypted is not None
@@ -809,22 +810,23 @@ def test_security():
 
 
 def test_security_set_callbacks():
-    sec = _vlink.Security()
-
     def xor_enc(data):
         return bytes(b ^ 0x5A for b in data)
 
     def xor_dec(data):
         return bytes(b ^ 0x5A for b in data)
 
-    sec.set_callbacks(xor_enc, xor_dec)
+    cfg = _vlink.SecurityConfig()
+    cfg.encrypt_callback = xor_enc
+    cfg.decrypt_callback = xor_dec
+    sec = _vlink.Security(cfg)
 
     plain = b"custom-cipher-roundtrip"
     encrypted = sec.encrypt(plain)
     assert encrypted is not None and encrypted != plain
     decrypted = sec.decrypt(encrypted)
     assert decrypted == plain
-    print("[PASS] Security.set_callbacks")
+    print("[PASS] Security callbacks")
 
 
 def test_server_async_reply():
@@ -979,7 +981,7 @@ def test_api_surface():
         "Logger", "ElapsedTimer", "DeadlineTimer", "MessageLoop", "MultiLoop", "Timer", "WheelTimer",
         "ThreadPool", "SpinLock", "CpuProfiler", "CpuProfilerGuard", "MemoryPool",
         "Process", "UrlRemap",
-        "Qos", "SslOptions", "Security",
+        "Qos", "SslOptions", "Security", "SecurityConfig",
         "Publisher", "Subscriber", "Server", "Client", "Setter", "Getter",
         "SecurityPublisher", "SecuritySubscriber", "SecurityServer", "SecurityClient", "SecuritySetter",
         "SecurityGetter",
@@ -1024,7 +1026,7 @@ def test_api_surface():
         _vlink.SecurityPublisher, _vlink.SecuritySubscriber, _vlink.SecurityServer, _vlink.SecurityClient,
         _vlink.SecuritySetter, _vlink.SecurityGetter,
     ):
-        for method in node_methods + ["set_security_key", "set_security_callbacks"]:
+        for method in node_methods:
             assert hasattr(cls, method), f"{cls.__name__} missing method: {method}"
 
     helper_exports = ["to_int", "to_long", "trim_string", "has_startwith", "has_endwith",
@@ -1100,9 +1102,11 @@ def test_security_node_bindings():
         _vlink.SecurityPublisher, _vlink.SecuritySubscriber, _vlink.SecurityServer, _vlink.SecurityClient,
         _vlink.SecuritySetter, _vlink.SecurityGetter,
     ):
-        node = cls(f"shm://test/security_bindings_{cls.__name__}", auto_init=False)
-        node.set_security_key("python-api-key")
-        node.set_security_callbacks(passthrough, passthrough)
+        cfg = _vlink.SecurityConfig()
+        cfg.key = "python-api-key"
+        cfg.encrypt_callback = passthrough
+        cfg.decrypt_callback = passthrough
+        node = cls(f"shm://test/security_bindings_{cls.__name__}", cfg, auto_init=False)
         assert node.get_transport_type() == _vlink.TransportType.Shm
 
     assert _vlink.SecurityType.WithSecurity is not None

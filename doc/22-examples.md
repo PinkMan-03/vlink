@@ -134,9 +134,10 @@ examples/
 │   ├── qos_basics/
 │   ├── qos_profiles/
 │   └── qos_history_depth/
-├── security/                   # 安全加密（3 个项目）
+├── security/                   # 安全加密（4 个项目）
 │   ├── security_basic/
 │   ├── security_custom/
+│   ├── security_rsa/
 │   └── security_ssl/
 ├── zerocopy/                   # 零拷贝（4 个项目）
 │   ├── zerocopy_loan/
@@ -342,8 +343,9 @@ URL 格式说明和各传输后端的配置指南。
 
 | 项目              | 说明                                              |
 | ----------------- | ------------------------------------------------- |
-| `security_basic`  | 内置 AES-128-CBC 加密（`set_security_key`）       |
-| `security_custom` | 自定义加密回调（`set_security_callbacks`）         |
+| `security_basic`  | 内置 AES-128-GCM 加密（`SecurityPublisher`/`SecuritySubscriber` 构造函数传入 `Security::Config::key`） |
+| `security_custom` | 自定义加密回调（`Config::encrypt_callback` / `decrypt_callback`） |
+| `security_rsa`    | RSA-OAEP hybrid + 可选 RSA-PSS 签名（`Config::public_key_pem` / `signing_key_pem`） |
 | `security_ssl`    | 传输层 SSL/TLS 加密（`set_ssl_options`）          |
 
 ---

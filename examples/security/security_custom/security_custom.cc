@@ -22,9 +22,12 @@
  */
 
 // Security Custom Cipher Example
-// Demonstrates set_security_callbacks() with a custom XOR cipher.
-// Shows the encrypt/decrypt callback signature: bool(const Bytes& in, Bytes& out)
-// When custom callbacks are set, the built-in AES-128-CBC is bypassed entirely.
+// Demonstrates the custom-callback slot of vlink::Security::Config.
+// When both encrypt_callback and decrypt_callback are installed, the built-in
+// AES-128-GCM AEAD path is bypassed entirely and the user-supplied cipher runs
+// for every encrypt() / decrypt() call.
+//
+// Callback signature: bool(const vlink::Bytes& in, vlink::Bytes& out)
 
 #include <vlink/base/logger.h>
 #include <vlink/extension/security.h>
@@ -41,28 +44,28 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 
 int main() {
   // ======== Section 1: Custom XOR Cipher ========
-  // Replace the built-in AES with a custom XOR cipher using set_security_callbacks().
-  // When custom callbacks are installed, the AES implementation is bypassed entirely.
+  // Install custom encrypt/decrypt callbacks through Security::Config.
+  // When both callbacks are set, the built-in AES-128-GCM path is skipped.
   {
-    std::cout << "\n[1] Custom XOR Cipher via set_security_callbacks()" << std::endl;
+    std::cout << "\n[1] Custom XOR Cipher via Security::Config callbacks" << std::endl;
 
     std::atomic<int> received{0};
 
-    vlink::SecuritySubscriber<std::string> sub("dds://security_custom/xor");
-    // Install custom decrypt callback
-    // Signature: void set_security_callbacks(
-    //     Security::Callback&& encrypt_callback,
-    //     Security::Callback&& decrypt_callback)
-    // where Security::Callback = vlink::MoveFunction<bool(const Bytes& in, Bytes& out)>
-    sub.set_security_callbacks(xor_cipher::encrypt, xor_cipher::decrypt);
+    vlink::Security::Config sub_cfg;
+    sub_cfg.encrypt_callback = xor_cipher::encrypt;
+    sub_cfg.decrypt_callback = xor_cipher::decrypt;
+
+    vlink::SecuritySubscriber<std::string> sub("dds://security_custom/xor", sub_cfg);
     sub.listen([&received](const std::string& msg) {
       received++;
       VLOG_I("[XOR] Received:", msg);
     });
 
-    vlink::SecurityPublisher<std::string> pub("dds://security_custom/xor");
-    // Install custom encrypt callback - must match the subscriber's decrypt
-    pub.set_security_callbacks(xor_cipher::encrypt, xor_cipher::decrypt);
+    vlink::Security::Config pub_cfg;
+    pub_cfg.encrypt_callback = xor_cipher::encrypt;
+    pub_cfg.decrypt_callback = xor_cipher::decrypt;
+
+    vlink::SecurityPublisher<std::string> pub("dds://security_custom/xor", pub_cfg);
 
     pub.wait_for_subscribers();
 
@@ -74,15 +77,13 @@ int main() {
   }
 
   // ======== Section 2: Lambda-based Callbacks ========
-  // Callbacks can be lambdas, capturing external state if needed.
+  // Callbacks may be lambdas, capturing external state if needed.
   {
     std::cout << "\n[2] Lambda-based Custom Cipher" << std::endl;
 
-    // A simple ROT-N cipher using lambda captures
     const uint8_t rotation = 13;
 
     auto rot_encrypt = [rotation](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
-      (void)rotation;
       if (in.empty()) return true;
       out = vlink::Bytes::create(in.size());
       for (size_t i = 0; i < in.size(); ++i) {
@@ -92,7 +93,6 @@ int main() {
     };
 
     auto rot_decrypt = [rotation](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
-      (void)rotation;
       if (in.empty()) return true;
       out = vlink::Bytes::create(in.size());
       for (size_t i = 0; i < in.size(); ++i) {
@@ -103,17 +103,21 @@ int main() {
 
     std::atomic<int> received{0};
 
-    vlink::SecuritySubscriber<std::string> sub("dds://security_custom/lambda");
-    sub.set_security_callbacks(rot_encrypt,   // encrypt callback (not used by subscriber, but required)
-                               rot_decrypt);  // decrypt callback
+    vlink::Security::Config sub_cfg;
+    sub_cfg.encrypt_callback = rot_encrypt;
+    sub_cfg.decrypt_callback = rot_decrypt;
+
+    vlink::SecuritySubscriber<std::string> sub("dds://security_custom/lambda", sub_cfg);
     sub.listen([&received](const std::string& msg) {
       received++;
       VLOG_I("[ROT-N] Received:", msg);
     });
 
-    vlink::SecurityPublisher<std::string> pub("dds://security_custom/lambda");
-    pub.set_security_callbacks(rot_encrypt,   // encrypt callback
-                               rot_decrypt);  // decrypt callback (not used by publisher, but required)
+    vlink::Security::Config pub_cfg;
+    pub_cfg.encrypt_callback = rot_encrypt;
+    pub_cfg.decrypt_callback = rot_decrypt;
+
+    vlink::SecurityPublisher<std::string> pub("dds://security_custom/lambda", pub_cfg);
 
     pub.wait_for_subscribers();
 
@@ -124,31 +128,26 @@ int main() {
   }
 
   // ======== Section 3: Direct Security Class Usage ========
-  // The Security class can also be used directly for encrypt/decrypt operations,
-  // independent of the pub/sub framework.
+  // The Security class can be used standalone, independent of the pub/sub
+  // framework.  Configuration is one-shot at construction time; to change
+  // settings construct a fresh Security instance.
   {
     std::cout << "\n[3] Direct Security Class Usage" << std::endl;
 
-    vlink::Security security;
+    vlink::Security::Config sec_cfg;
+    sec_cfg.encrypt_callback = xor_cipher::encrypt;
+    sec_cfg.decrypt_callback = xor_cipher::decrypt;
+    vlink::Security security(sec_cfg);
 
-    // Set a custom key
-    security.set_key("direct-test-16b!");  // AES-128 needs exactly 16 bytes
-
-    // Set custom callbacks (overrides AES)
-    security.set_callbacks(xor_cipher::encrypt, xor_cipher::decrypt);
-
-    // Encrypt some data
     vlink::Bytes plaintext = vlink::Bytes::from_string("Hello, Security!");
     vlink::Bytes ciphertext;
     bool enc_ok = security.encrypt(plaintext, ciphertext);
     VLOG_I("Encrypt success:", enc_ok, "plaintext_size:", plaintext.size(), "cipher_size:", ciphertext.size());
 
-    // Decrypt the ciphertext
     vlink::Bytes recovered;
     bool dec_ok = security.decrypt(ciphertext, recovered);
     VLOG_I("Decrypt success:", dec_ok, "recovered:", recovered.to_string());
 
-    // Verify roundtrip
     if (plaintext == recovered) {
       VLOG_I("Roundtrip verification: PASS");
     } else {
@@ -159,7 +158,7 @@ int main() {
   // ======== Section 4: Callback Signature Reference ========
   {
     std::cout << "\n[4] Callback Signature Reference" << std::endl;
-    std::cout << "   Security::Callback = vlink::MoveFunction<bool(const Bytes& in, Bytes& out)>" << std::endl;
+    std::cout << "   Security::Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>" << std::endl;
     std::cout << std::endl;
     std::cout << "   Encrypt callback:" << std::endl;
     std::cout << "     Input:  'in'  = plaintext bytes from the serialized message" << std::endl;
@@ -171,13 +170,16 @@ int main() {
     std::cout << "     Output: 'out' = plaintext bytes to be deserialized into MsgT" << std::endl;
     std::cout << "     Return: true on success, false on decryption failure" << std::endl;
     std::cout << std::endl;
-    std::cout << "   API:" << std::endl;
-    std::cout << "     node.set_security_callbacks(encrypt_cb, decrypt_cb);" << std::endl;
-    std::cout << "     // or on Security class directly:" << std::endl;
-    std::cout << "     security.set_callbacks(encrypt_cb, decrypt_cb);" << std::endl;
+    std::cout << "   Configuration:" << std::endl;
+    std::cout << "     vlink::Security::Config cfg;" << std::endl;
+    std::cout << "     cfg.encrypt_callback = my_encrypt;" << std::endl;
+    std::cout << "     cfg.decrypt_callback = my_decrypt;" << std::endl;
+    std::cout << "     SecurityPublisher pub(url, cfg);    // cfg passed via ctor (no runtime setter)" << std::endl;
+    std::cout << "     // or standalone:" << std::endl;
+    std::cout << "     vlink::Security security(cfg);" << std::endl;
     std::cout << std::endl;
-    std::cout << "   When callbacks are set, built-in AES-128-CBC is bypassed entirely." << std::endl;
-    std::cout << "   Set callbacks to nullptr to fall back to built-in AES." << std::endl;
+    std::cout << "   When both callbacks are set, the built-in AES-128-GCM path is bypassed." << std::endl;
+    std::cout << "   Security::Config is one-shot at construction; rebuild to change settings." << std::endl;
   }
 
   VLOG_I("Security custom cipher example complete.");

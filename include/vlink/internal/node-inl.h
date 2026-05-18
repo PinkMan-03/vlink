@@ -179,24 +179,6 @@ inline const std::string& Node<ImplT, SecT>::get_url() const {
 }
 
 template <typename ImplT, SecurityType SecT>
-inline void Node<ImplT, SecT>::set_security_key(const std::string& key) {
-  static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.");
-
-  if VUNLIKELY (impl_->transport_type == TransportType::kIntra ||
-                (impl_->transport_type == TransportType::kDds && impl_->is_cdr_type)) {
-    VLOG_F("Node: Intra or Dds(cdr) type does not support security.");
-    return;
-  }
-
-  if VUNLIKELY (!security_) {
-    VLOG_F("Node::set_security_key() requires enable_security() first.");
-    return;
-  }
-
-  security_->set_key(key);
-}
-
-template <typename ImplT, SecurityType SecT>
 inline void Node<ImplT, SecT>::set_record_path(const std::string& path) {
   if VUNLIKELY (impl_->transport_type == TransportType::kIntra ||
                 (impl_->transport_type == TransportType::kDds && impl_->is_cdr_type)) {
@@ -205,19 +187,6 @@ inline void Node<ImplT, SecT>::set_record_path(const std::string& path) {
   }
 
   impl_->set_record_path(path);
-}
-
-template <typename ImplT, SecurityType SecT>
-inline void Node<ImplT, SecT>::set_security_callbacks(Security::Callback&& encrypt_callback,
-                                                      Security::Callback&& decrypt_callback) {
-  static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.");
-
-  if VUNLIKELY (!security_) {
-    VLOG_F("Node::set_security_callbacks() requires enable_security() first.");
-    return;
-  }
-
-  security_->set_callbacks(std::move(encrypt_callback), std::move(decrypt_callback));
 }
 
 template <typename ImplT, SecurityType SecT>
@@ -341,16 +310,39 @@ inline Node<ImplT, SecT>::~Node() {
 }
 
 template <typename ImplT, SecurityType SecT>
-inline void Node<ImplT, SecT>::enable_security() {
+inline bool Node<ImplT, SecT>::enable_security(const Security::Config& cfg) {
   static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.");
+
+  if VUNLIKELY (!impl_) {
+    return false;
+  }
 
   if VUNLIKELY (impl_->transport_type == TransportType::kIntra ||
                 (impl_->transport_type == TransportType::kDds && impl_->is_cdr_type)) {
-    VLOG_F("Node: Intra or Dds(cdr) type does not support security.");
-    return;
+    VLOG_W("Node: Intra or Dds(cdr) type does not support security; Security::Config ignored.");
+    return false;
   }
 
-  security_.emplace();
+  if VUNLIKELY (has_inited_) {
+    VLOG_W(
+        "Node::enable_security() must run before init(); callback paths read security_ without a lock and replacing "
+        "it under live traffic would race.  This call is rejected.");
+    return false;
+  }
+
+  std::optional<Security> candidate;
+  candidate.emplace(cfg);
+
+  if VUNLIKELY (!candidate->is_configured()) {
+    VLOG_W(
+        "Node::enable_security(): Security::Config has no usable cryptographic slot; encrypt/decrypt would fail.  "
+        "Existing security configuration (if any) is preserved.");
+    return false;
+  }
+
+  security_ = std::move(candidate);
+
+  return true;
 }
 
 template <typename ImplT, SecurityType SecT>

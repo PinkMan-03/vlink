@@ -21,8 +21,6 @@
  * limitations under the License.
  */
 
-// NOLINTBEGIN
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,8 +38,6 @@ void custom_sleep(int ms) {
   usleep(ms * 1000);
 #endif
 }
-
-int test_schema_type_mapping(void);
 
 // event
 
@@ -249,6 +245,297 @@ int test_schema_info_validation(void) {
   return ret;
 }
 
+int test_security_standalone(void) {
+  printf("test_security_standalone...\n");
+  fflush(stdout);
+
+  int ret = 0;
+
+  vlink_security_config_t cfg;
+  vlink_security_config_init(&cfg);
+  cfg.key = "test_key";
+
+  vlink_security_handle_t sender = vlink_security_create(&cfg);
+  if (!sender) {
+    printf("FAIL: vlink_security_create sender returned NULL\n");
+    return 1;
+  }
+
+  vlink_security_handle_t receiver = vlink_security_create(&cfg);
+  if (!receiver) {
+    printf("FAIL: vlink_security_create receiver returned NULL\n");
+    vlink_security_destroy(sender);
+    return 1;
+  }
+
+  const char* plain = "hello vlink security";
+  size_t plain_size = strlen(plain);
+
+  uint8_t* cipher = NULL;
+  size_t cipher_size = 0;
+  int rc = vlink_security_encrypt(sender, (const uint8_t*)plain, plain_size, &cipher, &cipher_size);
+  if (rc != VLINK_RET_NO_ERROR || cipher == NULL || cipher_size == 0) {
+    printf("FAIL: vlink_security_encrypt rc=%d cipher=%p size=%zu\n", rc, (void*)cipher, cipher_size);
+    vlink_security_free_buffer(cipher);
+    vlink_security_destroy(sender);
+    vlink_security_destroy(receiver);
+    return 1;
+  }
+
+  uint8_t* recovered = NULL;
+  size_t recovered_size = 0;
+  rc = vlink_security_decrypt(receiver, cipher, cipher_size, &recovered, &recovered_size);
+  if (rc != VLINK_RET_NO_ERROR || recovered == NULL || recovered_size != plain_size ||
+      memcmp(recovered, plain, plain_size) != 0) {
+    printf("FAIL: vlink_security_decrypt rc=%d size=%zu (expected %zu)\n", rc, recovered_size, plain_size);
+    ret = 1;
+  } else {
+    printf("PASS: encrypt/decrypt round-trip\n");
+  }
+
+  vlink_security_free_buffer(cipher);
+  vlink_security_free_buffer(recovered);
+
+  uint8_t* tmp = NULL;
+  size_t tmp_size = 0;
+  rc = vlink_security_encrypt(NULL, (const uint8_t*)plain, plain_size, &tmp, &tmp_size);
+  if (rc != VLINK_RET_INVALID_ERROR) {
+    printf("FAIL: encrypt(NULL handle) rc=%d expected INVALID\n", rc);
+    ret = 1;
+  } else {
+    printf("PASS: encrypt rejects null handle\n");
+  }
+
+  rc = vlink_security_encrypt(sender, (const uint8_t*)plain, plain_size, NULL, &tmp_size);
+  if (rc != VLINK_RET_INVALID_ERROR) {
+    printf("FAIL: encrypt(NULL out) rc=%d expected INVALID\n", rc);
+    ret = 1;
+  } else {
+    printf("PASS: encrypt rejects null out\n");
+  }
+
+  vlink_security_config_t bad_cfg;
+  vlink_security_config_init(&bad_cfg);
+  bad_cfg.key = "wrong_key";
+  vlink_security_handle_t bad_receiver = vlink_security_create(&bad_cfg);
+  if (!bad_receiver) {
+    printf("FAIL: vlink_security_create bad_receiver returned NULL\n");
+    ret = 1;
+  } else {
+    uint8_t* cipher2 = NULL;
+    size_t cipher2_size = 0;
+    rc = vlink_security_encrypt(sender, (const uint8_t*)plain, plain_size, &cipher2, &cipher2_size);
+    if (rc == VLINK_RET_NO_ERROR && cipher2 != NULL) {
+      uint8_t* bad_plain = NULL;
+      size_t bad_plain_size = 0;
+      rc = vlink_security_decrypt(bad_receiver, cipher2, cipher2_size, &bad_plain, &bad_plain_size);
+      if (rc == VLINK_RET_NO_ERROR && bad_plain != NULL && bad_plain_size == plain_size &&
+          memcmp(bad_plain, plain, plain_size) == 0) {
+        printf("FAIL: decrypt with wrong key recovered the plaintext\n");
+        ret = 1;
+      } else {
+        printf("PASS: decrypt with wrong key fails\n");
+      }
+      vlink_security_free_buffer(bad_plain);
+    }
+    vlink_security_free_buffer(cipher2);
+    vlink_security_destroy(bad_receiver);
+  }
+
+  vlink_security_destroy(sender);
+  vlink_security_destroy(receiver);
+
+  return ret;
+}
+
+int test_security_passphrase(void) {
+  printf("test_security_passphrase...\n");
+  fflush(stdout);
+
+  int ret = 0;
+
+  uint8_t salt[32];
+  for (size_t i = 0; i < sizeof(salt); ++i) {
+    salt[i] = (uint8_t)(i * 7u + 3u);
+  }
+
+  vlink_security_config_t cfg;
+  vlink_security_config_init(&cfg);
+  cfg.passphrase = "correct horse battery staple";
+  cfg.pbkdf2_salt = salt;
+  cfg.pbkdf2_salt_size = sizeof(salt);
+  cfg.pbkdf2_iterations = 1000;
+
+  vlink_security_handle_t sender = vlink_security_create(&cfg);
+  vlink_security_handle_t receiver = vlink_security_create(&cfg);
+  if (!sender || !receiver) {
+    printf("FAIL: passphrase security_create returned NULL\n");
+    vlink_security_destroy(sender);
+    vlink_security_destroy(receiver);
+    return 1;
+  }
+
+  const char* plain = "passphrase round trip payload";
+  size_t plain_size = strlen(plain);
+
+  uint8_t* cipher = NULL;
+  size_t cipher_size = 0;
+  int rc = vlink_security_encrypt(sender, (const uint8_t*)plain, plain_size, &cipher, &cipher_size);
+  if (rc != VLINK_RET_NO_ERROR || cipher == NULL) {
+    printf("FAIL: passphrase encrypt rc=%d\n", rc);
+    vlink_security_free_buffer(cipher);
+    vlink_security_destroy(sender);
+    vlink_security_destroy(receiver);
+    return 1;
+  }
+
+  uint8_t* recovered = NULL;
+  size_t recovered_size = 0;
+  rc = vlink_security_decrypt(receiver, cipher, cipher_size, &recovered, &recovered_size);
+  if (rc != VLINK_RET_NO_ERROR || recovered_size != plain_size || memcmp(recovered, plain, plain_size) != 0) {
+    printf("FAIL: passphrase decrypt rc=%d size=%zu\n", rc, recovered_size);
+    ret = 1;
+  } else {
+    printf("PASS: passphrase round-trip\n");
+  }
+
+  vlink_security_free_buffer(cipher);
+  vlink_security_free_buffer(recovered);
+  vlink_security_destroy(sender);
+  vlink_security_destroy(receiver);
+
+  uint8_t short_salt[8];
+  for (size_t i = 0; i < sizeof(short_salt); ++i) {
+    short_salt[i] = (uint8_t)i;
+  }
+
+  vlink_security_config_t bad_cfg;
+  vlink_security_config_init(&bad_cfg);
+  bad_cfg.passphrase = "any";
+  bad_cfg.pbkdf2_salt = short_salt;
+  bad_cfg.pbkdf2_salt_size = sizeof(short_salt);
+  bad_cfg.pbkdf2_iterations = 1000;
+
+  vlink_security_handle_t bad = vlink_security_create(&bad_cfg);
+  uint8_t* bad_cipher = NULL;
+  size_t bad_cipher_size = 0;
+  rc = vlink_security_encrypt(bad, (const uint8_t*)plain, plain_size, &bad_cipher, &bad_cipher_size);
+  if (rc == VLINK_RET_NO_ERROR && bad_cipher != NULL && bad_cipher_size > 0) {
+    printf("FAIL: short salt was accepted (encrypt succeeded)\n");
+    ret = 1;
+  } else {
+    printf("PASS: short salt is rejected\n");
+  }
+  vlink_security_free_buffer(bad_cipher);
+  vlink_security_destroy(bad);
+
+  return ret;
+}
+
+void on_secure_sub_msg(const uint8_t* data, const size_t size, void* user_data) {
+  if (!data || size == 0) {
+    return;
+  }
+  const char* expected = "secure_event";
+  if (size == strlen(expected) && memcmp(data, expected, size) == 0) {
+    *(int*)user_data = 0;
+  }
+}
+
+int test_security_callback_pubsub(void) {
+  printf("test_security_callback_pubsub...\n");
+  fflush(stdout);
+
+  int ret = 0;
+  int got = 1;
+  const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
+
+  vlink_security_config_t cfg;
+  vlink_security_config_init(&cfg);
+  cfg.key = "shared_pubsub_key";
+
+  vlink_subscriber_handle_t sub_handle = {0};
+  int rc =
+      vlink_create_secure_subscriber("dds://c_interface/secure_event", &schema, &sub_handle, on_secure_sub_msg, &got, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create_secure_subscriber rc=%d\n", rc);
+    return 1;
+  }
+
+  vlink_publisher_handle_t pub_handle = {0};
+  rc = vlink_create_secure_publisher("dds://c_interface/secure_event", &schema, &pub_handle, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create_secure_publisher rc=%d\n", rc);
+    vlink_destroy_subscriber(&sub_handle);
+    return 1;
+  }
+
+  vlink_wait_for_subscribers(pub_handle, 5000);
+
+  const char* msg = "secure_event";
+  rc = vlink_publish(pub_handle, (const uint8_t*)msg, strlen(msg));
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: publish rc=%d\n", rc);
+    ret = 1;
+  }
+
+  for (int i = 0; i < 50 && got != 0; ++i) {
+    custom_sleep(100);
+  }
+
+  if (got != 0) {
+    printf("FAIL: encrypted message did not arrive at subscriber callback\n");
+    ret = 1;
+  } else {
+    printf("PASS: encrypted pub/sub round-trip\n");
+  }
+
+  vlink_destroy_publisher(&pub_handle);
+  vlink_destroy_subscriber(&sub_handle);
+
+  return ret;
+}
+
+int test_ssl_options_init(void) {
+  printf("test_ssl_options_init...\n");
+  fflush(stdout);
+
+  int ret = 0;
+
+  vlink_ssl_options_t opt;
+  memset(&opt, 0xAB, sizeof(opt));
+  vlink_ssl_options_init(&opt);
+
+  if (opt.verify_peer != 1) {
+    printf("FAIL: verify_peer=%d expected 1\n", opt.verify_peer);
+    ret = 1;
+  } else {
+    printf("PASS: verify_peer default is 1\n");
+  }
+
+  if (opt.ca_file != NULL) {
+    printf("FAIL: ca_file not NULL\n");
+    ret = 1;
+  } else {
+    printf("PASS: ca_file is NULL\n");
+  }
+
+  if (opt.cert_file != NULL || opt.key_file != NULL || opt.key_password != NULL || opt.server_name != NULL ||
+      opt.ciphers != NULL) {
+    printf("FAIL: one or more string fields not NULL\n");
+    ret = 1;
+  } else {
+    printf("PASS: all string fields are NULL\n");
+  }
+
+  vlink_ssl_options_init(NULL);
+  printf("PASS: vlink_ssl_options_init(NULL) is a no-op\n");
+
+  return ret;
+}
+
+int test_schema_type_mapping(void);
+
 int main(int argc, char* argv[]) {
   (void)argc;
   (void)argv;
@@ -265,7 +552,12 @@ int main(int argc, char* argv[]) {
 
   ret += test_schema_type_mapping();
 
+#ifdef VLINK_ENABLE_SECURITY
+  ret += test_security_standalone();
+  ret += test_security_passphrase();
+  ret += test_security_callback_pubsub();
+  ret += test_ssl_options_init();
+#endif
+
   return ret;
 }
-
-// NOLINTEND

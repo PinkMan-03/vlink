@@ -4,7 +4,7 @@
 
 本示例演示通过 `SslOptions` 配置**传输层** TLS 加密——区别于 `SecurityPublisher` / `SecuritySubscriber` 的应用层 AES：
 
-- 应用层(`set_security_key`)：消息 payload 端到端加密；适用 `shm://` / `shm2://` / `zenoh://` / `mqtt://` / `fdbus://`，**不**支持 `intra://` 与 `dds://`+CDR。
+- 应用层（在 `SecurityXxx` 构造时传入 `Security::Config`）：消息 payload 端到端加密；适用 `shm://` / `shm2://` / `zenoh://` / `mqtt://` / `fdbus://`，**不**支持 `intra://` 与 `dds://`+CDR。
 - 传输层(`SslOptions`)：让 transport 自身（如 MQTT、DDS-Security）使用 TLS，进行链路加密 + 节点身份认证。
 
 示例覆盖：

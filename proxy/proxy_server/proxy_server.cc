@@ -321,22 +321,24 @@ void ProxyServer::init_server() {
     }
   }
 
+  Security::Config sec_cfg;
+
+  if (!impl_->config.security_key.empty()) {
+    sec_cfg.key = impl_->config.security_key;
+  }
+
   impl_->time_pub = std::make_shared<TimePub>(impl_->config.dds_impl + VLINK_PROXY_TIME_URL_CTX + domain_id_str,
-                                              InitType::kWithoutInit);
+                                              sec_cfg, InitType::kWithoutInit);
   impl_->info_pub = std::make_shared<InfoPub>(impl_->config.dds_impl + VLINK_PROXY_INFOLIST_URL_CTX + domain_id_str,
-                                              InitType::kWithoutInit);
+                                              sec_cfg, InitType::kWithoutInit);
   impl_->control_sub = std::make_shared<ControlSub>(
-      impl_->config.dds_impl + VLINK_PROXY_CONTROL_URL_CTX + domain_id_str, InitType::kWithoutInit);
+      impl_->config.dds_impl + VLINK_PROXY_CONTROL_URL_CTX + domain_id_str, sec_cfg, InitType::kWithoutInit);
 
   impl_->data_pub->set_discovery_enabled(false);
   impl_->data_sub->set_discovery_enabled(false);
   impl_->time_pub->set_discovery_enabled(false);
   impl_->info_pub->set_discovery_enabled(false);
   impl_->control_sub->set_discovery_enabled(false);
-
-  impl_->info_pub->set_security_key(impl_->config.security_key);
-  impl_->control_sub->set_security_key(impl_->config.security_key);
-  impl_->time_pub->set_security_key(impl_->config.security_key);
 
   if (!impl_->config.bind_ip.empty()) {
     impl_->data_pub->set_property("dds.ip", impl_->config.bind_ip);

@@ -35,6 +35,7 @@
 
 namespace vlink {
 
+// Getter<ValueT>
 template <typename ValueT, SecurityType SecT>
 inline typename Getter<ValueT, SecT>::UniquePtr Getter<ValueT, SecT>::create_unique(const std::string& url_str,
                                                                                     InitType type) {
@@ -75,7 +76,6 @@ inline Getter<ValueT, SecT>::Getter(const ConfT& conf, InitType type) {
 
   if constexpr (SecT == SecurityType::kWithSecurity) {
     this->impl_->is_security_type = true;
-    this->enable_security();
   }
 
   if (type == InitType::kWithInit) {
@@ -282,6 +282,43 @@ inline void Getter<ValueT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callback)
       this->invoke_callback(callback, data);
     }
   });
+}
+
+// SecurityGetter<ValueT>
+template <typename ValueT>
+inline typename SecurityGetter<ValueT>::UniquePtr SecurityGetter<ValueT>::create_unique(const std::string& url_str,
+                                                                                        const Security::Config& sec_cfg,
+                                                                                        InitType type) {
+  return std::make_unique<SecurityGetter<ValueT>>(url_str, sec_cfg, type);
+}
+
+template <typename ValueT>
+inline typename SecurityGetter<ValueT>::SharedPtr SecurityGetter<ValueT>::create_shared(const std::string& url_str,
+                                                                                        const Security::Config& sec_cfg,
+                                                                                        InitType type) {
+  return std::make_shared<SecurityGetter<ValueT>>(url_str, sec_cfg, type);
+}
+
+template <typename ValueT>
+template <typename ConfT, typename>
+inline SecurityGetter<ValueT>::SecurityGetter(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+    : Getter<ValueT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
+}
+
+template <typename ValueT>
+inline SecurityGetter<ValueT>::SecurityGetter(const std::string& url_str, const Security::Config& sec_cfg,
+                                              InitType type)
+    : Getter<ValueT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
 }
 
 }  // namespace vlink

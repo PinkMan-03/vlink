@@ -129,7 +129,7 @@ Publisher<Imu> pub("zenoh://sensor/imu");    // Zenoh 云边
 | `fdbus://`  | 同机          | 否     | fdbus              | 是       | 否       | 支持       | Beta |
 | `qnx://`    | 同机（QNX）   | 否     | QNX SDK            | 是       | 否       | 支持       | Beta |
 
-> 消息级加密说明：`intra://` 不经过序列化管道，`dds://` 与 CDR 类型组合绕过 VLink Bytes 路径，这两种组合调用 `set_security_key()` / `set_security_callbacks()` 只会打 fatal log 不会生效。详见 [09-security.md](09-security.md)。
+> 消息级加密说明：`intra://` 不经过序列化管道，`dds://` 与 CDR 类型组合绕过 VLink Bytes 路径，这两种组合下 `SecurityXxx` 构造时会打 warning 并忽略 `Security::Config`，`security_` 保持空，发送 / 接收路径直接 drop 消息。详见 [09-security.md](09-security.md)。
 
 **通信模型支持矩阵：**
 

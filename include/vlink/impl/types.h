@@ -141,9 +141,12 @@ enum class InitType : uint8_t {
  * @details
  * Selects the security variant at compile time via the template parameter
  * of @c Publisher<T, SecurityType>, @c Subscriber<T, SecurityType>, etc.
- * @c kWithSecurity enables AES-128-CBC encryption on the serialised message
- * payload.  Supported on all transports except @c intra:// and @c dds://
- * with CDR serialisation, which trigger a fatal log if security is enabled.
+ * @c kWithSecurity enables authenticated AES-128-GCM encryption (with optional
+ * RSA-OAEP hybrid key wrap and RSA-PSS signature) on the serialised message
+ * payload.  Supported on all transports except @c intra:// and @c dds:// with
+ * CDR serialisation; on those, the @c Security::Config passed to the
+ * @c SecurityXxx constructor is ignored with a warning and the node continues
+ * in plaintext mode.
  */
 enum class SecurityType : uint8_t {
   kWithoutSecurity = 0,  ///< Plain (unauthenticated) transport.

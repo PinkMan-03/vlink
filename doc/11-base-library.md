@@ -3013,8 +3013,8 @@ worker.join();
 
 #### 适用场景
 
-`vlink::ConditionVariable` 是 `std::condition_variable` 的就地替换，针对老版本
-GCC / 部分 libc 上 `std::condition_variable` 内部使用 `CLOCK_REALTIME` 进行
+`vlink::ConditionVariable` 是 `std::condition_variable` 的就地替换，规避某些
+GCC / libc 实现下 `std::condition_variable` 内部使用 `CLOCK_REALTIME` 进行
 `wait_for / wait_until` 而引发的两类问题：
 
 - 系统时钟被 NTP 调整、用户改时区/时间，导致提前唤醒或永久等不到。

@@ -63,7 +63,7 @@ A minimalist API (3–5 lines to get communication going), zero-cost transport s
 | Documentation                                    | Content                                |
 | ------------------------------------------------ | -------------------------------------- |
 | [Node Base](doc/02-node-lifecycle.md)            | Node base template shared interface & lifecycle (init/deinit/interrupt) |
-| [Security](doc/09-security.md)                   | AES-128-CBC & custom encryption callbacks |
+| [Security](doc/09-security.md)                   | AES-128-GCM AEAD, RSA hybrid handshake & custom encryption callbacks |
 
 ### Part VI — Extension & Contribution
 

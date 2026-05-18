@@ -35,6 +35,7 @@
 
 namespace vlink {
 
+// Publisher<MsgT>
 template <typename MsgT, SecurityType SecT>
 inline typename Publisher<MsgT, SecT>::UniquePtr Publisher<MsgT, SecT>::create_unique(const std::string& url_str,
                                                                                       InitType type) {
@@ -75,7 +76,6 @@ inline Publisher<MsgT, SecT>::Publisher(const ConfT& conf, InitType type) {
 
   if constexpr (SecT == SecurityType::kWithSecurity) {
     this->impl_->is_security_type = true;
-    this->enable_security();
   }
 
   if (type == InitType::kWithInit) {
@@ -213,6 +213,41 @@ inline bool Publisher<MsgT, SecT>::write_bytes(const Bytes& data) {
 template <typename MsgT, SecurityType SecT>
 inline bool Publisher<MsgT, SecT>::write_intra(const IntraData& intra_data) {
   return this->impl_->write(intra_data);
+}
+
+// SecurityPublisher<MsgT>
+template <typename MsgT>
+inline typename SecurityPublisher<MsgT>::UniquePtr SecurityPublisher<MsgT>::create_unique(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_unique<SecurityPublisher<MsgT>>(url_str, sec_cfg, type);
+}
+
+template <typename MsgT>
+inline typename SecurityPublisher<MsgT>::SharedPtr SecurityPublisher<MsgT>::create_shared(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_shared<SecurityPublisher<MsgT>>(url_str, sec_cfg, type);
+}
+
+template <typename MsgT>
+template <typename ConfT, typename>
+inline SecurityPublisher<MsgT>::SecurityPublisher(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+    : Publisher<MsgT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
+}
+
+template <typename MsgT>
+inline SecurityPublisher<MsgT>::SecurityPublisher(const std::string& url_str, const Security::Config& sec_cfg,
+                                                  InitType type)
+    : Publisher<MsgT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
 }
 
 }  // namespace vlink

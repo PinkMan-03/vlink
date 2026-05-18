@@ -5,7 +5,7 @@
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
-        <mxCell id="title" value="Security Encryption Pipeline  -  AES-128-CBC + PKCS7" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
+        <mxCell id="title" value="Security Encryption Pipeline  -  AES-128-GCM AEAD" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="30" y="22" width="1120" height="34" as="geometry" />
         </mxCell>
         <mxCell id="subtitle" value="Plaintext is encrypted before transport; decrypted on delivery using the same shared key" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
@@ -28,10 +28,10 @@
         <mxCell id="pSer" value="Serialize&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;to Bytes&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#b71c1c;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="270" y="180" width="160" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="pPad" value="PKCS7 pad&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;16-byte block align&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#b71c1c;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="pPad" value="Nonce&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;12 B random per msg&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#b71c1c;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="470" y="180" width="170" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="pEnc" value="Encrypt&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;AES-128-CBC&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d32f2f;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=13;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="pEnc" value="Encrypt + Tag&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;AES-128-GCM&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d32f2f;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=13;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="680" y="180" width="170" height="70" as="geometry" />
         </mxCell>
         <mxCell id="pTx" value="Transport&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;dds / shm / zenoh&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
@@ -71,10 +71,10 @@
         <mxCell id="sRx" value="Transport&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;receive ciphertext&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="890" y="440" width="180" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="sDec" value="Decrypt&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;AES-128-CBC&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#1b5e20;strokeWidth=1.5;fontSize=13;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="sDec" value="Verify + Decrypt&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;AES-128-GCM&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#1b5e20;strokeWidth=1.5;fontSize=13;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="680" y="440" width="170" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="sUnpad" value="PKCS7 unpad&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;strip padding bytes&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#1b5e20;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="sUnpad" value="GCM tag check&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;reject if mismatch&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#1b5e20;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="470" y="440" width="170" height="70" as="geometry" />
         </mxCell>
         <mxCell id="sDeser" value="Deserialize&lt;br&gt;&lt;span style=&quot;font-size:10px&quot;&gt;from Bytes&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#1b5e20;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
@@ -97,7 +97,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="note1" value="set_security_key(key)   -   built-in demo key/IV (16 bytes each); replace in production" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#bdbdbd;strokeWidth=1.2;fontSize=12;fontStyle=2;fontColor=#546e7a;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="note1" value="enable_security(cfg)   -   Config::key is SHA-256-truncated into a 16-byte AES-128-GCM key; replace demo key in production" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#bdbdbd;strokeWidth=1.2;fontSize=12;fontStyle=2;fontColor=#546e7a;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="140" y="580" width="900" height="26" as="geometry" />
         </mxCell>
 

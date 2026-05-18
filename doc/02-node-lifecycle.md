@@ -82,7 +82,7 @@ static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must be derived from No
 | ------------------- | ----------------------------- | ---------- | ---------------------------------------- |
 | `has_inited_`       | `std::atomic_bool`            | `false`    | 初始化标志，CAS 保护                     |
 | `impl_`             | `std::unique_ptr<ImplT>`      | 空         | 传输后端实现对象                         |
-| `security_`         | `std::optional<Security>`     | 空         | 安全加解密对象（仅 `kWithSecurity` 构造后填充）|
+| `security_`         | `std::optional<Security>`     | 空         | 安全加解密对象（仅 `kWithSecurity` 节点在构造时由 `SecurityXxx` ctor 内部填充，且 `Security::Config` 验证通过；未传 cfg 或验证失败时保持空，加解密路径直接 drop 消息）|
 | `quit_mtx_`         | `std::optional<std::mutex>`   | 空         | 安全退出互斥锁（`set_safety_quit(true)` 时创建） |
 | `proto_arena_`      | `void*`                       | `nullptr`  | Protobuf Arena 指针（仅 proto 指针类型使用） |
 | `is_support_loan_`  | `bool`                        | `false`    | 在 `init()` 中由 `impl_->is_support_loan()` 填写 |
@@ -110,8 +110,7 @@ Publisher<MyMsg> pub("dds://vehicle/speed");
 3. `Conf::parse()` 验证配置有效性
 4. `Conf::create_publisher()` 创建对应的 `PublisherImpl`
 5. 设置 `impl_->transport_type`、`impl_->ser_type`、`impl_->schema_type`、`impl_->is_cdr_type`
-6. 若 `SecT == kWithSecurity`，调用 `enable_security()` 初始化安全模块
-7. 默认情况下（`InitType::kWithInit`）立即调用 `init()`
+6. 默认情况下（`InitType::kWithInit`）立即调用 `init()`；`SecT == kWithSecurity` 时由 `SecurityXxx` 派生类构造函数接收的 `Security::Config` 在 `init()` 之前完成安装
 
 **方式二：Conf 配置对象构造**
 
@@ -228,8 +227,9 @@ pub.set_discovery_enabled(false);
 pub.init();
 
 // 场景二：需要在 init 前配置安全
-SecurityPublisher<MyMsg> sec_pub("shm://secure_topic", InitType::kWithoutInit);
-sec_pub.set_security_key("my-aes-128-key!!");
+Security::Config sec_cfg;
+sec_cfg.key = "my-secret";
+SecurityPublisher<MyMsg> sec_pub("shm://secure_topic", sec_cfg, InitType::kWithoutInit);
 sec_pub.init();
 
 // 场景三：工厂方法也支持延迟初始化
@@ -238,7 +238,7 @@ pub_ptr->set_property("dds.qos.reliability", "reliable");
 pub_ptr->init();
 ```
 
-> **重要**：`set_security_key()`、`set_security_callbacks()` 可以在 `init()` 之前或之后调用。但 `set_property()` 通常需要在 `init()` 之前设置才能生效。
+> **重要**：消息级 `Security::Config` 只能通过 `SecurityXxx` 节点的**构造函数**传入；没有运行时的 `enable_security()` 入口。需要更换密钥/回调时请销毁并重新构造节点。`set_property()` 通常也需要在 `init()` 之前设置才能生效。
 
 ## 5. 属性配置与查询
 
@@ -281,41 +281,45 @@ pub.set_ser_type("my.proto.MessageTypeV2");
 pub.init();
 ```
 
-### 5.2 安全配置 -- set_security_key() / set_security_callbacks()
+### 5.2 安全配置 -- SecurityXxx 构造函数
+
+`Security::Config` 只能通过 `SecurityPublisher` / `SecuritySubscriber` / `SecurityServer` / `SecurityClient` / `SecuritySetter` / `SecurityGetter` 的**构造函数**一次性传入，无运行时 setter：
 
 ```cpp
-void set_security_key(const std::string& key);
-void set_security_callbacks(Security::Callback&& encrypt_callback,
-                            Security::Callback&& decrypt_callback);
+explicit SecurityPublisher(const std::string& url_str,
+                           const Security::Config& sec_cfg = {},
+                           InitType type = InitType::kWithInit);
+
+// 另有 ConfT 重载和 create_unique / create_shared 工厂方法。
 ```
 
-两个方法均包含编译期断言：
+构造阶段的处理：
+
+- `SecurityXxx` 总是先以 `InitType::kWithoutInit` 调用基类构造，再用 `sec_cfg` 构造候选 `Security`，验证 `is_configured()` 通过后才装入 `security_`，最后按 `type` 决定是否立刻 `init()`；
+- 在非 `kWithSecurity` 实例上调用 `enable_security()` 会编译失败（`static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.")`）；
+- `intra://` 与 `dds://` CDR 类型运行时不支持安全加密，构造时会打印 warning 并把 `sec_cfg` 忽略，`security_` 保持空；
+- 验证失败（非法 PEM / 弱 RSA / 缺 salt 等）会打印 warning 并把对应槽位置空；如果整个 cfg 都失效，`security_` 保持空，发送 / 接收路径会直接 drop 消息并打 log，不再触发未定义行为；
+- `Security::Config` 是一个 aggregate struct，包含 `key` / `passphrase` / `pbkdf2_salt` / `public_key_pem` / `private_key_pem` / `signing_key_pem` / `verify_key_pem` / `encrypt_callback` / `decrypt_callback` 等字段；模式按字段自动选择（自定义回调 > RSA 非对称 > 对称）；
+- 自定义回调必须**成对**安装；只设 `encrypt_callback` 或只设 `decrypt_callback` 会被忽略并打印 warning；
+- 内置 AEAD / RSA 需以 `ENABLE_SECURITY=ON` 构建（依赖 OpenSSL）；未启用时只有自定义回调路径生效。
 
 ```cpp
-static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.");
-```
+// 方式一：对称 AES-128-GCM
+Security::Config cfg;
+cfg.key = "my-secret";
+SecurityPublisher<MyMsg> pub("shm://topic", cfg);
 
-- 在非 `kWithSecurity` 实例上调用会编译失败；
-- `intra://` 与 `dds://` CDR 类型运行时不支持安全加密，调用 `set_security_key()` 会触发 `VLOG_F`（抛出 `Exception::RuntimeError`）；`set_security_callbacks()` 当前未做该传输检查（`include/vlink/internal/node-inl.h:210-221` 仅校验 `security_` 是否非空），在这两类传输上调用会静默接受但实际不生效，需用户自行避免；
-- 内置 AES-128-CBC 需以 `ENABLE_SECURITY=ON` 构建（依赖 OpenSSL）；未启用时使用内置 key 路径会打印警告。
-
-```cpp
-// 方式一：使用内置 AES-128-CBC
-SecurityPublisher<MyMsg> pub("shm://topic");
-pub.set_security_key("my-aes-128-key!!");
-
-// 方式二：使用自定义加解密回调
-SecurityPublisher<MyMsg> pub2("dds://topic");
-pub2.set_security_callbacks(
-    [](const Bytes& in, Bytes& out) -> bool {
-        // 自定义加密逻辑
-        return true;
-    },
-    [](const Bytes& in, Bytes& out) -> bool {
-        // 自定义解密逻辑
-        return true;
-    }
-);
+// 方式二：自定义加解密回调
+Security::Config cfg2;
+cfg2.encrypt_callback = [](const Bytes& in, Bytes& out) -> bool {
+    // 自定义加密逻辑
+    return true;
+};
+cfg2.decrypt_callback = [](const Bytes& in, Bytes& out) -> bool {
+    // 自定义解密逻辑
+    return true;
+};
+SecurityPublisher<MyMsg> pub2("dds://topic", cfg2);
 ```
 
 ### 5.3 发现服务 -- set_discovery_enabled()
@@ -694,13 +698,13 @@ client->init();
 VLink 通过模板参数 `SecurityType SecT` 在编译期决定是否启用安全功能。使用 `static_assert` 保证安全 API 只能在安全模式的实例上调用。
 
 ```cpp
-// 编译通过
-SecurityPublisher<MyMsg> pub("shm://topic");
-pub.set_security_key("my-aes-128-key!!");
+// 正确：Security::Config 通过 SecurityXxx 构造函数传入
+Security::Config cfg;
+cfg.key = "my-secret";
+SecurityPublisher<MyMsg> pub("shm://topic", cfg);
 
-// 编译失败 -- static_assert 报错
-Publisher<MyMsg> pub2("shm://topic");
-pub2.set_security_key("my-aes-128-key!!");  // error: Must be security type.
+// 错误：普通 Publisher 没有接收 Security::Config 的 ctor 重载
+Publisher<MyMsg> pub2("shm://topic", cfg);  // compile error
 ```
 
 ### 13.2 便捷别名
@@ -718,10 +722,12 @@ VLink 为每种通信原语提供预定义的安全别名类型：
 
 ### 13.3 不支持安全的传输
 
-以下传输后端不支持安全功能，调用安全 API 会触发致命错误 (`VLOG_F`)：
+以下传输后端不支持安全功能，`SecurityXxx` 构造时会**打印警告（`VLOG_W`）并忽略 `Security::Config`**：
 
 - `intra://` -- 进程内通信无需加密
 - `dds://` 且使用 CDR 序列化 -- CDR 数据由 DDS 直接管理，无法在 VLink 层加密
+
+`security_` 保持空 `optional`；发送 / 接收路径会 drop 消息并打 log，不会 UB。
 
 ### 13.4 安全与零拷贝
 
@@ -771,7 +777,7 @@ sub->listen([](const MyMsg& msg) {
 | `set_property()`          | 推荐    | 一般不再生效                |
 | `set_ser_type()`          | 推荐    | 自动 `deinit_ext / init_ext` |
 | `set_discovery_enabled()` | 推荐    | 自动 `deinit_ext / init_ext` |
-| `set_security_key()`      | 可以    | 可以                        |
+| `SecurityXxx` 构造时传 cfg | 必须    | 不适用（无运行时入口）      |
 | `set_record_path()`       | 可以    | 可以                        |
 | `set_ssl_options()`       | 必须    | 不生效（需在 init 前）      |
 | `bind_proto_arena()`      | 可以    | 在 `listen()` 前即可        |

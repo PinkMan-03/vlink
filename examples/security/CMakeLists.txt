@@ -18,4 +18,5 @@ endif()
 
 add_subdirectory(security_basic)
 add_subdirectory(security_custom)
+add_subdirectory(security_rsa)
 add_subdirectory(security_ssl)

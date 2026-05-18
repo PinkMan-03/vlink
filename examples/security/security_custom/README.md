@@ -2,7 +2,7 @@
 
 ## 概述
 
-本示例演示 `set_security_callbacks()` 用法——用自定义 encrypt/decrypt 回调**完全绕过**内置 AES-128-CBC，让上层接入业务自有算法（SM4、ChaCha20、HSM、白盒密码等）。
+本示例演示通过 `Security::Config::encrypt_callback` / `decrypt_callback` 安装自定义加解密函数，**完全绕过**内置 AES-128-GCM 与 RSA 路径，让上层接入业务自有算法（SM4、ChaCha20、HSM、白盒密码等）。
 
 示例覆盖：
 
@@ -30,18 +30,27 @@ cmake --build build --target example_security_custom
 
 ```cpp
 // 回调签名（在 include/vlink/extension/security.h 中）：
-using Callback = vlink::MoveFunction<bool(const Bytes& in, Bytes& out)>;
+using Security::Callback = vlink::Function<bool(const Bytes& in, Bytes& out)>;
 
-// 同时安装 encrypt 与 decrypt（必须成对）：
-void set_security_callbacks(Security::Callback&& encrypt, Security::Callback&& decrypt);
+// 通过 Config 一次性安装（必须成对）：
+struct Security::Config {
+    Function<bool(const Bytes&, Bytes&)> encrypt_callback;
+    Function<bool(const Bytes&, Bytes&)> decrypt_callback;
+    // ... 其它字段
+};
+
+// 配置随 SecurityXxx 构造函数第二参数一次性传入（无运行时 setter）：
+explicit SecurityPublisher(const std::string& url_str,
+                           const Security::Config& sec_cfg = {},
+                           InitType type = InitType::kWithInit);
 ```
 
 | 行为 | 说明 |
 |------|------|
-| 安装后 AES 被完全绕过 | 不再调用 OpenSSL，回调即是唯一加解密路径 |
-| 双端必须用对称兼容的回调 | 双端 encrypt/decrypt 函数必须使用相同密钥与算法；XOR 自互反指"encrypt 与 decrypt 同一函数",不代表"双端 key 可不同" |
+| 安装后内置 AEAD/RSA 被完全绕过 | 不再调用 OpenSSL，回调即是唯一加解密路径 |
+| 双端必须用对称兼容的回调 | 双端 encrypt/decrypt 函数必须使用相同密钥与算法；XOR 自互反指"encrypt 与 decrypt 同一函数"，不代表"双端 key 可不同" |
 | 回调返回 `false` | 视为加/解密失败：发送端丢弃消息、接收端不触发用户回调 |
-| 与 `set_security_key()` 关系 | 安装回调后 AES 路径不再被走，但 `set_security_key()` 仍合法调用——它只更新内部 key，对回调路径无影响（源码：`src/extension/security.cc:88-95, 110-112, 164-166`） |
+| 与对称/非对称字段共存 | 同时设了 `key` / `public_key_pem` 时，回调路径优先级更高，对称/非对称槽位静默闲置 |
 
 ## 回调最小实现
 
@@ -55,18 +64,24 @@ auto enc = [key](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
 };
 auto dec = enc;  // XOR 自互反
 
-pub.set_security_callbacks(enc, dec);
+vlink::Security::Config cfg;
+cfg.encrypt_callback = enc;
+cfg.decrypt_callback = dec;
+
+vlink::SecurityPublisher<std::string> pub("dds://demo/custom", cfg);
+vlink::SecuritySubscriber<std::string> sub("dds://demo/custom", cfg);
 ```
 
 ## 注意事项
 
 - 回调在 `publish` / `listen` 的同一线程被调用，**禁止阻塞**热路径。
 - `in` 为空时回调应直接返回 `true`，与默认实现的"空输入直通"约定一致。
-- `set_security_callbacks()` 当前**不**对 `intra://` 与 `dds://` CDR 类型做传输检查（不像 `set_security_key()` 会 fatal），在这两种传输上调用会静默接受但加密路径不被触发；需用户自行避免。
+- `encrypt_callback` 与 `decrypt_callback` 必须**成对**安装；只设其中之一会被忽略并打印 warning。
+- 在 `intra://` 与 `dds://` CDR 类型上，`SecurityXxx` 构造时会打印 warning 并把 `Security::Config` 忽略；在这两种传输上不要启用任何安全配置。
 - XOR 仅用于演示，**严禁**生产使用。
 
 ## 相关文档
 
-- [doc/09-security.md](../../../doc/09-security.md) §9.6 自定义加密回调
-- [`../security_basic/`](../security_basic/) — 内置 AES-128-CBC 用法
+- [doc/09-security.md](../../../doc/09-security.md) §9.7 自定义加密回调
+- [`../security_basic/`](../security_basic/) — 内置 AES-128-GCM 用法
 - `include/vlink/extension/security.h` — `Security` 类完整接口

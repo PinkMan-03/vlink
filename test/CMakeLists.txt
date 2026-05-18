@@ -22,6 +22,9 @@ endif()
 
 if(ENABLE_SECURITY)
   target_compile_definitions(${PROJECT_NAME} PRIVATE "VLINK_TEST_SUPPORT_SECURITY")
+  if(TARGET OpenSSL::Crypto)
+    target_link_libraries(${PROJECT_NAME} PRIVATE OpenSSL::Crypto)
+  endif()
 endif()
 
 # test

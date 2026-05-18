@@ -326,7 +326,61 @@ class Client : public Node<ClientImpl, SecT> {
 template <typename ReqT, typename RespT = Traits::EmptyType>
 class SecurityClient : public Client<ReqT, RespT, SecurityType::kWithSecurity> {
  public:
-  using Client<ReqT, RespT, SecurityType::kWithSecurity>::Client;
+  /** @brief Unique-pointer alias. */
+  using UniquePtr = std::unique_ptr<SecurityClient<ReqT, RespT>>;
+
+  /** @brief Shared-pointer alias. */
+  using SharedPtr = std::shared_ptr<SecurityClient<ReqT, RespT>>;
+
+  /**
+   * @brief Creates a @c SecurityClient on the heap wrapped in a @c unique_ptr.
+   *
+   * @param url_str  Service URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound traffic).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c UniquePtr owning the new client.
+   */
+  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Creates a @c SecurityClient on the heap wrapped in a @c shared_ptr.
+   *
+   * @param url_str  Service URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound traffic).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c SharedPtr owning the new client.
+   */
+  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityClient from a typed transport configuration object.
+   *
+   * @tparam ConfT  @c Conf-derived configuration type.
+   * @param conf    Populated configuration object.
+   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param type    @c kWithInit to call @c init() immediately (default).
+   */
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+  explicit SecurityClient(const ConfT& conf, const Security::Config& sec_cfg = {}, InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityClient and installs the security configuration in place.
+   *
+   * @details
+   * Always builds the base @c Client with @c InitType::kWithoutInit, then
+   * calls the inherited @c enable_security(sec_cfg) so that @c security_ is
+   * either populated or left empty.  Finally calls @c init() unless the
+   * caller requests deferred initialisation.
+   *
+   * @param url_str  Service URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound traffic).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   */
+  explicit SecurityClient(const std::string& url_str, const Security::Config& sec_cfg = {},
+                          InitType type = InitType::kWithInit);
 };
 
 }  // namespace vlink

@@ -35,6 +35,7 @@
 
 namespace vlink {
 
+// Subscriber<MsgT>
 template <typename MsgT, SecurityType SecT>
 inline typename Subscriber<MsgT, SecT>::UniquePtr Subscriber<MsgT, SecT>::create_unique(const std::string& url_str,
                                                                                         InitType type) {
@@ -75,7 +76,6 @@ inline Subscriber<MsgT, SecT>::Subscriber(const ConfT& conf, InitType type) {
 
   if constexpr (SecT == SecurityType::kWithSecurity) {
     this->impl_->is_security_type = true;
-    this->enable_security();
   }
 
   if (type == InitType::kWithInit) {
@@ -227,6 +227,41 @@ inline bool Subscriber<MsgT, SecT>::listen_intra(NodeImpl::IntraMsgCallback&& ca
   this->impl_->is_listened = ret;
 
   return ret;
+}
+
+// SecuritySubscriber<MsgT>
+template <typename MsgT>
+inline typename SecuritySubscriber<MsgT>::UniquePtr SecuritySubscriber<MsgT>::create_unique(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_unique<SecuritySubscriber<MsgT>>(url_str, sec_cfg, type);
+}
+
+template <typename MsgT>
+inline typename SecuritySubscriber<MsgT>::SharedPtr SecuritySubscriber<MsgT>::create_shared(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_shared<SecuritySubscriber<MsgT>>(url_str, sec_cfg, type);
+}
+
+template <typename MsgT>
+template <typename ConfT, typename>
+inline SecuritySubscriber<MsgT>::SecuritySubscriber(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+    : Subscriber<MsgT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
+}
+
+template <typename MsgT>
+inline SecuritySubscriber<MsgT>::SecuritySubscriber(const std::string& url_str, const Security::Config& sec_cfg,
+                                                    InitType type)
+    : Subscriber<MsgT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
 }
 
 }  // namespace vlink

@@ -215,7 +215,7 @@ void mark_as_setter();
 
 ### 继承自 Node 的公共 API
 
-Node 基类继承的公共 API（init / deinit / attach / interrupt / set_security_key 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
+Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
 ---
 
@@ -299,7 +299,7 @@ void mark_as_getter();
 
 ### 继承自 Node 的公共 API
 
-Node 基类继承的公共 API（init / deinit / attach / interrupt / set_security_key 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
+Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
 ---
 
@@ -576,11 +576,12 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity>;
 ### 示例六：安全加密发布订阅
 
 ```cpp
-SecurityPublisher<MyMsg> pub("dds://secure/data");
-pub.set_security_key("my-aes-128-key!!");
+Security::Config cfg;
+cfg.key = "my-secret";
 
-SecuritySubscriber<MyMsg> sub("dds://secure/data");
-sub.set_security_key("my-aes-128-key!!");
+SecurityPublisher<MyMsg> pub("dds://secure/data", cfg);
+
+SecuritySubscriber<MyMsg> sub("dds://secure/data", cfg);
 sub.listen([](const MyMsg& msg) { /* 消息已自动解密 */ });
 ```
 

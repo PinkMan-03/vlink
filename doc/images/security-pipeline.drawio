@@ -9,7 +9,7 @@
         <mxCell id="title" value="Security Encryption Pipeline" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="1020" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="AES-128-CBC (default) or custom encrypt/decrypt callback  -  End-to-end payload protection" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#c62828;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="AES-128-GCM AEAD (+ optional RSA-OAEP/PSS hybrid) or custom encrypt/decrypt callback  -  End-to-end payload protection" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#c62828;" vertex="1" parent="1">
           <mxGeometry x="40" y="54" width="1020" height="22" as="geometry" />
         </mxCell>
 
@@ -61,10 +61,10 @@
         <mxCell id="note_bg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#ef9a9a;strokeWidth=1.5;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="40" y="260" width="560" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="note_t" value="Crypto:  AES-128-CBC  (default)" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#b71c1c;" vertex="1" parent="1">
+        <mxCell id="note_t" value="Crypto:  AES-128-GCM AEAD  (default)" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#b71c1c;" vertex="1" parent="1">
           <mxGeometry x="58" y="266" width="240" height="28" as="geometry" />
         </mxCell>
-        <mxCell id="note_l" value="or set_security_callbacks(encrypt, decrypt) custom hook" style="text;html=1;align=right;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#c62828;fontFamily=Courier New;" vertex="1" parent="1">
+        <mxCell id="note_l" value="or Config::encrypt_callback / decrypt_callback custom hook" style="text;html=1;align=right;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#c62828;fontFamily=Courier New;" vertex="1" parent="1">
           <mxGeometry x="300" y="266" width="288" height="28" as="geometry" />
         </mxCell>
 
@@ -105,7 +105,7 @@
         <mxCell id="foot_bg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#bdbdbd;strokeWidth=1.2;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="40" y="484" width="1020" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="foot_l" value="Enable via template param SecurityType::kWithSecurity, or via SecurityPublisher&amp;lt;T&amp;gt; / SecuritySubscriber&amp;lt;T&amp;gt; - pair with set_security_key() or set_security_callbacks()" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+        <mxCell id="foot_l" value="Enable via template param SecurityType::kWithSecurity, or via SecurityPublisher&amp;lt;T&amp;gt; / SecuritySubscriber&amp;lt;T&amp;gt; - pair with enable_security(Security::Config{...})" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
           <mxGeometry x="50" y="490" width="1000" height="28" as="geometry" />
         </mxCell>
 

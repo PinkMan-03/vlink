@@ -29,17 +29,25 @@
 
 namespace security_common {
 
-// Algorithm name only -- the actual default key/IV are not exposed by the
-// example to avoid leaking the demonstration values.  Use `set_security_key()`
-// to inject your own key in any real deployment.
-constexpr const char* kDefaultAlgorithm = "AES-128-CBC";
+// Algorithm metadata for the construction-only Security::Config API.
+// All endpoints must construct Security with matching Config fields; there is
+// no built-in default key.  Inject your own key via:
+//   vlink::Security::Config cfg;
+//   cfg.key = "...";  // or cfg.passphrase + cfg.pbkdf2_salt
+//   vlink::SecurityPublisher<T> pub(url, cfg);  // cfg passed as the 2nd ctor arg
+constexpr const char* kDefaultAlgorithm = "AES-128-GCM";
+constexpr const char* kAsymmetricWrap = "RSA-OAEP-SHA256";
+constexpr const char* kSignatureScheme = "RSA-PSS-SHA256";
+constexpr const char* kPassphraseKdf = "PBKDF2-HMAC-SHA256";
 
-// Print a summary of VLink security defaults.
+// Print a summary of VLink security primitives.
 inline void print_security_defaults() {
-  std::cout << "  VLink Security Defaults:" << std::endl;
-  std::cout << "    Algorithm: " << kDefaultAlgorithm << std::endl;
-  std::cout << "    Key:       <built-in 16-byte default; replace via set_security_key()>" << std::endl;
-  std::cout << "    IV:        <built-in 16-byte default; replace by paired key rotation>" << std::endl;
+  std::cout << "  VLink Security Primitives:" << std::endl;
+  std::cout << "    AEAD:       " << kDefaultAlgorithm << " (12-byte nonce, 16-byte tag)" << std::endl;
+  std::cout << "    RSA wrap:   " << kAsymmetricWrap << " (>=2048-bit RSA)" << std::endl;
+  std::cout << "    Signature:  " << kSignatureScheme << " (optional sender auth)" << std::endl;
+  std::cout << "    KDF:        " << kPassphraseKdf << " (passphrase -> 16-byte AES key)" << std::endl;
+  std::cout << "    Configure:  vlink::Security::Config{ ... } as the 2nd ctor arg of SecurityXxx" << std::endl;
 }
 
 // Print a summary of supported transports for security.

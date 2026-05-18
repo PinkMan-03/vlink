@@ -57,7 +57,7 @@ cmake --build build --target sample_dds_idl
 
 2. **CDR 序列化**: VLink 通过类型 `IsCdrType<T>` 自动识别 IDL 生成类型,走 CDR 路径(无需用户手写 serializer)。
 
-3. **安全限制**: CDR 类型**不**支持 `SecurityPublisher` / `set_security_key()`(`include/vlink/internal/node-inl.h:185-189` 中 fatal),如需加密请改用 Protobuf 或 FlatBuffers。
+3. **安全限制**: CDR 类型**不**支持 `SecurityPublisher`（构造时传入 `Security::Config` 会被忽略并打 warning）,如需加密请改用 Protobuf 或 FlatBuffers。
 
 ## 相关文档
 

@@ -31,4 +31,6 @@ install(
 # export
 vlink_export(${PROJECT_NAME} ${PROJECT_NAME} ${PROJECT_NAMESPACE} ${CMAKE_PROJECT_VERSION})
 
-# add_subdirectory(test)
+if(ENABLE_TEST)
+  add_subdirectory(test)
+endif()

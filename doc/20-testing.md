@@ -339,7 +339,7 @@ ctest --output-on-failure
 | `qos_profile_test.cc`                          | 内置 QoS profile（`sensor` / `event` / `command` / `state` 等）映射      |
 | `runnable_plugin_interface_test.cc`            | Runnable 插件 SPI（`vlink-proxy --runnable` 等加载入口）                 |
 | `schema_plugin_test.cc`                        | Schema 插件 SPI（自定义序列化格式扩展点）                                 |
-| `security_test.cc`                             | Security 加密回调、AES-128-CBC 默认实现                                   |
+| `security_test.cc`                             | Security 配置、AES-128-GCM AEAD、RSA 混合握手与自定义回调                |
 | `status_test.cc`                               | `Status` / `BasePtr` 状态对象与回调                                       |
 | `terminal_stream_test.cc`                      | TerminalStream 颜色与宽度处理                                            |
 | `url_remap_test.cc`                            | URL 重映射（`VLINK_URL_REMAP` JSON 文件）解析与子串匹配                   |

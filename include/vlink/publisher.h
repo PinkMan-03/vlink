@@ -264,8 +264,8 @@ class Publisher : public Node<PublisherImpl, SecT> {
  *
  * @details
  * Equivalent to @c Publisher<MsgT, SecurityType::kWithSecurity>.  Encrypts
- * every outgoing message using the key or callbacks configured via
- * @c set_security_key() or @c set_security_callbacks().
+ * every outgoing message with the @c Security::Config passed at construction
+ * (second constructor argument; defaults to an empty config).
  *
  * @note Not supported on @c intra:// or @c dds:// CDR transport.
  *
@@ -274,7 +274,69 @@ class Publisher : public Node<PublisherImpl, SecT> {
 template <typename MsgT>
 class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
  public:
-  using Publisher<MsgT, SecurityType::kWithSecurity>::Publisher;
+  /** @brief Unique-pointer alias for heap allocation. */
+  using UniquePtr = std::unique_ptr<SecurityPublisher<MsgT>>;
+
+  /** @brief Shared-pointer alias for heap allocation. */
+  using SharedPtr = std::shared_ptr<SecurityPublisher<MsgT>>;
+
+  /**
+   * @brief Creates a @c SecurityPublisher on the heap wrapped in a @c unique_ptr.
+   *
+   * @param url_str  Topic URL string (e.g. @c "dds://vehicle/speed").
+   * @param sec_cfg  Security configuration aggregate (empty by default → no encryption).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c UniquePtr owning the new publisher instance.
+   */
+  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Creates a @c SecurityPublisher on the heap wrapped in a @c shared_ptr.
+   *
+   * @param url_str  Topic URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → no encryption).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @return         @c SharedPtr owning the new publisher instance.
+   */
+  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, const Security::Config& sec_cfg = {},
+                                               InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityPublisher from a typed transport configuration object.
+   *
+   * @details
+   * Builds the base @c Publisher with @c InitType::kWithoutInit using @p conf,
+   * then calls the inherited @c enable_security(sec_cfg) so that @c security_
+   * is either populated or left empty.  Finally calls @c init() unless the
+   * caller requests deferred initialisation.
+   *
+   * @tparam ConfT  @c Conf-derived configuration type.
+   * @param conf    Populated configuration object.
+   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param type    @c kWithInit to call @c init() immediately (default).
+   */
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+  explicit SecurityPublisher(const ConfT& conf, const Security::Config& sec_cfg = {},
+                             InitType type = InitType::kWithInit);
+
+  /**
+   * @brief Constructs a @c SecurityPublisher and installs the security configuration in place.
+   *
+   * @details
+   * Always builds the base @c Publisher with @c InitType::kWithoutInit, then
+   * calls the inherited @c enable_security(sec_cfg) so that @c security_ is
+   * either populated (when @p sec_cfg contains a usable cryptographic slot)
+   * or left empty (when @p sec_cfg is empty or invalid).  Finally calls
+   * @c init() unless the caller requests deferred initialisation.
+   *
+   * @param url_str  Topic URL string.
+   * @param sec_cfg  Security configuration aggregate (empty by default → no encryption).
+   * @param type     @c kWithInit to call @c init() immediately (default).
+   */
+  explicit SecurityPublisher(const std::string& url_str, const Security::Config& sec_cfg = {},
+                             InitType type = InitType::kWithInit);
 };
 
 }  // namespace vlink

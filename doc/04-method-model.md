@@ -147,7 +147,7 @@ bool send(const ReqT& req);
 
 ### 继承自 Node 的公共 API
 
-Node 基类继承的公共 API（init / deinit / attach / interrupt / set_security_key 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
+Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
 ---
 
@@ -738,14 +738,15 @@ int main() {
 ### 示例五：安全 RPC
 
 ```cpp
-SecurityServer<Auth::Request, Auth::Response> server("dds://auth/verify");
-server.set_security_key("shared-key-16b!!");
+Security::Config cfg;
+cfg.key = "shared-secret";
+
+SecurityServer<Auth::Request, Auth::Response> server("dds://auth/verify", cfg);
 server.listen([](const Auth::Request& req, Auth::Response& resp) {
     resp.set_token("valid-token-" + req.username());
 });
 
-SecurityClient<Auth::Request, Auth::Response> client("dds://auth/verify");
-client.set_security_key("shared-key-16b!!");
+SecurityClient<Auth::Request, Auth::Response> client("dds://auth/verify", cfg);
 ```
 
 完整安全加密配置请参阅 [安全加密](09-security.md)。

@@ -42,10 +42,13 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 ///   2. Event model (Pub/Sub): encrypted message publishing with a custom key
 ///   3. Field model (Getter/Setter): encrypted field read/write
 int main() {
+  Security::Config method_sec_cfg;
+  method_sec_cfg.key = "rpc-shared-key";
+
   // ======== Method Model (RPC + Encryption) ========
   // SecurityServer is the secure variant of Server; it automatically encrypts/decrypts requests and responses using
-  // AES-128-CBC
-  SecurityServer<Bytes, Bytes> server("shm://example_raw/method");
+  // AES-128-GCM (AEAD).  Security::Config is passed as the second constructor argument.
+  SecurityServer<Bytes, Bytes> server("shm://example_raw/method", method_sec_cfg);
 
   // Register a synchronous callback: when receiving the request {0x1, 0x2, 0x3}, return a 1MB response
   server.listen([](const Bytes& req, Bytes& resp) {
@@ -57,7 +60,7 @@ int main() {
   });
 
   // SecurityClient automatically encrypts requests and decrypts responses
-  SecurityClient<Bytes, Bytes> client("shm://example_raw/method");
+  SecurityClient<Bytes, Bytes> client("shm://example_raw/method", method_sec_cfg);
 
   // Synchronous call: send a request and wait for the response (returns std::optional)
   auto resp = client.invoke(Bytes{0x1, 0x2, 0x3});
@@ -70,17 +73,17 @@ int main() {
   }
 
   // ======== Event Model (Pub/Sub + Custom Key) ========
-  SecuritySubscriber<Bytes> sub("shm://example_raw/event");
+  Security::Config sub_sec_cfg;
+  sub_sec_cfg.key = "custom-key-16b!!";
 
-  // Set a custom encryption key (publisher and subscriber must use the same key)
-  sub.set_security_key("custom-key-16b!!");
+  SecuritySubscriber<Bytes> sub("shm://example_raw/event", sub_sec_cfg);
   // Register receive callback: convert the received Bytes to a string and print it
   sub.listen([](const Bytes& msg) { VLOG_I("sub:", msg.to_string()); });
 
-  SecurityPublisher<Bytes> pub("shm://example_raw/event");
+  Security::Config pub_sec_cfg;
+  pub_sec_cfg.key = "custom-key-16b!!";
 
-  // The publisher must also set the same key
-  pub.set_security_key("custom-key-16b!!");
+  SecurityPublisher<Bytes> pub("shm://example_raw/event", pub_sec_cfg);
 
   // Wait for at least one subscriber to be ready before publishing
   pub.wait_for_subscribers();
@@ -89,15 +92,18 @@ int main() {
   pub.publish(Bytes::from_string("hello2"));
   pub.publish(Bytes::from_string("hello3"));
 
+  Security::Config field_sec_cfg;
+  field_sec_cfg.key = "field-shared-key";
+
   // ======== Field Model (Getter/Setter + Encryption) ========
   // SecuritySetter writes encrypted field values
-  SecuritySetter<Bytes> setter("shm://example_raw/field");
+  SecuritySetter<Bytes> setter("shm://example_raw/field", field_sec_cfg);
 
   // Write the field value {0x0A, 0x0B, 0x0C}
   setter.set(Bytes{0xA, 0XB, 0XC});
 
   // SecurityGetter reads encrypted field values
-  SecurityGetter<Bytes> getter("shm://example_raw/field");
+  SecurityGetter<Bytes> getter("shm://example_raw/field", field_sec_cfg);
 
   // Wait briefly to ensure the field value has been transmitted
   std::this_thread::sleep_for(100ms);

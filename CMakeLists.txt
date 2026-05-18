@@ -174,7 +174,7 @@ endif()
 # requires
 find_package(Threads REQUIRED)
 if(ENABLE_SECURITY)
-  find_package(OpenSSL QUIET)
+  find_package(OpenSSL 1.1.0 QUIET)
   if(NOT TARGET OpenSSL::Crypto)
     message(WARNING "Can not find openssl, set ENABLE_SECURITY to OFF")
     set(ENABLE_SECURITY OFF)

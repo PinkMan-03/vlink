@@ -35,6 +35,7 @@
 
 namespace vlink {
 
+// Server<ReqT, RespT>
 template <typename ReqT, typename RespT, SecurityType SecT>
 inline typename Server<ReqT, RespT, SecT>::UniquePtr Server<ReqT, RespT, SecT>::create_unique(
     const std::string& url_str, InitType type) {
@@ -95,7 +96,6 @@ inline Server<ReqT, RespT, SecT>::Server(const ConfT& conf, InitType type) {
 
   if constexpr (SecT == SecurityType::kWithSecurity) {
     this->impl_->is_security_type = true;
-    this->enable_security();
   }
 
   if (type == InitType::kWithInit) {
@@ -342,6 +342,41 @@ inline bool Server<ReqT, RespT, SecT>::reply_bytes(uint64_t req_id, const Bytes&
     this->impl_->try_record(ActionType::kServerResponse, resp_data);
 
     return this->impl_->reply(req_id, resp_data, is_sync);
+  }
+}
+
+// SecurityServer<ReqT, RespT>
+template <typename ReqT, typename RespT>
+inline typename SecurityServer<ReqT, RespT>::UniquePtr SecurityServer<ReqT, RespT>::create_unique(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_unique<SecurityServer<ReqT, RespT>>(url_str, sec_cfg, type);
+}
+
+template <typename ReqT, typename RespT>
+inline typename SecurityServer<ReqT, RespT>::SharedPtr SecurityServer<ReqT, RespT>::create_shared(
+    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
+  return std::make_shared<SecurityServer<ReqT, RespT>>(url_str, sec_cfg, type);
+}
+
+template <typename ReqT, typename RespT>
+template <typename ConfT, typename>
+inline SecurityServer<ReqT, RespT>::SecurityServer(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+    : Server<ReqT, RespT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
+}
+
+template <typename ReqT, typename RespT>
+inline SecurityServer<ReqT, RespT>::SecurityServer(const std::string& url_str, const Security::Config& sec_cfg,
+                                                   InitType type)
+    : Server<ReqT, RespT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
 

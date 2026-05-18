@@ -34,6 +34,7 @@
 
 namespace vlink {
 
+// Setter<ValueT>
 template <typename ValueT, SecurityType SecT>
 inline typename Setter<ValueT, SecT>::UniquePtr Setter<ValueT, SecT>::create_unique(const std::string& url_str,
                                                                                     InitType type) {
@@ -74,7 +75,6 @@ inline Setter<ValueT, SecT>::Setter(const ConfT& conf, InitType type) {
 
   if constexpr (SecT == SecurityType::kWithSecurity) {
     this->impl_->is_security_type = true;
-    this->enable_security();
   }
 
   if (type == InitType::kWithInit) {
@@ -193,6 +193,43 @@ inline void Setter<ValueT, SecT>::write_bytes(const Bytes& data) {
     this->impl_->try_record(ActionType::kSet, data);
 
     this->impl_->write(data);
+  }
+}
+
+// SecuritySetter<ValueT>
+template <typename ValueT>
+inline typename SecuritySetter<ValueT>::UniquePtr SecuritySetter<ValueT>::create_unique(const std::string& url_str,
+                                                                                        const Security::Config& sec_cfg,
+                                                                                        InitType type) {
+  return std::make_unique<SecuritySetter<ValueT>>(url_str, sec_cfg, type);
+}
+
+template <typename ValueT>
+inline typename SecuritySetter<ValueT>::SharedPtr SecuritySetter<ValueT>::create_shared(const std::string& url_str,
+                                                                                        const Security::Config& sec_cfg,
+                                                                                        InitType type) {
+  return std::make_shared<SecuritySetter<ValueT>>(url_str, sec_cfg, type);
+}
+
+template <typename ValueT>
+template <typename ConfT, typename>
+inline SecuritySetter<ValueT>::SecuritySetter(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+    : Setter<ValueT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
+  }
+}
+
+template <typename ValueT>
+inline SecuritySetter<ValueT>::SecuritySetter(const std::string& url_str, const Security::Config& sec_cfg,
+                                              InitType type)
+    : Setter<ValueT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
+  this->enable_security(sec_cfg);
+
+  if (type == InitType::kWithInit) {
+    this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
 

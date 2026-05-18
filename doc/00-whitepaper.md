@@ -543,7 +543,7 @@ vlink::Publisher<MyCustomType> pub("shm://my/topic");
 `Node` 基类提供以下通用能力：
 - **懒初始化**：通过 `InitType::kWithoutInit` 参数，可以推迟 `init()` 调用，用于在构造器中注册回调后再初始化
 - **QoS 配置**：通过传输配置对象（如 `DdsConf`）或 URL 参数（如 `?qos=name&depth=10`）配置 QoS 策略
-- **安全密钥**：`set_security_key()` 或 `set_security_callbacks()` 配置加密/解密方法
+- **安全密钥**：通过 `SecurityXxx` 派生类构造函数（第二参数）一次性传入 `Security::Config` 配置加密/解密参数
 - **消息录制**：`set_record_path()` 启用自动消息录制，所有通过该节点的消息均被记录到 bag 文件
 - **服务发现**：`set_discovery_enabled()` 控制该节点是否参与发现广播
 - **属性 KV 存储**：`set_property()` / `get_property()` 用于存储节点元数据
@@ -810,15 +810,16 @@ VLink 将安全加密作为模板参数，与正常通信完全同构：
 // 普通发布者
 vlink::Publisher<MyMsg> pub("dds://my/topic");
 
-// 加密发布者（接口完全相同）
-vlink::SecurityPublisher<MyMsg> sec_pub("dds://my/topic");
-sec_pub.set_security_key("vlink-aes128-key");  // AES-128-CBC，必须正好 16 字节
+// 加密发布者（接口仅多一个 Security::Config 构造参数）
+vlink::Security::Config cfg;
+cfg.key = "vlink-secret";   // 对称 AES-128-GCM；SHA-256 截断后作为 AES key
+vlink::SecurityPublisher<MyMsg> sec_pub("dds://my/topic", cfg);
 
 // 或使用自定义加密/解密回调
-sec_pub.set_security_callbacks(
-    [](const Bytes& plain, Bytes& cipher) -> bool { /* 自定义加密 */ return true; },
-    [](const Bytes& cipher, Bytes& plain) -> bool { /* 自定义解密 */ return true; }
-);
+vlink::Security::Config cb_cfg;
+cb_cfg.encrypt_callback = [](const Bytes& plain, Bytes& cipher) -> bool { /* 自定义加密 */ return true; };
+cb_cfg.decrypt_callback = [](const Bytes& cipher, Bytes& plain) -> bool { /* 自定义解密 */ return true; };
+vlink::SecurityPublisher<MyMsg> cb_pub("dds://my/topic", cb_cfg);
 ```
 
 安全加密的透明集成意味着：在不同安全等级的部署场景下（如开发环境不加密、生产环境加密），只需切换类型别名，而无需修改任何业务逻辑。
@@ -1157,9 +1158,10 @@ vlink::Subscriber<int> sub("dds://my/topic");
 
 **延迟初始化（kWithoutInit）：**
 ```cpp
-// 先构造，再配置，最后初始化
-vlink::SecuritySubscriber<int> sub("dds://my/topic", vlink::InitType::kWithoutInit);
-sub.set_security_key("my-aes-128-key!!");  // 必须正好 16 字节
+// 构造时通过第二参数传入 Security::Config，再延迟 init
+vlink::Security::Config sec_cfg;
+sec_cfg.key = "my-secret";
+vlink::SecuritySubscriber<int> sub("dds://my/topic", sec_cfg, vlink::InitType::kWithoutInit);
 sub.set_discovery_enabled(true);
 sub.init();               // 先初始化
 sub.listen(my_callback);  // 再注册回调（Subscriber 要求 init 后才能 listen）

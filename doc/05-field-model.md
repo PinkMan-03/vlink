@@ -293,7 +293,7 @@ void set_latency_and_lost_enabled(bool enable);
 
 ### 继承自 Node 的公共 API
 
-Node 基类继承的公共 API（init / deinit / attach / interrupt / set_security_key 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
+Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
 ### 角色切换方法
 
@@ -518,13 +518,14 @@ int main() {
 using namespace vlink;
 
 int main() {
+    Security::Config cfg;
+    cfg.key = "my-secret";
+
     // SecuritySetter / SecurityGetter 启用自动加解密
-    SecuritySetter<Bytes> setter("shm://example_raw/field");
-    setter.set_security_key("my-aes-128-key!!");
+    SecuritySetter<Bytes> setter("shm://example_raw/field", cfg);
     setter.set(Bytes{0xA, 0xB, 0xC});
 
-    SecurityGetter<Bytes> getter("shm://example_raw/field");
-    getter.set_security_key("my-aes-128-key!!");
+    SecurityGetter<Bytes> getter("shm://example_raw/field", cfg);
 
     if (auto ret = getter.get()) {
         VLOG_I("Getter value:", ret.value());
@@ -603,11 +604,11 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity>;
 ```
 
 ```cpp
-SecuritySetter<MyMsg> setter("dds://secure/field");
-setter.set_security_key("my-aes-128-key!!");
+Security::Config cfg;
+cfg.key = "my-secret";
 
-SecurityGetter<MyMsg> getter("dds://secure/field");
-getter.set_security_key("my-aes-128-key!!");
+SecuritySetter<MyMsg> setter("dds://secure/field", cfg);
+SecurityGetter<MyMsg> getter("dds://secure/field", cfg);
 ```
 
 完整安全加密配置请参阅 [安全加密](09-security.md)。

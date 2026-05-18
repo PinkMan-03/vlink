@@ -22,11 +22,15 @@
  */
 
 // Security Basic Example
-// Demonstrates SecurityPublisher/SecuritySubscriber with:
-//   1. Default encryption key (built-in 16-byte demo key)
-//   2. Custom encryption key via set_security_key()
+// Demonstrates SecurityPublisher/SecuritySubscriber with the construction-only
+// Security::Config API:
+//   1. Symmetric raw key (AES-128-GCM, SHA-256 truncated)
+//   2. PBKDF2 passphrase derivation (AES-128-GCM)
 //   3. Key mismatch failure scenario
-// Uses AES-128-CBC encryption. Default IV: "thun.lu@zohomail" (16 bytes)
+//   4. Encryption with raw Bytes payloads
+//   5. Transport / serializer limitations
+//
+// Algorithm: AES-128-GCM (AEAD) with a 12-byte random nonce and 16-byte tag.
 //
 // WARNING: intra:// does NOT support security encryption (messages stay in-process).
 // Security requires a cross-process transport such as dds://, shm://, zenoh://, mqtt://, etc.
@@ -43,68 +47,78 @@
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
 int main() {
-  // ======== Section 1: Default Key Encryption ========
-  // SecurityPublisher and SecuritySubscriber use AES-128-CBC encryption with
-  // a built-in 16-byte demo key/IV.  Both sides must use the same key to
-  // communicate.  The demo key/IV are not safe for production -- always
-  // inject your own via set_security_key().
+  // ======== Section 1: Symmetric Raw Key ========
+  // Provide a raw seed via Security::Config::key.  Both endpoints must supply
+  // the same seed; internally it is SHA-256 truncated to a 16-byte AES key.
   {
-    std::cout << "\n[1] Default Key Encryption (built-in demo key)" << std::endl;
+    std::cout << "\n[1] Symmetric Raw Key (AES-128-GCM)" << std::endl;
 
     std::atomic<int> received{0};
 
-    // SecuritySubscriber automatically decrypts incoming messages
-    vlink::SecuritySubscriber<std::string> sub("dds://security_basic/default_key");
-    // No set_security_key() call => uses built-in demo key
+    vlink::Security::Config sub_cfg;
+    sub_cfg.key = "my-secret-key-16";
+
+    vlink::SecuritySubscriber<std::string> sub("dds://security_basic/raw_key", sub_cfg);
     sub.listen([&received](const std::string& msg) {
       received++;
-      VLOG_I("[Default Key] Received:", msg);
+      VLOG_I("[Raw Key] Received:", msg);
     });
 
-    // SecurityPublisher automatically encrypts outgoing messages
-    vlink::SecurityPublisher<std::string> pub("dds://security_basic/default_key");
-    // No set_security_key() call => uses built-in demo key
+    vlink::Security::Config pub_cfg;
+    pub_cfg.key = "my-secret-key-16";
+
+    vlink::SecurityPublisher<std::string> pub("dds://security_basic/raw_key", pub_cfg);
 
     pub.wait_for_subscribers();
 
-    pub.publish("Hello with default encryption!");
-    pub.publish("AES-128-CBC encrypted message");
-    pub.publish("Encrypted with the built-in demo key");
+    pub.publish("Hello with AES-128-GCM!");
+    pub.publish("Authenticated encryption is automatic");
+    pub.publish("Both endpoints derive the same 16-byte AES key");
 
     std::this_thread::sleep_for(100ms);
-    VLOG_I("Default key: received", received.load(), "messages");
+    VLOG_I("Raw key: received", received.load(), "messages");
   }
 
-  // ======== Section 2: Custom Key Encryption ========
-  // Both publisher and subscriber must call set_security_key() with the SAME key.
-  // The key string is used as the AES key (OpenSSL uses the first 16 bytes).
+  // ======== Section 2: PBKDF2 Passphrase ========
+  // Low-entropy passphrases must be stretched via PBKDF2-HMAC-SHA256.
+  // Both endpoints must share the same passphrase, salt and iteration count.
   {
-    std::cout << "\n[2] Custom Key Encryption" << std::endl;
+    std::cout << "\n[2] PBKDF2 Passphrase (AES-128-GCM)" << std::endl;
 
     std::atomic<int> received{0};
 
-    vlink::SecuritySubscriber<std::string> sub("dds://security_basic/custom_key");
-    sub.set_security_key("my-secret-key-16");  // Custom 16-byte key
+    const vlink::Bytes shared_salt = vlink::Bytes::from_string("vlink-example-salt-v1");
+
+    vlink::Security::Config sub_cfg;
+    sub_cfg.passphrase = "correct horse battery staple";
+    sub_cfg.pbkdf2_salt = shared_salt;
+    sub_cfg.pbkdf2_iterations = 200000U;
+
+    vlink::SecuritySubscriber<std::string> sub("dds://security_basic/passphrase", sub_cfg);
     sub.listen([&received](const std::string& msg) {
       received++;
-      VLOG_I("[Custom Key] Received:", msg);
+      VLOG_I("[Passphrase] Received:", msg);
     });
 
-    vlink::SecurityPublisher<std::string> pub("dds://security_basic/custom_key");
-    pub.set_security_key("my-secret-key-16");  // Must match subscriber's key
+    vlink::Security::Config pub_cfg;
+    pub_cfg.passphrase = "correct horse battery staple";
+    pub_cfg.pbkdf2_salt = shared_salt;
+    pub_cfg.pbkdf2_iterations = 200000U;
+
+    vlink::SecurityPublisher<std::string> pub("dds://security_basic/passphrase", pub_cfg);
 
     pub.wait_for_subscribers();
 
-    pub.publish("Encrypted with custom key");
-    pub.publish("Only matching keys can decrypt");
+    pub.publish("Passphrase-derived AES key in use");
+    pub.publish("PBKDF2 normalises low-entropy inputs");
 
     std::this_thread::sleep_for(100ms);
-    VLOG_I("Custom key: received", received.load(), "messages");
+    VLOG_I("Passphrase: received", received.load(), "messages");
   }
 
   // ======== Section 3: Key Mismatch Failure ========
-  // When the publisher and subscriber use different keys, decryption fails.
-  // The subscriber's callback will NOT be invoked for messages it cannot decrypt.
+  // When the publisher and subscriber derive different keys, GCM authentication
+  // fails on the receiver and the message is dropped before the user callback.
   {
     std::cout << "\n[3] Key Mismatch Failure Demo" << std::endl;
     std::cout << "   Publisher key: 'alpha-key-16byte'" << std::endl;
@@ -112,26 +126,28 @@ int main() {
 
     std::atomic<int> received{0};
 
-    vlink::SecuritySubscriber<std::string> sub("dds://security_basic/mismatch");
-    sub.set_security_key("beta--key-16byte");  // Different key!
+    vlink::Security::Config sub_cfg;
+    sub_cfg.key = "beta--key-16byte";
+
+    vlink::SecuritySubscriber<std::string> sub("dds://security_basic/mismatch", sub_cfg);
     sub.listen([&received](const std::string& msg) {
       received++;
       VLOG_I("[Mismatch] Received (unexpected):", msg);
     });
 
-    vlink::SecurityPublisher<std::string> pub("dds://security_basic/mismatch");
-    pub.set_security_key("alpha-key-16byte");  // Different from subscriber
+    vlink::Security::Config pub_cfg;
+    pub_cfg.key = "alpha-key-16byte";
+
+    vlink::SecurityPublisher<std::string> pub("dds://security_basic/mismatch", pub_cfg);
 
     pub.wait_for_subscribers();
 
-    // These messages will be encrypted with "alpha-key-16byte"
-    // but the subscriber tries to decrypt with "beta--key-16byte" => failure
-    pub.publish("This message should fail to decrypt");
+    pub.publish("This message should fail GCM authentication");
     pub.publish("Key mismatch prevents decryption");
 
     std::this_thread::sleep_for(200ms);
-    VLOG_I("Key mismatch: received", received.load(), "messages (expected 0 due to decryption failure)");
-    std::cout << "   Messages encrypted with a different key cannot be decrypted." << std::endl;
+    VLOG_I("Key mismatch: received", received.load(), "messages (expected 0 due to auth failure)");
+    std::cout << "   Messages encrypted with a different key fail GCM authentication." << std::endl;
     std::cout << "   The subscriber's callback is NOT invoked on decryption failure." << std::endl;
   }
 
@@ -142,20 +158,23 @@ int main() {
 
     std::atomic<int> received{0};
 
-    vlink::SecuritySubscriber<vlink::Bytes> sub("dds://security_basic/bytes");
-    sub.set_security_key("bytes--key-16b!!");
+    vlink::Security::Config sub_cfg;
+    sub_cfg.key = "bytes--key-16b!!";
+
+    vlink::SecuritySubscriber<vlink::Bytes> sub("dds://security_basic/bytes", sub_cfg);
     sub.listen([&received](const vlink::Bytes& msg) {
       received++;
       // NOLINTNEXTLINE(readability-container-size-empty)
       VLOG_I("[Bytes] Received size:", msg.size(), "first_byte:", msg.size() > 0 ? +msg.data()[0] : -1);
     });
 
-    vlink::SecurityPublisher<vlink::Bytes> pub("dds://security_basic/bytes");
-    pub.set_security_key("bytes--key-16b!!");
+    vlink::Security::Config pub_cfg;
+    pub_cfg.key = "bytes--key-16b!!";
+
+    vlink::SecurityPublisher<vlink::Bytes> pub("dds://security_basic/bytes", pub_cfg);
 
     pub.wait_for_subscribers();
 
-    // Publish raw binary data with encryption
     vlink::Bytes data = vlink::Bytes::create(256);
     for (size_t i = 0; i < 256; ++i) {
       data[i] = static_cast<uint8_t>(i);
