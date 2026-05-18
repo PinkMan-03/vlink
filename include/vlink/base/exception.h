@@ -73,7 +73,6 @@
 
 #include <exception>
 #include <stdexcept>
-#include <string>
 
 #include "./macros.h"
 
@@ -89,293 +88,149 @@ namespace Exception {  // NOLINT(readability-identifier-naming)
  * @class RuntimeError
  * @brief Indicates a general runtime failure.
  */
-class VLINK_EXPORT RuntimeError final : public std::runtime_error {
+class RuntimeError final : public std::runtime_error {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit RuntimeError(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit RuntimeError(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~RuntimeError() override;
-
+  using std::runtime_error::runtime_error;
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class OutOfRange
  * @brief Indicates an index or iterator that is outside the valid range.
  */
-class VLINK_EXPORT OutOfRange final : public std::out_of_range {
+class OutOfRange final : public std::out_of_range {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit OutOfRange(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit OutOfRange(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~OutOfRange() override;
+  using std::out_of_range::out_of_range;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class InvalidArgument
  * @brief Indicates that a function received an argument with an invalid value.
  */
-class VLINK_EXPORT InvalidArgument final : public std::invalid_argument {
+class InvalidArgument final : public std::invalid_argument {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit InvalidArgument(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit InvalidArgument(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~InvalidArgument() override;
+  using std::invalid_argument::invalid_argument;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class LogicError
  * @brief Indicates a violated program logic precondition.
  */
-class VLINK_EXPORT LogicError final : public std::logic_error {
+class LogicError final : public std::logic_error {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit LogicError(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit LogicError(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~LogicError() override;
+  using std::logic_error::logic_error;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class DomainError
  * @brief Indicates that a value is outside the domain of a mathematical function.
  */
-class VLINK_EXPORT DomainError final : public std::domain_error {
+class DomainError final : public std::domain_error {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit DomainError(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit DomainError(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~DomainError() override;
+  using std::domain_error::domain_error;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class LengthError
  * @brief Indicates an attempt to exceed the maximum allowable size or length.
  */
-class VLINK_EXPORT LengthError final : public std::length_error {
+class LengthError final : public std::length_error {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit LengthError(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit LengthError(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~LengthError() override;
+  using std::length_error::length_error;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class RangeError
  * @brief Indicates an arithmetic range error.
  */
-class VLINK_EXPORT RangeError final : public std::range_error {
+class RangeError final : public std::range_error {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit RangeError(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit RangeError(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~RangeError() override;
+  using std::range_error::range_error;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class OverflowError
  * @brief Indicates an arithmetic overflow.
  */
-class VLINK_EXPORT OverflowError final : public std::overflow_error {
+class OverflowError final : public std::overflow_error {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit OverflowError(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit OverflowError(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~OverflowError() override;
+  using std::overflow_error::overflow_error;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class UnderflowError
  * @brief Indicates an arithmetic underflow.
  */
-class VLINK_EXPORT UnderflowError final : public std::underflow_error {
+class UnderflowError final : public std::underflow_error {
  public:
-  /**
-   * @brief Constructs the exception with a descriptive message.
-   * @param what_arg Explanatory string returned by what().
-   */
-  explicit UnderflowError(const std::string& what_arg);
-
-  /**
-   * @brief Constructs the exception with a C-string descriptive message.
-   * @param what_arg Null-terminated explanatory string returned by what().
-   */
-  explicit UnderflowError(const char* what_arg);
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~UnderflowError() override;
+  using std::underflow_error::underflow_error;
 
   /**
    * @brief Returns the explanatory message associated with this exception.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
  * @class OperationCancelled
  * @brief Indicates that an operation observed a cooperative cancellation request.
  */
-class VLINK_EXPORT OperationCancelled final : public std::exception {
+class OperationCancelled final : public std::exception {
  public:
-  /**
-   * @brief Constructs a cancellation exception with a default message.
-   */
-  OperationCancelled();
-
-  /**
-   * @brief Destroys the exception object.
-   */
-  ~OperationCancelled() override;
+  using std::exception::exception;
 
   /**
    * @brief Returns the explanatory cancellation message.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] const char* what() const noexcept override;
+  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 }  // namespace Exception
