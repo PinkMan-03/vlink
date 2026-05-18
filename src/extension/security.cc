@@ -51,6 +51,11 @@ namespace vlink {
 [[maybe_unused]] static constexpr size_t kAsymHeaderFieldsSize = kRsaWrapLenFieldSize + kRsaSigLenFieldSize;
 [[maybe_unused]] static constexpr int kRsaMinBits = 2048;
 [[maybe_unused]] static constexpr size_t kPbkdf2MinSaltSize = 16U;
+#ifdef RSA_PSS_SALTLEN_DIGEST
+[[maybe_unused]] static constexpr int kRsaPssSaltLenDigest = RSA_PSS_SALTLEN_DIGEST;
+#else
+[[maybe_unused]] static constexpr int kRsaPssSaltLenDigest = -1;
+#endif
 
 [[nodiscard]] static inline bool size_fits_int(size_t value) noexcept {
   return value <= static_cast<size_t>(std::numeric_limits<int>::max());
@@ -365,7 +370,7 @@ static bool rsa_pss_sign(EVP_PKEY* pkey, const uint8_t* data, size_t data_len, B
     return false;
   }
 
-  if VUNLIKELY (EVP_PKEY_CTX_set_rsa_pss_saltlen(ctx.get(), RSA_PSS_SALTLEN_DIGEST) <= 0) {
+  if VUNLIKELY (EVP_PKEY_CTX_set_rsa_pss_saltlen(ctx.get(), kRsaPssSaltLenDigest) <= 0) {
     return false;
   }
 
@@ -424,7 +429,7 @@ static bool rsa_pss_verify(EVP_PKEY* pkey, const uint8_t* data, size_t data_len,
     return false;
   }
 
-  if VUNLIKELY (EVP_PKEY_CTX_set_rsa_pss_saltlen(ctx.get(), RSA_PSS_SALTLEN_DIGEST) <= 0) {
+  if VUNLIKELY (EVP_PKEY_CTX_set_rsa_pss_saltlen(ctx.get(), kRsaPssSaltLenDigest) <= 0) {
     return false;
   }
 
