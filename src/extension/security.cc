@@ -57,8 +57,8 @@ namespace vlink {
 }
 
 struct DigestScrub final {
-  uint8_t* ptr;
-  size_t size;
+  uint8_t* ptr{nullptr};
+  size_t size{0};
 
   DigestScrub(uint8_t* p, size_t n) noexcept : ptr(p), size(n) {}
 
