@@ -1,6 +1,6 @@
 # SchemaPluginInterface 概念示例
 
-## 概述
+## 1. 概述
 
 本示例演示 VLink 的 `SchemaPluginInterface` 和 `SchemaPluginManager` API——一个用于运行时 protobuf/flatbuffers schema 查找、模式序列化和动态解析的插件接口。
 
@@ -12,7 +12,7 @@
 
 ---
 
-## 目录结构
+## 2. 目录结构
 
 ```
 plugin_schema/
@@ -26,9 +26,9 @@ plugin_schema/
 
 ---
 
-## SchemaPluginInterface 接口
+## 3. SchemaPluginInterface 接口
 
-### 接口定义
+### 3.1 接口定义
 
 ```cpp
 class SchemaPluginInterface {
@@ -59,7 +59,7 @@ class SchemaPluginInterface {
 };
 ```
 
-### 核心方法
+### 3.2 核心方法
 
 | 方法 | 参数 | 返回值 | 用途 |
 |------|------|--------|------|
@@ -70,7 +70,7 @@ class SchemaPluginInterface {
 | `search_flatbuffers_schema(name)` | 完全限定消息类型名 | `reflection::Schema*`（类型擦除） | 查找 BFBS 反射句柄 |
 | `create_flatbuffers_parser(name)` | 完全限定消息类型名 | `flatbuffers::Parser*`（类型擦除） | 创建已设置 root type 的运行时 parser |
 
-### VersionInfo 结构
+### 3.3 VersionInfo 结构
 
 `get_version_info()` 返回插件的构建元数据：
 
@@ -82,7 +82,7 @@ class SchemaPluginInterface {
 | `tag` | 源代码控制标签 |
 | `commit_id` | 源代码提交哈希 |
 
-### SchemaData 结构
+### 3.4 SchemaData 结构
 
 ```cpp
 struct SchemaData final {
@@ -97,7 +97,7 @@ struct SchemaData final {
 
 ---
 
-## SchemaPluginBase 的真实职责
+## 4. SchemaPluginBase 的真实职责
 
 `SchemaPluginBase` 的默认行为分成两部分：
 
@@ -116,9 +116,9 @@ struct SchemaData final {
 
 ---
 
-## SchemaPluginManager 单例
+## 5. SchemaPluginManager 单例
 
-### 接口
+### 5.1 接口
 
 ```cpp
 class SchemaPluginManager final {
@@ -129,7 +129,7 @@ class SchemaPluginManager final {
 };
 ```
 
-### 工作流程
+### 5.2 工作流程
 
 ```
 首次调用 get()
@@ -144,7 +144,7 @@ class SchemaPluginManager final {
 后续调用 get() --> 直接返回已有的单例（忽略 schema_plugin_path）
 ```
 
-### 使用模式
+### 5.3 使用模式
 
 ```cpp
 // 方式 1：通过环境变量
@@ -162,9 +162,9 @@ if (mgr.is_valid()) {
 
 ---
 
-## 示例代码分析 (plugin_schema.cc)
+## 6. 示例代码分析 (plugin_schema.cc)
 
-### 直接加载模式
+### 6.1 直接加载模式
 
 ```cpp
 static void demo_direct_load() {
@@ -190,7 +190,7 @@ static void demo_direct_load() {
 
 直接加载模式使用 `Plugin::load<SchemaPluginInterface>()` 手动管理插件生命周期。适用于需要精细控制的场景。
 
-### 单例管理器模式
+### 6.2 单例管理器模式
 
 ```cpp
 static void demo_manager() {
@@ -210,9 +210,9 @@ static void demo_manager() {
 
 ---
 
-## 与录制/回放系统的集成
+## 7. 与录制/回放系统的集成
 
-### BagWriter 录制流程
+### 7.1 BagWriter 录制流程
 
 ```
 Publisher<T> 发布消息
@@ -230,7 +230,7 @@ SchemaPluginInterface::search_schema(type_name, schema_type)
 将消息数据写入 bag 文件
 ```
 
-### BagReader 回放流程
+### 7.2 BagReader 回放流程
 
 ```
 BagReader 打开 bag 文件
@@ -248,7 +248,7 @@ SchemaPluginInterface::create_protobuf_message(type_name)
 重建原始消息并回放
 ```
 
-### 核心优势
+### 7.3 核心优势
 
 1. **解耦**：主应用不需要链接 Protobuf 库
 2. **动态**：运行时加载描述符，不需要预生成代码
@@ -257,16 +257,16 @@ SchemaPluginInterface::create_protobuf_message(type_name)
 
 ---
 
-## 编写自定义 SchemaPlugin
+## 8. 编写自定义 SchemaPlugin
 
-### 实现步骤
+### 8.1 实现步骤
 
 1. 继承 `SchemaPluginBase`
 2. 让 protobuf 从当前库的 generated descriptors 按需查询，并为 flatbuffers 静态注册 BFBS
 3. 实现版本信息接口
 4. 使用 `VLINK_PLUGIN_DECLARE` 导出
 
-### 概念代码
+### 8.2 概念代码
 
 ```cpp
 #define VLINK_SCHEMA_PLUGIN_IMPL
@@ -288,7 +288,7 @@ VLINK_PLUGIN_DECLARE(MySchemaPlugin, 1, 0)
 
 ---
 
-## 环境变量
+## 9. 环境变量
 
 | 变量 | 作用 |
 |------|------|
@@ -303,7 +303,7 @@ export VLINK_SCHEMA_PLUGIN=/opt/vlink/lib/libvlink_schema_plugin.so
 
 ---
 
-## 编译与运行
+## 10. 编译与运行
 
 ```bash
 cd build
@@ -347,7 +347,7 @@ VLINK_SCHEMA_PLUGIN=/path/to/schema_plugin.so ./output/bin/example_plugin_schema
 
 ---
 
-## 类型擦除设计
+## 11. 类型擦除设计
 
 `SchemaPluginInterface` 使用 `void*` 进行类型擦除：
 
@@ -376,7 +376,7 @@ auto* msg = static_cast<google::protobuf::Message*>(msg_ptr);
 
 ---
 
-## 与其他插件类型的对比
+## 12. 与其他插件类型的对比
 
 | 特性 | 基本插件 | RunablePluginInterface | SchemaPluginInterface |
 |------|---------|----------------------|---------------------|
@@ -388,7 +388,7 @@ auto* msg = static_cast<google::protobuf::Message*>(msg_ptr);
 
 ---
 
-## 注意事项
+## 13. 注意事项
 
 - 本示例是概念演示，不构建实际的 schema plugin .so
 - 实际的 SchemaPlugin 实现需要链接 Protobuf 库

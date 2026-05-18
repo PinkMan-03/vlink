@@ -1,6 +1,6 @@
 # VLink Security RSA 非对称示例
 
-## 概述
+## 1. 概述
 
 本示例演示 `vlink::Security` 的非对称（hybrid）路径，覆盖：
 
@@ -11,7 +11,9 @@
 
 启动时通过 OpenSSL 临时生成 RSA-2048 keypair，**仅用于演示**。生产部署的 RSA key 应通过 PEM 文件离线分发。
 
-## 编译运行
+![Security RSA Hybrid](images/security-rsa-hybrid.png)
+
+## 2. 编译运行
 
 ```bash
 cmake -S . -B build -DENABLE_SECURITY=ON -DENABLE_EXAMPLES=ON
@@ -21,9 +23,9 @@ cmake --build build --target example_security_rsa
 
 DDS 段需要 Fast-DDS 默认本机 discovery 可用（无需额外 broker）。
 
-## 核心 API
+## 3. 核心 API
 
-### 发送方（加密 + 可选签名）
+### 3.1 发送方（加密 + 可选签名）
 
 ```cpp
 vlink::Security::Config sender_cfg;
@@ -34,7 +36,7 @@ vlink::SecurityPublisher<std::string> pub("dds://demo/secure", sender_cfg);
 pub.publish("hello");                              // 自动 hybrid + sign
 ```
 
-### 接收方（解密 + 可选验签）
+### 3.2 接收方（解密 + 可选验签）
 
 ```cpp
 vlink::Security::Config receiver_cfg;
@@ -45,7 +47,7 @@ vlink::SecuritySubscriber<std::string> sub("dds://demo/secure", receiver_cfg);
 sub.listen([](const std::string& msg) { ... });
 ```
 
-### Wire format（非对称）
+### 3.3 Wire format（非对称）
 
 ```
 [2B wrap_len_le][2B sig_len_le][wrap_len B RSA-OAEP wrapped key]
@@ -54,7 +56,7 @@ sub.listen([](const std::string& msg) { ... });
 
 签名覆盖 `wrap_len_le ‖ wrapped_key ‖ nonce ‖ ciphertext ‖ tag`，不含 `sig_len_le`。`sig_len = 0` 表示未签名（仅当接收方未装 `verify_key_pem` 时才接受）。
 
-## RSA Key 约束
+## 4. RSA Key 约束
 
 | 约束 | 说明 |
 |---|---|
@@ -62,7 +64,7 @@ sub.listen([](const std::string& msg) { ... });
 | 位数 | 至少 2048 bits |
 | PEM | 标准 PEM（PKCS#1 或 PKCS#8 私钥；SubjectPublicKeyInfo 公钥） |
 
-## 模式选择
+## 5. 模式选择
 
 | 场景 | 发送方 cfg | 接收方 cfg |
 |---|---|---|
@@ -70,13 +72,13 @@ sub.listen([](const std::string& msg) { ... });
 | 加密 + 发送方身份认证 | `public_key_pem` + `signing_key_pem` | `private_key_pem` + `verify_key_pem` |
 | 双向 | 两端都设置上述 4 个 PEM | 同左 |
 
-## 限制
+## 6. 限制
 
 - 不支持 `intra://` 和 `dds://` + CDR 类型。
 - 不提供 replay 防护（一条合法密文可重放）；如需 replay 防护需在应用层加序列号。
 - 单条 RSA-OAEP wrap ≤ 65535 B；超过会被拒绝（实践中远不可能触发）。
 
-## 相关
+## 7. 相关
 
 - 头文件：`include/vlink/extension/security.h`
 - 实现：`src/extension/security.cc`

@@ -1,6 +1,6 @@
 # C API Security 示例
 
-## 概述
+## 1. 概述
 
 本示例演示在纯 C 代码中使用 VLink 的应用层加密 API：
 
@@ -9,7 +9,9 @@
 
 加密算法：AES-128-GCM（AEAD）+ 12B 随机 nonce + 16B 认证 tag。可通过 `vlink_security_config_t` 切换到 RSA-OAEP hybrid（设置 `public_key_pem` / `private_key_pem`）或 RSA-PSS 签名（设置 `signing_key_pem` / `verify_key_pem`）。
 
-## 编译运行
+![C API Security Flow](images/c-api-security-flow.png)
+
+## 2. 编译运行
 
 启用 `ENABLE_SECURITY=ON` + `ENABLE_C_API=ON` + `ENABLE_EXAMPLES=ON`：
 
@@ -27,9 +29,9 @@ iox-roudi &
 
 未启动 RouDi 时 pub/sub 段会优雅跳过；独立 standalone 段始终可跑。
 
-## 核心 API
+## 3. 核心 API
 
-### 配置结构体
+### 3.1 配置结构体
 
 ```c
 typedef struct {
@@ -50,7 +52,7 @@ typedef struct {
 void vlink_security_config_init(vlink_security_config_t* cfg);  // 清零 + 默认值
 ```
 
-### 独立加解密
+### 3.2 独立加解密
 
 ```c
 vlink_security_config_t cfg;
@@ -72,7 +74,7 @@ vlink_security_free_buffer(recovered);
 vlink_security_destroy(sec);
 ```
 
-### 原子 create_secure
+### 3.3 原子 create_secure
 
 ```c
 vlink_publisher_handle_t pub;
@@ -84,7 +86,7 @@ vlink_destroy_publisher(&pub);
 六种节点都有对应的原子构造接口：
 `vlink_create_secure_publisher` / `_subscriber` / `_server` / `_client` / `_setter` / `_getter`。
 
-### 返回码
+### 3.4 返回码
 
 | 代码 | 值 | 含义 |
 |---|---|---|
@@ -94,13 +96,13 @@ vlink_destroy_publisher(&pub);
 | `VLINK_RET_RUNTIME_ERROR` | 4 | C++ 构造抛异常（极少） |
 | `VLINK_RET_TRANSFER_ERROR` | 5 | encrypt/decrypt 失败（错 key / 篡改 / 短输入） |
 
-## 限制
+## 4. 限制
 
 - `intra://` 与 `dds://` 配 CDR 类型不支持 security —— `vlink_create_secure_*` 会拒绝 `Security::Config` 并返回 `VLINK_RET_INVALID_ERROR`。
 - 因为 `Security` 在 `vlink_create_secure_*` 内部于 `listen()` / `init()` 之前装配，所以不存在“前几条消息可能走明文”的窗口。
 - `vlink_security_config_t.encrypt_callback` 与 `decrypt_callback` 必须**成对**安装，单独一个会被忽略并打 warning。
 
-## 相关
+## 5. 相关
 
 - C++ 同语义示例：`examples/security/security_basic` / `security_custom` / `security_rsa`
 - 头文件：`include/vlink/external/c_api.h`（vlink_security_* / vlink_ssl_options_*）

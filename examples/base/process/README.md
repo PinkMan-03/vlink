@@ -1,26 +1,26 @@
 # VLink Process 示例
 
-## 概述
+## 1. 概述
 
 本示例演示了 VLink `Process` 类的跨平台子进程管理功能，包括进程创建、标准输入输出管道通信、状态回调、进程终止与强制杀死等完整的进程生命周期管理。`Process` 的 API 设计灵感来自 Qt 的 `QProcess`，但采用纯 C++ 实现。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
 | `process_demo.cc` | Process 全功能演示源码 |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
 
-## 构建与运行
+## 3. 构建与运行
 
 ```bash
 cmake --build . --target example_process
 ./examples/base/process/example_process
 ```
 
-## 核心概念
+## 4. 核心概念
 
-### 进程生命周期状态
+### 4.1 进程生命周期状态
 
 ```
 kNotRunningState -> kStartingState -> kRunningState -> kNotRunningState
@@ -33,7 +33,7 @@ kNotRunningState -> kStartingState -> kRunningState -> kNotRunningState
 | `kStartingState` | 1 | `start()` 已调用，等待 exec 完成 |
 | `kRunningState` | 2 | 子进程正在运行 |
 
-### I/O 通道模式
+### 4.2 I/O 通道模式
 
 | 模式 | stdout | stderr | 适用场景 |
 |------|--------|--------|---------|
@@ -43,7 +43,7 @@ kNotRunningState -> kStartingState -> kRunningState -> kNotRunningState
 | `kForwardedOutputMode` | 转发到父进程 | 缓冲管道 | stdout 直接显示，stderr 需要捕获 |
 | `kForwardedErrorMode` | 缓冲管道 | 转发到父进程 | stdout 需要捕获，stderr 直接显示 |
 
-### 基本使用模式
+### 4.3 基本使用模式
 
 ```cpp
 Process proc;
@@ -57,9 +57,9 @@ proc.read_all_output(output);
 int exit_code = proc.get_exit_code();
 ```
 
-## 代码详解
+## 5. 代码详解
 
-### 1. 同步执行
+### 5.1 同步执行
 
 ```cpp
 int code = Process::execute("/bin/echo", {"hello"}, 5000);
@@ -67,7 +67,7 @@ int code = Process::execute("/bin/echo", {"hello"}, 5000);
 
 `execute` 是静态方法，阻塞等待进程完成并返回退出码。适合简单的命令执行场景。超时或启动失败返回 `-1`。
 
-### 2. 异步启动与输出捕获
+### 5.2 异步启动与输出捕获
 
 ```cpp
 Process proc;
@@ -82,7 +82,7 @@ proc.read_all_output(output);
 
 异步模式下，`start()` 立即返回，子进程在后台运行。通过 `wait_for_started` 和 `wait_for_finished` 等待状态变化。
 
-### 3. 管道写入（stdin）
+### 5.3 管道写入（stdin）
 
 ```cpp
 proc.start("/bin/cat", {});
@@ -94,7 +94,7 @@ proc.wait_for_finished(5000);
 
 `write()` 将数据写入子进程的 stdin。`close_write_channel()` 关闭写端，向子进程发送 EOF 信号。这对于需要交互的程序（如 `cat`、`python`）至关重要。
 
-### 4. 逐行读取
+### 5.4 逐行读取
 
 ```cpp
 while (proc.can_read_line_stdout()) {
@@ -106,7 +106,7 @@ while (proc.can_read_line_stdout()) {
 
 `can_read_line_stdout()` 检查缓冲区中是否有完整的一行（以换行符结尾）。`read_line_stdout()` 读取一行并去除换行符。
 
-### 5. 进程终止
+### 5.5 进程终止
 
 ```cpp
 proc.terminate();  // 发送 SIGTERM（优雅终止）
@@ -118,7 +118,7 @@ if (!finished) {
 
 `terminate()` 发送 SIGTERM，子进程可以选择忽略。`kill()` 发送 SIGKILL，不可被忽略。`close(true)` 是二合一方法：先 terminate，超时后自动 kill。
 
-### 6. 状态与完成回调
+### 5.6 状态与完成回调
 
 ```cpp
 proc.register_state_changed_callback([](Process::State state) {
@@ -139,7 +139,7 @@ proc.register_ready_read_stdout_callback([&proc]() {
 
 所有回调在内部监控线程中执行，访问共享数据时需要注意线程安全。
 
-### 7. 分离进程
+### 5.7 分离进程
 
 ```cpp
 bool ok = Process::start_detached("/usr/bin/my_daemon", {"--config", "/etc/app.conf"});
@@ -147,7 +147,7 @@ bool ok = Process::start_detached("/usr/bin/my_daemon", {"--config", "/etc/app.c
 
 `start_detached` 启动一个完全独立于父进程的子进程。没有返回句柄，子进程独立运行直到自行退出。
 
-## 错误处理
+## 6. 错误处理
 
 | 错误码 | 说明 |
 |--------|------|
@@ -161,9 +161,9 @@ bool ok = Process::start_detached("/usr/bin/my_daemon", {"--config", "/etc/app.c
 
 通过 `register_error_callback` 注册错误回调，或通过 `get_error()` 查询最后的错误码。
 
-## 高级配置
+## 7. 高级配置
 
-### 环境变量
+### 7.1 环境变量
 
 ```cpp
 Process::EnvironmentMap env;
@@ -172,13 +172,13 @@ proc.set_environment(env);
 proc.set_inherit_environment(true); // 是否继承父进程环境
 ```
 
-### 工作目录
+### 7.2 工作目录
 
 ```cpp
 proc.set_working_directory("/tmp");
 ```
 
-### 缓冲区限制
+### 7.3 缓冲区限制
 
 ```cpp
 proc.set_max_buffer_size(32 * 1024 * 1024); // 32MB 上限
@@ -186,14 +186,14 @@ proc.set_max_buffer_size(32 * 1024 * 1024); // 32MB 上限
 
 默认缓冲区上限为 16MB，超出后触发 `kBufferOverflowError`。
 
-## 退出状态
+## 8. 退出状态
 
 | 状态 | 说明 |
 |------|------|
 | `kNormalExitStatus` | 正常退出（通过 `exit()` 或 `main` 返回） |
 | `kCrashExitStatus` | 被信号杀死或崩溃 |
 
-## 常量说明
+## 9. 常量说明
 
 | 常量 | 默认值 | 说明 |
 |------|--------|------|
@@ -203,7 +203,7 @@ proc.set_max_buffer_size(32 * 1024 * 1024); // 32MB 上限
 | `kDefaultExecuteTimeoutMs` | 30000 | `execute()` 默认超时 |
 | `kDestructorWaitTimeoutMs` | 5000 | 析构函数等待子进程退出的超时 |
 
-## 注意事项
+## 10. 注意事项
 
 - `Process` 对象不可拷贝、不可移动
 - 析构函数会等待最多 5 秒让子进程退出

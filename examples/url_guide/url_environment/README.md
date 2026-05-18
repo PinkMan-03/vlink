@@ -1,12 +1,12 @@
 # URL Environment -- VLink 环境变量完整指南
 
-## 概述
+## 1. 概述
 
 本示例全面展示 VLink 框架使用的所有重要 `VLINK_` 环境变量。按功能类别分组，涵盖传输配置、URL 重映射、日志、录制、安全、性能分析、发现和系统路径等方面。
 
-## 环境变量分类总览
+## 2. 环境变量分类总览
 
-### 类别 1: 传输配置
+### 2.1 类别 1: 传输配置
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
@@ -19,28 +19,28 @@
 | `VLINK_MQTT_DOMAIN` | MQTT 默认域 ID | 0 |
 | `VLINK_INTRA_BIND` | 启用 intra:// 代理观察 | (禁用) |
 
-### 类别 2: URL 重映射
+### 2.2 类别 2: URL 重映射
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_URL_REMAP` | 重映射 JSON 文件路径 | (不设置) |
 | `VLINK_URL_USE_REMAP` | 启用自动重映射（设为 `1`） | (禁用) |
 
-### 类别 3: 日志
+### 2.3 类别 3: 日志
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_LOG_CONSOLE_LEVEL` | 控制台日志级别 (0=Trace ~ 6=Off) | 2 (Info) |
 | `VLINK_LOG_DIR` | 日志文件输出目录 | (不输出文件) |
 
-### 类别 4: 录制 (Bag)
+### 2.4 类别 4: 录制 (Bag)
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_BAG_PATH` | Bag 文件输出目录，设置即启用录制 | (禁用) |
 | `VLINK_BAG_TAG` | Bag 文件名标签 | (空) |
 
-### 类别 5: 安全 (SSL/TLS)
+### 2.5 类别 5: 安全 (SSL/TLS)
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
@@ -48,21 +48,21 @@
 | `VLINK_SSL_CERT` | TLS 证书文件路径 | (不设置) |
 | `VLINK_SSL_KEY` | TLS 私钥文件路径 | (不设置) |
 
-### 类别 6: 性能分析与诊断
+### 2.6 类别 6: 性能分析与诊断
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_PROFILER_ENABLE` | 启用 CPU 性能分析 (设为 `1`) | (禁用) |
 | `VLINK_QOS_CONFIG` | QoS 配置 JSON 文件路径 | (不设置) |
 
-### 类别 7: 发现
+### 2.7 类别 7: 发现
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_DISCOVER_DISABLE` | 禁用发现子系统 (设为 `1`) | (启用) |
 | `VLINK_PLUGIN_DIR` | 插件共享库搜索目录 | (仅内置传输) |
 
-### 类别 8: 系统路径与内存
+### 2.8 类别 8: 系统路径与内存
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
@@ -71,9 +71,9 @@
 | `VLINK_MEMORY_LEVEL` | `MemoryPool` 默认分级（`0..9`：`0` = bypass，`1..9` 越大每档预留 chunk 越多；tier 跨度 `32B..16MB`；L9 满载 ≈ 656 MiB；L3 不激活 4MB tier） | 3 (Balanced) |
 | `VLINK_MEMORY_PREALLOC` | 设为 `1` 时全局 `MemoryPool` 在构造时为每个 tier 一次性预分配满额 `blocks_per_chunk` 的 chunk（best-effort），消除热路径上的所有上游分配延迟。仅 `MemoryPool::global_instance(true)` 首次构造时读取 | (禁用) |
 
-## 关键代码分析
+## 3. 关键代码分析
 
-### 1. 程序化读写环境变量
+### 3.1 程序化读写环境变量
 
 ```cpp
 // 读取（带默认值）
@@ -89,7 +89,7 @@ Utils::set_env("VLINK_DDS_DOMAIN", "99", false);  // 如果已存在则不覆盖
 Utils::unset_env("VLINK_DDS_DOMAIN");
 ```
 
-### 2. 日志级别控制
+### 3.2 日志级别控制
 
 ```bash
 export VLINK_LOG_CONSOLE_LEVEL=0  # 显示所有日志（Trace 级别）
@@ -99,7 +99,7 @@ export VLINK_LOG_CONSOLE_LEVEL=6  # 关闭控制台日志
 
 级别对应：0=Trace, 1=Debug, 2=Info, 3=Warn, 4=Error, 5=Fatal, 6=Off
 
-### 3. 全局录制
+### 3.3 全局录制
 
 ```bash
 export VLINK_BAG_PATH=/data/recordings
@@ -108,7 +108,7 @@ export VLINK_BAG_TAG=highway_test_001
 
 设置 `VLINK_BAG_PATH` 后，所有 Publisher 发布的消息自动录制到该目录下的 bag 文件中。
 
-### 4. TLS 安全配置
+### 3.4 TLS 安全配置
 
 ```bash
 export VLINK_SSL_CA=/etc/vlink/certs/ca.pem
@@ -118,7 +118,7 @@ export VLINK_SSL_KEY=/etc/vlink/certs/client.key
 
 用于 MQTT SSL (`ssl://`) 和 DDS 安全插件的证书配置。
 
-### 5. 性能分析
+### 3.5 性能分析
 
 ```bash
 export VLINK_PROFILER_ENABLE=1
@@ -126,7 +126,7 @@ export VLINK_PROFILER_ENABLE=1
 
 启用后，VLink 对关键代码路径进行性能采样，可用于定位热点和优化瓶颈。
 
-## Shell 快速参考
+## 4. Shell 快速参考
 
 ```bash
 # 传输配置
@@ -164,7 +164,7 @@ export VLINK_MEMORY_LEVEL=3
 export VLINK_INTRA_BIND=1
 ```
 
-## 编译与运行
+## 5. 编译与运行
 
 ```bash
 mkdir build && cd build
@@ -173,7 +173,7 @@ make example_url_environment
 ./output/bin/example_url_environment
 ```
 
-## 预期输出
+## 6. 预期输出
 
 ```
 [I] ==================================================
@@ -192,7 +192,7 @@ make example_url_environment
 ...
 ```
 
-## 扩展思考
+## 7. 扩展思考
 
 - 在容器化部署中（Docker/K8s），环境变量是最自然的配置注入方式。VLink 的所有关键参数都可以通过环境变量配置，无需修改代码。
 - `VLINK_LOG_CONSOLE_LEVEL` 可以在运行时通过 `Logger::set_console_level()` 动态调整。

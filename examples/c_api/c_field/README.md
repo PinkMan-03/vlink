@@ -1,12 +1,14 @@
 # C API 字段示例
 
-## 概述
+## 1. 概述
 
 本示例演示使用纯 C 语言的 VLink Setter/Getter（字段模型）API。字段模型保留最新值，支持推送模式（回调通知）和轮询模式（主动获取）。创建接口里的 `vlink_schema_info_t` 会把 `ser + schema` 作为精确运行时 metadata 一次性写入节点。
 
-## 核心 API
+![C API Field Flow](images/c-api-field-flow.png)
 
-### Setter（写入者）
+## 2. 核心 API
+
+### 2.1 Setter（写入者）
 
 ```c
 vlink_schema_info_t schema = {
@@ -20,7 +22,7 @@ vlink_set(setter, data, size);
 vlink_destroy_setter(&setter);
 ```
 
-### Getter 推送模式
+### 2.2 Getter 推送模式
 
 ```c
 void on_change(const uint8_t* data, size_t size, void* ud) {
@@ -31,7 +33,7 @@ vlink_getter_handle_t getter;
 vlink_create_getter("intra://field", &schema, &getter, on_change, NULL);
 ```
 
-### Getter 轮询模式
+### 2.3 Getter 轮询模式
 
 ```c
 vlink_getter_handle_t getter;
@@ -43,7 +45,7 @@ int ret = vlink_get(getter, buf, &buf_size);
 // buf_size 被更新为实际数据大小
 ```
 
-## vlink_get 返回码
+## 3. vlink_get 返回码
 
 | 返回值 | 含义 |
 |--------|------|
@@ -52,7 +54,7 @@ int ret = vlink_get(getter, buf, &buf_size);
 | `VLINK_RET_MEMORY_ERROR` | 缓冲区太小，`*size` 被回写为所需的字节数；调用方可据此扩容后重试 |
 | `VLINK_RET_INVALID_ERROR` | 无效参数 |
 
-## 编译与运行
+## 4. 编译与运行
 
 ```bash
 cd build
@@ -60,7 +62,7 @@ cmake .. && make example_c_field
 ./output/bin/example_c_field
 ```
 
-## 注意事项
+## 5. 注意事项
 
 - Getter 的 `msg_callback` 为 NULL 时使用轮询模式
 - 通过 `vlink_schema_info_t` 显式传入 `ser + schema`
@@ -70,6 +72,6 @@ cmake .. && make example_c_field
 - Setter 的每次 `vlink_set()` 覆盖前一个值
 - 字段模型支持迟到的 Getter 获取最新值（late-join）
 
-## 相关文档
+## 6. 相关文档
 
 详细原理参见 [doc/18-c-api.md](../../../doc/18-c-api.md)。

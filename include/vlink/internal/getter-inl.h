@@ -270,7 +270,7 @@ inline void Getter<ValueT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callback)
     if constexpr (SecT == SecurityType::kWithSecurity) {
       Bytes sec_data;
 
-      if VUNLIKELY (!this->security_->decrypt(data, sec_data)) {
+      if VUNLIKELY (!this->security_ || !this->security_->decrypt(data, sec_data)) {
         VLOG_T("Getter decrypt failed, url: ", this->impl_->url, ".");
         return;
       }

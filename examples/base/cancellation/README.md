@@ -1,10 +1,12 @@
 # cancellation -- 协作取消三件套
 
+## 1. 概述
+
 `vlink::CancellationSource` / `CancellationToken` / `CancellationRegistration` 与
 `vlink::OperationCancelled` 异常组成 VLink 的协作取消（cooperative cancellation）
 原语。本示例**完整展示** 12 种典型用法、边界场景、并发竞态。
 
-## 头文件
+## 2. 头文件
 
 ```cpp
 #include <vlink/base/cancellation.h>
@@ -13,7 +15,7 @@
 #include <vlink/base/task_handle.h>   // 集成示例
 ```
 
-## 三种协作模式速览
+## 3. 三种协作模式速览
 
 ![三种协作模式](images/cancellation-usage-modes.png)
 
@@ -23,7 +25,7 @@
 | 抛异常 | `token.throw_if_cancellation_requested();` | 需要 RAII 自动展开、跨多层调用 |
 | 回调   | `token.register_callback([]{ wake_io_thread(); });` | 唤醒阻塞 I/O / epoll / 文件操作 |
 
-## 示例覆盖范围（12 段）
+## 4. 示例覆盖范围（12 段）
 
 | 段落 | 主题 |
 |------|------|
@@ -40,7 +42,7 @@
 | 11 | 并发注册 + 并发 cancel 的竞态（同步/异步触发混合） |
 | 12 | 与 `TaskHandle` 集成：父级 token 自动透传到队列任务 |
 
-## 构建与运行
+## 5. 构建与运行
 
 ```bash
 cmake -S . -B build
@@ -48,7 +50,7 @@ cmake --build build --target example_cancellation
 ./build/examples/base/cancellation/example_cancellation
 ```
 
-## 锁与语义要点
+## 6. 锁与语义要点
 
 - **一次性触发**：`request_cancel()` 首次返回 `true`，后续返回 `false`。
 - **同步 vs 异步**：register 时若已 cancelled，回调在**当前线程同步执行**，返回的 registration 为空；否则回调在 producer 线程上触发。
@@ -57,12 +59,12 @@ cmake --build build --target example_cancellation
 - **生命周期**：所有类型经 `shared_ptr<State>` 共享内部状态；`CancellationRegistration` 析构 / `reset()` 在回调未触发时取消订阅，已触发则为 no-op。
 - **`CancellationToken` 默认构造**：`valid()==false`，`is_cancellation_requested()` 永返 `false`，`register_callback()` 返回空。
 
-## 与其他组件的集成
+## 7. 与其他组件的集成
 
 - `vlink::TaskHandle` / `vlink::PostTaskOptions::cancellation_token`：dispatcher 在排队和出队阶段感知取消（示例 §12，详见 `examples/base/task_handle`）。
 - `vlink::Co::*` 协程：`await_graph` 等场景在投递失败 / loop 死亡时抛 `OperationCancelled`（参见 `examples/base/message_loop_coroutine`）。
 
-## 相关文档与图
+## 8. 相关文档与图
 
 - 章节：[doc/11-base-library.md §11.14 协作取消 Cancellation](../../../doc/11-base-library.md)
 - 模型图：[doc/images/cancellation-model.png](../../../doc/images/cancellation-model.png)

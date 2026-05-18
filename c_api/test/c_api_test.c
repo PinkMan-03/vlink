@@ -21,6 +21,8 @@
  * limitations under the License.
  */
 
+// NOLINTBEGIN
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,7 +42,6 @@ void custom_sleep(int ms) {
 }
 
 // event
-
 void on_subscriber_msg(const uint8_t* data, const size_t size, void* user_data) {
   if (!data || size == 0) {
     return;
@@ -221,8 +222,8 @@ int test_schema_info_validation(void) {
          VLINK_RET_INVALID_ERROR;
 
   const vlink_schema_info_t empty_ser = {"", VLINK_SCHEMA_RAW};
-  ret += vlink_create_publisher("dds://c_interface/schema_empty_ser", &empty_ser, &pub_handle) !=
-         VLINK_RET_INVALID_ERROR;
+  ret +=
+      vlink_create_publisher("dds://c_interface/schema_empty_ser", &empty_ser, &pub_handle) != VLINK_RET_INVALID_ERROR;
 
   {
     const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
@@ -455,8 +456,8 @@ int test_security_callback_pubsub(void) {
   cfg.key = "shared_pubsub_key";
 
   vlink_subscriber_handle_t sub_handle = {0};
-  int rc =
-      vlink_create_secure_subscriber("dds://c_interface/secure_event", &schema, &sub_handle, on_secure_sub_msg, &got, &cfg);
+  int rc = vlink_create_secure_subscriber("dds://c_interface/secure_event", &schema, &sub_handle, on_secure_sub_msg,
+                                          &got, &cfg);
   if (rc != VLINK_RET_NO_ERROR) {
     printf("FAIL: create_secure_subscriber rc=%d\n", rc);
     return 1;
@@ -492,6 +493,68 @@ int test_security_callback_pubsub(void) {
 
   vlink_destroy_publisher(&pub_handle);
   vlink_destroy_subscriber(&sub_handle);
+
+  return ret;
+}
+
+int test_security_tamper(void) {
+  printf("test_security_tamper...\n");
+  fflush(stdout);
+
+  int ret = 0;
+
+  vlink_security_config_t cfg;
+  vlink_security_config_init(&cfg);
+  cfg.key = "tamper_test_key";
+
+  vlink_security_handle_t sec = vlink_security_create(&cfg);
+  if (!sec) {
+    printf("FAIL: vlink_security_create returned NULL\n");
+    return 1;
+  }
+
+  uint8_t plain[64];
+  for (size_t i = 0; i < sizeof(plain); ++i) {
+    plain[i] = (uint8_t)i;
+  }
+
+  uint8_t* cipher = NULL;
+  size_t cipher_size = 0;
+  int rc = vlink_security_encrypt(sec, plain, sizeof(plain), &cipher, &cipher_size);
+  if (rc != VLINK_RET_NO_ERROR || cipher == NULL || cipher_size < sizeof(plain) + 12u + 16u) {
+    printf("FAIL: encrypt rc=%d size=%zu\n", rc, cipher_size);
+    vlink_security_free_buffer(cipher);
+    vlink_security_destroy(sec);
+    return 1;
+  }
+
+  /* Flip exactly one bit at three structural positions: nonce start, ciphertext mid, tag tail. */
+  const size_t positions[3] = {0u, cipher_size / 2u, cipher_size - 1u};
+  for (size_t pi = 0; pi < 3u; ++pi) {
+    uint8_t* tampered = (uint8_t*)malloc(cipher_size);
+    if (!tampered) {
+      printf("FAIL: malloc failed for tampered buffer\n");
+      ret = 1;
+      continue;
+    }
+    memcpy(tampered, cipher, cipher_size);
+    tampered[positions[pi]] ^= 0x01u;
+
+    uint8_t* recovered = NULL;
+    size_t recovered_size = 0;
+    rc = vlink_security_decrypt(sec, tampered, cipher_size, &recovered, &recovered_size);
+    if (rc == VLINK_RET_NO_ERROR) {
+      printf("FAIL: tampered byte at offset %zu produced rc=NO_ERROR\n", positions[pi]);
+      ret = 1;
+    } else {
+      printf("PASS: tampered byte at offset %zu is rejected (rc=%d)\n", positions[pi], rc);
+    }
+    vlink_security_free_buffer(recovered);
+    free(tampered);
+  }
+
+  vlink_security_free_buffer(cipher);
+  vlink_security_destroy(sec);
 
   return ret;
 }
@@ -555,9 +618,12 @@ int main(int argc, char* argv[]) {
 #ifdef VLINK_ENABLE_SECURITY
   ret += test_security_standalone();
   ret += test_security_passphrase();
+  ret += test_security_tamper();
   ret += test_security_callback_pubsub();
   ret += test_ssl_options_init();
 #endif
 
   return ret;
 }
+
+// NOLINTEND

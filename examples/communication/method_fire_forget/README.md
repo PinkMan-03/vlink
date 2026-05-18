@@ -1,19 +1,21 @@
 # Method Fire-and-Forget -- VLink 即发即忘模式示例
 
-## 通信模型概览
+## 1. 通信模型概览
 
 ![通信模型概览](../event_basic/images/communication-models-overview.png)
 
-## 概述
+## 2. 概述
 
 本示例演示 VLink **方法模型** 的即发即忘（Fire-and-Forget）模式：`Server<Req>` 只接收请求不发送响应，`Client<Req>` 使用 `send()` 发送请求后立即返回。
+
+![Method Fire-and-Forget Flow](images/method-fire-forget-flow.png)
 
 ```
 Client<Req> ──send(req)──> [dds://] ──> Server<Req>: callback(req)
                                           (无响应返回)
 ```
 
-## 即发即忘 vs 完整 RPC
+## 3. 即发即忘 vs 完整 RPC
 
 | 特性 | 即发即忘 | 完整 RPC |
 |------|---------|---------|
@@ -24,9 +26,9 @@ Client<Req> ──send(req)──> [dds://] ──> Server<Req>: callback(req)
 | 等待响应 | 否 | 是 |
 | 适用场景 | 日志、通知、非关键命令 | 查询、计算、需要确认的操作 |
 
-## 核心 API
+## 4. 核心 API
 
-### Server<Req> (无 Resp 类型)
+### 4.1 Server<Req> (无 Resp 类型)
 
 ```cpp
 Server<LogEntry> server(url);
@@ -37,7 +39,7 @@ server.listen([](const LogEntry& entry) {
 
 当 `RespT` 省略时（默认为 `Traits::EmptyType`），Server 只接收请求。`listen` 回调的签名变为 `void(const Req&)`，没有 `Resp&` 参数。
 
-### Client<Req> (无 Resp 类型)
+### 4.2 Client<Req> (无 Resp 类型)
 
 ```cpp
 Client<LogEntry> client(url);
@@ -46,9 +48,9 @@ bool ok = client.send(entry);
 
 `send()` 方法仅在 `RespT == EmptyType` 时可用。它将请求发送到 Server 后立即返回，不等待任何响应。返回值 `true` 表示传输层成功接受了请求。
 
-## 关键代码分析
+## 5. 关键代码分析
 
-### 1. 基本即发即忘
+### 5.1 基本即发即忘
 
 ```cpp
 Server<LogEntry> log_server("dds://logging/collector");
@@ -68,7 +70,7 @@ bool ok = log_client.send(entry);
 4. Server 收到请求，执行回调
 5. 没有响应环节，流程完成
 
-### 2. 通知命令模式
+### 5.2 通知命令模式
 
 ```cpp
 Server<NotifyCommand> notify_server("dds://control/notifications");
@@ -86,7 +88,7 @@ notify_client.send({5, 10, 0});    // 停止电机
 - 命令执行方可以按队列顺序处理
 - 减少了往返延迟
 
-### 3. 高吞吐量场景
+### 5.3 高吞吐量场景
 
 ```cpp
 constexpr int kBurstSize = 100;
@@ -101,7 +103,7 @@ for (int i = 0; i < kBurstSize; ++i) {
 
 这使得即发即忘模式特别适合高频遥测数据和日志收集。
 
-## 使用场景
+## 6. 使用场景
 
 | 场景 | 说明 |
 |------|------|
@@ -111,7 +113,7 @@ for (int i = 0; i < kBurstSize; ++i) {
 | 事件通知 | 广播状态变更通知 |
 | 心跳报告 | 周期性上报存活状态 |
 
-## Server 三种 listen 模式对比
+## 7. Server 三种 listen 模式对比
 
 ```cpp
 // 模式 1: 即发即忘（本示例）
@@ -130,7 +132,7 @@ server.listen_for_reply([&server](uint64_t req_id, const Req& req) {
 });
 ```
 
-## 编译与运行
+## 8. 编译与运行
 
 ```bash
 mkdir build && cd build
@@ -139,7 +141,7 @@ make example_method_fire_forget
 ./output/bin/example_method_fire_forget
 ```
 
-## 预期输出
+## 9. 预期输出
 
 ```
 [I] === VLink Method Fire-and-Forget Example ===
@@ -162,7 +164,7 @@ make example_method_fire_forget
 [I] === Example complete ===
 ```
 
-## 文件结构
+## 10. 文件结构
 
 | 文件 | 说明 |
 |------|------|
@@ -170,7 +172,7 @@ make example_method_fire_forget
 | `method_fire_forget.cc` | 主程序：Server + Client 在同一进程 |
 | `CMakeLists.txt` | 构建配置 |
 
-## 扩展思考
+## 11. 扩展思考
 
 - 即发即忘模式不提供传输保证。如果需要"至少一次"投递语义，可以：
   - 在应用层实现 ACK 机制（使用完整 RPC + 超时重试）
@@ -179,6 +181,6 @@ make example_method_fire_forget
 - 在生产环境中，日志收集器建议使用独立的 MessageLoop 并设置足够的 pipeline 深度，避免日志积压导致阻塞。
 - 即发即忘模式可以与事件模型（Publisher/Subscriber）互换使用。选择依据：事件模型拓扑是 N:N 广播，即发即忘 RPC 是 N:1 汇聚；按参与者关系选择。
 
-## 相关文档
+## 12. 相关文档
 
 详细原理参见 [doc/04-method-model.md](../../../doc/04-method-model.md)。

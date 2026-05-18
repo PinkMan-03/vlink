@@ -1,12 +1,14 @@
 # VLink BagReader 回放示例
 
-## 概述
+![BagReader Playback Flow](images/bag-reader-flow.png)
+
+## 1. 概述
 
 本示例演示了 `BagReader` 的完整使用方法，包括 bag 文件信息查看、各种回放配置、时间范围过滤、URL 过滤以及 `BagReaderProcessor` 时间排序合并。
 
 `BagReader` 是 VLink 录制子系统的回放核心，继承自 `MessageLoop`，提供基于事件循环的异步消息回放能力。
 
-## BagReader 架构
+## 2. BagReader 架构
 
 `BagReader` 是一个抽象基类，有两个具体实现：
 
@@ -17,7 +19,7 @@
 
 `BagReader::create()` 根据文件扩展名自动选择实现。
 
-## BagReader::create() API
+## 3. BagReader::create() API
 
 ```cpp
 [[nodiscard]] static std::shared_ptr<BagReader> create(
@@ -32,7 +34,7 @@
 | `read_only` | `bool` | `true` | 只读模式打开 |
 | `try_to_fix` | `bool` | `false` | 文件损坏时尝试修复 |
 
-## BagReader::Info 结构体
+## 4. BagReader::Info 结构体
 
 通过 `reader->get_info()` 获取 bag 文件元数据：
 
@@ -55,7 +57,7 @@ struct Info final {
 };
 ```
 
-### Info::UrlMeta 结构体
+### 4.1 Info::UrlMeta 结构体
 
 ```cpp
 struct UrlMeta final {
@@ -70,7 +72,7 @@ struct UrlMeta final {
 };
 ```
 
-## BagReader::Config 回放配置
+## 5. BagReader::Config 回放配置
 
 ```cpp
 struct Config final {
@@ -86,31 +88,31 @@ struct Config final {
 };
 ```
 
-### 配置字段详解
+### 5.1 配置字段详解
 
-#### rate（速率倍数）
+#### 5.1.1 rate（速率倍数）
 控制回放速度。`1.0` 为实时回放，`2.0` 为两倍速，`0.5` 为半速。配合 `skip_blank` 可以快速浏览数据而不等待静默间隔。
 
-#### times（循环次数）
+#### 5.1.2 times（循环次数）
 - `1`：单次回放
 - `3`：回放三次
 - `BagReader::kInfinite`（`-1`）：无限循环
 
-#### begin_time / end_time（时间范围）
+#### 5.1.3 begin_time / end_time（时间范围）
 以毫秒为单位指定回放范围。`begin_time=0` 从头开始，`end_time=0` 到末尾结束。这两个值是相对于录制起始时间戳的偏移量。
 
-#### filter_urls（URL 过滤）
+#### 5.1.4 filter_urls（URL 过滤）
 指定需要回放的 URL 集合。如果为空集则回放所有 URL。适用于只关注特定 topic 的调试场景。
 
-#### skip_blank（跳过静默）
+#### 5.1.5 skip_blank（跳过静默）
 当消息之间存在较长的时间间隔时，启用此选项可以跳过等待时间，连续输出消息。
 
-#### force_delay（强制间隔）
+#### 5.1.6 force_delay（强制间隔）
 覆盖消息间的时间间隔。设为 `0` 时以最快速度连续输出所有消息，无论原始时间戳如何。`-1` 使用原始时间戳计算间隔。
 
-## 回调类型
+## 6. 回调类型
 
-### OutputCallback
+### 6.1 OutputCallback
 ```cpp
 using OutputCallback = vlink::MoveFunction<void(
     int64_t timestamp,         // 消息时间戳（微秒）
@@ -119,19 +121,19 @@ using OutputCallback = vlink::MoveFunction<void(
     const Bytes& data)>;       // 消息负载（仅回调期间有效）
 ```
 
-### StatusCallback
+### 6.2 StatusCallback
 ```cpp
 using StatusCallback = vlink::MoveFunction<void(Status status)>;
 // Status: kStopped(0), kPaused(1), kPlaying(2)
 ```
 
-### FinishCallback
+### 6.3 FinishCallback
 ```cpp
 using FinishCallback = vlink::MoveFunction<void(bool is_interrupted)>;
 // is_interrupted: true 表示由 stop() 中断，false 表示自然结束
 ```
 
-## 回放控制 API
+## 7. 回放控制 API
 
 | 方法 | 说明 |
 |------|------|
@@ -144,7 +146,7 @@ using FinishCallback = vlink::MoveFunction<void(bool is_interrupted)>;
 | `get_status()` | 获取当前回放状态 |
 | `get_timestamp()` | 获取当前回放位置（录制时间戳，毫秒） |
 
-## BagReaderProcessor
+## 8. BagReaderProcessor
 
 `BagReaderProcessor` 是一个时间排序缓冲器，用于将来自多个 `BagReader` 的消息按时间戳顺序合并输出。
 
@@ -162,7 +164,7 @@ processor.register_output_callback([](int64_t ts, const std::string& url,
 
 典型场景：同时读取多个分割的 bag 文件，将它们的消息按时间顺序合并。
 
-## 数据完整性工具
+## 9. 数据完整性工具
 
 `BagReader` 提供三个异步完整性操作，返回 `std::future<bool>`：
 
@@ -179,14 +181,14 @@ if (result.get()) {
 }
 ```
 
-## 编译和运行
+## 10. 编译和运行
 
 ```bash
 cmake --build . --target example_record_bag_reader
 ./output/bin/example_record_bag_reader
 ```
 
-## 注意事项
+## 11. 注意事项
 
 1. **必须先调用 `async_run()`**：在调用 `play()` 之前必须启动事件循环
 2. **OutputCallback 数据生命周期**：回调中的 `data` 引用仅在回调执行期间有效，如需保留请拷贝

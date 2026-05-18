@@ -1,10 +1,12 @@
 # ProxyServer 基础示例
 
-## 概述
+![ProxyServer Overview](images/proxy-server-overview.png)
+
+## 1. 概述
 
 本示例演示 VLink `ProxyServer` 守护进程的配置和生命周期管理。`ProxyServer` 是代理子系统的服务端，负责发现主题、广播心跳、转发数据和管理插件。
 
-## 核心功能
+## 2. 核心功能
 
 - 主题发现：通过 `DiscoveryViewer` 枚举所有活跃的发布者和订阅者
 - 心跳广播：每秒发送包含 CPU/内存使用、版本号、主机名的 Time 消息
@@ -12,7 +14,7 @@
 - 数据转发：在观察/录制/回放模式下转发消息字节
 - 插件管理：加载和管理 `RunablePluginInterface` 插件
 
-## 配置
+## 3. 配置
 
 ```cpp
 ProxyServer::Config cfg;
@@ -23,7 +25,7 @@ cfg.async = true;
 cfg.use_iox = false;
 ```
 
-## 通信架构
+## 4. 通信架构
 
 ```
 ProxyAPI (kController)
@@ -33,7 +35,7 @@ ProxyAPI (kController)
      |<-- Data    <-- [DDS/SHM] <-- |
 ```
 
-## 编译与运行
+## 5. 编译与运行
 
 ```bash
 cd build
@@ -43,7 +45,7 @@ cmake .. && make example_proxy_server_basic
 
 需要链接 `vlink::proxy_server`。
 
-## 注意事项
+## 6. 注意事项
 
 - 每个进程只能有一个 ProxyServer（单例约束）
 - 需要 DDS 后端可用

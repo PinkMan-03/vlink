@@ -295,7 +295,7 @@ inline bool Server<ReqT, RespT, SecT>::listen_bytes(NodeImpl::ReqRespCallback&& 
       [this, callback = std::move(callback)](uint64_t req_id, const Bytes& req_data, Bytes* resp_data) {
         if constexpr (SecT == SecurityType::kWithSecurity) {
           Bytes sec_req_data;
-          if VUNLIKELY (!this->security_->decrypt(req_data, sec_req_data)) {
+          if VUNLIKELY (!this->security_ || !this->security_->decrypt(req_data, sec_req_data)) {
             VLOG_T("Server decrypt failed, url: ", this->impl_->url, ".");
             return;
           }
@@ -324,7 +324,7 @@ inline bool Server<ReqT, RespT, SecT>::reply_bytes(uint64_t req_id, const Bytes&
   if constexpr (SecT == SecurityType::kWithSecurity) {
     Bytes sec_resp_data;
 
-    if VUNLIKELY (!this->security_->encrypt(resp_data, sec_resp_data)) {
+    if VUNLIKELY (!this->security_ || !this->security_->encrypt(resp_data, sec_resp_data)) {
       VLOG_T("Server encrypt failed, url: ", this->impl_->url, ".");
       return false;
     }

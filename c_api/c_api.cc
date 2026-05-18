@@ -25,6 +25,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -87,6 +88,10 @@ static void pool_free_raw(uint8_t* ptr, size_t size) noexcept {
 
 static uint8_t* pool_alloc_buffer(size_t size) noexcept {
   if VUNLIKELY (size == 0U) {
+    return nullptr;
+  }
+
+  if VUNLIKELY (size > std::numeric_limits<size_t>::max() - kPoolBufferHeaderSize) {
     return nullptr;
   }
 
@@ -317,8 +322,8 @@ int vlink_create_secure_publisher(const char* url, const vlink_schema_info_t* sc
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->is_configured()) {
-      VLOG_W("vlink_create_secure_publisher: security_cfg has no usable cryptographic slot.");
+    if VUNLIKELY (!sec->can_encrypt()) {
+      VLOG_W("vlink_create_secure_publisher: security_cfg cannot encrypt.");
       pool_delete(sec);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -581,8 +586,8 @@ int vlink_create_secure_subscriber(const char* url, const vlink_schema_info_t* s
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->is_configured()) {
-      VLOG_W("vlink_create_secure_subscriber: security_cfg has no usable cryptographic slot.");
+    if VUNLIKELY (!sec->can_decrypt()) {
+      VLOG_W("vlink_create_secure_subscriber: security_cfg cannot decrypt.");
       pool_delete(sec);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -775,8 +780,8 @@ int vlink_create_secure_server(const char* url, const vlink_schema_info_t* schem
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->is_configured()) {
-      VLOG_W("vlink_create_secure_server: security_cfg has no usable cryptographic slot.");
+    if VUNLIKELY (!sec->can_encrypt() || !sec->can_decrypt()) {
+      VLOG_W("vlink_create_secure_server: security_cfg cannot encrypt and decrypt.");
       pool_delete(sec);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -1042,8 +1047,8 @@ int vlink_create_secure_client(const char* url, const vlink_schema_info_t* schem
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->is_configured()) {
-      VLOG_W("vlink_create_secure_client: security_cfg has no usable cryptographic slot.");
+    if VUNLIKELY (!sec->can_encrypt() || !sec->can_decrypt()) {
+      VLOG_W("vlink_create_secure_client: security_cfg cannot encrypt and decrypt.");
       pool_delete(sec);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -1278,8 +1283,8 @@ int vlink_create_secure_setter(const char* url, const vlink_schema_info_t* schem
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!state->security.is_configured()) {
-      VLOG_W("vlink_create_secure_setter: security_cfg has no usable cryptographic slot.");
+    if VUNLIKELY (!state->security.can_encrypt()) {
+      VLOG_W("vlink_create_secure_setter: security_cfg cannot encrypt.");
       pool_delete(state);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -1306,6 +1311,8 @@ int vlink_create_secure_setter(const char* url, const vlink_schema_info_t* schem
   } catch (std::exception&) {
     pool_delete(ptr);
     pool_delete(state);
+    handle->native_handle = nullptr;
+    std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
     return VLINK_RET_RUNTIME_ERROR;
   }
 }
@@ -1452,8 +1459,8 @@ int vlink_create_secure_getter(const char* url, const vlink_schema_info_t* schem
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->is_configured()) {
-      VLOG_W("vlink_create_secure_getter: security_cfg has no usable cryptographic slot.");
+    if VUNLIKELY (!sec->can_decrypt()) {
+      VLOG_W("vlink_create_secure_getter: security_cfg cannot decrypt.");
       pool_delete(sec);
       return VLINK_RET_INVALID_ERROR;
     }

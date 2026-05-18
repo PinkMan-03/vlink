@@ -56,6 +56,20 @@ namespace vlink {
   return value <= static_cast<size_t>(std::numeric_limits<int>::max());
 }
 
+struct DigestScrub final {
+  uint8_t* ptr;
+  size_t size;
+
+  DigestScrub(uint8_t* p, size_t n) noexcept : ptr(p), size(n) {}
+
+  ~DigestScrub() noexcept { OPENSSL_cleanse(ptr, size); }
+
+  DigestScrub(const DigestScrub&) = delete;
+  DigestScrub& operator=(const DigestScrub&) = delete;
+  DigestScrub(DigestScrub&&) = delete;
+  DigestScrub& operator=(DigestScrub&&) = delete;
+};
+
 struct EvpCipherCtxDeleter final {
   void operator()(EVP_CIPHER_CTX* ptr) const noexcept { EVP_CIPHER_CTX_free(ptr); }
 };
@@ -85,6 +99,7 @@ static Bytes derive_aes_key_sha256(const std::string& seed) noexcept {
   }
 
   uint8_t digest[EVP_MAX_MD_SIZE];
+  DigestScrub digest_scrub{digest, sizeof(digest)};
   unsigned int digest_len = 0;
 
   if VUNLIKELY (EVP_Digest(seed.data(), seed.size(), digest, &digest_len, EVP_sha256(), nullptr) != 1) {
@@ -113,6 +128,7 @@ static Bytes derive_aes_key_pbkdf2(const std::string& passphrase, const uint8_t*
       PKCS5_PBKDF2_HMAC(passphrase.data(), static_cast<int>(passphrase.size()), salt, static_cast<int>(salt_len),
                         static_cast<int>(iterations), EVP_sha256(), static_cast<int>(kAesKeySize), out.data());
   if VUNLIKELY (rv != 1) {
+    OPENSSL_cleanse(out.data(), out.size());
     return Bytes{};
   }
 
@@ -308,10 +324,14 @@ static bool rsa_oaep_decrypt(EVP_PKEY* pkey, const uint8_t* in, size_t in_len, B
   }
 
   if VUNLIKELY (EVP_PKEY_decrypt(ctx.get(), out.data(), &plain_len, in, in_len) <= 0) {
+    OPENSSL_cleanse(out.data(), out.size());
+    out = Bytes{};
     return false;
   }
 
   if VUNLIKELY (!out.resize(plain_len)) {
+    OPENSSL_cleanse(out.data(), out.size());
+    out = Bytes{};
     return false;
   }
 
@@ -324,6 +344,7 @@ static bool rsa_pss_sign(EVP_PKEY* pkey, const uint8_t* data, size_t data_len, B
   }
 
   uint8_t digest[EVP_MAX_MD_SIZE];
+  DigestScrub digest_scrub{digest, sizeof(digest)};
   unsigned int digest_len = 0;
 
   if VUNLIKELY (EVP_Digest(data, data_len, digest, &digest_len, EVP_sha256(), nullptr) != 1) {
@@ -382,6 +403,7 @@ static bool rsa_pss_verify(EVP_PKEY* pkey, const uint8_t* data, size_t data_len,
   }
 
   uint8_t digest[EVP_MAX_MD_SIZE];
+  DigestScrub digest_scrub{digest, sizeof(digest)};
   unsigned int digest_len = 0;
 
   if VUNLIKELY (EVP_Digest(data, data_len, digest, &digest_len, EVP_sha256(), nullptr) != 1) {
@@ -897,6 +919,7 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
       }
 
       Bytes signed_range = Bytes::create(kRsaWrapLenFieldSize + wrap_len + body_size);
+
       if VUNLIKELY (signed_range.data() == nullptr) {
         return false;
       }
@@ -942,6 +965,7 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
     OPENSSL_cleanse(session_key.data(), session_key.size());
 
     if VUNLIKELY (!ok) {
+      OPENSSL_cleanse(plain.data(), plain.size());
       return false;
     }
 
@@ -977,6 +1001,7 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
   }
 
   if VUNLIKELY (!aes_gcm_decrypt(impl_->key.data(), nonce, cipher, body_len, tag, plain.data())) {
+    OPENSSL_cleanse(plain.data(), plain.size());
     return false;
   }
 

@@ -10,6 +10,6 @@
 | `record_compression` | 压缩录制（None / Auto / Zstd / LZ4 / LZAV） |
 | `record_mcap` | MCAP 格式录制 |
 
-## 相关文档
+## 1. 相关文档
 
 详细原理参见 [doc/12-bag-recording.md](../../doc/12-bag-recording.md)。

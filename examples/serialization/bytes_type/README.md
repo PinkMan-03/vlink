@@ -1,16 +1,16 @@
 # Bytes 类型序列化示例
 
-## 类型检测优先级链
+## 1. 类型检测优先级链
 
 ![类型检测优先级链](images/serialization-type-chain.png)
 
-## 概述
+## 2. 概述
 
 本示例演示如何使用 VLink 的 `Bytes` 类型进行原始二进制数据的发布与订阅。`Bytes` 是 VLink 序列化体系中优先级最高的类型（`kBytesType = 1`），它是一种**透传类型**——数据不经过任何序列化/反序列化处理，直接以原始字节形式传递。
 
-## 关键代码解析
+## 3. 关键代码解析
 
-### 编译期类型检测
+### 3.1 编译期类型检测
 
 ```cpp
 static_assert(Serializer::get_type_of<Bytes>() == Serializer::kBytesType,
@@ -19,7 +19,7 @@ static_assert(Serializer::get_type_of<Bytes>() == Serializer::kBytesType,
 
 `Serializer::get_type_of<T>()` 是一个 `constexpr` 函数，在**编译期**自动推导任意 C++ 类型对应的序列化器类型。`Bytes` 类型永远被识别为 `kBytesType`，这是类型检测链中的第一个，优先级最高。
 
-### 创建 Bytes 对象的多种方式
+### 3.2 创建 Bytes 对象的多种方式
 
 ```cpp
 // 方式一：从字符串创建（深拷贝字符串内容到 Bytes 缓冲区）
@@ -42,7 +42,7 @@ Bytes{};
 
 `Bytes` 类内部使用了**小缓冲区优化（SBO）**：96 字节以内的数据存储在对象的内联数组中，不会触发堆分配。超过 96 字节的数据才会从内存池或堆分配。
 
-### 发布与订阅
+### 3.3 发布与订阅
 
 ```cpp
 Subscriber<Bytes> sub("dds://example/bytes_type");
@@ -56,7 +56,7 @@ pub.publish(bytes_from_str);
 
 使用 `dds://` 传输方案进行通信。`Bytes` 类型的消息作为原始二进制数据通过传输层传递给订阅者的回调函数。
 
-### Bytes 工具函数
+### 3.4 Bytes 工具函数
 
 ```cpp
 auto sample = Bytes::from_string("VLink");
@@ -72,7 +72,7 @@ Bytes::deep_copy(sample.data(), sample.size());              // 深拷贝
 
 这些工具函数覆盖了二进制数据处理中常见的操作场景：格式转换、校验、拷贝等。
 
-## 构建与运行
+## 4. 构建与运行
 
 ```bash
 cd build
@@ -80,7 +80,7 @@ cmake .. && make example_bytes_type
 ./output/bin/example_bytes_type
 ```
 
-## 要点总结
+## 5. 要点总结
 
 | 要点 | 说明 |
 |------|------|

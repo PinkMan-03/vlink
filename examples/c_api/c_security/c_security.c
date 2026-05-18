@@ -78,8 +78,7 @@ int main(void) {
     ret = vlink_security_decrypt(sec, cipher, cipher_size, &recovered, &recovered_size);
     printf("  decrypt ret=%d\n", ret);
 
-    if (ret == VLINK_RET_NO_ERROR && recovered_size == plain_size &&
-        memcmp(recovered, plain, plain_size) == 0) {
+    if (ret == VLINK_RET_NO_ERROR && recovered_size == plain_size && memcmp(recovered, plain, plain_size) == 0) {
       printf("  Roundtrip: PASS (recovered \"%.*s\")\n", (int)recovered_size, (const char*)recovered);
     } else {
       printf("  Roundtrip: FAIL\n");
@@ -94,7 +93,7 @@ int main(void) {
   printf("\n[2] Standalone Security (PBKDF2-HMAC-SHA256 + AES-128-GCM)\n");
   {
     /* The salt must be >= 16 bytes and shared out-of-band with the peer. */
-    static const uint8_t salt[] = "vlink-c-example-salt-v1";
+    static uint8_t salt[] = "vlink-c-example-salt-v1";
 
     vlink_security_config_t cfg;
     vlink_security_config_init(&cfg);
@@ -122,8 +121,7 @@ int main(void) {
     ret = vlink_security_decrypt(sec, cipher, cipher_size, &recovered, &recovered_size);
     printf("  decrypt ret=%d recovered_size=%zu\n", ret, recovered_size);
 
-    if (ret == VLINK_RET_NO_ERROR && recovered_size == plain_size &&
-        memcmp(recovered, plain, plain_size) == 0) {
+    if (ret == VLINK_RET_NO_ERROR && recovered_size == plain_size && memcmp(recovered, plain, plain_size) == 0) {
       printf("  Roundtrip: PASS\n");
     } else {
       printf("  Roundtrip: FAIL\n");

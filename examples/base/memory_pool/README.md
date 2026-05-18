@@ -1,24 +1,24 @@
 # VLink MemoryPool 示例
 
-## 概述
+## 1. 概述
 
 本示例演示 `vlink::MemoryPool` 的用法：分级（金字塔）free-list 内存池，按 size class 分发请求；超过最大 tier 或对齐过严的请求走 oversized 直通路径，直接 `::operator new` / `::operator delete`。`MemoryPool` 是 `Bytes` 默认堆分配器。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
 | `memory_pool.cc` | MemoryPool 功能演示源码 |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
 
-## 构建与运行
+## 3. 构建与运行
 
 ```bash
 cmake --build . --target example_memory_pool
 ./examples/base/memory_pool/example_memory_pool
 ```
 
-## VLINK_MEMORY_LEVEL 环境变量
+## 4. VLINK_MEMORY_LEVEL 环境变量
 
 `MemoryPool::get_default_config()` 返回的 19 阶金字塔由 `VLINK_MEMORY_LEVEL`（整数 `0..9`，默认 `3`）从一张编译期常量表中按行索引。Tier 大小为 `32B / 64B / 128B / 256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB / 256KB / 512KB / 1MB / 4MB / 8MB / 16MB`。等级越高，每档 `blocks_per_chunk` 越大，常驻内存越多，但 upstream 分配次数越少。每级内 `blocks_per_chunk` 从最小档（`32B`）开始严格减半，使倍增档（`32B..256KB`，14 档）各档常驻字节预算大致相等；`32B` 头档的预留块数是 `64B` 档的 **两倍**，用于吸纳高密度的微小分配。尾部 `1MB / 4MB / 8MB / 16MB` 各档激活后每级 block 数翻倍。`0` 是 bypass 哨兵（不走池）；`1` 把 `1MB / 4MB / 8MB / 16MB` 四个大 tier 全部留为 sentinel；`2` 启用 `1MB`；`4` 起激活 `4MB`（**L3 默认不激活 4MB**，让 4K 帧走 oversized 直通以节省常驻内存）；`5` 起激活 `8MB`；`6` 起激活 `16MB`。非数字或越界的取值会被钳到 `[0, 9]` 区间并打印 warning。
 
@@ -47,7 +47,7 @@ export VLINK_MEMORY_LEVEL=0
 
 > 该变量仅在 **首次** 构造全局池时被读取（`MemoryPool::global_instance(true)` 或 `Bytes::init_memory_pool()`）；后续 `global_instance()` 调用始终返回同一个对象，不会再次读环境变量。
 
-## VLINK_MEMORY_PREALLOC 环境变量
+## 5. VLINK_MEMORY_PREALLOC 环境变量
 
 设为 `1` 时，`get_default_config()` 返回的 `Config` 会带上 `prealloc=true`，
 构造函数据此为每个 tier 一次性预分配满额 `blocks_per_chunk` 的 chunk
@@ -62,7 +62,7 @@ export VLINK_MEMORY_PREALLOC=1
 
 > 该变量同样仅在 **首次** 构造全局池时被读取。
 
-## 核心 API
+## 6. 核心 API
 
 ```cpp
 namespace vlink {
@@ -106,7 +106,7 @@ class MemoryPool final {
 }  // namespace vlink
 ```
 
-### 关键约束
+### 6.1 关键约束
 
 - `deallocate(p, bytes, alignment)` 必须传入与 `allocate` **完全相同**的 `bytes`，否则会路由到错误 tier 损坏其 free-list。
 - `allocate` 永不抛异常；upstream OOM 时返回 `nullptr`。
@@ -116,7 +116,7 @@ class MemoryPool final {
 - 析构函数（`~MemoryPool`）则**无条件**释放所有 chunk —— 这是 lifecycle end，需要调用方保证此时没有任何 live block，也没有其它线程仍在并发 `allocate`/`deallocate`/`clear`，否则 UB。
 - 全局单例与进程同生共死。如需主动释放：对全局池调用 `clear()`（安全释放空闲 chunk，并发友好），或构造本地 `MemoryPool` 并在所有 block 归还后让其析构。
 
-## 演示流程
+## 7. 演示流程
 
 1. **get_default_config()**：读取当前 `VLINK_MEMORY_LEVEL` 对应的 19 阶金字塔，构造本地池，分配 24B / 96B / 1 KiB / 1 MiB 四种典型尺寸（24B 落到新的 32B 头档），打印 per-tier 统计。
 2. **Oversized passthrough**：构造一个最大 tier 仅 1 KiB 的小池子，请求 16 MiB，观察 oversized 计数。
@@ -125,7 +125,7 @@ class MemoryPool final {
 5. **MemoryPool(int level)**：按 level（5）直接构造一个池，不需要拼写 tier 数组。
 6. **Bypass 模式**：以 `MemoryPool()`（无参 = bypass）演示所有分配直通 `::operator new`，所有 tier 计数为 0、仅 oversized 计数增长。
 
-## 与 Bytes 的关系
+## 8. 与 Bytes 的关系
 
 ```
 Bytes::create() / bytes_malloc()
@@ -140,7 +140,7 @@ MemoryPool::global_instance().allocate(size)
 
 `Bytes::init_memory_pool()` 内部就是 `MemoryPool::global_instance(true)`：在应用启动时调用一次，让单例按 `VLINK_MEMORY_LEVEL` 选择 tier；不显式调用也能工作，但会按 level-3 默认值懒加载。
 
-## 注意事项
+## 9. 注意事项
 
 - 所有 `public` 方法 `noexcept`，可从多线程并发调用；锁粒度为 per-tier。
 - `get_default_config()` 由查表得出，不在运行时计算，因此进程驻留内存大小可预测。

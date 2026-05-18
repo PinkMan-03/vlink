@@ -1,16 +1,16 @@
 # String 类型序列化示例
 
-## 类型检测优先级链
+## 1. 类型检测优先级链
 
 ![类型检测优先级链](../bytes_type/images/serialization-type-chain.png)
 
-## 概述
+## 2. 概述
 
 本示例演示如何使用 VLink 发布和订阅 `std::string` 类型的消息。`std::string` 被识别为 `kStringType`（编号 10），序列化时将字符串内容直接转换为 `Bytes` 缓冲区，反序列化时从 `Bytes` 还原为 `std::string`。
 
-## 关键代码解析
+## 3. 关键代码解析
 
-### 编译期类型检测
+### 3.1 编译期类型检测
 
 ```cpp
 static_assert(Serializer::get_type_of<std::string>() == Serializer::kStringType,
@@ -19,7 +19,7 @@ static_assert(Serializer::get_type_of<std::string>() == Serializer::kStringType,
 
 `kStringType` 在检测链中排名第 10 位。VLink 专门为 `std::string` 提供了独立的序列化类型，而不是将其归类为流类型（`kStreamType`）或自定义类型（`kCustomType`），这是因为字符串是最常用的消息类型之一，需要专门的高效处理路径。
 
-### 各种字符串场景
+### 3.2 各种字符串场景
 
 ```cpp
 // 普通 ASCII 字符串
@@ -44,7 +44,7 @@ pub.publish(std::string("line1\nline2\ttab\0embedded_null", 29));
 - **超长字符串**：超过 96 字节后 `Bytes` 会从堆分配内存，对用户完全透明
 - **嵌入的 null 字节**：`std::string` 可以包含 `\0`，注意构造时必须指定长度
 
-### 序列化/反序列化往返验证
+### 3.3 序列化/反序列化往返验证
 
 ```cpp
 std::string original = "round-trip test payload";
@@ -58,7 +58,7 @@ Serializer::deserialize(buf, restored);  // Bytes -> string
 
 `kStringType` 的序列化就是将 `std::string` 的内容（`data()` + `size()`）拷贝到 `Bytes` 缓冲区。反序列化时从 `Bytes` 构造 `std::string`。整个过程简单高效。
 
-## 构建与运行
+## 4. 构建与运行
 
 ```bash
 cd build
@@ -66,7 +66,7 @@ cmake .. && make example_string_type
 ./output/bin/example_string_type
 ```
 
-## 要点总结
+## 5. 要点总结
 
 | 要点 | 说明 |
 |------|------|

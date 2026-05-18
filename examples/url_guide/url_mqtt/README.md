@@ -1,6 +1,6 @@
 # URL MQTT -- mqtt:// MQTT 物联网传输详解
 
-## 概述
+## 1. 概述
 
 MQTT 是面向受限设备和低带宽网络的轻量级 pub/sub 协议。VLink 使用 Eclipse Paho MQTT C 库作为后端。与 DDS 不同，MQTT 需要一个中心化的 Broker。
 
@@ -8,7 +8,7 @@ MQTT 是面向受限设备和低带宽网络的轻量级 pub/sub 协议。VLink 
 mqtt://address[?event=name&domain=N&qos=0|1|2][#broker_uri]
 ```
 
-## URL 参数详解
+## 2. URL 参数详解
 
 | 参数 | 位置 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -18,7 +18,7 @@ mqtt://address[?event=name&domain=N&qos=0|1|2][#broker_uri]
 | qos | ?qos= | 1 | MQTT QoS 级别：0/1/2 |
 | fragment | # | `VLINK_MQTT_BROKER` | Broker URI 覆盖 |
 
-## MQTT QoS 三级
+## 3. MQTT QoS 三级
 
 | QoS | 名称 | 投递保证 | 适用场景 |
 |-----|------|---------|---------|
@@ -26,7 +26,7 @@ mqtt://address[?event=name&domain=N&qos=0|1|2][#broker_uri]
 | 1 | At least once | 至少一次，可能重复 | 控制命令、状态更新（默认） |
 | 2 | Exactly once | 恰好一次，四步握手 | 金融交易、关键告警 |
 
-## 环境变量
+## 4. 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
@@ -36,9 +36,9 @@ mqtt://address[?event=name&domain=N&qos=0|1|2][#broker_uri]
 | `VLINK_MQTT_KEEPALIVE` | 心跳间隔（秒） | 60 |
 | `VLINK_MQTT_DOMAIN` | 默认域 ID | 0 |
 
-## 关键代码分析
+## 5. 关键代码分析
 
-### 1. Broker URI 覆盖
+### 5.1 Broker URI 覆盖
 
 ```cpp
 // 通过 fragment 指定 Broker
@@ -53,7 +53,7 @@ Broker URI 格式：
 - `ws://host:9001` -- WebSocket
 - `wss://host:9001` -- 安全 WebSocket
 
-### 2. QoS 选择
+### 5.2 QoS 选择
 
 ```cpp
 "mqtt://sensor/temperature?qos=0"  // 高频，允许丢失
@@ -61,7 +61,7 @@ Broker URI 格式：
 "mqtt://payment/transaction?qos=2" // 关键事务，恰好一次
 ```
 
-### 3. 客户端 ID
+### 5.3 客户端 ID
 
 ```cpp
 Utils::set_env("VLINK_MQTT_CLIENT_ID", "my_robot");
@@ -70,14 +70,14 @@ Utils::set_env("VLINK_MQTT_CLIENT_ID", "my_robot");
 
 MQTT Broker 要求每个客户端有唯一 ID。VLink 自动附加进程 ID 和计数器。
 
-## 前置条件
+## 6. 前置条件
 
 需要运行 MQTT Broker（如 Eclipse Mosquitto）：
 ```bash
 mosquitto -d -p 1883
 ```
 
-## 编译与运行
+## 7. 编译与运行
 
 ```bash
 mkdir build && cd build
@@ -86,7 +86,7 @@ make example_url_mqtt
 ./output/bin/example_url_mqtt
 ```
 
-## 预期输出
+## 8. 预期输出
 
 ```
 [I] === Example 1: Basic MQTT topic ===
@@ -102,7 +102,7 @@ make example_url_mqtt
 ...
 ```
 
-## 扩展思考
+## 9. 扩展思考
 
 - MQTT 适合边缘设备到云端的数据上传，带宽占用极低。
 - QoS 2 的四步握手增加了延迟，仅在需要精确一次投递时使用。

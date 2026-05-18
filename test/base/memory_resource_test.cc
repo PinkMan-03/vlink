@@ -71,13 +71,15 @@ TEST_SUITE("base-MemoryResource - construction") {
     REQUIRE(pool.get_tier_count() >= 4u);
 
     auto stats_before = pool.get_stats();
-    CHECK(stats_before.front().max_size == 64u);
+    CHECK(stats_before.front().max_size == 32u);
+    CHECK(stats_before.at(1).max_size == 64u);
 
     void* p = res.allocate(64);
     REQUIRE(p != nullptr);
 
     auto stats = pool.get_stats();
-    CHECK(stats[0].hit_count == 1u);
+    CHECK(stats[0].hit_count == 0u);
+    CHECK(stats[1].hit_count == 1u);
     CHECK(pool.get_oversized_stats().alloc_count == 0u);
 
     res.deallocate(p, 64);

@@ -1,6 +1,6 @@
 # 插件基础示例 (Plugin Basic)
 
-## 概述
+## 1. 概述
 
 本示例演示 VLink 插件系统的完整工作流：**定义接口 -> 实现插件 -> 编译为 .so -> 运行时加载 -> 调用方法 -> 卸载**。
 
@@ -10,7 +10,7 @@
 
 ---
 
-## 目录结构
+## 2. 目录结构
 
 ```
 plugin_basic/
@@ -25,9 +25,9 @@ plugin_basic/
 
 ---
 
-## 核心概念
+## 3. 核心概念
 
-### 1. 接口定义 (greeter_interface.h)
+### 3.1 接口定义 (greeter_interface.h)
 
 VLink 插件系统的核心是一个**抽象接口类**。接口必须满足三个条件：
 
@@ -48,7 +48,7 @@ class GreeterInterface {
 
 `VLINK_PLUGIN_REGISTER` 宏展开后生成一个 `static constexpr` 方法 `get_plugin_id()`，它返回接口类型的名称。宿主和插件通过这个 ID 进行身份验证。
 
-### 2. 插件实现 (greeter_plugin.cc)
+### 3.2 插件实现 (greeter_plugin.cc)
 
 实现类继承抽象接口，覆盖所有纯虚函数。关键点：
 
@@ -76,7 +76,7 @@ VLINK_PLUGIN_DECLARE(GreeterImpl, 1, 0)
 | `vlink_plugin_create()` | 验证 ID 和版本后，执行 `new GreeterImpl` 并返回 `void*` |
 | `vlink_plugin_destroy()` | 执行 `delete static_cast<GreeterImpl*>(handle)` |
 
-### 3. 宿主加载器 (plugin_basic.cc)
+### 3.3 宿主加载器 (plugin_basic.cc)
 
 宿主通过 `vlink::Plugin` 类加载共享库，获取一个类型安全的 `shared_ptr<GreeterInterface>`：
 
@@ -102,7 +102,7 @@ if (greeter) {
 
 ---
 
-## 搜索路径
+## 4. 搜索路径
 
 `Plugin::default_search_path()` 返回默认搜索目录列表，依次搜索：
 
@@ -125,7 +125,7 @@ auto impl = plugin.load<GreeterInterface>("greeter_plugin", 1, 0, "", paths);
 
 ---
 
-## 版本检查
+## 5. 版本检查
 
 `load<T>()` 的第二、三个参数是期望的主版本号和次版本号。插件导出的版本号通过 `VLINK_PLUGIN_DECLARE(Impl, Major, Minor)` 指定。
 
@@ -142,7 +142,7 @@ assert(!bad);
 
 ---
 
-## 插件内省 API
+## 6. 插件内省 API
 
 | 方法 | 返回类型 | 说明 |
 |------|---------|------|
@@ -159,7 +159,7 @@ assert(!bad);
 
 ---
 
-## 生命周期管理
+## 7. 生命周期管理
 
 插件实例的生命周期由 `shared_ptr` 管理。`load()` 返回的 `shared_ptr` 附带了一个自定义删除器：
 
@@ -183,7 +183,7 @@ plugin.unload<GreeterInterface>("greeter_plugin");  // 从注册表移除
 
 ---
 
-## CMake 构建模式
+## 8. CMake 构建模式
 
 本示例的 CMakeLists.txt 同时构建插件和宿主：
 
@@ -210,7 +210,7 @@ target_link_libraries(example_plugin_basic vlink::all)
 
 ---
 
-## 编译与运行
+## 9. 编译与运行
 
 ```bash
 # 在 VLink 项目根目录的 build 目录中
@@ -248,7 +248,7 @@ cmake .. -DENABLE_WHOLE_EXAMPLES=ON && make example_plugin_basic greeter_plugin
 
 ---
 
-## 编译时检查
+## 10. 编译时检查
 
 `VLINK_PLUGIN_REGISTER` 和 `VLINK_PLUGIN_DECLARE` 内部包含多个 `static_assert`：
 
@@ -264,7 +264,7 @@ cmake .. -DENABLE_WHOLE_EXAMPLES=ON && make example_plugin_basic greeter_plugin
 
 ---
 
-## 自定义插件 ID
+## 11. 自定义插件 ID
 
 默认情况下，`VLINK_PLUGIN_REGISTER` 通过 `NameDetector::get<T>()` 从类型名自动推导插件 ID。如果需要一个跨编译器稳定的固定 ID，可以使用 `VLINK_PLUGIN_REGISTER_BY_ID`：
 
@@ -284,7 +284,7 @@ class GreeterInterface {
 
 ---
 
-## 常见问题
+## 12. 常见问题
 
 **Q: 插件加载失败怎么办？**
 
@@ -303,13 +303,13 @@ class GreeterInterface {
 
 ---
 
-## 注意事项
+## 13. 注意事项
 
 - `VLINK_PLUGIN_DECLARE` 导出的是 C 符号，不能放在同时包含 `main()` 的源文件中
 - 接口头文件由宿主和插件共享，修改时需要重新编译双方
 - 插件 `shared_ptr` 的自定义删除器会调用 `vlink_plugin_destroy`，因此 `.so` 在所有引用释放前不会被关闭
 - 建议在 `unload()` 之前先 `reset()` 所有 `shared_ptr`，避免悬挂引用
 
-## 相关文档
+## 14. 相关文档
 
 详细原理参见 [doc/19-extensions.md](../../../doc/19-extensions.md)。

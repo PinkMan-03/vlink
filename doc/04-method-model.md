@@ -8,26 +8,27 @@ Server 处理后返回响应。方法模型支持**多个 Client 对一个 Serve
 
 ## 目录
 
-1. [概念与架构](#概念与架构)
-2. [Client API](#client-api)
-3. [Server API](#server-api)
-4. [五种调用模式详解](#五种调用模式详解)
-5. [超时处理](#超时处理)
-6. [错误处理](#错误处理)
-7. [wait_for_connected 用法](#wait_for_connected-用法)
-8. [完整使用示例](#完整使用示例)
-9. [并发调用场景](#并发调用场景)
-10. [模型选择](#模型选择)
+1. [4.1 概念与架构](#41-概念与架构)
+2. [4.2 Client API](#42-client-api)
+3. [4.3 Server API](#43-server-api)
+4. [4.4 五种调用模式详解](#44-五种调用模式详解)
+5. [4.5 超时处理](#45-超时处理)
+6. [4.6 错误处理](#46-错误处理)
+7. [4.7 wait_for_connected 用法](#47-wait_for_connected-用法)
+8. [4.8 完整使用示例](#48-完整使用示例)
+9. [4.9 并发调用场景](#49-并发调用场景)
+10. [4.10 模型选择](#410-模型选择)
+11. [4.11 相关文档](#411-相关文档)
 
 ---
 
-## 概念与架构
+## 4.1 概念与架构
 
-### 方法模型数据流
+### 4.1.1 方法模型数据流
 
 ![方法模型数据流](images/method-dataflow.png)
 
-### 关键特性
+### 4.1.2 关键特性
 
 - **N:1**：多个 Client 可连接同一个 Server，每个请求对应一个响应
 - **类型安全**：请求类型 `ReqT` 和响应类型 `RespT` 在编译时固定
@@ -36,15 +37,15 @@ Server 处理后返回响应。方法模型支持**多个 Client 对一个 Serve
 - **超时控制**：所有阻塞调用均支持超时，默认使用 `Timeout::kDefaultInterval`
 - **连接感知**：Client 可感知 Server 的上线/下线状态
 
-### 与其他模型的关系
+### 4.1.3 与其他模型的关系
 
 ![三种通信模型对比](images/method-model-comparison.png)
 
 ---
 
-## Client API
+## 4.2 Client API
 
-### 类模板声明
+### 4.2.1 类模板声明
 
 ```cpp
 template <typename ReqT,
@@ -56,7 +57,7 @@ class Client : public Node<ClientImpl, SecT>;
 当 `RespT` 为默认的 `Traits::EmptyType` 时，Client 仅发送请求，不等待响应，
 即 fire-and-forget 模式，此时只有 `send()` 方法可用。
 
-### 编译期常量与类型别名
+### 4.2.2 编译期常量与类型别名
 
 ```cpp
 using UniquePtr       = std::unique_ptr<Client<ReqT, RespT, SecT>>;
@@ -70,7 +71,7 @@ static constexpr Serializer::Type   kReqType  = Serializer::get_type_of<ReqT>();
 static constexpr Serializer::Type   kRespType = Serializer::get_type_of<RespT>();
 ```
 
-### 工厂方法
+### 4.2.3 工厂方法
 
 ```cpp
 [[nodiscard]] static UniquePtr create_unique(const std::string& url_str,
@@ -79,7 +80,7 @@ static constexpr Serializer::Type   kRespType = Serializer::get_type_of<RespT>()
                                              InitType type = InitType::kWithInit);
 ```
 
-### 构造函数
+### 4.2.4 构造函数
 
 ```cpp
 // 从 URL 字符串构造
@@ -92,7 +93,7 @@ explicit Client(const ConfT& conf,
                 InitType type = InitType::kWithInit);
 ```
 
-### 连接感知
+### 4.2.5 连接感知
 
 ```cpp
 // 注册 Server 连接/断开通知回调
@@ -109,7 +110,7 @@ bool wait_for_connected(std::chrono::milliseconds timeout = Timeout::kDefaultInt
 [[nodiscard]] bool is_connected() const;
 ```
 
-### 调用方法
+### 4.2.6 调用方法
 
 ```cpp
 // --- 方式一：同步调用，输出参数形式 ---
@@ -145,15 +146,15 @@ bool invoke(const ReqT& req, RespCallback&& callback);
 bool send(const ReqT& req);
 ```
 
-### 继承自 Node 的公共 API
+### 4.2.7 继承自 Node 的公共 API
 
 Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
 ---
 
-## Server API
+## 4.3 Server API
 
-### 类模板声明
+### 4.3.1 类模板声明
 
 ```cpp
 template <typename ReqT,
@@ -162,7 +163,7 @@ template <typename ReqT,
 class Server : public Node<ServerImpl, SecT>;
 ```
 
-### 回调类型定义
+### 4.3.2 回调类型定义
 
 ```cpp
 // fire-and-forget 回调（RespT 必须为 EmptyType）
@@ -175,7 +176,7 @@ using ReqRespCallback     = vlink::Function<void(const ReqT&, RespT&)>;
 using ReqAsyncRespCallback = vlink::Function<void(uint64_t req_id, const ReqT&)>;
 ```
 
-### 工厂方法与构造函数
+### 4.3.3 工厂方法与构造函数
 
 ```cpp
 [[nodiscard]] static UniquePtr create_unique(const std::string& url_str,
@@ -191,7 +192,7 @@ explicit Server(const ConfT& conf,
                 InitType type = InitType::kWithInit);
 ```
 
-### 监听方法
+### 4.3.4 监听方法
 
 ```cpp
 // --- 方式一：fire-and-forget ---
@@ -214,7 +215,7 @@ bool listen_for_reply(ReqAsyncRespCallback&& callback);
 
 > 注意：`listen()` 和 `listen_for_reply()` 只能调用一次，重复调用是 fatal error。
 
-### 异步响应发送
+### 4.3.5 异步响应发送
 
 ```cpp
 // 向指定 req_id 的请求发送响应
@@ -224,7 +225,7 @@ bool listen_for_reply(ReqAsyncRespCallback&& callback);
 bool reply(uint64_t req_id, const RespT& resp);
 ```
 
-### 安全别名
+### 4.3.6 安全别名
 
 ```cpp
 // SecurityServer: 等价于 Server<ReqT, RespT, SecurityType::kWithSecurity>
@@ -238,9 +239,9 @@ class SecurityClient : public Client<ReqT, RespT, SecurityType::kWithSecurity>;
 
 ---
 
-## 五种调用模式详解
+## 4.4 五种调用模式详解
 
-### 模式对比总览
+### 4.4.1 模式对比总览
 
 | 模式                | 方法签名                                    | 是否阻塞 | 超时支持 | 适用场景                        |
 | ------------------- | ------------------------------------------- | -------- | -------- | ------------------------------- |
@@ -250,7 +251,7 @@ class SecurityClient : public Client<ReqT, RespT, SecurityType::kWithSecurity>;
 | 异步（future）      | `async_invoke(req) -> future<Resp>`         | 否       | 可用 future.wait_for | 并发调用，统一等待多个结果 |
 | 仅发送              | `send(req) -> bool`                         | 否       | 否       | fire-and-forget，无需响应       |
 
-### 模式一：同步调用（输出参数）
+### 4.4.2 模式一：同步调用（输出参数）
 
 ```cpp
 Client<Req, Resp> client("dds://my_service");
@@ -268,7 +269,7 @@ if (ok) {
 }
 ```
 
-### 模式二：同步调用（optional 返回）
+### 4.4.3 模式二：同步调用（optional 返回）
 
 ```cpp
 if (auto r = client.invoke(req, std::chrono::seconds(3))) {
@@ -278,7 +279,7 @@ if (auto r = client.invoke(req, std::chrono::seconds(3))) {
 }
 ```
 
-### 模式三：异步调用（回调）
+### 4.4.4 模式三：异步调用（回调）
 
 ```cpp
 // 立即返回，响应到来时回调
@@ -292,7 +293,7 @@ if (!ok) {
 // 此处代码立即执行，不等待响应
 ```
 
-### 模式四：异步调用（future）
+### 4.4.5 模式四：异步调用（future）
 
 ```cpp
 // 发起请求，立即返回 future
@@ -314,7 +315,7 @@ if (future.wait_for(std::chrono::seconds(3)) == std::future_status::ready) {
 }
 ```
 
-### 模式五：仅发送（fire-and-forget）
+### 4.4.6 模式五：仅发送（fire-and-forget）
 
 当 `RespT` 为 `Traits::EmptyType`（默认值）时，Client 仅发送请求，不等待任何响应。
 此模式通过 `send()` 方法调用。
@@ -339,9 +340,9 @@ if (!ok) {
 
 ---
 
-## 超时处理
+## 4.5 超时处理
 
-### 超时默认值
+### 4.5.1 超时默认值
 
 VLink 在 `include/vlink/impl/types.h` 中定义两个 `std::chrono::milliseconds` 常量（`struct Timeout`）：
 
@@ -350,7 +351,7 @@ VLink 在 `include/vlink/impl/types.h` 中定义两个 `std::chrono::millisecond
 
 源码中 `timeout == 0` 会打印警告并按无限等待处理，应避免传 `0`。
 
-### 超时单位
+### 4.5.2 超时单位
 
 所有超时参数均为 `std::chrono::milliseconds`，推荐使用字面量：
 
@@ -366,7 +367,7 @@ client.invoke(req, resp, 3000ms);          // 3000 毫秒 = 3 秒
 client.invoke(req, resp, std::chrono::milliseconds(1000));
 ```
 
-### 超时处理最佳实践
+### 4.5.3 超时处理最佳实践
 
 ```cpp
 // 等待连接（服务启动可能较慢，给足超时）
@@ -384,7 +385,7 @@ if (!client.invoke(req, resp, 3s)) {
 }
 ```
 
-### 中断阻塞等待
+### 4.5.4 中断阻塞等待
 
 可从其他线程调用 `interrupt()` 立即中断所有阻塞等待：
 
@@ -403,9 +404,9 @@ bool ok = client.wait_for_connected(30s);
 
 ---
 
-## 错误处理
+## 4.6 错误处理
 
-### invoke() 返回 false 的原因
+### 4.6.1 invoke() 返回 false 的原因
 
 | 原因                   | 说明                                           |
 | ---------------------- | ---------------------------------------------- |
@@ -416,7 +417,7 @@ bool ok = client.wait_for_connected(30s);
 | 节点未初始化           | 在 init() 前调用（fatal log 会打印）           |
 | Server 已断开          | Server 在请求发出后下线                        |
 
-### async_invoke() 的异常处理
+### 4.6.2 async_invoke() 的异常处理
 
 `async_invoke()` 失败时不返回 false，而是在 future 中设置异常：
 
@@ -432,7 +433,7 @@ try {
 }
 ```
 
-### 服务端错误处理
+### 4.6.3 服务端错误处理
 
 Server 的回调可以通过不填充 `resp`（或填充错误码）来表达处理失败：
 
@@ -454,11 +455,11 @@ server.listen([](const Req& req, Resp& resp) {
 
 ---
 
-## wait_for_connected 用法
+## 4.7 wait_for_connected 用法
 
 在发起调用前通常需要等待 Server 上线，有三种方式：
 
-### 方式一：阻塞等待（最简单）
+### 4.7.1 方式一：阻塞等待（最简单）
 
 ```cpp
 Client<Req, Resp> client("dds://my_service");
@@ -473,7 +474,7 @@ if (!client.wait_for_connected(10s)) {
 client.invoke(req, resp);
 ```
 
-### 方式二：非阻塞检查
+### 4.7.2 方式二：非阻塞检查
 
 ```cpp
 Client<Req, Resp> client("dds://my_service");
@@ -489,7 +490,7 @@ while (!client.is_connected()) {
 client.invoke(req, resp);
 ```
 
-### 方式三：事件回调（推荐用于服务发现）
+### 4.7.3 方式三：事件回调（推荐用于服务发现）
 
 ```cpp
 Client<Req, Resp> client("dds://my_service");
@@ -510,7 +511,7 @@ client.detect_connected([&client](bool connected) {
 });
 ```
 
-### 配合 MessageLoop 的正确用法
+### 4.7.4 配合 MessageLoop 的正确用法
 
 ```cpp
 MessageLoop loop;
@@ -532,9 +533,9 @@ loop.run();
 
 ---
 
-## 完整使用示例
+## 4.8 完整使用示例
 
-### 示例一：helloworld（Protobuf 同步 RPC）
+### 4.8.1 示例一：helloworld（Protobuf 同步 RPC）
 
 这是一个典型的加法服务，来自 VLink 自带的 helloworld 示例：
 
@@ -596,7 +597,7 @@ int main() {
 }
 ```
 
-### 示例二：异步服务器（listen_for_reply）
+### 4.8.2 示例二：异步服务器（listen_for_reply）
 
 适合处理耗时任务（如文件读写、数据库查询）时将响应推迟到任务完成后发送：
 
@@ -665,7 +666,7 @@ int main() {
 }
 ```
 
-### 示例三：fire-and-forget（无响应 RPC）
+### 4.8.3 示例三：fire-and-forget（无响应 RPC）
 
 适合单向通知类场景，Client 不需要等待任何确认：
 
@@ -694,7 +695,7 @@ bool ok = client.send(evt);   // 只发不收
 printf("[Client] send %s\n", ok ? "ok" : "failed");
 ```
 
-### 示例四：并发 future 调用
+### 4.8.4 示例四：并发 future 调用
 
 ```cpp
 #include <vlink/vlink.h>
@@ -735,7 +736,7 @@ int main() {
 }
 ```
 
-### 示例五：安全 RPC
+### 4.8.5 示例五：安全 RPC
 
 ```cpp
 Security::Config cfg;
@@ -751,7 +752,7 @@ SecurityClient<Auth::Request, Auth::Response> client("dds://auth/verify", cfg);
 
 完整安全加密配置请参阅 [安全加密](09-security.md)。
 
-### 示例六：SOME/IP 服务（车载场景）（Beta）
+### 4.8.6 示例六：SOME/IP 服务（车载场景）（Beta）
 
 > **注意**：`someip://` 为 Beta 后端，API 可能变化。生产环境推荐使用 `dds://` 或 `ddsc://`。
 
@@ -779,9 +780,9 @@ if (auto r = client.invoke(req, 1s)) {
 
 ---
 
-## 并发调用场景
+## 4.9 并发调用场景
 
-### Client 的线程安全性
+### 4.9.1 Client 的线程安全性
 
 同一个 `Client` 对象可以从多个线程并发调用，VLink 内部使用互斥锁保护 future 映射：
 
@@ -808,7 +809,7 @@ t2.join();
 t3.join();
 ```
 
-### 高并发推荐使用 async_invoke
+### 4.9.2 高并发推荐使用 async_invoke
 
 ```cpp
 // 不推荐：多线程各自阻塞在 invoke（线程资源浪费）
@@ -824,7 +825,7 @@ for (auto& f : futures) {
 }
 ```
 
-### Server 的回调线程模型
+### 4.9.3 Server 的回调线程模型
 
 Server 的回调默认在传输线程上执行。若有共享状态，需要加锁或绑定 MessageLoop：
 
@@ -854,7 +855,7 @@ loop.run();
 
 ---
 
-## 模型选择
+## 4.10 模型选择
 
 - 通知多个接收方、不需要确认 -> Event 模型
 - 查询结果 / 触发操作并确认 -> Method 模型
@@ -864,7 +865,7 @@ loop.run();
 
 ---
 
-## 相关文档
+## 4.11 相关文档
 
 - [节点基类与生命周期](02-node-lifecycle.md) -- Node 通用 API（init / deinit / attach / security 等）
 - [Event 模型（Publisher / Subscriber）](03-event-model.md) -- 事件发布订阅通信

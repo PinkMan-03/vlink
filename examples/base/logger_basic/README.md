@@ -1,30 +1,30 @@
 # VLink Logger 基础示例 -- 深入解析
 
-## 概述
+## 1. 概述
 
 VLink 的 `Logger` 是一个全局单例日志系统，通过 `Logger::init()` 初始化后可在任意位置通过宏输出日志。本示例深入演示日志初始化、四种输出风格、六种日志级别以及动态级别控制。
 
 `Logger` 基于 spdlog 构建，但提供了 VLink 特有的增强功能：四种风格宏、编译时级别过滤、自动 `{file:line}` 注解以及零分配的 FastStream 风格。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
 | `logger_basic.cc` | 日志基础功能演示源码 |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
 
-## 构建与运行
+## 3. 构建与运行
 
 ```bash
 cmake --build . --target example_logger_basic
 ./examples/base/logger_basic/example_logger_basic
 ```
 
-## 四种输出风格详解
+## 4. 四种输出风格详解
 
 VLink 提供四种风格的日志宏，适用于不同的开发场景和个人偏好。每种风格在所有六种级别（T/D/I/W/E/F）上都有对应的宏。
 
-### 1. Stream 风格 (VLOG_*)
+### 4.1 Stream 风格 (VLOG_*)
 
 ```cpp
 VLOG_I("message: key=", value, " name=", name);
@@ -46,7 +46,7 @@ VLOG_W("Stream style [Warn]: disk usage is high, used=", 91, "%");
 VLOG_E("Stream style [Error]: failed to open config file");
 ```
 
-### 2. Format 风格 (MLOG_*)
+### 4.2 Format 风格 (MLOG_*)
 
 ```cpp
 MLOG_I("connected to host={}, port={}", host, port);
@@ -68,7 +68,7 @@ MLOG_W("Format style [Warn]: retry attempt {}/{}", 3, 5);
 MLOG_E("Format style [Error]: timeout after {}ms", 5000);
 ```
 
-### 3. C 风格 (CLOG_*)
+### 4.3 C 风格 (CLOG_*)
 
 ```cpp
 CLOG_I("PID=%d, name=%s", pid, name);
@@ -90,7 +90,7 @@ CLOG_W("C style [Warn]: memory usage=%d%%", 85);
 CLOG_E("C style [Error]: errno=%d (%s)", 2, "No such file or directory");
 ```
 
-### 4. RAII Stream 风格 (SLOG_*)
+### 4.4 RAII Stream 风格 (SLOG_*)
 
 ```cpp
 SLOG_I << "value=" << x << " status=" << status;
@@ -112,7 +112,7 @@ SLOG_W << "RAII stream [Warn]: connection unstable";
 SLOG_E << "RAII stream [Error]: data corruption detected";
 ```
 
-### 四种风格对比
+### 4.5 四种风格对比
 
 | 风格 | 宏前缀 | 语法 | 堆分配 | 类型安全 | 编译检查 |
 |------|--------|------|--------|---------|---------|
@@ -123,7 +123,7 @@ SLOG_E << "RAII stream [Error]: data corruption detected";
 
 **推荐使用优先级**：`VLOG_`（最快、最安全） > `MLOG_`（最灵活） > `SLOG_`（特殊场景） > `CLOG_`（兼容旧代码）
 
-## 六种日志级别
+## 5. 六种日志级别
 
 | 级别值 | 名称 | 宏后缀 | 用途 | 颜色 |
 |--------|------|--------|------|------|
@@ -134,7 +134,7 @@ SLOG_E << "RAII stream [Error]: data corruption detected";
 | 4 | kError | `_E` | 影响运行的错误 | 红色 |
 | 5 | kFatal | `_F` | 不可恢复的致命错误 | 加粗红色 |
 
-### 级别语义
+### 5.1 级别语义
 
 - **kTrace**：函数进入/退出、循环迭代、帧时序等高频信息。生产环境应编译时剔除。
 - **kDebug**：配置加载、连接建立、状态变化等开发调试信息。
@@ -143,7 +143,7 @@ SLOG_E << "RAII stream [Error]: data corruption detected";
 - **kError**：需要关注的错误：连接失败、数据校验失败等。
 - **kFatal**：不可恢复的致命错误。**会抛出 `RuntimeError` 异常**。
 
-### 自动 Detail 注解
+### 5.2 自动 Detail 注解
 
 当日志级别 >= `kDetailLevel`（默认 `kWarn`）时，宏自动在消息前添加 `{filename:line}` 信息：
 
@@ -152,7 +152,7 @@ SLOG_E << "RAII stream [Error]: data corruption detected";
 [2026-03-28 10:00:00.124] [ERROR] {timer_basic.cc:43} This is an error
 ```
 
-## 编译时级别过滤
+## 6. 编译时级别过滤
 
 通过定义 `VLINK_LOG_LEVEL=N` 宏，可以在编译时**完全剔除**低于 N 级别的日志代码：
 
@@ -176,7 +176,7 @@ target_compile_definitions(myapp PRIVATE VLINK_LOG_LEVEL=2)  # 剔除 Trace 和 
 Logger::kMinimumLevel  // 编译时确定的最低级别
 ```
 
-## 动态级别控制
+## 7. 动态级别控制
 
 ```cpp
 // 设置控制台和文件 sink 的最低输出级别
@@ -192,9 +192,9 @@ if (Logger::is_writable(Logger::kDebug)) {
 
 控制台和文件的输出级别可以独立配置，且可在运行时随时修改。
 
-## 关键代码分析
+## 8. 关键代码分析
 
-### Logger 初始化
+### 8.1 Logger 初始化
 
 ```cpp
 Logger::init("app_name", "/path/to/logfile.log");
@@ -205,7 +205,7 @@ Logger::init("app_name", "/path/to/logfile.log");
 - 必须在使用任何日志宏**之前**调用
 - 可以多次调用以重新配置
 
-### 日志刷新
+### 8.2 日志刷新
 
 ```cpp
 Logger::flush();
@@ -213,16 +213,16 @@ Logger::flush();
 
 在异常终止前调用 `flush()` 确保缓冲的消息写入。`kFatal` 级别会自动触发 `flush()`。
 
-## 常见错误
+## 9. 常见错误
 
-### 错误 1：在 Logger::init() 之前使用日志宏
+### 9.1 错误 1：在 Logger::init() 之前使用日志宏
 
 ```cpp
 VLOG_I("This may crash or silently fail");
 Logger::init("myapp");  // 太晚了！
 ```
 
-### 错误 2：在 kFatal 之后期望继续执行
+### 9.2 错误 2：在 kFatal 之后期望继续执行
 
 ```cpp
 VLOG_F("Fatal error: ", reason);
@@ -230,7 +230,7 @@ VLOG_F("Fatal error: ", reason);
 cleanup();
 ```
 
-### 错误 3：混淆编译时过滤和运行时过滤
+### 9.3 错误 3：混淆编译时过滤和运行时过滤
 
 ```cpp
 // 编译时：-DVLINK_LOG_LEVEL=2
@@ -238,7 +238,7 @@ Logger::set_console_level(Logger::kTrace);  // 无效！Trace 已在编译时被
 VLOG_T("This is completely removed by preprocessor");  // 空操作
 ```
 
-### 错误 4：在日志回调中递归使用日志
+### 9.4 错误 4：在日志回调中递归使用日志
 
 ```cpp
 Logger::register_console_handler([](Logger::Level, std::string_view msg) {
@@ -246,6 +246,6 @@ Logger::register_console_handler([](Logger::Level, std::string_view msg) {
 });
 ```
 
-## 相关示例
+## 10. 相关示例
 
 - [logger_advanced](../logger_advanced/) -- 自定义 handler、backtrace、fatal 异常捕获

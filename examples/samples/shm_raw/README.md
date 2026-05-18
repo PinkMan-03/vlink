@@ -1,19 +1,19 @@
 # shm_raw -- VLink 共享内存原始字节通信示例
 
-## 概述
+## 1. 概述
 
 本示例演示如何使用 VLink 的共享内存（`shm://`）传输协议进行原始字节通信。这是唯一一个在单进程内完整展示 VLink 全部六种通信原语的示例，并且使用了带安全密钥的 Security 变体。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
 | `shm_raw.cc` | 主程序，演示全部六种通信原语 |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::shm` |
 
-## 演示内容
+## 3. 演示内容
 
-### 1. 方法模型 (Method) -- RPC 请求-响应
+### 3.1 方法模型 (Method) -- RPC 请求-响应
 
 ```
 SecurityClient  -->  SecurityServer
@@ -25,7 +25,7 @@ SecurityClient  -->  SecurityServer
 - 服务端检查请求内容，返回 1MB 响应数据
 - 客户端使用同步 `invoke()` 调用
 
-### 2. 事件模型 (Event) -- 发布/订阅
+### 3.2 事件模型 (Event) -- 发布/订阅
 
 ```
 SecurityPublisher  -->  SecuritySubscriber
@@ -36,7 +36,7 @@ SecurityPublisher  -->  SecuritySubscriber
 - 构造一个 `Security::Config`（`cfg.key = "custom-key"`），作为 `SecurityPublisher` / `SecuritySubscriber` 构造函数的第二参数传入；任意长度的 key 内部用 SHA-256 截断为 AES-128-GCM key
 - 发布者调用 `wait_for_subscribers()` 等待匹配后再发送
 
-### 3. 字段模型 (Field) -- 状态读写
+### 3.3 字段模型 (Field) -- 状态读写
 
 ```
 SecuritySetter  -->  SecurityGetter
@@ -48,15 +48,15 @@ SecuritySetter  -->  SecurityGetter
 - Setter 设置字段值，Getter 轮询获取最新值
 - `getter.get()` 返回 `std::optional`，无值时为 `std::nullopt`
 
-## Security 变体
+## 4. Security 变体
 
 本示例使用的 `SecurityPublisher`、`SecuritySubscriber` 等是带安全密钥验证的通信原语。只有安全密钥匹配的端点才能通信，增强了进程间通信的安全性。
 
-## 依赖
+## 5. 依赖
 
 - VLink 库（`vlink::shm` 组件）
 
-## 构建与运行
+## 6. 构建与运行
 
 ```bash
 # 构建

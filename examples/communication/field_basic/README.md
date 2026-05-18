@@ -1,12 +1,14 @@
 # Field Basic -- VLink 字段模型基础示例
 
-## 通信模型概览
+## 1. 通信模型概览
 
 ![通信模型概览](../event_basic/images/communication-models-overview.png)
 
-## 概述
+## 2. 概述
 
 本示例演示 VLink **字段模型 (Field Model)** 的基本用法：`Setter` 写入字段值、`Getter` 读取字段值。字段模型的核心特征是**值保留** -- Setter 缓存最新值，后加入的 Getter 可以立即获取当前状态。
+
+![Field Basic Dataflow](images/field-basic-dataflow.png)
 
 ```
 Setter<GearState> ──set(value)──> [dds:// 缓存] ──> Getter<GearState>
@@ -15,7 +17,7 @@ Setter<GearState> ──set(value)──> [dds:// 缓存] ──> Getter<GearSta
                                                           └── listen(callback)
 ```
 
-## 字段模型 vs 事件模型
+## 3. 字段模型 vs 事件模型
 
 | 特性 | 字段模型 (Setter/Getter) | 事件模型 (Publisher/Subscriber) |
 |------|--------------------------|-------------------------------|
@@ -25,16 +27,16 @@ Setter<GearState> ──set(value)──> [dds:// 缓存] ──> Getter<GearSta
 | 语义 | "状态字段" -- 关注当前值 | "事件流" -- 关注每条消息 |
 | 适用场景 | 配置参数、系统状态、传感器最新读数 | 日志流、命令序列、数据帧 |
 
-## 核心 API
+## 4. 核心 API
 
-### Setter<T>
+### 4.1 Setter<T>
 
 | 方法 | 说明 |
 |------|------|
 | `Setter(url)` | 构造并初始化 Setter |
 | `set(value)` | 写入新值，通知所有 Getter，缓存以支持迟到加入 |
 
-### Getter<T>
+### 4.2 Getter<T>
 
 | 方法 | 说明 |
 |------|------|
@@ -43,9 +45,9 @@ Setter<GearState> ──set(value)──> [dds:// 缓存] ──> Getter<GearSta
 | `wait_for_value(timeout)` | 阻塞等待直到值可用。默认超时 5000ms |
 | `listen(callback)` | 注册值变更回调，每次 Setter 写入新值时触发 |
 
-## 关键代码分析
+## 5. 关键代码分析
 
-### 1. Setter 创建与初始值设置
+### 5.1 Setter 创建与初始值设置
 
 ```cpp
 Setter<GearState> setter("dds://vehicle/gear");
@@ -59,7 +61,7 @@ setter.set(initial_gear);
 
 当后续有新的 Getter 连接时，传输层自动将缓存值同步给它（late-joiner sync）。这是字段模型与事件模型的根本区别。
 
-### 2. Getter 的三种读取模式
+### 5.2 Getter 的三种读取模式
 
 **模式 1: wait_for_value -- 阻塞等待**
 
@@ -94,7 +96,7 @@ getter.listen([](const GearState& gear) {
 
 **注意**: `listen()` 只能调用一次。重复调用会触发 Fatal 错误。
 
-### 3. 迟到加入（Late-Joiner）机制
+### 5.3 迟到加入（Late-Joiner）机制
 
 ```cpp
 // Step 1: Setter 先写入值
@@ -107,7 +109,7 @@ Getter<GearState> getter("dds://vehicle/gear");
 
 这是字段模型的核心价值。在分布式系统中，组件的启动顺序不可预测。字段模型确保无论 Getter 何时加入，都能获取到当前状态。
 
-### 4. 值更新与回调触发
+### 5.4 值更新与回调触发
 
 ```cpp
 GearState gears[] = {{2, true}, {3, true}, {4, true}};
@@ -122,7 +124,7 @@ for (const auto& gear : gears) {
 3. Getter 收到后更新本地 `value_`，触发 `listen` 回调
 4. `get()` 后续调用返回最新值
 
-## 数据流转过程
+## 6. 数据流转过程
 
 ```
 1. setter.set({3, true})
@@ -141,7 +143,7 @@ for (const auto& gear : gears) {
    └── 返回 optional<GearState>{3, true}
 ```
 
-## 编译与运行
+## 7. 编译与运行
 
 ```bash
 mkdir build && cd build
@@ -150,7 +152,7 @@ make example_field_basic
 ./output/bin/example_field_basic
 ```
 
-## 预期输出
+## 8. 预期输出
 
 ```
 [I] === VLink Field Basic Example ===
@@ -170,7 +172,7 @@ make example_field_basic
 [I] === Example complete ===
 ```
 
-## 文件结构
+## 9. 文件结构
 
 | 文件 | 说明 |
 |------|------|
@@ -178,13 +180,13 @@ make example_field_basic
 | `field_basic.cc` | 主程序：Setter + Getter 在同一进程 |
 | `CMakeLists.txt` | 构建配置 |
 
-## 扩展思考
+## 10. 扩展思考
 
 - 如果需要过滤重复值（Setter 连续写入相同值），可以使用 `set_change_reporting(true)`，参见 `field_advanced` 示例。
 - 将 `dds://` 替换为 `shm://` 或 `zenoh://` 可切换传输协议，API 不变。
 - 在车载系统中，字段模型常用于表示车辆状态（挡位、车速、电池电量等），确保任何时刻查询都能得到最新值。
 - `get()` 是线程安全的，可以从多个线程并发调用。
 
-## 相关文档
+## 11. 相关文档
 
 详细原理参见 [doc/05-field-model.md](../../../doc/05-field-model.md)。

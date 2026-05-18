@@ -1,6 +1,6 @@
 # VLink Security Custom 示例
 
-## 概述
+## 1. 概述
 
 本示例演示通过 `Security::Config::encrypt_callback` / `decrypt_callback` 安装自定义加解密函数，**完全绕过**内置 AES-128-GCM 与 RSA 路径，让上层接入业务自有算法（SM4、ChaCha20、HSM、白盒密码等）。
 
@@ -10,7 +10,9 @@
 2. 用 lambda 捕获实现 ROT-N 替换密码
 3. encrypt/decrypt 回调的契约与失败语义
 
-## 文件说明
+![Security Custom Callback](images/security-custom-callback.png)
+
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
@@ -18,7 +20,7 @@
 | `xor_cipher.h` | 演示用 XOR 密码实现（带 `kDefaultKey` 与 `xor_transform`） |
 | `CMakeLists.txt` | 构建配置 |
 
-## 构建与运行
+## 3. 构建与运行
 
 ```bash
 cmake -B build -S . -DENABLE_EXAMPLES=ON -DENABLE_WHOLE_EXAMPLES=ON -DENABLE_SECURITY=ON
@@ -26,7 +28,7 @@ cmake --build build --target example_security_custom
 ./build/output/bin/example_security_custom
 ```
 
-## 核心 API
+## 4. 核心 API
 
 ```cpp
 // 回调签名（在 include/vlink/extension/security.h 中）：
@@ -52,7 +54,7 @@ explicit SecurityPublisher(const std::string& url_str,
 | 回调返回 `false` | 视为加/解密失败：发送端丢弃消息、接收端不触发用户回调 |
 | 与对称/非对称字段共存 | 同时设了 `key` / `public_key_pem` 时，回调路径优先级更高，对称/非对称槽位静默闲置 |
 
-## 回调最小实现
+## 5. 回调最小实现
 
 ```cpp
 auto enc = [key](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
@@ -72,7 +74,7 @@ vlink::SecurityPublisher<std::string> pub("dds://demo/custom", cfg);
 vlink::SecuritySubscriber<std::string> sub("dds://demo/custom", cfg);
 ```
 
-## 注意事项
+## 6. 注意事项
 
 - 回调在 `publish` / `listen` 的同一线程被调用，**禁止阻塞**热路径。
 - `in` 为空时回调应直接返回 `true`，与默认实现的"空输入直通"约定一致。
@@ -80,7 +82,7 @@ vlink::SecuritySubscriber<std::string> sub("dds://demo/custom", cfg);
 - 在 `intra://` 与 `dds://` CDR 类型上，`SecurityXxx` 构造时会打印 warning 并把 `Security::Config` 忽略；在这两种传输上不要启用任何安全配置。
 - XOR 仅用于演示，**严禁**生产使用。
 
-## 相关文档
+## 7. 相关文档
 
 - [doc/09-security.md](../../../doc/09-security.md) §9.7 自定义加密回调
 - [`../security_basic/`](../security_basic/) — 内置 AES-128-GCM 用法

@@ -2,7 +2,7 @@
 
 > 本章介绍 VLink 所有通信原语共享的 `Node<ImplT, SecT>` 基类模板，包括模板参数化继承架构、生命周期管理、属性配置、零拷贝借贷、安全加密等通用能力。有关各通信原语的专属 API，请参阅 [Event 模型](03-event-model.md)、[Method 模型](04-method-model.md) 和 [Field 模型](05-field-model.md)。
 
-## 1. 概述
+## 2.1 概述
 
 `Node<ImplT, SecT>` 是 VLink 中所有通信端点共享的基类模板（源码：`include/vlink/node.h`），各通信原语通过 `Node<ImplT, SecT>` 间接持有 `std::unique_ptr<ImplT>` 形式的传输实现。VLink 的六种通信原语全部继承自它：
 
@@ -14,13 +14,13 @@
 
 `Node` 统一管理传输层实现指针 (`impl_`)、驱动节点生命周期，并提供安全加密、零拷贝借贷、属性配置、消息循环绑定、CPU 性能分析等共享服务。
 
-### 1.1 架构层次
+### 2.1.1 架构层次
 
 ![Node Architecture Layers](images/node-architecture-layers.png)
 
-## 2. 模板参数与角色
+## 2.2 模板参数与角色
 
-### 2.1 模板参数
+### 2.2.1 模板参数
 
 ```cpp
 template <typename ImplT, SecurityType SecT>
@@ -38,7 +38,7 @@ class Node;
 static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must be derived from NodeImpl.");
 ```
 
-### 2.2 ImplType 节点角色
+### 2.2.2 ImplType 节点角色
 
 `ImplType`（`include/vlink/impl/types.h`）是一个 `uint8_t` 的位掩码枚举，用于标识节点在通信中的角色：
 
@@ -54,7 +54,7 @@ static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must be derived from No
 
 这些值可按位或组合，`Conf` 据此声明支持的节点角色。
 
-### 2.3 TransportType 传输方案
+### 2.2.3 TransportType 传输方案
 
 `TransportType`（`enum class : uint8_t`）标识当前节点使用的传输后端：
 
@@ -76,7 +76,7 @@ static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must be derived from No
 
 > 源码中存在的 scheme 不代表当前构建一定启用对应模块（参见 Conan recipe 的组件导出清单）。
 
-### 2.4 核心成员变量
+### 2.2.4 核心成员变量
 
 | 成员                | 类型                          | 初值       | 说明                                     |
 | ------------------- | ----------------------------- | ---------- | ---------------------------------------- |
@@ -88,13 +88,13 @@ static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must be derived from No
 | `is_support_loan_`  | `bool`                        | `false`    | 在 `init()` 中由 `impl_->is_support_loan()` 填写 |
 | `is_manual_unloan_` | `bool`                        | `false`    | 是否启用手动归还模式                     |
 
-## 3. 生命周期管理
+## 2.3 生命周期管理
 
-### 3.1 生命周期状态图
+### 2.3.1 生命周期状态图
 
 ![Node Lifecycle State Machine](images/node-lifecycle.png)
 
-### 3.2 构造阶段
+### 2.3.2 构造阶段
 
 节点的构造支持三种方式：
 
@@ -135,7 +135,7 @@ pub.set_property("dds.ip", "192.168.1.100");
 pub.init();  // 手动初始化
 ```
 
-### 3.3 init() -- 初始化
+### 2.3.3 init() -- 初始化
 
 ```cpp
 virtual bool init();
@@ -159,7 +159,7 @@ if (!has_inited_.compare_exchange_strong(expected, true)) {
 
 > 重复调用 `init()` 无副作用，CAS 判失败后直接返回 `false`。
 
-### 3.4 deinit() -- 反初始化
+### 2.3.4 deinit() -- 反初始化
 
 ```cpp
 virtual bool deinit();
@@ -181,7 +181,7 @@ if (!has_inited_.compare_exchange_strong(expected, false)) {
 3. **传输清理** -- 调用 `impl_->deinit()`，释放底层传输资源
 4. **扩展清理** -- 调用 `impl_->deinit_ext()`，从 `DiscoveryReporter` 注销
 
-### 3.5 析构自动 deinit
+### 2.3.5 析构自动 deinit
 
 ```cpp
 template <typename ImplT, SecurityType SecT>
@@ -192,7 +192,7 @@ inline Node<ImplT, SecT>::~Node() {
 
 析构函数自动调用 `deinit()`。因此在大多数场景下，用户不需要显式调用 `deinit()`，节点超出作用域时自动完成清理。仅在需要提前释放资源时才需要手动调用。
 
-### 3.6 全局初始化
+### 2.3.6 全局初始化
 
 `NodeImpl` 构造函数会调用静态方法 `global_init()`（`src/impl/node_impl.cc`），确保进程级单例被初始化：
 
@@ -207,7 +207,7 @@ static void NodeImpl::global_init() {
 
 方法内部的单例懒加载自带线程安全，多次调用仅首次有效果。
 
-## 4. 延迟初始化
+## 2.4 延迟初始化
 
 `InitType` 枚举控制节点是否在构造时立即初始化：
 
@@ -240,9 +240,9 @@ pub_ptr->init();
 
 > **重要**：消息级 `Security::Config` 只能通过 `SecurityXxx` 节点的**构造函数**传入；没有运行时的 `enable_security()` 入口。需要更换密钥/回调时请销毁并重新构造节点。`set_property()` 通常也需要在 `init()` 之前设置才能生效。
 
-## 5. 属性配置与查询
+## 2.5 属性配置与查询
 
-### 5.0 基础查询方法
+### 2.5.1 基础查询方法
 
 ```cpp
 TransportType get_transport_type() const;
@@ -252,7 +252,7 @@ const std::string& get_url() const;
 - `get_transport_type()` 返回节点所绑定的传输后端枚举（如 `kDds`、`kShm`、`kIntra` 等）。
 - `get_url()` 返回构造此节点时使用的 URL 字符串（如 `"dds://vehicle/speed"`）。通过 `ConfT` 构造的节点返回空字符串。
 
-### 5.1 序列化类型 -- set_ser_type()
+### 2.5.2 序列化类型 -- set_ser_type()
 
 ```cpp
 void set_ser_type(const std::string& ser_type, SchemaType schema_type = SchemaType::kUnknown);
@@ -281,7 +281,7 @@ pub.set_ser_type("my.proto.MessageTypeV2");
 pub.init();
 ```
 
-### 5.2 安全配置 -- SecurityXxx 构造函数
+### 2.5.3 安全配置 -- SecurityXxx 构造函数
 
 `Security::Config` 只能通过 `SecurityPublisher` / `SecuritySubscriber` / `SecurityServer` / `SecurityClient` / `SecuritySetter` / `SecurityGetter` 的**构造函数**一次性传入，无运行时 setter：
 
@@ -322,7 +322,7 @@ cfg2.decrypt_callback = [](const Bytes& in, Bytes& out) -> bool {
 SecurityPublisher<MyMsg> pub2("dds://topic", cfg2);
 ```
 
-### 5.3 发现服务 -- set_discovery_enabled()
+### 2.5.4 发现服务 -- set_discovery_enabled()
 
 ```cpp
 void set_discovery_enabled(bool enable);
@@ -335,7 +335,7 @@ bool get_discovery_enabled() const;
 - 若在 `init()` 之前调用：直接设置标志
 - 若在 `init()` 之后调用：自动执行 `deinit_ext()` -> 修改标志 -> `init_ext()` 三步操作
 
-### 5.4 录制路径 -- set_record_path()
+### 2.5.5 录制路径 -- set_record_path()
 
 ```cpp
 void set_record_path(const std::string& path);
@@ -345,7 +345,7 @@ void set_record_path(const std::string& path);
 
 > **注意**：`intra://` 与 `dds://` CDR 类型不支持录制 —— 调用 `set_record_path(path)` 会先触发 `VLOG_F`；即使绕过此检查，`try_record()` 内部也会直接跳过这两种传输。
 
-### 5.5 SSL/TLS 配置 -- set_ssl_options()
+### 2.5.6 SSL/TLS 配置 -- set_ssl_options()
 
 ```cpp
 void set_ssl_options(const SslOptions& options);
@@ -386,7 +386,7 @@ pub.set_ssl_options(ssl);
 pub.init();
 ```
 
-### 5.6 自定义属性 -- set_property() / get_property()
+### 2.5.7 自定义属性 -- set_property() / get_property()
 
 ```cpp
 void set_property(const std::string& prop, const std::string& value);
@@ -404,7 +404,7 @@ pub.init();
 std::string ip = pub.get_property("dds.ip");  // "192.168.1.100"
 ```
 
-### 5.7 Protobuf Arena 绑定 -- bind_proto_arena()
+### 2.5.8 Protobuf Arena 绑定 -- bind_proto_arena()
 
 ```cpp
 void bind_proto_arena(void* proto_arena);
@@ -421,7 +421,7 @@ sub.listen([](MyProto* msg) {
 });
 ```
 
-## 6. MessageLoop 绑定
+## 2.6 MessageLoop 绑定
 
 ```cpp
 bool attach(class MessageLoop* message_loop);
@@ -429,13 +429,13 @@ bool detach();
 class MessageLoop* get_message_loop() const;
 ```
 
-### 6.1 工作原理
+### 2.6.1 工作原理
 
 默认情况下，节点的回调在传输线程上直接调用。通过 `attach()` 将节点绑定到 `MessageLoop` 后，回调被 `post_task()` 投递到 MessageLoop 线程执行，实现回调的线程切换。
 
 这对于单线程应用代码特别有用，可以避免多线程同步问题。
 
-### 6.2 使用示例
+### 2.6.2 使用示例
 
 ```cpp
 MessageLoop loop;
@@ -449,7 +449,7 @@ sub.listen([](const MyMsg& msg) {
 loop.run();  // 启动消息循环
 ```
 
-### 6.3 注意事项
+### 2.6.3 注意事项
 
 | 操作    | 行为                                                               |
 | ------- | ------------------------------------------------------------------ |
@@ -458,7 +458,7 @@ loop.run();  // 启动消息循环
 | detach  | detach 后回调恢复在传输线程上执行                                  |
 | 状态回调 | `call_status()` 也会通过绑定的 MessageLoop 分发                   |
 
-## 7. 零拷贝借贷
+## 2.7 零拷贝借贷
 
 ```cpp
 bool is_support_loan() const;
@@ -468,7 +468,7 @@ void set_manual_unloan(bool manual_unloan);
 bool is_manual_unloan() const;
 ```
 
-### 7.1 支持的传输后端
+### 2.7.1 支持的传输后端
 
 | 传输后端  | 是否支持 loan |
 | --------- | ------------- |
@@ -476,7 +476,7 @@ bool is_manual_unloan() const;
 | `shm2://` | 是            |
 | 其他      | 否            |
 
-### 7.2 Publisher 端使用
+### 2.7.2 Publisher 端使用
 
 ```cpp
 Publisher<Bytes> pub("shm://topic");
@@ -493,7 +493,7 @@ if (pub.is_support_loan()) {
 > 注：loan 路径需要使用 `Publisher<Bytes>`——`loan()` 返回的 `Bytes` 作为消息直接发送；若用 `Publisher<MyStruct>` 则 `publish(buf)` 与模板签名 `publish(const MsgT&)` 不匹配，无法编译。
 
 
-### 7.3 Subscriber 端手动归还
+### 2.7.3 Subscriber 端手动归还
 
 ```cpp
 Subscriber<Bytes> sub("shm://topic");
@@ -512,7 +512,7 @@ sub.listen([&sub](const Bytes& data) {
 > - 未归还的 loan 会耗尽共享内存池
 > - 启用安全模式 (`kWithSecurity`) 时不使用 loan，因为加密后数据大小与原始大小不同
 
-## 8. 挂起与恢复
+## 2.8 挂起与恢复
 
 ```cpp
 bool suspend();
@@ -539,7 +539,7 @@ sub.suspend();   // 暂停接收
 sub.resume();    // 恢复接收
 ```
 
-## 9. 中断机制
+## 2.9 中断机制
 
 ```cpp
 virtual void interrupt();
@@ -572,7 +572,7 @@ t.join();
 
 > **注意**：`deinit()` 内部会自动调用 `interrupt()`，确保析构时不会死锁。
 
-## 10. CPU 性能分析
+## 2.10 CPU 性能分析
 
 ```cpp
 double get_cpu_usage() const;
@@ -580,7 +580,7 @@ double get_cpu_usage() const;
 
 返回节点在活跃的 publish/receive 操作中消耗的 CPU 时间占比。
 
-### 10.1 启用条件
+### 2.10.1 启用条件
 
 | 条件                       | 说明                                            |
 | -------------------------- | ----------------------------------------------- |
@@ -588,7 +588,7 @@ double get_cpu_usage() const;
 | 运行时                     | 设置环境变量 `VLINK_PROFILER_ENABLE`             |
 | 节点级别                   | `init_ext()` 中检测到全局 profiler 启用时自动创建 |
 
-### 10.2 返回值
+### 2.10.2 返回值
 
 | 返回值               | 含义                            |
 | -------------------- | ------------------------------- |
@@ -605,7 +605,7 @@ if (usage >= 0) {
 }
 ```
 
-### 10.3 实现原理
+### 2.10.3 实现原理
 
 `Publisher::publish()` 和 `Subscriber` 的内部接收路径中使用 `CpuProfilerGuard` RAII 对象，在操作前后自动记录 CPU 时间：
 
@@ -616,7 +616,7 @@ CpuProfilerGuard profiler_guard(this->impl_->profiler.get());
 #endif
 ```
 
-## 11. 状态查询与内省
+## 2.11 状态查询与内省
 
 ```cpp
 Status::BasePtr get_status(Status::Type type) const;
@@ -624,11 +624,11 @@ void register_status_handler(StatusCallback&& callback);
 const AbstractNode* get_abstract_node() const;
 ```
 
-### 11.0 抽象节点句柄
+### 2.11.1 抽象节点句柄
 
 `get_abstract_node()` 返回底层传输图中的 `AbstractNode` 指针，可用于 `AbstractFactory` 查询同图中的对等节点，或传递给代理监控 API 进行运行时拓扑检查。若传输后端不暴露 `AbstractNode`，返回 `nullptr`。
 
-### 11.1 支持的传输后端
+### 2.11.2 支持的传输后端
 
 状态查询和状态回调仅在 DDS 系列传输上有效：
 
@@ -642,7 +642,7 @@ const AbstractNode* get_abstract_node() const;
 
 在不支持的传输上调用会打印警告并返回 `Status::Unknown` 对象。
 
-### 11.2 使用示例
+### 2.11.3 使用示例
 
 ```cpp
 Publisher<MyMsg> pub("dds://topic");
@@ -655,11 +655,11 @@ pub.register_status_handler([](const Status::BasePtr& status) {
 auto status = pub.get_status(Status::Type::kLivelinessChanged);
 ```
 
-### 11.3 状态回调与 MessageLoop
+### 2.11.4 状态回调与 MessageLoop
 
 若节点已 `attach()` 到 `MessageLoop`，状态回调会通过 `MessageLoop::post_task()` 分发到 loop 线程。否则直接在传输线程调用。
 
-## 12. 工厂方法
+## 2.12 工厂方法
 
 每个通信端点类（Publisher、Subscriber 等）都提供静态工厂方法：
 
@@ -668,7 +668,7 @@ static UniquePtr create_unique(const std::string& url_str, InitType type = InitT
 static SharedPtr create_shared(const std::string& url_str, InitType type = InitType::kWithInit);
 ```
 
-### 12.1 使用示例
+### 2.12.1 使用示例
 
 ```cpp
 // unique_ptr 管理
@@ -683,7 +683,7 @@ client->set_property("timeout", "5000");
 client->init();
 ```
 
-### 12.2 对比直接构造
+### 2.12.2 对比直接构造
 
 | 方式            | 内存位置 | 智能指针类型   | 适用场景                         |
 | --------------- | -------- | -------------- | -------------------------------- |
@@ -691,9 +691,9 @@ client->init();
 | `create_unique` | 堆       | `unique_ptr`   | 需要动态生命周期，独占所有权     |
 | `create_shared` | 堆       | `shared_ptr`   | 需要共享所有权                   |
 
-## 13. 安全模板
+## 2.13 安全模板
 
-### 13.1 编译期约束
+### 2.13.1 编译期约束
 
 VLink 通过模板参数 `SecurityType SecT` 在编译期决定是否启用安全功能。使用 `static_assert` 保证安全 API 只能在安全模式的实例上调用。
 
@@ -707,7 +707,7 @@ SecurityPublisher<MyMsg> pub("shm://topic", cfg);
 Publisher<MyMsg> pub2("shm://topic", cfg);  // compile error
 ```
 
-### 13.2 便捷别名
+### 2.13.2 便捷别名
 
 VLink 为每种通信原语提供预定义的安全别名类型：
 
@@ -720,7 +720,7 @@ VLink 为每种通信原语提供预定义的安全别名类型：
 | `SecuritySetter`      | `Setter<ValueT, SecurityType::kWithSecurity>`                  |
 | `SecurityGetter`      | `Getter<ValueT, SecurityType::kWithSecurity>`                  |
 
-### 13.3 不支持安全的传输
+### 2.13.3 不支持安全的传输
 
 以下传输后端不支持安全功能，`SecurityXxx` 构造时会**打印警告（`VLOG_W`）并忽略 `Security::Config`**：
 
@@ -729,11 +729,11 @@ VLink 为每种通信原语提供预定义的安全别名类型：
 
 `security_` 保持空 `optional`；发送 / 接收路径会 drop 消息并打 log，不会 UB。
 
-### 13.4 安全与零拷贝
+### 2.13.4 安全与零拷贝
 
 启用安全模式后，`Publisher::publish()` 内部不会使用 loan 机制。因为加密后的数据大小与原始序列化数据大小不同，无法预先分配精确的 loan 缓冲区。
 
-## 14. 安全退出模式
+## 2.14 安全退出模式
 
 ```cpp
 bool get_safety_quit() const;
@@ -742,7 +742,7 @@ void set_safety_quit(bool safety_quit);
 
 安全退出模式通过 `std::mutex` 保护回调执行和 `deinit()` 操作，防止回调执行过程中节点被销毁导致的 use-after-free 竞态。
 
-### 14.1 工作原理
+### 2.14.1 工作原理
 
 启用后：
 - 每次回调调用都在 `quit_mtx_` 锁保护下执行（通过 `invoke_callback()`）
@@ -759,7 +759,7 @@ sub->listen([](const MyMsg& msg) {
 });
 ```
 
-### 14.2 使用建议
+### 2.14.2 使用建议
 
 | 场景                           | 是否启用    |
 | ------------------------------ | ----------- |
@@ -768,9 +768,9 @@ sub->listen([](const MyMsg& msg) {
 | 高频消息的热路径               | 不建议启用 (有锁开销) |
 | 节点生命周期与应用程序一致     | 不需要      |
 
-## 15. 属性配置时机与线程模型
+## 2.15 属性配置时机与线程模型
 
-### 15.1 属性配置时机
+### 2.15.1 属性配置时机
 
 | 属性方法                  | init 前 | init 后                     |
 | ------------------------- | ------- | --------------------------- |
@@ -782,7 +782,7 @@ sub->listen([](const MyMsg& msg) {
 | `set_ssl_options()`       | 必须    | 不生效（需在 init 前）      |
 | `bind_proto_arena()`      | 可以    | 在 `listen()` 前即可        |
 
-### 15.2 回调线程模型
+### 2.15.2 回调线程模型
 
 | 回调路径                | 默认线程      | attach 后线程    |
 | ----------------------- | ------------- | ---------------- |
@@ -795,7 +795,7 @@ sub->listen([](const MyMsg& msg) {
 
 ---
 
-## 16. 相关文档
+## 2.16 相关文档
 
 - [构建指南](01-build.md) -- CMake 编译选项与依赖配置
 - [Event 模型（Publisher / Subscriber）](03-event-model.md) -- 事件发布订阅 API

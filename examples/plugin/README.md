@@ -9,6 +9,6 @@ VLink 插件化扩展机制，支持运行时动态加载模块。
 | `plugin_runnable` | `RunablePluginInterface` 可运行插件 |
 | `plugin_schema` | `SchemaPluginInterface` 统一 schema 反射插件 |
 
-## 相关文档
+## 1. 相关文档
 
 详细原理参见 [doc/19-extensions.md](../../doc/19-extensions.md)。

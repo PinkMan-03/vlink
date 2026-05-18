@@ -1,12 +1,14 @@
 # PointCloud 零拷贝点云容器示例
 
-## 概述
+## 1. 概述
 
 本示例演示 VLink 的 `zerocopy::PointCloud` 容器——一个带有编译时 Schema 的零拷贝三维点云容器。`PointCloud` 支持自定义字段类型（float、double、int、uint8 等），提供类型安全的创建、填充和读取 API。
 
-## 核心概念
+![PointCloud zero-copy flow](images/point-cloud-zerocopy.png)
 
-### Schema 协议
+## 2. 核心概念
+
+### 2.1 Schema 协议
 
 每个 `PointCloud` 都包含一个嵌入式 Schema，描述每个点记录中每个字段的名称、类型和字节大小。Schema 编码在两个 `uint64_t` 值中：
 
@@ -16,7 +18,7 @@ type_num: 每个 nibble 编码一个字段的 Type 枚举值
 names:    逗号分隔的字段名字符串（最多 160 字符，3-16 个字段）
 ```
 
-### 支持的字段类型
+### 2.2 支持的字段类型
 
 | 枚举 | C++ 类型 | 字节数 |
 |------|---------|--------|
@@ -32,9 +34,9 @@ names:    逗号分隔的字段名字符串（最多 160 字符，3-16 个字段
 | kFloatType(10) | float | 4 |
 | kDoubleType(11) | double | 8 |
 
-## 关键 API 解析
+## 3. 关键 API 解析
 
-### 创建点云
+### 3.1 创建点云
 
 ```cpp
 // 方式 1: 显式模板参数
@@ -48,7 +50,7 @@ pc.create_v3f<float>(500, {"intensity"});
 pc.create_v3d(100);  // double x,y,z
 ```
 
-### 添加点（push_value_v3f）
+### 3.2 添加点（push_value_v3f）
 
 ```cpp
 pc.push_value_v3f(1.0f, 2.0f, 3.0f, 0.8f);  // x, y, z, intensity
@@ -57,7 +59,7 @@ pc.push_value_v3f(4.0f, 5.0f, 6.0f, 0.5f);
 
 每次 `push_value` 在缓冲区末尾追加一个点。返回 `false` 表示缓冲区已满。
 
-### 读取点（get_value_v3f）
+### 3.3 读取点（get_value_v3f）
 
 ```cpp
 // 方式 1: 输出参数
@@ -72,7 +74,7 @@ auto key_map = pc.get_key_map();
 float intensity = pc.get_value<float>(index, key_map, "intensity");
 ```
 
-### Schema 检查
+### 3.4 Schema 检查
 
 ```cpp
 std::cout << pc.get_protocol_name_str();  // "x,y,z,intensity"
@@ -81,7 +83,7 @@ std::cout << pc.get_protocol_type_str();  // "float,float,float,float"
 std::cout << pc.pack_size();              // 16 (每个点 16 字节)
 ```
 
-### 序列化 / 反序列化
+### 3.5 序列化 / 反序列化
 
 ```cpp
 Bytes wire;
@@ -91,14 +93,14 @@ PointCloud restored;
 restored << wire;  // 反序列化（零拷贝）
 ```
 
-### resize + set_value（随机访问写入）
+### 3.6 resize + set_value（随机访问写入）
 
 ```cpp
 pc.resize(100);  // 设置逻辑大小为 100
 pc.set_value_v3f(50, 1.0f, 2.0f, 3.0f);  // 覆写第 50 个点
 ```
 
-## 编译与运行
+## 4. 编译与运行
 
 ```bash
 cd build
@@ -106,7 +108,7 @@ cmake .. && make example_zerocopy_point_cloud
 ./output/bin/example_zerocopy_point_cloud
 ```
 
-## 二进制线格式
+## 5. 二进制线格式
 
 ```
 [ magic_begin(4) | PointCloud结构体(256) | 点数据(size*pack_size) | magic_end(4) ]
@@ -114,7 +116,7 @@ cmake .. && make example_zerocopy_point_cloud
 
 结构体在 64 位平台上恰好 256 字节。
 
-## 点云操作流程
+## 6. 点云操作流程
 
 ```
 1. create<T...>(max_points, field_names)  -- 分配缓冲区，设置 Schema
@@ -125,14 +127,14 @@ cmake .. && make example_zerocopy_point_cloud
 6. get_value_v3f(index)  -- 读取特定点
 ```
 
-## 实际应用场景
+## 7. 实际应用场景
 
 - LiDAR 驱动发布点云到 `shm://lidar/front`
 - 感知模块订阅并检索 XYZ + intensity
 - 记录系统将点云序列化到 Bag 文件
 - 支持 3-16 个自定义字段（ring、timestamp、label 等）
 
-## 注意事项
+## 8. 注意事项
 
 - 字段数量限制：3 到 16 个
 - 所有字段类型必须是基础类型（`is_fundamental_v<T> == true`）

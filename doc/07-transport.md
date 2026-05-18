@@ -6,18 +6,18 @@
 - [7.2 传输后端选择指南](#72-传输后端选择指南)
 - [7.3 后端能力对比表](#73-后端能力对比表)
 - [7.4 各后端详细说明](#74-各后端详细说明)
-  - [intra:// — 进程内通信](#intra--进程内通信)
-  - [shm:// — Iceoryx 共享内存](#shm--iceoryx-共享内存)
-  - [shm2:// — Iceoryx2 共享内存](#shm2--iceoryx2-共享内存)
-  - [dds:// — Fast-DDS RTPS](#dds--fast-dds-rtps)
-  - [ddsc:// — CycloneDDS](#ddsc--cyclonedds)
-  - [ddsr:// — RTI DDS](#ddsr--rti-dds)
-  - [ddst:// — TravoDDS](#ddst--travodds)
-  - [zenoh:// — Zenoh 协议](#zenoh--zenoh-协议)
-  - [someip:// — SOME/IP 车载以太网](#someip--someip-车载以太网)
-  - [mqtt:// — MQTT 物联网协议](#mqtt--mqtt-物联网协议)
-  - [fdbus:// — FDBus IPC](#fdbus--fdbus-ipc)
-  - [qnx:// — QNX 实时 IPC](#qnx--qnx-实时-ipc)
+  - [7.4.1 intra:// — 进程内通信](#741-intra--进程内通信)
+  - [7.4.2 shm:// — Iceoryx 共享内存](#742-shm--iceoryx-共享内存)
+  - [7.4.3 shm2:// — Iceoryx2 共享内存](#743-shm2--iceoryx2-共享内存)
+  - [7.4.4 dds:// — Fast-DDS RTPS](#744-dds--fast-dds-rtps)
+  - [7.4.5 ddsc:// — CycloneDDS](#745-ddsc--cyclonedds)
+  - [7.4.6 ddsr:// — RTI DDS](#746-ddsr--rti-dds)
+  - [7.4.7 ddst:// — TravoDDS](#747-ddst--travodds)
+  - [7.4.8 zenoh:// — Zenoh 协议](#748-zenoh--zenoh-协议)
+  - [7.4.9 someip:// — SOME/IP 车载以太网](#749-someip--someip-车载以太网)
+  - [7.4.10 mqtt:// — MQTT 物联网协议](#7410-mqtt--mqtt-物联网协议)
+  - [7.4.11 fdbus:// — FDBus IPC](#7411-fdbus--fdbus-ipc)
+  - [7.4.12 qnx:// — QNX 实时 IPC](#7412-qnx--qnx-实时-ipc)
 - [7.5 后端混合使用与 Bridge](#75-后端混合使用与-bridge)
 - [7.6 全局初始化与生命周期管理](#76-全局初始化与生命周期管理)
 - [7.7 URL 重映射](#77-url-重映射)
@@ -152,7 +152,7 @@ Publisher<Imu> pub("zenoh://sensor/imu");    // Zenoh 云边
 
 ## 7.4 各后端详细说明
 
-### intra:// — 进程内通信
+### 7.4.1 intra:// — 进程内通信
 
 **定位：** 同一 OS 进程内各模块间通信，极低延迟，无序列化，无内核调用。
 
@@ -222,7 +222,7 @@ auto result = client.invoke(21);
 
 ---
 
-### shm:// — Iceoryx 共享内存
+### 7.4.2 shm:// — Iceoryx 共享内存
 
 **定位：** 同机不同进程间的零拷贝高性能 IPC，适合高频大数据量（相机帧、点云等）传输。
 
@@ -332,7 +332,7 @@ int main() {
 
 ---
 
-### shm2:// — Iceoryx2 共享内存
+### 7.4.3 shm2:// — Iceoryx2 共享内存
 
 **定位：** Iceoryx2 是 Iceoryx 的下一代实现，**无需独立的 RouDi 守护进程**，API 更现代化。
 
@@ -426,7 +426,7 @@ int main() {
 
 ---
 
-### dds:// — Fast-DDS RTPS
+### 7.4.4 dds:// — Fast-DDS RTPS
 
 **定位：** 基于 eProsima Fast-DDS（Fast-RTPS）的跨机器 DDS 通信，VLink 最主要的跨网络后端。
 
@@ -526,7 +526,7 @@ export VLINK_DDS_DOMAIN=1
 
 ---
 
-### ddsc:// — CycloneDDS
+### 7.4.5 ddsc:// — CycloneDDS
 
 **定位：** Eclipse CycloneDDS，开源 DDS 实现，与 `dds://`（Fast-DDS）API 完全相同，适合偏好 Apache 协议或 CycloneDDS 生态的场景。
 
@@ -583,7 +583,7 @@ int main() {
 
 ---
 
-### ddsr:// — RTI DDS
+### 7.4.6 ddsr:// — RTI DDS
 
 **定位：** RTI Connext DDS（商业 DDS 实现），适合需要 RTI 认证或 RTI 生态集成的场景。
 
@@ -612,7 +612,7 @@ ddsr://vehicle/speed?domain=1&qos=reliable
 
 ---
 
-### ddst:// — TravoDDS
+### 7.4.7 ddst:// — TravoDDS
 
 **定位：** TravoDDS 是国产开源 DDS 实现（项目仓库：<https://gitee.com/agiros/travodds>），作为 Fast-DDS / CycloneDDS / RTI Connext 之外的另一种 DDS 运行时选择。API 表面与 `DdsConf` 一致，底层替换为 TravoDDS 运行时。
 
@@ -641,7 +641,7 @@ ddst://perception/model/result?domain=1
 
 ---
 
-### zenoh:// — Zenoh 协议
+### 7.4.8 zenoh:// — Zenoh 协议
 
 **定位：** Eclipse Zenoh，面向云-边-端统一数据管理的现代协议，支持发布/订阅、查询/回应，适合 IoT 和云边协同场景。
 
@@ -733,7 +733,7 @@ int main() {
 
 ---
 
-### someip:// — SOME/IP 车载以太网
+### 7.4.9 someip:// — SOME/IP 车载以太网
 
 **定位：** SOME/IP（Scalable service-Oriented MiddlewarE over IP）是 AUTOSAR 标准车载以太网通信协议，适合 ECU 间通信和 V2X 场景。
 
@@ -862,7 +862,7 @@ int main() {
 
 ---
 
-### mqtt:// — MQTT 物联网协议
+### 7.4.10 mqtt:// — MQTT 物联网协议
 
 **定位：** MQTT（Message Queuing Telemetry Transport）是面向物联网的轻量级发布/订阅消息协议，适合带宽受限、网络不稳定的跨机器通信场景。
 
@@ -934,7 +934,7 @@ int main() {
 
 ---
 
-### fdbus:// — FDBus IPC
+### 7.4.11 fdbus:// — FDBus IPC
 
 **定位：** FDBus 是面向 Android 和 Linux 的轻量级 IPC 框架，类似于 D-Bus 但更轻量，适合车载 Linux 系统的同机 IPC。
 
@@ -1015,7 +1015,7 @@ int main() {
 
 ---
 
-### qnx:// — QNX 实时 IPC
+### 7.4.12 qnx:// — QNX 实时 IPC
 
 **定位：** 基于 QNX Neutrino RTOS 原生 IPC 原语的通信后端，提供确定性实时消息传递，适合功能安全（ASIL）场景。
 
@@ -1080,7 +1080,7 @@ int main() {
 
 VLink 支持在同一进程内同时使用多个传输后端，常见的混合场景：
 
-### 场景 1：进程内加速 + 跨机通信
+### 7.5.1 场景 1：进程内加速 + 跨机通信
 
 ```cpp
 // 同一进程内的高频数据流：intra:// 极低延迟
@@ -1095,7 +1095,7 @@ intra_pub.publish(data);
 dds_pub.publish(data);
 ```
 
-### 场景 2：协议桥接（Bridge）
+### 7.5.2 场景 2：协议桥接（Bridge）
 
 ```cpp
 // 将 shm:// 的数据桥接到 dds://（跨机器传输）
@@ -1112,7 +1112,7 @@ shm_sub.listen([&dds_pub](const Bytes& frame) {
 // Publisher<Bytes> zenoh_pub("zenoh://cloud/camera/frame");
 ```
 
-### 场景 3：字段模型跨后端同步
+### 7.5.3 场景 3：字段模型跨后端同步
 
 ```cpp
 // 本地用 shm:// 高频更新，同时用 dds:// 向远程同步当前状态
@@ -1124,7 +1124,7 @@ local_getter.listen([&remote_setter](const VehicleState& state) {
 });
 ```
 
-### 场景 4：开发测试阶段逐步切换
+### 7.5.4 场景 4：开发测试阶段逐步切换
 
 ```cpp
 // 环境变量控制后端，零代码改动

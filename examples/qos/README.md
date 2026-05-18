@@ -8,6 +8,6 @@
 | `qos_history_depth` | History Depth 对消息缓存的影响 |
 | `qos_profiles` | 预置 QoS Profile 的使用 |
 
-## 相关文档
+## 1. 相关文档
 
 详细原理参见 [doc/08-qos.md](../../doc/08-qos.md)。

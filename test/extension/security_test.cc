@@ -31,9 +31,11 @@
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -197,6 +199,23 @@ TEST_SUITE("extension-Security - AES built-in") {
     REQUIRE(receiver.decrypt(cipher, recovered));
     REQUIRE(recovered.size() == plain.size());
     CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+  }
+
+  TEST_CASE("AES-GCM 1-byte plaintext is the smallest valid payload (29-byte ciphertext)") {
+    Security sender(make_key_cfg("one_byte_seed"));
+    Security receiver(make_key_cfg("one_byte_seed"));
+
+    Bytes plain = Bytes::create(1U);
+    plain.data()[0] = 0xA5U;
+
+    Bytes cipher;
+    REQUIRE(sender.encrypt(plain, cipher));
+    CHECK(cipher.size() == 1U + 12U + 16U);
+
+    Bytes recovered;
+    REQUIRE(receiver.decrypt(cipher, recovered));
+    REQUIRE(recovered.size() == 1U);
+    CHECK(recovered.data()[0] == 0xA5U);
   }
 
   TEST_CASE("AES-GCM ciphertext differs across calls (random nonce)") {
@@ -363,6 +382,45 @@ TEST_SUITE("extension-Security - AES built-in") {
     Bytes recovered;
     CHECK_FALSE(sec.decrypt(plain, recovered));
   }
+
+  TEST_CASE("AES-GCM concurrent encrypt/decrypt is thread-safe") {
+    Security sec(make_key_cfg("concurrent_seed"));
+
+    constexpr int kThreads = 8;
+    constexpr int kIters = 64;
+    std::atomic<int> failures{0};
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
+
+    for (int t = 0; t < kThreads; ++t) {
+      workers.emplace_back([&sec, &failures, t]() {
+        for (int i = 0; i < kIters; ++i) {
+          Bytes plain = Bytes::create(48U);
+          for (size_t k = 0; k < plain.size(); ++k) {
+            plain.data()[k] = static_cast<uint8_t>((t * 31 + i + k) & 0xFFU);
+          }
+
+          Bytes cipher;
+          if (!sec.encrypt(plain, cipher)) {
+            ++failures;
+            continue;
+          }
+
+          Bytes recovered;
+          if (!sec.decrypt(cipher, recovered) || recovered.size() != plain.size() ||
+              std::memcmp(recovered.data(), plain.data(), plain.size()) != 0) {
+            ++failures;
+          }
+        }
+      });
+    }
+
+    for (auto& w : workers) {
+      w.join();
+    }
+
+    CHECK(failures.load() == 0);
+  }
 }
 
 TEST_SUITE("extension-Security - RSA hybrid") {
@@ -517,6 +575,64 @@ TEST_SUITE("extension-Security - RSA hybrid") {
     std::memset(plain.data(), 0x03, 16);
     Bytes cipher;
     CHECK_FALSE(sec.encrypt(plain, cipher));
+  }
+
+  TEST_CASE("PEM edge cases: header-only / truncated middle / missing footer / CRLF / wrong slot all reject cleanly") {
+    const auto kp = generate_rsa_keypair(2048);
+
+    SUBCASE("BEGIN line only (no body, no END)") {
+      Security::Config cfg;
+      cfg.public_key_pem = "-----BEGIN PUBLIC KEY-----\n";
+      Security sec(cfg);
+      Bytes plain = Bytes::create(16);
+      Bytes cipher;
+      CHECK_FALSE(sec.encrypt(plain, cipher));
+    }
+
+    SUBCASE("body truncated in the middle (no END marker)") {
+      std::string truncated = kp.public_pem;
+      const auto end_pos = truncated.find("-----END");
+      REQUIRE(end_pos != std::string::npos);
+      truncated.resize(end_pos / 2U);
+      Security::Config cfg;
+      cfg.public_key_pem = truncated;
+      Security sec(cfg);
+      Bytes plain = Bytes::create(16);
+      Bytes cipher;
+      CHECK_FALSE(sec.encrypt(plain, cipher));
+    }
+
+    SUBCASE("END marker dropped") {
+      std::string no_end = kp.public_pem;
+      const auto end_pos = no_end.find("-----END");
+      REQUIRE(end_pos != std::string::npos);
+      no_end.resize(end_pos);
+      Security::Config cfg;
+      cfg.public_key_pem = no_end;
+      Security sec(cfg);
+      Bytes plain = Bytes::create(16);
+      Bytes cipher;
+      CHECK_FALSE(sec.encrypt(plain, cipher));
+    }
+
+    SUBCASE("private PEM passed in public_key_pem slot is rejected") {
+      Security::Config cfg;
+      cfg.public_key_pem = kp.private_pem;
+      Security sec(cfg);
+      Bytes plain = Bytes::create(16);
+      Bytes cipher;
+      CHECK_FALSE(sec.encrypt(plain, cipher));
+    }
+
+    SUBCASE("public PEM passed in private_key_pem slot is rejected (no decrypt path)") {
+      Security::Config cfg;
+      cfg.private_key_pem = kp.public_pem;
+      Security sec(cfg);
+      Bytes payload = Bytes::create(64);
+      std::memset(payload.data(), 0x10, 64);
+      Bytes recovered;
+      CHECK_FALSE(sec.decrypt(payload, recovered));
+    }
   }
 
   TEST_CASE("RSA-PSS signed message verifies under matching verify key") {
@@ -702,6 +818,65 @@ TEST_SUITE("extension-Security - Node API surface") {
 
     Bytes recovered;
     CHECK_FALSE(first.decrypt(cipher_second, recovered));
+  }
+}
+
+TEST_SUITE("extension-Security - capability queries") {
+  TEST_CASE("default-constructed Security has no usable slot") {
+    Security sec;
+    CHECK_FALSE(sec.is_configured());
+    CHECK_FALSE(sec.can_encrypt());
+    CHECK_FALSE(sec.can_decrypt());
+  }
+
+  TEST_CASE("symmetric key populates all three capability slots") {
+    Security sec(make_key_cfg("cap_key_seed"));
+    CHECK(sec.is_configured());
+    CHECK(sec.can_encrypt());
+    CHECK(sec.can_decrypt());
+  }
+
+  TEST_CASE("public_key_pem only enables encrypt, not decrypt") {
+    const auto kp = generate_rsa_keypair(2048);
+    Security::Config cfg;
+    cfg.public_key_pem = kp.public_pem;
+    Security sec(cfg);
+    CHECK(sec.is_configured());
+    CHECK(sec.can_encrypt());
+    CHECK_FALSE(sec.can_decrypt());
+  }
+
+  TEST_CASE("private_key_pem only enables decrypt, not encrypt") {
+    const auto kp = generate_rsa_keypair(2048);
+    Security::Config cfg;
+    cfg.private_key_pem = kp.private_pem;
+    Security sec(cfg);
+    CHECK(sec.is_configured());
+    CHECK_FALSE(sec.can_encrypt());
+    CHECK(sec.can_decrypt());
+  }
+
+  TEST_CASE("matched callback pair enables both directions") {
+    auto identity = [](const Bytes& in, Bytes& out) -> bool {
+      out = in;
+      return true;
+    };
+    Security sec(make_callbacks_cfg(identity, identity));
+    CHECK(sec.is_configured());
+    CHECK(sec.can_encrypt());
+    CHECK(sec.can_decrypt());
+  }
+
+  TEST_CASE("lone callback is ignored: capabilities stay false") {
+    Security::Config cfg;
+    cfg.encrypt_callback = [](const Bytes& in, Bytes& out) -> bool {
+      out = in;
+      return true;
+    };
+    Security sec(cfg);
+    CHECK_FALSE(sec.is_configured());
+    CHECK_FALSE(sec.can_encrypt());
+    CHECK_FALSE(sec.can_decrypt());
   }
 }
 

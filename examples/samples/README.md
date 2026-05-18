@@ -4,7 +4,7 @@
 
 ---
 
-## 示例总览
+## 1. 示例总览
 
 | 示例 | 传输协议 | 序列化格式 | 通信模型 | 进程模式 | 外部依赖 |
 |------|----------|------------|----------|----------|----------|
@@ -20,7 +20,7 @@
 
 ---
 
-## 各示例关系与定位
+## 2. 各示例关系与定位
 
 ![Samples Relationship Tree](images/samples-relationship.png)
 
@@ -30,9 +30,9 @@
 
 ---
 
-## 各协议 URL 格式速查
+## 3. 各协议 URL 格式速查
 
-### DDS / DDSC（话题路径模式）
+### 3.1 DDS / DDSC（话题路径模式）
 
 ```
 dds://话题路径         例：dds://helloworld/method
@@ -41,7 +41,7 @@ ddsc://话题路径        例：ddsc://phone/event
 
 话题路径即为 DDS Domain 中的 Topic 名称。同一路径的 Publisher/Subscriber 或 Server/Client 自动匹配。
 
-### SHM（分组/话题模式）
+### 3.2 SHM（分组/话题模式）
 
 ```
 shm://分组名/话题名    例：shm://example_raw/method
@@ -49,7 +49,7 @@ shm://分组名/话题名    例：shm://example_raw/method
 
 分组名用于逻辑隔离，话题名标识具体通信通道。需要 Iceoryx RouDi 守护进程运行。
 
-### SOME/IP（服务 ID 模式）
+### 3.3 SOME/IP（服务 ID 模式）
 
 ```
 someip://ServiceID/InstanceID?method=MethodID                         -- Method 模型
@@ -59,7 +59,7 @@ someip://ServiceID/InstanceID?groups=EventGroupID&event=EventID&field=1  -- Fiel
 
 所有 ID 为十六进制格式（0x 前缀）。`groups` 支持逗号分隔的多个事件组：`groups=0x1,0x2`。
 
-### FDBus（服务名 + 事件参数模式）
+### 3.4 FDBus（服务名 + 事件参数模式）
 
 ```
 fdbus://服务名?event=话题名    例：fdbus://phone?event=req
@@ -69,7 +69,7 @@ fdbus://服务名?event=话题名    例：fdbus://phone?event=req
 
 ---
 
-## 构建全部传输示例
+## 4. 构建全部传输示例
 
 ```bash
 # 从 VLink 项目根目录
@@ -99,7 +99,7 @@ ls build/output/bin/example_*
 
 ---
 
-## 推荐学习顺序
+## 5. 推荐学习顺序
 
 1. **helloworld** -- 最全面的入门示例，理解 VLink 的 Method/Event 模型、环境变量协议切换、Timer 定时发布
 2. **ping_pong** -- 理解 Bytes 原始字节通信、延迟测量方法、可配置负载大小
@@ -113,7 +113,7 @@ ls build/output/bin/example_*
 
 ---
 
-## 运行前置条件速查
+## 6. 运行前置条件速查
 
 | 示例 | 启动命令 | 前置操作 |
 |------|----------|----------|
@@ -129,6 +129,6 @@ ls build/output/bin/example_*
 | fdbus_proto | `./sample_fdbus_proto` | `fdb_name_server &` |
 | someip_flat | `./sample_someip_flat` | 启动 vsomeip routing manager |
 
-## 相关文档
+## 7. 相关文档
 
 详细原理参见 [doc/22-examples.md](../../doc/22-examples.md)。

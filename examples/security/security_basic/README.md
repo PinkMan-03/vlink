@@ -1,6 +1,6 @@
 # VLink Security Basic 示例
 
-## 概述
+## 1. 概述
 
 本示例演示 `SecurityPublisher` / `SecuritySubscriber` 的基本用法，覆盖：
 
@@ -12,7 +12,7 @@
 
 > ⚠️ **传输要求**：`intra://` 与 `dds://` CDR 类型**不**支持安全加密；可用 `shm://`、`shm2://`、`zenoh://`、`mqtt://`、`fdbus://` 等跨进程后端。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
@@ -20,7 +20,7 @@
 | `security_common.h` | 公共辅助函数（打印默认算法、支持的 transport） |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::all`（覆盖全后端，含 dds） |
 
-## 构建与运行
+## 3. 构建与运行
 
 ```bash
 cmake -B build -S . -DENABLE_EXAMPLES=ON -DENABLE_WHOLE_EXAMPLES=ON -DENABLE_SECURITY=ON
@@ -28,7 +28,7 @@ cmake --build build --target example_security_basic
 ./build/output/bin/example_security_basic
 ```
 
-## 核心 API
+## 4. 核心 API
 
 ```cpp
 template <typename T>
@@ -66,19 +66,19 @@ vlink::SecuritySubscriber<std::string> sub("shm://secure/topic", cfg);
 | 缺省 cfg | 可写 `SecurityXxx(url)` 或 `SecurityXxx(url, {})`，等价于不安装 Security，encrypt/decrypt 始终失败 |
 | 双端配置 | 必须等价（相同 `key`，或相同 `passphrase + pbkdf2_salt`） |
 
-## 工作原理
+## 5. 工作原理
 
 1. **加密**：`SecurityPublisher::publish()` 在发送前对 payload 调用 OpenSSL `EVP_aes_128_gcm()` 加密，wire 上为 `[12B nonce][N B ciphertext][16B tag]`。
 2. **解密**：`SecuritySubscriber` 在分发回调前对收到的 payload 解密；**GCM tag 校验失败时回调不会被触发**（消息被静默丢弃，日志记录）。
 3. **密钥派生**：`Config::key` 经 SHA-256 截断为 16 字节 AES-128 key，因此可使用任意长度的种子字符串。
 
-## 注意事项
+## 6. 注意事项
 
 - 双端 `Config` 必须等价；任一端未在 ctor 传 cfg 或使用不同 `key` 时，GCM tag 校验失败、消息被丢弃。
 - 若要替换 AEAD 为其它算法（SM4 / ChaCha20 / HSM 等），见 [`../security_custom/`](../security_custom/) 中 `encrypt_callback` / `decrypt_callback` 用法。
 - 若要使用 RSA 混合握手（无需预共享对称密钥），见 [doc/09-security.md §9.6](../../../doc/09-security.md#96-非对称模式rsa-混合握手)。
 
-## 相关文档
+## 7. 相关文档
 
 - [doc/09-security.md](../../../doc/09-security.md) — 完整安全加密章节
 - [`../security_custom/`](../security_custom/) — 自定义 encrypt/decrypt 回调

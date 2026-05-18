@@ -6,7 +6,7 @@
 
 ---
 
-## 扩展与插件一览
+## 19.1 扩展与插件一览
 
 `include/vlink/extension/` 目录下的 header，按用途分组：
 
@@ -30,7 +30,9 @@
 > `LoggerPluginInterface` 位于 `include/vlink/base/logger_plugin_interface.h`，
 > `Plugin` 加载器位于 `include/vlink/base/plugin.h`。
 
-### 插件接口全景
+![Plugin Architecture](images/plugin-architecture.png)
+
+### 19.1.1 插件接口全景
 
 | 接口                       | 头文件                                       | 用途                                            |
 | -------------------------- | -------------------------------------------- | ----------------------------------------------- |
@@ -41,7 +43,7 @@
 | `BagReaderPluginInterface` | `extension/bag_reader_plugin_interface.h`    | 回放时的 URL/类型转换钩子                       |
 | `MessageConvertPlugin`     | `extension/message_convert_plugin.h`         | Foxglove / Rerun 消息转换                       |
 
-### 核心宏
+### 19.1.2 核心宏
 
 | 宏                                         | 用途                                          |
 | ------------------------------------------ | --------------------------------------------- |
@@ -54,13 +56,13 @@
 
 ---
 
-## Plugin — 动态插件加载器
+## 19.2 Plugin — 动态插件加载器
 
 头文件：`<vlink/base/plugin.h>`
 
 `Plugin` 是 VLink 插件系统的核心，封装了 `dlopen` / `LoadLibrary`，提供类型安全的动态库加载、版本校验和生命周期管理。
 
-### 主要接口
+### 19.2.1 主要接口
 
 ```cpp
 class Plugin final {
@@ -92,14 +94,14 @@ public:
 };
 ```
 
-### 工作原理
+### 19.2.2 工作原理
 
 1. `load<T>()` 按 `search_paths` 依次搜索 `lib_name`（自动添加平台前缀/后缀，如 `lib` 前缀和 `.so` 后缀）。
 2. 打开共享库后调用 `vlink_plugin_create` 入口点，传入 **插件 ID**（由 `T::get_plugin_id()` 获取）和版本号。
 3. 入口点内部调用 `Plugin::process_plugin_internal()` 进行 ID 和版本校验，失败返回 `nullptr`。
 4. 返回的指针被包装为 `shared_ptr<T>`，其自定义删除器在引用计数归零时调用 `vlink_plugin_destroy` 并关闭共享库。
 
-### 使用示例
+### 19.2.3 使用示例
 
 ```cpp
 vlink::Plugin plugin;
@@ -117,13 +119,13 @@ plugin.unload<vlink::LoggerPluginInterface>("my_logger");
 
 ---
 
-## RunablePluginInterface — 可运行插件
+## 19.3 RunablePluginInterface — 可运行插件
 
 头文件：`<vlink/extension/runnable_plugin_interface.h>`
 
 `RunablePluginInterface`（注意：类名中 `Runable` 为源码中的实际拼写）继承自 `MessageLoop`，允许插件携带自己的事件循环线程，实现完全自包含的功能组件。
 
-### 接口定义
+### 19.3.1 接口定义
 
 ```cpp
 class RunablePluginInterface : public MessageLoop {
@@ -136,7 +138,7 @@ public:
 };
 ```
 
-### 生命周期
+### 19.3.2 生命周期
 
 `RunablePluginInterface` 的公开契约是：宿主先启动插件自己的 `MessageLoop`，再由宿主线程显式调用
 `on_init()`；`on_deinit()` 同样由宿主在线程外显式触发。它们都不是插件 loop 线程里的隐式回调。
@@ -153,7 +155,7 @@ dlopen
 dlclose
 ```
 
-### 实现示例
+### 19.3.3 实现示例
 
 ```cpp
 // my_sensor_plugin.h
@@ -201,7 +203,7 @@ if (instance) {
 
 ---
 
-## SchemaPluginInterface / SchemaPluginBase — Schema 插件
+## 19.4 SchemaPluginInterface / SchemaPluginBase — Schema 插件
 
 头文件：`<vlink/extension/schema_plugin_interface.h>`，`<vlink/extension/schema_plugin_base.h>`
 
@@ -210,7 +212,7 @@ if (instance) {
 - protobuf 的 `FileDescriptorSet` / `Descriptor` / 动态消息原型
 - flatbuffers 的 BFBS / `reflection::Schema` / 运行时 `Parser`
 
-### 接口方法
+### 19.4.1 接口方法
 
 | 方法                              | 说明                                                   |
 | --------------------------------- | ------------------------------------------------------ |
@@ -224,7 +226,7 @@ if (instance) {
 
 所有方法均通过内部 `mutex` 保证线程安全，查询结果在内部缓存以避免重复查找。
 
-### SchemaPluginBase — 内置实现
+### 19.4.2 SchemaPluginBase — 内置实现
 
 `SchemaPluginBase` 是 `SchemaPluginInterface` 的标准实现：
 
@@ -263,7 +265,7 @@ public:
 VLINK_PLUGIN_DECLARE(MySchemaPlugin, 1, 0)
 ```
 
-### 注册已编译 schema
+### 19.4.3 注册已编译 schema
 
 典型做法是：protobuf 直接从当前库里已链接的 generated descriptors 查询；flatbuffers 则在类外静态注册已编译进当前库的 BFBS：
 
@@ -286,7 +288,7 @@ VLINK_REGISTER_FLATBUFFERS("my.pkg.MyMessage", MyMessageBinarySchema);
 - `VLINK_REGISTER_FLATBUFFERS_NOW(...)` 会立即返回注册结果，适合你在函数体、初始化代码或自定义注册流程里手动调用
 - 如果只需要 BFBS 注册能力，也可以单独包含 `<vlink/extension/flatbuffers_registry.h>`
 
-### search_schema 的 SchemaData 结构
+### 19.4.4 search_schema 的 SchemaData 结构
 
 ```cpp
 struct SchemaData {
@@ -299,13 +301,13 @@ struct SchemaData {
 
 ---
 
-## SchemaPluginManager — 插件管理器
+## 19.5 SchemaPluginManager — 插件管理器
 
 头文件：`<vlink/extension/schema_plugin_manager.h>`
 
 `SchemaPluginManager` 是进程级单例，负责加载和持有唯一的 `SchemaPluginInterface` 实例。
 
-### 插件路径解析顺序
+### 19.5.1 插件路径解析顺序
 
 `schema_plugin_path` 可以是插件基础名，也可以是共享库路径。`Plugin::load()` 会在需要时自动补平台前缀/后缀并搜索默认目录。
 
@@ -313,7 +315,7 @@ struct SchemaData {
 2. 环境变量 `VLINK_SCHEMA_PLUGIN`
 3. 以上均未设置时，`is_valid()` 返回 `false`，不加载任何插件
 
-### 接口
+### 19.5.2 接口
 
 ```cpp
 class SchemaPluginManager final {
@@ -329,7 +331,7 @@ public:
 };
 ```
 
-### 使用示例
+### 19.5.3 使用示例
 
 ```cpp
 // 方式 1：通过环境变量 VLINK_SCHEMA_PLUGIN 加载
@@ -361,20 +363,20 @@ if (mgr.is_valid()) {
 
 ---
 
-## ConfPluginInterface — 传输配置插件
+## 19.6 ConfPluginInterface — 传输配置插件
 
 头文件：`<vlink/impl/conf_plugin_interface.h>`
 
 `ConfPluginInterface` 是所有外部传输插件必须实现的接口。每个传输插件导出一个实现该接口的具体类，VLink URL 系统在解析未知 Transport 时动态加载匹配插件。
 
-### 插件发现机制
+### 19.6.1 插件发现机制
 
 - 环境变量 `VLINK_URL_PLUGINS` 设置插件基础名列表（分号分隔，不含路径、`lib` 前缀和 `.so` 后缀；`vlink-` 前缀可省略）
 - 或调用 `Url::init_plugins()` 显式注册
 
 当 `Url` 构造时遇到未知 transport 时，`Url::load_for_plugin()` 会遍历所有已加载插件，调用 `get_transport_type()` 进行匹配，匹配成功后再调用 `create()` 获取 `Conf` 实例。
 
-### 接口定义
+### 19.6.2 接口定义
 
 ```cpp
 struct ConfPluginInterface {
@@ -388,7 +390,7 @@ struct ConfPluginInterface {
 };
 ```
 
-### 实现自定义传输插件
+### 19.6.3 实现自定义传输插件
 
 ```cpp
 // my_transport_conf.h
@@ -430,13 +432,13 @@ VLINK_PLUGIN_DECLARE(MyTransportPlugin, 1, 0)
 
 ---
 
-## LoggerPluginInterface — 日志后端插件
+## 19.7 LoggerPluginInterface — 日志后端插件
 
 头文件：`<vlink/base/logger_plugin_interface.h>`
 
 通过 `LoggerPluginInterface` 可以将 VLink 日志系统对接到任意第三方日志框架（spdlog、log4cxx、自定义文件滚动日志等）。
 
-### 接口定义
+### 19.7.1 接口定义
 
 ```cpp
 class LoggerPluginInterface {
@@ -450,7 +452,7 @@ public:
 };
 ```
 
-### `level` 对应关系
+### 19.7.2 `level` 对应关系
 
 | 值  | Logger::Level    | 含义     |
 | --- | ---------------- | -------- |
@@ -461,7 +463,7 @@ public:
 | 4   | kError           | 错误     |
 | 5   | kFatal           | 致命错误 |
 
-### 对接 spdlog 示例
+### 19.7.3 对接 spdlog 示例
 
 ```cpp
 // spdlog_plugin.cpp
@@ -514,7 +516,7 @@ if (backend) {
 
 ---
 
-## MessageConvertPlugin — Foxglove / Rerun 消息转换
+## 19.8 MessageConvertPlugin — Foxglove / Rerun 消息转换
 
 头文件：`<vlink/extension/message_convert_plugin.h>`
 
@@ -522,7 +524,7 @@ if (backend) {
 字节流转换为目标可视化后端能理解的格式。接口不依赖任何第三方库（protobuf、flatbuffers、Rerun SDK、
 JSON 库都不需要），便于外部工程独立实现。
 
-### 目标后端
+### 19.8.1 目标后端
 
 ```cpp
 enum class ConvertTarget : uint8_t {
@@ -536,7 +538,7 @@ enum class ConvertTarget : uint8_t {
 | `kFoxglove` | FlatBuffer / Protobuf 二进制          | Foxglove schema 名     |
 | `kRerun`    | UTF-8 JSON（描述 Rerun archetype 组件）| Rerun archetype 名     |
 
-### 核心虚函数
+### 19.8.2 核心虚函数
 
 | 方法                                                                 | 用途                                           |
 | -------------------------------------------------------------------- | ---------------------------------------------- |
@@ -547,7 +549,7 @@ enum class ConvertTarget : uint8_t {
 | `extract_timestamp(vlink_ser, raw, target)`（默认实现返回 -1，表示不可用） | 可选：从消息提取时间戳（纳秒）            |
 | `can_convert_frontend` / `get_publish_info` / `convert_frontend`      | 可选：支持从浏览器 publish 到 VLink 反向通道    |
 
-### Rerun JSON payload 约定示例
+### 19.8.3 Rerun JSON payload 约定示例
 
 ```json
 // Points3D
@@ -560,25 +562,25 @@ enum class ConvertTarget : uint8_t {
 { "text": "hello", "level": "INFO" }
 ```
 
-### 与 JSON 映射文件的关系
+### 19.8.4 与 JSON 映射文件的关系
 
 当同时存在 JSON 映射配置与此插件时，先尝试插件；若 `can_convert` 返回 `false`，则回退到
 JSON 映射管道。因此插件只需覆盖需要自定义逻辑的类型。
 
-### 线程安全
+### 19.8.5 线程安全
 
 `convert()` 可能被 ProxyAPI 的多个数据回调线程并发调用，实现必须自行保证线程安全。
 
 ---
 
-## BagReaderPluginInterface — 回放转换插件
+## 19.9 BagReaderPluginInterface — 回放转换插件
 
 头文件：`<vlink/extension/bag_reader_plugin_interface.h>`
 
 通过 `BagReader::bind_plugin_interface(plugin)` 注入，用于在回放时做 URL/ser_type 转换
 或消息过滤。
 
-### 核心方法
+### 19.9.1 核心方法
 
 ```cpp
 class BagReaderPluginInterface {
@@ -603,9 +605,9 @@ public:
 
 ---
 
-## FlatbuffersRegistry / ProtobufRegistry — schema 注册
+## 19.10 FlatbuffersRegistry / ProtobufRegistry — schema 注册
 
-### `protobuf_registry.h`
+### 19.10.1 `protobuf_registry.h`
 
 纯包装头，只做两件事：
 
@@ -616,7 +618,7 @@ Protobuf 不需要独立的运行时注册 API：generated messages 通过
 `google::protobuf::DescriptorPool::generated_pool()` 已经可查；`SchemaPluginBase` 直接从
 该 pool 按类型名查找。
 
-### `flatbuffers_registry.h`
+### 19.10.2 `flatbuffers_registry.h`
 
 FlatBuffers 没有等价的全局 pool，需要显式注册 BFBS 到进程级单例 `FlatbuffersRegistry`：
 
@@ -648,7 +650,7 @@ public:
 
 ---
 
-## DiscoveryReporter — 节点发现上报
+## 19.11 DiscoveryReporter — 节点发现上报
 
 头文件：`<vlink/extension/discovery_reporter.h>`
 
@@ -672,13 +674,13 @@ public:
 
 ---
 
-## DynamicData — 动态类型数据
+## 19.12 DynamicData — 动态类型数据
 
 头文件：`<vlink/extension/dynamic_data.h>`
 
 `DynamicData` 是类型擦除的数据容器，将任意 VLink 兼容消息类型连同类型名标签一起序列化到内部 `Bytes` 缓冲区，从而可以在不知道编译时类型的通道中传输，之后再反序列化回具体类型。
 
-### 内部布局
+### 19.12.1 内部布局
 
 ```
 [ 类型名字段 (20 字节固定) | 序列化载荷 ]
@@ -687,13 +689,13 @@ public:
 
 类型名字段最大 19 个字符（含 NUL 终止符）。
 
-### 限制
+### 19.12.2 限制
 
 - 不能序列化/反序列化另一个 `DynamicData` 对象（编译期 `static_assert`）
 - 不能序列化 CDR 类型（编译期 `static_assert`）
 - 类型名字符串长度必须小于 20 个字符（含 NUL）
 
-### 主要接口
+### 19.12.3 主要接口
 
 ```cpp
 class DynamicData final {
@@ -724,7 +726,7 @@ public:
 };
 ```
 
-### 使用示例
+### 19.12.4 使用示例
 
 ```cpp
 #include <vlink/extension/dynamic_data.h>
@@ -759,13 +761,13 @@ dd2 << wire;  // 从 wire 格式恢复
 
 ---
 
-## TerminalStream — 终端流输出
+## 19.13 TerminalStream — 终端流输出
 
 头文件：`<vlink/extension/terminal_stream.h>`
 
 `TerminalStream` 是进程级单例的带缓冲 stdout 输出流，专为 CLI 工具设计，绕过 `std::cout` 和标准 stdio 的开销。
 
-### 特性
+### 19.13.1 特性
 
 - **缓冲输出**：默认 1 MiB 内部缓冲区，批量 `write()` 减少系统调用
 - **线程安全**：所有操作受 `std::mutex` 保护
@@ -773,13 +775,13 @@ dd2 << wire;  // 从 wire 格式恢复
 - **TTY 检测**：`is_tty()` 判断 stdout 是否连接到终端，可按需启用 ANSI 颜色
 - **跨平台**：Windows 10+ 上启用虚拟终端处理（ANSI 转义码支持）
 
-### 便捷宏
+### 19.13.2 便捷宏
 
 ```cpp
 #define VLINK_TERM_OUT vlink::TerminalStream::get()
 ```
 
-### 使用示例
+### 19.13.3 使用示例
 
 ```cpp
 #include <vlink/extension/terminal_stream.h>
@@ -806,13 +808,13 @@ VLINK_TERM_OUT << "hello" << std::endl;
 
 ---
 
-## UrlRemap — URL 重映射
+## 19.14 UrlRemap — URL 重映射
 
 头文件：`<vlink/extension/url_remap.h>`
 
 `UrlRemap` 从 JSON 配置文件加载 URL 重映射规则，在运行时将 VLink topic 地址动态替换，无需重新编译即可切换传输后端或修改 topic 名称。
 
-### JSON 配置格式
+### 19.14.1 JSON 配置格式
 
 ```json
 {
@@ -824,11 +826,11 @@ VLINK_TERM_OUT << "hello" << std::endl;
 
 规则为平坦 JSON 对象，key 是原 URL（或其子串），value 是目标 URL。
 
-### 匹配算法
+### 19.14.2 匹配算法
 
 `convert()` 依次检查 remap 列表中每条规则，选取第一条**key 是输入 URL 子串**的规则，返回对应 value。查询结果缓存在内部 `unordered_map` 中，重复查询为 O(1)。
 
-### 主要接口
+### 19.14.3 主要接口
 
 ```cpp
 class UrlRemap {
@@ -856,7 +858,7 @@ public:
 };
 ```
 
-### 使用示例
+### 19.14.4 使用示例
 
 ```cpp
 #include <vlink/extension/url_remap.h>
@@ -877,7 +879,7 @@ std::string url = remap.convert("intra://sensor/lidar");
 remap.reload("/etc/vlink/remap_v2.json");
 ```
 
-### 注意事项
+### 19.14.5 注意事项
 
 - `UrlRemap` **不是线程安全的**，`load/unload/reload/convert` 应在同一线程调用，或由调用方加锁。
 - `convert()` 在 `is_valid()` 为 `false` 时直接返回原 URL，不会崩溃。
@@ -885,9 +887,9 @@ remap.reload("/etc/vlink/remap_v2.json");
 
 ---
 
-## 自定义插件实现指南
+## 19.15 自定义插件实现指南
 
-### 步骤总览
+### 19.15.1 步骤总览
 
 ```
 1. 定义接口类（使用 VLINK_PLUGIN_REGISTER）
@@ -897,7 +899,7 @@ remap.reload("/etc/vlink/remap_v2.json");
 5. 宿主加载（Plugin::load<接口>）
 ```
 
-### 完整示例：自定义监控插件
+### 19.15.2 完整示例：自定义监控插件
 
 **接口头文件** `monitor_plugin.h`：
 
@@ -974,9 +976,9 @@ monitor->shutdown();
 
 ---
 
-## 插件加载机制详解
+## 19.16 插件加载机制详解
 
-### 共享库搜索路径（`default_search_path()`）
+### 19.16.1 共享库搜索路径（`default_search_path()`）
 
 `Plugin::default_search_path()` 按以下顺序返回搜索路径队列（源码
 `src/base/plugin.cc:238`）：
@@ -989,7 +991,7 @@ monitor->shutdown();
 
 可通过 `Plugin::load()` 的 `dir_name` 参数或 `search_paths` 参数覆盖默认值。
 
-### 平台文件名规则
+### 19.16.2 平台文件名规则
 
 | 平台    | 前缀  | 后缀    | 示例                       |
 | ------- | ----- | ------- | -------------------------- |
@@ -997,12 +999,12 @@ monitor->shutdown();
 | macOS   | `lib` | `.dylib`| `libmy_plugin.dylib`       |
 | Windows | 无    | `.dll`  | `my_plugin.dll`            |
 
-### 插件 ID 验证
+### 19.16.3 插件 ID 验证
 
 每个接口类型通过 `VLINK_PLUGIN_REGISTER(InterfaceType)` 注入 `get_plugin_id()` 静态方法，该方法使用 `NameDetector::get<T>()` 从编译器的 `__PRETTY_FUNCTION__` 提取去修饰的类型名。
 
 加载时，`Plugin::process_plugin_internal()` 将加载方期望的 ID 与共享库内导出的 ID 进行字符串比对，ID 不匹配或版本不兼容时返回 `nullptr`，防止 ABI 错配导致的崩溃。
 
-### 版本兼容性规则
+### 19.16.4 版本兼容性规则
 
 `VLINK_PLUGIN_DECLARE(ImplType, Major, Minor)` 中的版本号必须与 `Plugin::load<T>(lib_name, major, minor)` 调用方指定的版本一致，否则加载失败并记录错误日志。版本检验在 `process_plugin_internal()` 内完成，此函数在共享库内部执行，不跨越库边界传递异常。

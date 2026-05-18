@@ -8,28 +8,28 @@
 
 ## 目录
 
-1. [示例总览](#示例总览)
-2. [目录结构与分类](#目录结构与分类)
-3. [运行示例的前提条件](#运行示例的前提条件)
-4. [quickstart — 快速入门](#quickstart)
-5. [base — 基础库示例](#base)
-6. [communication — 通信模型示例](#communication)
-7. [serialization — 序列化类型示例](#serialization)
-8. [url_guide — URL 与传输后端示例](#url_guide)
-9. [qos — QoS 配置示例](#qos)
-10. [security — 安全加密示例](#security)
-11. [zerocopy — 零拷贝示例](#zerocopy)
-12. [recording — 数据录制示例](#recording)
-13. [plugin — 插件系统示例](#plugin)
-14. [proxy — 代理层示例](#proxy)
-15. [c_api — C API 示例](#c_api)
-16. [node_features — 节点高级特性示例](#node_features)
-17. [samples — 经典综合示例](#samples)
-18. [常见编程模式](#常见编程模式)
+1. [22.1 示例总览](#221-示例总览)
+2. [22.2 目录结构与分类](#222-目录结构与分类)
+3. [22.3 运行示例的前提条件](#223-运行示例的前提条件)
+4. [22.4 quickstart -- 快速入门](#224-quickstart----快速入门)
+5. [22.5 base -- 基础库示例](#225-base----基础库示例)
+6. [22.6 communication -- 通信模型示例](#226-communication----通信模型示例)
+7. [22.7 serialization -- 序列化类型示例](#227-serialization----序列化类型示例)
+8. [22.8 url_guide -- URL 与传输后端示例](#228-url_guide----url-与传输后端示例)
+9. [22.9 qos -- QoS 配置示例](#229-qos----qos-配置示例)
+10. [22.10 security -- 安全加密示例](#2210-security----安全加密示例)
+11. [22.11 zerocopy -- 零拷贝示例](#2211-zerocopy----零拷贝示例)
+12. [22.12 recording -- 数据录制示例](#2212-recording----数据录制示例)
+13. [22.13 plugin -- 插件系统示例](#2213-plugin----插件系统示例)
+14. [22.14 proxy -- 代理层示例](#2214-proxy----代理层示例)
+15. [22.15 c_api -- C API 示例](#2215-c_api----c-api-示例)
+16. [22.16 node_features -- 节点高级特性示例](#2216-node_features----节点高级特性示例)
+17. [22.17 samples -- 经典综合示例](#2217-samples----经典综合示例)
+18. [22.18 常见编程模式](#2218-常见编程模式)
 
 ---
 
-## 示例总览
+## 22.1 示例总览
 
 VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高级功能的所有使用场景。
 
@@ -41,16 +41,16 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 | serialization     | `examples/serialization/`    | 7        | 各序列化类型的独立演示                      |
 | url_guide         | `examples/url_guide/`        | 9        | URL 格式与各传输后端配置指南                |
 | qos               | `examples/qos/`              | 3        | QoS 策略配置和预置 Profile                  |
-| security          | `examples/security/`         | 3        | AES 加密、自定义加密、SSL/TLS              |
+| security          | `examples/security/`         | 4        | AES-128-GCM、自定义加密、RSA hybrid、SSL/TLS |
 | zerocopy          | `examples/zerocopy/`         | 4        | 零拷贝传输（SHM loan）                     |
 | recording         | `examples/recording/`        | 5        | Bag 录制、回放、压缩、MCAP 格式            |
 | plugin            | `examples/plugin/`           | 4        | 动态插件加载、runnable 插件（API 名为 `RunablePluginInterface`）、Proto 插件 |
 | proxy             | `examples/proxy/`            | 3        | 代理层 API 和服务器基础用法                 |
-| c_api             | `examples/c_api/`            | 3        | 纯 C 语言绑定（PubSub、RPC、Field）        |
+| c_api             | `examples/c_api/`            | 4        | 纯 C 语言绑定（PubSub、RPC、Field、Security） |
 | node_features     | `examples/node_features/`    | 4        | 节点生命周期、MessageLoop 绑定、属性、状态  |
 | samples           | `examples/samples/`          | 9（默认构建 8）| 经典综合示例；`dds_idl/` 当前 CMake 未启用，`images/` 为资源目录 |
 
-### 编译控制
+### 22.1.1 编译控制
 
 顶层 `ENABLE_EXAMPLES` **默认关闭**（仅当 `CMAKE_EXPORT_COMPILE_COMMANDS` 或
 `CMAKE_CXX_CLANG_TIDY` 开启时会自动置为 `ON`）。要构建示例，需要显式
@@ -70,7 +70,7 @@ cmake -B build -S . -DENABLE_EXAMPLES=ON -DENABLE_WHOLE_EXAMPLES=ON
 
 ---
 
-## 目录结构与分类
+## 22.2 目录结构与分类
 
 ```
 examples/
@@ -159,10 +159,11 @@ examples/
 │   ├── proxy_api_basic/
 │   ├── proxy_server_basic/
 │   └── proxy_runnable_plugin/
-├── c_api/                      # C API（3 个项目）
+├── c_api/                      # C API（4 个项目）
 │   ├── c_pubsub/
 │   ├── c_rpc/
-│   └── c_field/
+│   ├── c_field/
+│   └── c_security/
 ├── node_features/              # 节点高级特性（4 个项目）
 │   ├── lifecycle/
 │   ├── message_loop_binding/
@@ -183,9 +184,9 @@ examples/
 
 ---
 
-## 运行示例的前提条件
+## 22.3 运行示例的前提条件
 
-### 编译示例
+### 22.3.1 编译示例
 
 ```bash
 cd /work/vlink
@@ -202,7 +203,7 @@ cmake --build build -j$(nproc)
 ls build/output/bin/
 ```
 
-### 各传输后端的依赖
+### 22.3.2 各传输后端的依赖
 
 | 传输后端     | 额外依赖                        | 运行前置条件                             |
 | ------------ | ------------------------------- | ---------------------------------------- |
@@ -221,7 +222,7 @@ ls build/output/bin/
 
 <a id="quickstart"></a>
 
-## quickstart -- 快速入门
+## 22.4 quickstart -- 快速入门
 
 最小化的入门示例，每个示例只演示一种通信模型的最基本用法。
 
@@ -235,7 +236,7 @@ ls build/output/bin/
 
 <a id="base"></a>
 
-## base -- 基础库示例
+## 22.5 base -- 基础库示例
 
 演示 VLink 基础库（`vlink/base/`）中各组件的独立用法。
 
@@ -269,7 +270,7 @@ ls build/output/bin/
 
 <a id="communication"></a>
 
-## communication -- 通信模型示例
+## 22.6 communication -- 通信模型示例
 
 三种通信模型（Event、Method、Field）的基础和进阶用法。
 
@@ -287,7 +288,7 @@ ls build/output/bin/
 
 <a id="serialization"></a>
 
-## serialization -- 序列化类型示例
+## 22.7 serialization -- 序列化类型示例
 
 每种 VLink 支持的序列化类型的独立演示。
 
@@ -305,7 +306,7 @@ ls build/output/bin/
 
 <a id="url_guide"></a>
 
-## url_guide -- URL 与传输后端示例
+## 22.8 url_guide -- URL 与传输后端示例
 
 URL 格式说明和各传输后端的配置指南。
 
@@ -325,7 +326,7 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="qos"></a>
 
-## qos -- QoS 配置示例
+## 22.9 qos -- QoS 配置示例
 
 | 项目               | 说明                                              |
 | ------------------ | ------------------------------------------------- |
@@ -337,7 +338,7 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="security"></a>
 
-## security -- 安全加密示例
+## 22.10 security -- 安全加密示例
 
 详细的安全加密文档参见 [09-security.md](09-security.md)；SSL/TLS 相关环境变量参见 [21-environment-vars.md](21-environment-vars.md)。
 
@@ -352,7 +353,7 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="zerocopy"></a>
 
-## zerocopy -- 零拷贝示例
+## 22.11 zerocopy -- 零拷贝示例
 
 | 项目                     | 说明                                              |
 | ------------------------ | ------------------------------------------------- |
@@ -365,7 +366,7 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="recording"></a>
 
-## recording -- 数据录制示例
+## 22.12 recording -- 数据录制示例
 
 详细的录制/回放 API 文档参见 [12-bag-recording.md](12-bag-recording.md)。
 
@@ -381,7 +382,7 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="plugin"></a>
 
-## plugin -- 插件系统示例
+## 22.13 plugin -- 插件系统示例
 
 详细的插件系统文档参见 [19-extensions.md](19-extensions.md)。
 
@@ -396,7 +397,7 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="proxy"></a>
 
-## proxy -- 代理层示例
+## 22.14 proxy -- 代理层示例
 
 详细的代理层文档参见 [16-proxy.md](16-proxy.md)。
 
@@ -410,23 +411,24 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="c_api"></a>
 
-## c_api -- C API 示例
+## 22.15 c_api -- C API 示例
 
-纯 C 语言绑定示例，覆盖三种通信模型。详细的 C API 文档及 Python/Go/Rust 绑定示例参见 [18-c-api.md](18-c-api.md)。
+纯 C 语言绑定示例，覆盖三种通信模型与应用层加密。详细的 C API 文档及 Python/Go/Rust 绑定示例参见 [18-c-api.md](18-c-api.md)。
 
 | 项目         | 说明                                              |
 | ------------ | ------------------------------------------------- |
 | `c_pubsub`   | C API Publisher/Subscriber（Event 模型）          |
 | `c_rpc`      | C API Server/Client（Method 模型）                |
 | `c_field`    | C API Setter/Getter（Field 模型）                 |
+| `c_security` | C API 应用层加密（独立 `vlink_security_handle_t` 加解密 + `vlink_create_secure_*` 节点装入 `vlink_security_config_t`） |
 
 ---
 
 <a id="node_features"></a>
 
-## node_features -- 节点高级特性示例
+## 22.16 node_features -- 节点高级特性示例
 
-节点生命周期详见 [02-node-lifecycle.md](02-node-lifecycle.md)；状态事件详见 [17-discovery.md](17-discovery.md#4-status-与-statusdetail)。
+节点生命周期详见 [02-node-lifecycle.md](02-node-lifecycle.md)；状态事件详见 [17-discovery.md](17-discovery.md#174-status-与-statusdetail)。
 
 | 项目                    | 说明                                              |
 | ----------------------- | ------------------------------------------------- |
@@ -439,7 +441,9 @@ URL 格式说明和各传输后端的配置指南。
 
 <a id="samples"></a>
 
-## samples -- 经典综合示例
+## 22.17 samples -- 经典综合示例
+
+![Helloworld Example Flow](images/helloworld-example-flow.png)
 
 `samples/` 目录保留了项目早期的综合示例，每个示例演示完整的端到端场景。这些示例在默认配置下即被编译（不需要 `ENABLE_WHOLE_EXAMPLES`）。
 
@@ -463,9 +467,9 @@ URL 格式说明和各传输后端的配置指南。
 
 ---
 
-## 常见编程模式
+## 22.18 常见编程模式
 
-### 错误处理
+### 22.18.1 错误处理
 
 ```cpp
 // 1. invoke() 返回 optional，通过 has_value() 检查
@@ -492,7 +496,7 @@ sub.listen([](const MyMsg& msg) {
 });
 ```
 
-### 多传输后端无缝切换
+### 22.18.2 多传输后端无缝切换
 
 ```cpp
 // 通过环境变量切换传输后端，代码无需修改
@@ -503,7 +507,7 @@ Subscriber<MyMsg> sub(url);
 // 代码完全相同，后端由 URL 中的 transport 字段决定
 ```
 
-### 优雅退出
+### 22.18.3 优雅退出
 
 ```cpp
 // 方式 1：MessageLoop + 信号处理

@@ -86,10 +86,6 @@ namespace vlink {
 class MessageLoop;
 class ThreadPool;
 
-namespace detail {
-class TrackedTask;
-}  // namespace detail
-
 /**
  * @enum TaskExecutionState
  * @brief Observable lifecycle stage of a task submitted through a tracked posting API.

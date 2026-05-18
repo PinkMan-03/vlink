@@ -1,12 +1,14 @@
 # Method Async -- VLink 方法模型异步调用示例
 
-## 通信模型概览
+## 1. 通信模型概览
 
 ![通信模型概览](../event_basic/images/communication-models-overview.png)
 
-## 概述
+## 2. 概述
 
 本示例演示 VLink **方法模型 (Method Model)** 的异步调用模式：Server 端使用 `listen_for_reply` 延迟回复，Client 端使用 `invoke(req, callback)` 回调模式和 `async_invoke(req)` Future 模式。
+
+![Method Async Future Flow](images/method-async-future-flow.png)
 
 ```
 Client ──async_invoke(req)──> [zenoh://] ──> Server: callback(req_id, req)
@@ -15,16 +17,16 @@ Client ──async_invoke(req)──> [zenoh://] ──> Server: callback(req_id
                                               [zenoh://] ──> Client: future.get()
 ```
 
-## 核心 API
+## 3. 核心 API
 
-### Server 端异步处理
+### 3.1 Server 端异步处理
 
 | 方法 | 说明 |
 |------|------|
 | `listen_for_reply(callback)` | 注册异步回调，接收 `(uint64_t req_id, const Req&)` |
 | `reply(req_id, resp)` | 发送延迟响应，`req_id` 必须匹配收到的请求 ID |
 
-### Client 端异步调用
+### 3.2 Client 端异步调用
 
 | 方法 | 说明 |
 |------|------|
@@ -32,9 +34,9 @@ Client ──async_invoke(req)──> [zenoh://] ──> Server: callback(req_id
 | `async_invoke(req)` | 非阻塞，返回 `std::future<Resp>` |
 | `detect_connected(callback)` | 异步通知 Server 连接状态 |
 
-## 关键代码分析
+## 4. 关键代码分析
 
-### 1. listen_for_reply -- Server 端延迟回复
+### 4.1 listen_for_reply -- Server 端延迟回复
 
 ```cpp
 server.listen_for_reply([&server](uint64_t req_id, const TranslateRequest& req) {
@@ -60,7 +62,7 @@ server.listen_for_reply([&server](uint64_t req_id, const TranslateRequest& req) 
 - `req_id` 必须与回调中收到的 ID 完全匹配
 - 每个 `req_id` 只能 `reply` 一次
 
-### 2. invoke(req, callback) -- 回调异步
+### 4.2 invoke(req, callback) -- 回调异步
 
 ```cpp
 client.invoke(req, [](const TranslateResponse& resp) {
@@ -75,7 +77,7 @@ client.invoke(req, [](const TranslateResponse& resp) {
 - 回调在传输层线程或 `attach()` 的 MessageLoop 线程上执行
 - 适用于事件驱动编程风格
 
-### 3. async_invoke(req) -> future -- Future 异步
+### 4.3 async_invoke(req) -> future -- Future 异步
 
 ```cpp
 auto future = client.async_invoke(req);
@@ -89,7 +91,7 @@ Future 异步模式的特点：
 - 如果发生错误（序列化/传输/反序列化），future 会设置异常 `Exception::RuntimeError`
 - 适用于需要并行发起多个请求的场景
 
-### 4. 并行 Future 模式
+### 4.4 并行 Future 模式
 
 ```cpp
 std::vector<std::future<TranslateResponse>> futures;
@@ -108,7 +110,7 @@ for (auto& f : futures) {
 
 比串行 `invoke()` 效率更高，因为多个请求可以在传输层中并行处理。
 
-### 5. detect_connected -- 异步连接通知
+### 4.5 detect_connected -- 异步连接通知
 
 ```cpp
 client.detect_connected([&server_ready](bool connected) {
@@ -121,7 +123,7 @@ client.detect_connected([&server_ready](bool connected) {
 - 否则在 Server 变为可用时异步触发
 - 连接断开时也会触发（`connected = false`）
 
-## 异步处理流程
+## 5. 异步处理流程
 
 ```
 Client                    Transport               Server
@@ -136,7 +138,7 @@ Client                    Transport               Server
   |  future.get() = resp    |                        |
 ```
 
-## 编译与运行
+## 6. 编译与运行
 
 ```bash
 mkdir build && cd build
@@ -145,7 +147,7 @@ make example_method_async
 ./output/bin/example_method_async
 ```
 
-## 预期输出
+## 7. 预期输出
 
 ```
 [I] === VLink Method Async Example ===
@@ -170,7 +172,7 @@ make example_method_async
 [I] === Example complete ===
 ```
 
-## 文件结构
+## 8. 文件结构
 
 | 文件 | 说明 |
 |------|------|
@@ -180,7 +182,7 @@ make example_method_async
 | `client.cc` | 多进程拆分：Client 端（独立可执行文件） |
 | `CMakeLists.txt` | 构建配置（生成 3 个可执行文件） |
 
-### 多进程运行方式
+### 8.1 多进程运行方式
 
 ```bash
 # 终端 1: 启动 Server
@@ -190,7 +192,7 @@ make example_method_async
 ./output/bin/example_method_async_client
 ```
 
-## 扩展思考
+## 9. 扩展思考
 
 - `listen_for_reply` 适用于需要查询数据库、调用外部 API 或等待硬件响应的场景。Server 可以先返回，待结果就绪后再调用 `reply()`。
 - `async_invoke` 配合 `std::when_all` 或手动轮询可以实现更复杂的并行调用模式。
@@ -198,6 +200,6 @@ make example_method_async
 - 如果 Server 不需要回复（单向通知），使用 `Server<Req>` 的即发即忘模式，参见 `method_fire_forget` 示例。
 - 注意：`listen()` 和 `listen_for_reply()` 是互斥的，同一个 Server 只能调用其中一种。
 
-## 相关文档
+## 10. 相关文档
 
 详细原理参见 [doc/04-method-model.md](../../../doc/04-method-model.md)。

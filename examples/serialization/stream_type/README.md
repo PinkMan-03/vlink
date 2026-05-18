@@ -1,16 +1,16 @@
 # Stream 流类型序列化示例
 
-## 类型检测优先级链
+## 1. 类型检测优先级链
 
 ![类型检测优先级链](../bytes_type/images/serialization-type-chain.png)
 
-## 概述
+## 2. 概述
 
 本示例演示通过 `std::stringstream` 的 `operator<<` 和 `operator>>` 进行序列化的类型，即 `kStreamType`（编号 12）。这种序列化方式将对象转换为**文本格式**传输，适用于已有 iostream 重载的轻量值类型。
 
-## 关键代码解析
+## 3. 关键代码解析
 
-### 定义支持流序列化的类型
+### 3.1 定义支持流序列化的类型
 
 ```cpp
 struct Color {
@@ -32,7 +32,7 @@ static_assert(Serializer::get_type_of<Color>() == Serializer::kStreamType, "..."
 
 序列化时，VLink 将对象通过 `operator<<` 写入 `std::stringstream`，再将 stream 内容转为 `Bytes`。反序列化时反向操作。
 
-### 为什么 kStreamType 优先级低于 kCustomType
+### 3.2 为什么 kStreamType 优先级低于 kCustomType
 
 ```cpp
 struct Hybrid {
@@ -64,7 +64,7 @@ Bytes(1) -> Dynamic(2) -> CDR(4) -> Proto(5) -> ProtoPtr(6)
 `kStandardType` 而不是 `kStreamType`。`kStreamType` 仅匹配那些**不**满足
 trivial+standard-layout 条件、但提供 `operator<<` / `operator>>` 的非指针类型。
 
-### 文本格式的线路数据
+### 3.3 文本格式的线路数据
 
 ```cpp
 Color c{100, 200, 50, 128};
@@ -78,7 +78,7 @@ Serializer::serialize(c, buf);
 - 可读性好，便于调试
 - 编码/解码开销较高（文本解析 vs 二进制拷贝）
 
-## 构建与运行
+## 4. 构建与运行
 
 ```bash
 cd build
@@ -86,7 +86,7 @@ cmake .. && make example_stream_type
 ./output/bin/example_stream_type
 ```
 
-## 文件结构
+## 5. 文件结构
 
 | 文件 | 说明 |
 |------|------|
@@ -94,7 +94,7 @@ cmake .. && make example_stream_type
 | `stream_type.cc` | 主程序：pub/sub、线路格式展示、优先级对比 |
 | `CMakeLists.txt` | 构建配置 |
 
-## 要点总结
+## 6. 要点总结
 
 | 要点 | 说明 |
 |------|------|

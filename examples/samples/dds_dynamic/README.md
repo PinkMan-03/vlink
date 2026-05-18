@@ -1,12 +1,12 @@
 # dds_dynamic -- VLink DDS 动态数据类型示例
 
-## 概述
+## 1. 概述
 
 本示例演示 VLink 的 `DynamicData` 动态数据类型系统。`DynamicData` 允许在同一个话题上传输不同类型的消息，通过类型标签（type string）区分，无需为每种消息类型创建独立的话题。
 
 使用 DDS (`dds://`) 传输协议和 Protobuf 序列化。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
@@ -14,9 +14,9 @@
 | `dds_dynamic.proto` | Protobuf 消息定义 |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::dds` |
 
-## 演示内容
+## 3. 演示内容
 
-### 1. 方法模型 -- 多类型 RPC
+### 3.1 方法模型 -- 多类型 RPC
 
 服务端根据请求的类型标签返回不同类型的响应：
 
@@ -30,7 +30,7 @@ auto resp = client.invoke(DynamicData().load("type1", req1));
 // 提取特定类型：resp.as<std::string>()
 ```
 
-### 2. 事件模型 -- 多类型消息
+### 3.2 事件模型 -- 多类型消息
 
 在同一个话题上发布不同类型的消息：
 
@@ -48,7 +48,7 @@ sub.listen([](const DynamicData& msg) {
 });
 ```
 
-## DynamicData 核心 API
+## 4. DynamicData 核心 API
 
 | 方法 | 说明 |
 |------|------|
@@ -56,13 +56,13 @@ sub.listen([](const DynamicData& msg) {
 | `get_type()` | 获取类型标签字符串 |
 | `as<T>()` | 将内部数据转换为指定类型 |
 
-## 依赖
+## 5. 依赖
 
 - VLink 库（`vlink::dds` 组件）
 - Protobuf
-- CycloneDDS（DDS 实现）
+- FastDDS（`dds://` 后端的 DDS 实现）
 
-## 构建与运行
+## 6. 构建与运行
 
 ```bash
 # 构建

@@ -1,0 +1,168 @@
+<mxfile host="app.diagrams.net" modified="2026-05-19T00:00:00.000Z" agent="Claude" version="24.0.0" type="device">
+  <diagram id="event-advanced-flow" name="Event Advanced Flow">
+    <mxGraphModel dx="1120" dy="640" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1120" pageHeight="640" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Event Advanced  -  Detect / Force / Latency / Fan-out" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#0d47a1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="1080" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Publisher advanced API  +  N parallel Subscribers on dds://advanced/sensor" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+          <mxGeometry x="20" y="54" width="1080" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pubBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#90caf9;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#e3f2fd;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="40" y="96" width="340" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="pubBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="40" y="96" width="340" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="pubT" value="Publisher&amp;lt;SensorReading&amp;gt;" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=16;fontStyle=1;fontColor=#0d47a1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="112" width="340" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="pubSt" value="advanced features on Producer side" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#1565c0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="340" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1" value="detect_subscribers(cb)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="64" y="170" width="292" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="has_subscribers()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="64" y="218" width="292" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="wait_for_subscribers(2000ms)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="64" y="266" width="292" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" value="publish(msg, force=true)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=#0d47a1;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="64" y="314" width="292" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p5" value="publish(msg)  x5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=#0d47a1;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="64" y="362" width="292" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p6" value="emit serialized bytes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;strokeWidth=1.2;fontSize=12;fontStyle=2;fontColor=#1565c0;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="64" y="430" width="292" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p12" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#1976d2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="p1" target="p2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p23" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#1976d2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="p2" target="p3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p34" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#1976d2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="p3" target="p4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p45" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#1976d2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="p4" target="p5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p56" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#1976d2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="p5" target="p6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pubFoot" value="force=true sends even when has_subscribers() == false" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="500" width="340" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="trBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#bdbdbd;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#fafafa;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="420" y="180" width="240" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="trBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#616161;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="420" y="180" width="240" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="trT" value="Transport  dds://" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=15;fontStyle=1;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="420" y="196" width="240" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="trSt" value="discovery + fan-out" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#616161;" vertex="1" parent="1">
+          <mxGeometry x="420" y="222" width="240" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="tr1" value="presence discovery" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="438" y="252" width="204" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="tr2" value="timestamp + seq" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="438" y="300" width="204" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="tr3" value="fan-out  1 to N" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#616161;strokeColor=#424242;strokeWidth=1.2;fontSize=12;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="438" y="348" width="204" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="tr4" value="QoS  Reliable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=11;fontStyle=2;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="438" y="396" width="204" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="tra1" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#616161;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="tr1" target="tr2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tra2" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#616161;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="tr2" target="tr3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="tra3" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#616161;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;" edge="1" parent="1" source="tr3" target="tr4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="subBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#90caf9;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#e3f2fd;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="700" y="96" width="380" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="subBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="700" y="96" width="380" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="subT" value="Subscribers  x 3  on the same URL" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=16;fontStyle=1;fontColor=#0d47a1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="112" width="380" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="subSt" value="each receives an independent copy" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#1565c0;" vertex="1" parent="1">
+          <mxGeometry x="700" y="140" width="380" height="18" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s1h" value="Sub1  -  verbose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=#0d47a1;strokeWidth=1.2;fontSize=12;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="170" width="344" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="s1b" value="listen(cb)   VLOG_I(sensor_id, value)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="200" width="344" height="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2h" value="Sub2  -  silent counter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=#0d47a1;strokeWidth=1.2;fontSize=12;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="248" width="344" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="s2b" value="listen(cb)   sub2_count++" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="278" width="344" height="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3h" value="Sub3  -  latency + lost tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=#0d47a1;strokeWidth=1.2;fontSize=12;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="326" width="344" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="s3b1" value="set_latency_and_lost_enabled(true)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="356" width="344" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="s3b2" value="get_latency()   //  microseconds" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="392" width="344" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="s3b3" value="get_lost()   //  SampleLostInfo total / lost" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="718" y="428" width="344" height="32" as="geometry" />
+        </mxCell>
+
+        <mxCell id="subFoot" value="presence change triggers detect_subscribers callback on Publisher" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+          <mxGeometry x="700" y="500" width="380" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="xPubTr" value="bytes" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#1976d2;fontSize=11;fontStyle=1;fontColor=#0d47a1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;labelBackgroundColor=#ffffff;rounded=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="p6" target="trBg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xTrSub1" value="deliver" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#1976d2;fontSize=11;fontStyle=1;fontColor=#0d47a1;exitX=1;exitY=0.3;entryX=0;entryY=0.5;labelBackgroundColor=#ffffff;rounded=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="trBg" target="s1b">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xTrSub2" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#1976d2;exitX=1;exitY=0.55;entryX=0;entryY=0.5;rounded=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="trBg" target="s2b">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="xTrSub3" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#1976d2;exitX=1;exitY=0.85;entryX=0;entryY=0.5;rounded=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="trBg" target="s3b1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sumBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#90caf9;strokeWidth=1.5;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="550" width="1040" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="sumTxt" value="Advanced API matrix:  detect_subscribers / wait_for_subscribers / has_subscribers / publish(force)  +  Subscriber set_latency_and_lost_enabled / get_latency / get_lost" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#0d47a1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="550" width="1040" height="42" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1987,7 +1987,16 @@ NB_MODULE(_vlink_nanobind, m) {
             if (self.decrypt(in_bytes, out)) return PythonCodec<vlink::Bytes>::to_python(out);
             return nb::none();
           },
-          "data"_a);
+          "data"_a)
+      .def("is_configured", &vlink::Security::is_configured,
+           "Return True iff at least one cryptographic slot (symmetric key, RSA keypair, or "
+           "encrypt+decrypt callback pair) is usable.")
+      .def("can_encrypt", &vlink::Security::can_encrypt,
+           "Return True iff encrypt() will produce a ciphertext for at least one configured mode "
+           "(custom callbacks > RSA public key > symmetric key).")
+      .def("can_decrypt", &vlink::Security::can_decrypt,
+           "Return True iff decrypt() can recover a plaintext for at least one configured mode "
+           "(custom callbacks > RSA private key > symmetric key).");
 
   nb::class_<vlink::UrlRemap>(m, "UrlRemap", "JSON-driven URL pattern remapping")
       .def(nb::init<>())

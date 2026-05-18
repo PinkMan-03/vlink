@@ -183,7 +183,7 @@ inline void Setter<ValueT, SecT>::write_bytes(const Bytes& data) {
   if constexpr (SecT == SecurityType::kWithSecurity) {
     Bytes sec_data;
 
-    if VUNLIKELY (!this->security_->encrypt(data, sec_data)) {
+    if VUNLIKELY (!this->security_ || !this->security_->encrypt(data, sec_data)) {
       VLOG_T("Setter encrypt failed, url: ", this->impl_->url, ".");
       return;
     }

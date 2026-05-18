@@ -1,19 +1,19 @@
 # Custom 自定义类型序列化示例
 
-## 类型检测优先级链
+## 1. 类型检测优先级链
 
 ![类型检测优先级链](../bytes_type/images/serialization-type-chain.png)
 
-## 概述
+## 2. 概述
 
 本示例演示如何为自定义 C++ 类型实现 VLink 序列化接口，使其被识别为 `kCustomType`（编号 3）。用户只需为类型定义两个运算符重载即可接入 VLink 序列化体系：
 
 - `void operator>>(Bytes& out) const` — 序列化（将对象写入 `Bytes`）
 - `void operator<<(const Bytes& in)` — 反序列化（从 `Bytes` 读取到对象）
 
-## 关键代码解析
+## 3. 关键代码解析
 
-### 固定长度自定义类型
+### 3.1 固定长度自定义类型
 
 ```cpp
 struct Vec3 {
@@ -38,7 +38,7 @@ struct Vec3 {
 
 `Vec3` 虽然满足 POD 条件（trivial + standard-layout），但因为它定义了 `operator>>` 和 `operator<<`，在检测链中 `kCustomType`（第 9 位）排在 `kStandardType`（第 13 位）之前，所以会被优先识别为 `kCustomType`。
 
-### 变长自定义类型
+### 3.2 变长自定义类型
 
 ```cpp
 struct NamedValue {
@@ -61,7 +61,7 @@ struct NamedValue {
 
 `NamedValue` 包含 `std::string` 成员，不满足 POD 条件。序列化时使用**长度前缀编码**：先写入 4 字节的字符串长度，再写入字符串内容，最后写入固定大小的字段。这是变长数据的经典编码方式。
 
-### 序列化流程
+### 3.3 序列化流程
 
 ```
 publish(msg)
@@ -74,7 +74,7 @@ publish(msg)
 
 整个过程对用户完全透明。用户只需定义序列化/反序列化逻辑，VLink 框架会在 `publish()` 和 `listen()` 时自动调用。
 
-### 类型检测优先级
+### 3.4 类型检测优先级
 
 ```cpp
 // Vec3 是 POD，但因为有 operator>>/<<，被识别为 kCustomType 而非 kStandardType
@@ -83,7 +83,7 @@ static_assert(Serializer::get_type_of<Vec3>() == Serializer::kCustomType, "...")
 
 检测链中 `kCustomType`（位置 9）优先于 `kStandardType`（位置 13）。这意味着如果你为一个 POD 类型添加了自定义序列化运算符，它会使用自定义编码而不是原始内存拷贝。
 
-## 构建与运行
+## 4. 构建与运行
 
 ```bash
 cd build
@@ -91,7 +91,7 @@ cmake .. && make example_custom_type
 ./output/bin/example_custom_type
 ```
 
-## 文件结构
+## 5. 文件结构
 
 | 文件 | 说明 |
 |------|------|
@@ -99,7 +99,7 @@ cmake .. && make example_custom_type
 | `custom_type.cc` | 主程序：pub/sub、序列化流程展示、往返验证 |
 | `CMakeLists.txt` | 构建配置 |
 
-## 要点总结
+## 6. 要点总结
 
 | 要点 | 说明 |
 |------|------|

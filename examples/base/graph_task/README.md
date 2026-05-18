@@ -1,12 +1,12 @@
 # VLink GraphTask 示例 -- 深入解析
 
-## 概述
+## 1. 概述
 
 `GraphTask` 是 VLink 的有向无环图（DAG）任务调度器。开发者以声明式方式定义任务间的依赖关系，由执行引擎自动调度就绪任务。无依赖的任务可以在 `MultiLoop` 或 `ThreadPool` 上并行执行。
 
 本示例深入演示线性依赖、菱形并行、条件分支、状态监控以及 DOT 图形导出。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
@@ -14,18 +14,18 @@
 | `task_graph_builder.h` | DAG 构建辅助函数：linear、diamond、conditional、pipeline |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
 
-## 构建与运行
+## 3. 构建与运行
 
 ```bash
 cmake --build . --target example_graph_task
 ./examples/base/graph_task/example_graph_task
 ```
 
-## DAG 概念
+## 4. DAG 概念
 
 ![GraphTask DAG](images/graph-task-dag.png)
 
-### 什么是 DAG
+### 4.1 什么是 DAG
 
 DAG（Directed Acyclic Graph，有向无环图）是一种图结构，其中：
 - **有向**：边有方向，表示"必须在...之前完成"
@@ -37,16 +37,16 @@ DAG（Directed Acyclic Graph，有向无环图）是一种图结构，其中：
 - **入度为 0 的节点**：可以立即执行的任务
 - **出度为 0 的节点**：最终输出任务
 
-### 为什么使用 DAG 调度
+### 4.2 为什么使用 DAG 调度
 
 1. **自动并行化**：无依赖的任务自动并行执行
 2. **声明式编程**：只需声明"什么依赖什么"，无需手动管理执行顺序
 3. **可视化**：DAG 可以导出为 DOT 格式，用 Graphviz 可视化
 4. **环路检测**：构建时检测循环依赖，防止死锁
 
-## 依赖模式
+## 5. 依赖模式
 
-### 模式 1：线性链 (A -> B -> C)
+### 5.1 模式 1：线性链 (A -> B -> C)
 
 ```cpp
 auto a = GraphTask::create("A", []() { load_data(); });
@@ -63,7 +63,7 @@ b->precede(c);
 
 执行顺序：A -> B -> C，严格串行。
 
-### 模式 2：菱形 (Diamond)
+### 5.2 模式 2：菱形 (Diamond)
 
 ```cpp
 auto a = GraphTask::create("A", init_task);
@@ -81,7 +81,7 @@ c->precede(d);  // C -> D
 
 这是最常用的并行模式：**分叉-合并**。
 
-### 模式 3：条件分支
+### 5.3 模式 3：条件分支
 
 ```cpp
 auto branch = GraphTask::create_condition("Branch", [&condition]() -> int {
@@ -94,7 +94,7 @@ branch->precede(path_1);  // branch 返回 1 时跑 path_1
 
 条件任务返回一个整数索引，选择激活哪个后继分支。未被选中的分支被跳过。
 
-### 模式 4：Fan-out
+### 5.4 模式 4：Fan-out
 
 ```cpp
 auto source = GraphTask::create("Source", generate_data);
@@ -106,9 +106,9 @@ for (int i = 0; i < 8; ++i) {
 
 一个源任务后接多个并行工作任务。
 
-## 关键代码分析
+## 6. 关键代码分析
 
-### 任务创建
+### 6.1 任务创建
 
 ```cpp
 // 普通任务（void 回调）
@@ -120,7 +120,7 @@ auto cond = GraphTask::create_condition("name", []() -> int { return 0; });
 
 任务通过 `shared_ptr<GraphTask>` 管理。`GraphTaskPtr` 是其类型别名。
 
-### 依赖声明
+### 6.2 依赖声明
 
 **API 含义以代码为准**：
 
@@ -140,7 +140,7 @@ a-- > b;
 
 > `execute()` 必须从根节点（无前驱节点）发起；从子节点 `execute()` 只会运行该子节点和它的后继子图。
 
-### 执行策略
+### 6.3 执行策略
 
 | 策略 | 说明 |
 |------|------|
@@ -155,7 +155,7 @@ d->set_policy(GraphTask::kPolicyWaitAll);
 // D 必须等待 B 和 C 都完成才能执行
 ```
 
-### 执行引擎
+### 6.4 执行引擎
 
 ```cpp
 task->execute(&engine);
@@ -169,7 +169,7 @@ task->execute(&engine);
 | `MultiLoop` | 无依赖的任务并行执行（多线程） |
 | `ThreadPool` | 无依赖的任务并行执行（线程池） |
 
-### 状态回调
+### 6.5 状态回调
 
 ```cpp
 // 支持多订阅者；返回 id 用于注销
@@ -192,7 +192,7 @@ task->clear_status_callbacks();         // 清空全部
 > `unregister_status_callback`/`clear_status_callbacks`/`cancel()`；可安全调 `set_name`/`get_name`/
 > `get_status` 或操作其它任务。回调抛出的异常会被捕获并打日志，**不影响其它订阅者继续触发**。
 
-### 环路检测
+### 6.6 环路检测
 
 ```cpp
 bool has_cycle = task->has_cycle();
@@ -204,7 +204,7 @@ bool has_cycle = task->has_cycle();
 若新边导致成环则被静默回滚并记录错误日志（best-effort，并发构图时应当作单写阶段处理）。
 `has_cycle()` 仍可用于显式校验。
 
-### DOT 导出
+### 6.7 DOT 导出
 
 ```cpp
 std::string dot = task->export_to_dot();
@@ -216,9 +216,9 @@ std::string dot = task->export_to_dot();
 echo "$DOT_STRING" | dot -Tpng -o graph.png
 ```
 
-## 车载软件中的典型 DAG
+## 7. 车载软件中的典型 DAG
 
-### 感知流水线
+### 7.1 感知流水线
 
 ```
 Camera ──> Detect ──> Track ──> Fusion ──> Publish
@@ -228,7 +228,7 @@ Radar  ──> Detect ──────────┘
 
 三个传感器的检测可以并行执行，Track 等待各自的 Detect 完成，Fusion 等待所有 Track 完成。
 
-### 系统启动序列
+### 7.2 系统启动序列
 
 ```
 LoadConfig ──> InitNetwork ──┐
@@ -238,9 +238,9 @@ LoadConfig ──> InitNetwork ──┐
 
 配置加载后，网络、硬件、日志三个初始化可以并行进行。
 
-## 常见错误
+## 8. 常见错误
 
-### 错误 1：循环依赖
+### 8.1 错误 1：循环依赖
 
 ```cpp
 // 建链：a -> b -> c
@@ -255,7 +255,7 @@ c->precede(a);
 assert(!a->has_cycle());
 ```
 
-### 错误 2：忘记设置 kPolicyWaitAll
+### 8.2 错误 2：忘记设置 kPolicyWaitAll
 
 ```cpp
 // 表达 a, b 完成后再跑 d：
@@ -266,7 +266,7 @@ b->precede(d);   // b 先跑，d 后跑
 d->set_policy(GraphTask::kPolicyWaitAll);
 ```
 
-### 错误 3：在并行任务中共享状态
+### 8.3 错误 3：在并行任务中共享状态
 
 ```cpp
 int shared = 0;
@@ -277,7 +277,7 @@ a->precede(c);
 // B 和 C 并行执行，shared 有数据竞争！
 ```
 
-### 错误 4：条件任务返回越界索引
+### 8.4 错误 4：条件任务返回越界索引
 
 ```cpp
 auto branch = GraphTask::create_condition("Branch", []() -> int {
@@ -288,7 +288,7 @@ branch->precede(path_1);
 // 返回 5 时，所有后继分支被跳过
 ```
 
-## 相关示例
+## 9. 相关示例
 
 - [thread_pool](../thread_pool/) -- GraphTask 的并行执行引擎
 - [multi_loop](../multi_loop/) -- GraphTask 的另一种并行引擎

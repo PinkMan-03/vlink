@@ -1,0 +1,181 @@
+<mxfile host="app.diagrams.net" modified="2026-05-19T00:00:00.000Z" agent="Claude" version="24.0.0" type="device">
+  <diagram id="security-ssl-tls-handshake" name="Security SSL/TLS">
+    <mxGraphModel dx="1120" dy="640" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1120" pageHeight="640" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Security SSL/TLS  -  Transport-Layer Encryption via SslOptions" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#7f0000;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="1080" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="sub" value="set_ssl_options() / set_property(&quot;ssl.*&quot;, ...) / VLINK_SSL_*  -  applied BEFORE init() on mqtt:// / dds:// / zenoh://" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#c62828;" vertex="1" parent="1">
+          <mxGeometry x="20" y="54" width="1080" height="22" as="geometry" />
+        </mxCell>
+
+        <!-- Top: 3 config sources merged into Node -->
+        <mxCell id="cfg1Bg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef9a9a;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#ffebee;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="20" y="92" width="320" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg1Bar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="20" y="92" width="320" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg1T" value="1. SslOptions struct" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#7f0000;" vertex="1" parent="1">
+          <mxGeometry x="20" y="108" width="320" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg1c1" value="SslOptions ssl;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="138" width="280" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg1c2" value="ssl.ca_file = &quot;/etc/certs/ca.pem&quot;;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="164" width="280" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg1c3" value="ssl.cert_file / key_file / key_password" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="190" width="280" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg1c4" value="pub.set_ssl_options(ssl)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="220" width="280" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cfg2Bg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef9a9a;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#ffebee;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="380" y="92" width="360" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg2Bar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="380" y="92" width="360" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg2T" value="2. set_property key-value" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#7f0000;" vertex="1" parent="1">
+          <mxGeometry x="380" y="108" width="360" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg2c1" value="pub.set_property(&quot;ssl.ca&quot;,   &quot;/etc/certs/ca.pem&quot;)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="138" width="320" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg2c2" value="pub.set_property(&quot;ssl.cert&quot;, &quot;/etc/certs/client.pem&quot;)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="164" width="320" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg2c3" value="pub.set_property(&quot;ssl.key&quot;,  &quot;/etc/certs/client-key.pem&quot;)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="190" width="320" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg2c4" value="pub.set_property(&quot;ssl.verify&quot;, &quot;1&quot;)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="220" width="320" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cfg3Bg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef9a9a;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#ffebee;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="780" y="92" width="320" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg3Bar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="780" y="92" width="320" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg3T" value="3. VLINK_SSL_* env vars" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#7f0000;" vertex="1" parent="1">
+          <mxGeometry x="780" y="108" width="320" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg3c1" value="VLINK_SSL_CA=/etc/certs/ca.pem" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="800" y="138" width="280" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg3c2" value="VLINK_SSL_CERT / KEY / KEY_PASS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="800" y="164" width="280" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg3c3" value="VLINK_SSL_SNI / CIPHERS / VERIFY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="800" y="190" width="280" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="cfg3c4" value="lowest priority (deploy-time)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ef9a9a;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontStyle=2;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="800" y="220" width="280" height="36" as="geometry" />
+        </mxCell>
+
+        <!-- Middle: Node (with set_ssl_options applied before init) -->
+        <mxCell id="nodeBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#90caf9;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#e3f2fd;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="20" y="300" width="540" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="nodeBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="20" y="300" width="540" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="nodeT" value="VLink Node Lifecycle  -  ssl.* properties resolved at init()" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor=#0d47a1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="316" width="540" height="26" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n1" value="Publisher&amp;lt;T&amp;gt; pub(&quot;mqtt://...&quot;, InitType::kWithoutInit);" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="350" width="500" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="n2" value="apply SSL config  (set_ssl_options / set_property / env)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#0d47a1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="388" width="500" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="n3" value="pub.init()   -&amp;gt;   backend builds TLS context with ssl.* keys" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=#1565c0;strokeWidth=1.5;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="426" width="500" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="prio" value="Priority: set_property &amp;gt; set_ssl_options &amp;gt; VLINK_SSL_*  -  set_ssl_options() MUST be before init()" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#0d47a1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="476" width="540" height="22" as="geometry" />
+        </mxCell>
+
+        <!-- TLS handshake / backend map -->
+        <mxCell id="tlsBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#bdbdbd;strokeWidth=1.5;arcSize=8;shadow=1;gradientColor=#eceff1;gradientDirection=north;" vertex="1" parent="1">
+          <mxGeometry x="600" y="300" width="500" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="tlsBar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#616161;strokeColor=none;arcSize=30;" vertex="1" parent="1">
+          <mxGeometry x="600" y="300" width="500" height="8" as="geometry" />
+        </mxCell>
+        <mxCell id="tlsT" value="Transport TLS Handshake  -  per-backend mechanism" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor=#212121;" vertex="1" parent="1">
+          <mxGeometry x="600" y="316" width="500" height="26" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t1" value="ClientHello (SNI = server_name)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="350" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="t2" value="ServerHello + Cert (verified vs ca_file)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="380" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="t3" value="(mTLS) ClientCert(cert_file) + sign(key_file)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="410" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="t4" value="negotiate ciphers (ssl.ciphers)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#616161;strokeColor=#424242;strokeWidth=1.5;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="620" y="440" width="220" height="26" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bk1" value="MQTT:  MQTTClient_SSLOptions (Paho C)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="350" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="bk2" value="DDS:   TCPv4 transport tls_config" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="380" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="bk3" value="CycloneDDS: ddsi_config ssl fields" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="410" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="bk4" value="Zenoh: transport/link/tls keys" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#424242;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="440" width="220" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- Bottom: scope / constraint footer -->
+        <mxCell id="scBg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#ef9a9a;strokeWidth=1.5;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="20" y="500" width="1080" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="scT" value="Scope vs Application-Layer Security (SecurityPublisher / SecuritySubscriber)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#7f0000;" vertex="1" parent="1">
+          <mxGeometry x="20" y="506" width="1080" height="22" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sc1" value="SslOptions  -  link encryption + node identity (TLS handshake) on mqtt:// / dds:// / zenoh://" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="534" width="500" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="sc2" value="Security::Config  -  payload AES-128-GCM (orthogonal); supports shm:// / zenoh:// / mqtt://" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="534" width="500" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="sc3" value="intra:// has NO TLS (in-process)  -  asymmetric peer enabling will fail handshake  -  verify_peer=false is dev only" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#7f0000;" vertex="1" parent="1">
+          <mxGeometry x="20" y="580" width="1080" height="34" as="geometry" />
+        </mxCell>
+
+        <!-- merge arrows from config sources to Node -->
+        <mxCell id="amerge1" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#c62828;exitX=0.5;exitY=1;entryX=0.25;entryY=0;rounded=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="cfg1c4" target="n2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="amerge2" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#c62828;exitX=0.5;exitY=1;entryX=0.5;entryY=0;rounded=1;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="cfg2c4" target="n2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="amerge3" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#c62828;exitX=0.5;exitY=1;entryX=0.75;entryY=0;rounded=1;edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" parent="1" source="cfg3c4" target="n2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- init -> handshake -->
+        <mxCell id="ainit" value="opens TLS connection" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#616161;exitX=1;exitY=0.5;entryX=0;entryY=0.5;rounded=1;fontSize=11;fontStyle=1;fontColor=#424242;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="n3" target="t1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

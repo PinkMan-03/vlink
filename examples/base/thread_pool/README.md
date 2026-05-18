@@ -1,12 +1,12 @@
 # VLink ThreadPool 示例 -- 深入解析
 
-## 概述
+## 1. 概述
 
 `ThreadPool` 维护固定数量的工作线程，从共享任务队列中取出并**并行**执行任务。与 MessageLoop 的单线程串行模型不同，ThreadPool 适用于 CPU 密集型的并行计算场景。
 
 本示例深入演示并行任务执行、通过 `invoke_task` 获取异步结果、无锁队列类型选择以及策略控制。
 
-## 文件说明
+## 2. 文件说明
 
 | 文件 | 说明 |
 |------|------|
@@ -14,14 +14,14 @@
 | `parallel_tasks.h` | 并行任务 demo 函数：basic parallel、invoke_task、lockfree |
 | `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
 
-## 构建与运行
+## 3. 构建与运行
 
 ```bash
 cmake --build . --target example_thread_pool
 ./examples/base/thread_pool/example_thread_pool
 ```
 
-## ThreadPool vs MessageLoop
+## 4. ThreadPool vs MessageLoop
 
 这两者是 VLink 中最重要的任务执行器，各有不同的设计目标。
 
@@ -36,21 +36,21 @@ cmake --build . --target example_thread_pool
 | 优先级调度 | 不支持 | kPriorityType 支持 |
 | 适用场景 | CPU 密集型并行计算 | 事件驱动、回调串行化 |
 
-### 何时选择 ThreadPool
+### 4.1 何时选择 ThreadPool
 
 - **CPU 密集型计算**：图像处理、矩阵运算、压缩/解压缩
 - **批量任务**：并行处理 N 个独立的数据块
 - **Fan-out/Fan-in 模式**：分发子任务，收集结果
 
-### 何时选择 MessageLoop
+### 4.2 何时选择 MessageLoop
 
 - **事件驱动**：网络消息处理、UI 更新
 - **需要定时器**：周期性任务、超时检测
 - **需要串行化**：避免共享状态同步开销
 
-## 并行计算模式
+## 5. 并行计算模式
 
-### 模式 1：Fire-and-forget
+### 5.1 模式 1：Fire-and-forget
 
 ```cpp
 ThreadPool pool(4);
@@ -58,7 +58,7 @@ pool.post_task([]() { heavy_computation(); });
 // 不关心结果，继续执行其他操作
 ```
 
-### 模式 2：Future 收集
+### 5.2 模式 2：Future 收集
 
 ```cpp
 ThreadPool pool(4);
@@ -74,7 +74,7 @@ for (auto& f : futures) {
 }
 ```
 
-### 模式 3：Atomic 累加
+### 5.3 模式 3：Atomic 累加
 
 ```cpp
 ThreadPool pool(4);
@@ -87,9 +87,9 @@ for (int i = 1; i <= 100; ++i) {
 // 等待所有任务完成后读取 sum
 ```
 
-## 关键代码分析
+## 6. 关键代码分析
 
-### 构造与销毁
+### 6.1 构造与销毁
 
 ```cpp
 ThreadPool pool(4);                           // 4 线程，默认 Normal 队列
@@ -102,7 +102,7 @@ pool.shutdown();
 
 工作线程在构造时创建并立即运行。线程数不可动态修改。
 
-### post_task
+### 6.2 post_task
 
 ```cpp
 bool ok = pool.post_task([]() { work(); });
@@ -110,7 +110,7 @@ bool ok = pool.post_task([]() { work(); });
 
 线程安全的任务投递。返回 `false` 表示队列已满。投递的任务被任意空闲的工作线程取出执行。任务间**无序**。
 
-### invoke_task
+### 6.3 invoke_task
 
 ```cpp
 auto future = pool.invoke_task([]() -> int { return compute(); });
@@ -119,14 +119,14 @@ int result = future.get();  // 阻塞等待结果
 
 投递任务并返回 `std::future<T>`。支持任意可调用对象和返回类型。
 
-### 队列类型
+### 6.4 队列类型
 
 | 类型 | 内部实现 | 适用场景 |
 |------|---------|---------|
 | `kNormalType` | mutex + FIFO queue（默认） | 通用场景 |
 | `kLockfreeType` | MPMC lock-free queue | 高竞争场景 |
 
-### 调度策略（控制队列已满时 `post_task` 的行为）
+### 6.5 调度策略（控制队列已满时 `post_task` 的行为）
 
 | 策略 | 行为 | 适用场景 |
 |------|------|---------|
@@ -134,7 +134,7 @@ int result = future.get();  // 阻塞等待结果
 | `kPopStrategy` | 立即丢弃最旧任务后入队 | 实时场景 |
 | `kBlockStrategy` | 无限重试（每次 sleep 1 ms）直到有空位 | 不允许丢任务 |
 
-### 状态查询
+### 6.6 状态查询
 
 ```cpp
 pool.get_name();            // 名称
@@ -145,9 +145,9 @@ pool.get_max_task_count();  // 队列最大容量
 pool.is_in_work_thread();   // 当前线程是否是工作线程
 ```
 
-## 性能建议
+## 7. 性能建议
 
-### 线程数选择
+### 7.1 线程数选择
 
 ```cpp
 // CPU 密集型：线程数 = CPU 核心数
@@ -158,18 +158,18 @@ ThreadPool pool(n);
 ThreadPool pool(n * 2);
 ```
 
-### 队列类型选择
+### 7.2 队列类型选择
 
 - **低竞争**（少量生产者）：`kNormalType` 足够
 - **高竞争**（多个线程频繁投递）：`kLockfreeType` 更优
 
-### 策略选择（仅影响队列已满时的入队行为；空闲时始终为条件变量等待）
+### 7.3 策略选择（仅影响队列已满时的入队行为；空闲时始终为条件变量等待）
 
 - **实时优先（宁丢旧不丢新）**：`kPopStrategy`
 - **不允许丢任务**：`kBlockStrategy`（背压阻塞）
 - **通用场景**：`kOptimizationStrategy`（先重试再退化为丢弃最旧）
 
-### 避免任务粒度过细
+### 7.4 避免任务粒度过细
 
 ```cpp
 // 不推荐：每个元素一个任务
@@ -187,9 +187,9 @@ for (int i = 0; i < pool_size; ++i) {
 }
 ```
 
-## 常见错误
+## 8. 常见错误
 
-### 错误 1：在工作线程上调用 future.get() 导致死锁
+### 8.1 错误 1：在工作线程上调用 future.get() 导致死锁
 
 ```cpp
 pool.post_task([&pool]() {
@@ -198,7 +198,7 @@ pool.post_task([&pool]() {
 });
 ```
 
-### 错误 2：共享状态未同步
+### 8.2 错误 2：共享状态未同步
 
 ```cpp
 int counter = 0;
@@ -209,14 +209,14 @@ for (int i = 0; i < 100; ++i) {
 }
 ```
 
-### 错误 3：shutdown 后继续投递
+### 8.3 错误 3：shutdown 后继续投递
 
 ```cpp
 pool.shutdown();
 pool.post_task([]() { /* ... */ });  // 投递失败
 ```
 
-### 错误 4：任务捕获了已销毁的局部变量
+### 8.4 错误 4：任务捕获了已销毁的局部变量
 
 ```cpp
 void enqueue(ThreadPool& pool) {
@@ -230,7 +230,7 @@ void enqueue(ThreadPool& pool) {
 
 应改为值捕获：`[local_data]()` 或 `[data = std::move(local_data)]()`.
 
-## 相关示例
+## 9. 相关示例
 
 - [message_loop_basic](../message_loop_basic/) -- 单线程串行替代方案
 - [graph_task](../graph_task/) -- 基于 DAG 的任务调度，可在 ThreadPool 上执行

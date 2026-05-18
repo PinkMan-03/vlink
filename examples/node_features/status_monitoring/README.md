@@ -1,12 +1,14 @@
 # 状态监控示例
 
-## 概述
+## 1. 概述
 
 本示例演示 VLink 节点的状态监控功能，包括 `register_status_handler()` 注册状态变更回调和 `get_cpu_usage()` 获取进程 CPU 使用率。
 
-## 核心 API
+![Status detail events](images/status-detail-events.png)
 
-### register_status_handler
+## 2. 核心 API
+
+### 2.1 register_status_handler
 
 ```cpp
 pub.register_status_handler([](Status::BasePtr status) {
@@ -19,7 +21,7 @@ DDS 兼容的状态枚举（`Status::Type`）包括 `kPublicationMatched`、`kSu
 `kOfferedDeadlineMissed`、`kLivelinessLost`、`kSampleRejected`、`kSampleLost` 等。
 具体可用的事件类型取决于活动的传输后端。
 
-### get_cpu_usage
+### 2.2 get_cpu_usage
 
 ```cpp
 double usage = pub.get_cpu_usage();
@@ -27,7 +29,7 @@ double usage = pub.get_cpu_usage();
 // 如果平台不支持则返回 -1.0
 ```
 
-## 编译与运行
+## 3. 编译与运行
 
 ```bash
 cd build
@@ -35,14 +37,14 @@ cmake .. && make example_status_monitoring
 ./output/bin/example_status_monitoring
 ```
 
-## 适用场景
+## 4. 适用场景
 
 - 监控节点连接状态变化
 - 实时跟踪系统 CPU 负载
 - 诊断通信链路问题
 - 构建自定义健康监控系统
 
-## 注意事项
+## 5. 注意事项
 
 - 状态回调在节点的事件线程上触发
 - `get_cpu_usage()` 返回进程级别的 CPU 使用率

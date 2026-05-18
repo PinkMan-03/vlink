@@ -1,10 +1,10 @@
 # DynamicData 动态类型序列化示例
 
-## 类型检测优先级链
+## 1. 类型检测优先级链
 
 ![类型检测优先级链](../bytes_type/images/serialization-type-chain.png)
 
-## 概述
+## 2. 概述
 
 `DynamicData` 是 VLink 提供的**类型擦除容器**（`kDynamicType`，编号 2），可以在一个 `Bytes` 缓冲区中存储任意可序列化类型的值和一个类型名称标签。这使得：
 
@@ -12,9 +12,9 @@
 2. 在运行时根据类型标签动态决定反序列化目标类型
 3. 先传输原始数据，稍后再反序列化
 
-## 关键代码解析
+## 3. 关键代码解析
 
-### 内部存储布局
+### 3.1 内部存储布局
 
 ```
 [类型名称（前 20 字节，含 NUL，实际写入长度 < 20）] [序列化后的有效载荷]
@@ -23,7 +23,7 @@
 类型名称嵌入在 `Bytes` 缓冲区的前 20 字节（`kOffset = 20`），后面紧跟实际数据。
 `load()` 的字符串字面量包括 NUL 终止符的长度必须小于 20（即字面量最多 18 个可见字符）。
 
-### 基本用法：load / as / convert
+### 3.2 基本用法：load / as / convert
 
 ```cpp
 DynamicData dd;
@@ -43,7 +43,7 @@ dd.convert(t2);
 
 `load()` 是模板函数，第一个参数是类型名称字符串字面量（编译期 `static_assert` 检查 `SizeT < kOffset`，即含 NUL 长度 < 20），第二个参数是要序列化的值。`as<T>()` 和 `convert(T&)` 用于反序列化。
 
-### 多类型共享单一 topic
+### 3.3 多类型共享单一 topic
 
 ```cpp
 // 订阅者：根据运行时类型标签分发
@@ -72,7 +72,7 @@ pub.publish(dd2);
 
 这是 `DynamicData` 最强大的功能：**同一个 topic URL 上可以传输不同类型的消息**。订阅者通过 `get_type()` 获取类型标签，然后动态决定调用哪个 `as<T>()` 进行反序列化。
 
-### 线路格式：operator>> / operator<<
+### 3.4 线路格式：operator>> / operator<<
 
 ```cpp
 DynamicData dd;
@@ -89,7 +89,7 @@ dd_from_wire << wire_bytes;
 
 `operator>>` 和 `operator<<` 用于 `DynamicData` 本身的序列化/反序列化（即将整个容器——包括类型标签和有效载荷——转换为/从 `Bytes`）。这是 VLink 传输层内部使用的接口，用户代码通常不需要直接调用。
 
-## 构建与运行
+## 4. 构建与运行
 
 ```bash
 cd build
@@ -97,7 +97,7 @@ cmake .. && make example_dynamic_data
 ./output/bin/example_dynamic_data
 ```
 
-## 要点总结
+## 5. 要点总结
 
 | 要点 | 说明 |
 |------|------|

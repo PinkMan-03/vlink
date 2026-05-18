@@ -1,24 +1,26 @@
 # Method Sync -- VLink 方法模型同步调用示例
 
-## 通信模型概览
+## 1. 通信模型概览
 
 ![通信模型概览](../event_basic/images/communication-models-overview.png)
 
-## 概述
+## 2. 概述
 
 本示例演示 VLink **方法模型 (Method Model)** 的同步调用模式：Server 注册同步处理函数，Client 使用阻塞式 `invoke()` 发送请求并等待响应。
+
+![Method Sync RPC Sequence](images/method-sync-rpc-sequence.png)
 
 ```
 Client ──invoke(req)──> [dds://] ──> Server: callback(req, resp) ──> [dds://] ──> Client: resp
 ```
 
-## 方法模型核心概念
+## 3. 方法模型核心概念
 
 VLink 方法模型是一种请求/响应（RPC）通信模式：
 - **Server<Req, Resp>**: 注册处理函数，接收请求，填写响应
 - **Client<Req, Resp>**: 发送请求，等待并接收响应
 
-### 五种调用模式
+### 3.1 五种调用模式
 
 | 模式 | 方法 | 阻塞 | 返回值 |
 |------|------|------|--------|
@@ -30,9 +32,9 @@ VLink 方法模型是一种请求/响应（RPC）通信模式：
 
 本示例聚焦前两种同步模式。异步模式参见 `method_async`，即发即忘参见 `method_fire_forget`。
 
-## 关键代码分析
+## 4. 关键代码分析
 
-### 1. Server 同步处理函数
+### 4.1 Server 同步处理函数
 
 ```cpp
 Server<MathRequest, MathResponse> server("dds://math/calculator");
@@ -51,7 +53,7 @@ server.listen([](const MathRequest& req, MathResponse& resp) {
 - `listen()` 只能调用一次，重复调用会触发 Fatal 错误
 - 如果不需要响应，使用 `Server<Req>` 配合 `listen(ReqCallback)`
 
-### 2. Client 连接检测
+### 4.2 Client 连接检测
 
 ```cpp
 Client<MathRequest, MathResponse> client("dds://math/calculator");
@@ -63,7 +65,7 @@ bool is_conn = client.is_connected();
 - `is_connected()`: 非阻塞查询当前连接状态
 - 还有 `detect_connected(callback)` 用于异步通知
 
-### 3. invoke(req, resp) -- 引用输出模式
+### 4.3 invoke(req, resp) -- 引用输出模式
 
 ```cpp
 MathRequest req{10.0, 3.0, 0};
@@ -84,7 +86,7 @@ bool ok = client.invoke(req, resp);
 - 超时（默认 5000ms）
 - 传输层错误
 
-### 4. invoke(req) -> optional -- 可选返回模式
+### 4.4 invoke(req) -> optional -- 可选返回模式
 
 ```cpp
 auto result = client.invoke(req);
@@ -99,7 +101,7 @@ if (result.has_value()) {
 
 这种模式更符合现代 C++ 风格，避免了未初始化引用的问题。
 
-### 5. 自定义超时
+### 4.5 自定义超时
 
 ```cpp
 bool ok = client.invoke(req, resp, 1000ms);      // 1 秒超时
@@ -108,7 +110,7 @@ auto result = client.invoke(req, 1000ms);          // 1 秒超时
 
 两种 invoke 模式都支持自定义超时参数。默认超时为 `Timeout::kDefaultInterval`（5000ms）。设置为 0 会被视为无限等待（会产生告警日志）。
 
-## RPC 内部流程
+## 5. RPC 内部流程
 
 ```
 1. client.invoke(req)
@@ -129,7 +131,7 @@ auto result = client.invoke(req, 1000ms);          // 1 秒超时
    └── 解除阻塞，返回 true
 ```
 
-## 编译与运行
+## 6. 编译与运行
 
 ```bash
 mkdir build && cd build
@@ -138,7 +140,7 @@ make example_method_sync
 ./output/bin/example_method_sync
 ```
 
-## 预期输出
+## 7. 预期输出
 
 ```
 [I] === VLink Method Sync Example ===
@@ -160,7 +162,7 @@ make example_method_sync
 [I] === Example complete ===
 ```
 
-## 文件结构
+## 8. 文件结构
 
 | 文件 | 说明 |
 |------|------|
@@ -170,7 +172,7 @@ make example_method_sync
 | `client.cc` | 多进程拆分：Client 端（独立可执行文件） |
 | `CMakeLists.txt` | 构建配置（生成 3 个可执行文件） |
 
-### 多进程运行方式
+### 8.1 多进程运行方式
 
 ```bash
 # 终端 1: 启动 Server
@@ -180,13 +182,13 @@ make example_method_sync
 ./output/bin/example_method_sync_client
 ```
 
-## 扩展思考
+## 9. 扩展思考
 
 - 同步 `invoke()` 会阻塞调用线程。如果在 MessageLoop 线程上调用 `invoke()` 会导致死锁（loop 线程等待响应，但响应需要 loop 线程派发）。请在独立线程中调用 `invoke()`。
 - 对于需要并发处理的场景，使用 `async_invoke()` 或 `invoke(req, callback)` 参见 `method_async` 示例。
 - 将 URL 从 `dds://` 切换为 `someip://` 或 `zenoh://` 可切换传输协议，API 完全一致。
 - 如果不需要响应（单向命令），使用 `Server<Req>` + `Client<Req>` 的即发即忘模式，参见 `method_fire_forget` 示例。
 
-## 相关文档
+## 10. 相关文档
 
 详细原理参见 [doc/04-method-model.md](../../../doc/04-method-model.md)。

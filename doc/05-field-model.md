@@ -4,20 +4,21 @@
 
 ## 目录
 
-- [概念介绍](#概念介绍)
-- [与 Event 模型的区别](#与-event-模型的区别)
-- [适用场景](#适用场景)
-- [Setter\<T\> 完整 API](#settert-完整-api)
-- [Getter\<T\> 完整 API](#gettert-完整-api)
-- [std::optional\<T\> 返回值说明](#stdoptionalt-返回值说明)
-- [完整使用示例](#完整使用示例)
-- [多 Getter 读取同一 Setter](#多-getter-读取同一-setter)
-- [安全模式](#安全模式)
-- [性能特性](#性能特性)
+- [5.1 概念介绍](#51-概念介绍)
+- [5.2 与 Event 模型的区别](#52-与-event-模型的区别)
+- [5.3 适用场景](#53-适用场景)
+- [5.4 Setter\<T\> 完整 API](#54-settert-完整-api)
+- [5.5 Getter\<T\> 完整 API](#55-gettert-完整-api)
+- [5.6 std::optional\<T\> 返回值说明](#56-stdoptionalt-返回值说明)
+- [5.7 完整使用示例](#57-完整使用示例)
+- [5.8 多 Getter 读取同一 Setter](#58-多-getter-读取同一-setter)
+- [5.9 安全模式](#59-安全模式)
+- [5.10 性能特性](#510-性能特性)
+- [5.11 相关文档](#511-相关文档)
 
 ---
 
-## 概念介绍
+## 5.1 概念介绍
 
 字段模型（Field Model）是 VLink 三大通信模型之一，用于在节点之间**同步最新状态值**。
 与事件模型（Event Model）不同，字段模型不关心历史消息队列，只维护一个"当前最新值"。
@@ -33,7 +34,7 @@
 
 ---
 
-## 与 Event 模型的区别
+## 5.2 与 Event 模型的区别
 
 三种通信模型的对比请参阅 [Event 模型](03-event-model.md) 第 1 节。
 
@@ -41,7 +42,7 @@
 
 ---
 
-## 适用场景
+## 5.3 适用场景
 
 字段模型非常适合以下场景：
 
@@ -106,9 +107,9 @@ dash_getter.listen([](const DashboardData& d) {
 
 ---
 
-## Setter\<T\> 完整 API
+## 5.4 Setter\<T\> 完整 API
 
-### 类声明
+### 5.4.1 类声明
 
 ```cpp
 template <typename ValueT, SecurityType SecT = SecurityType::kWithoutSecurity>
@@ -118,21 +119,21 @@ class Setter : public Node<SetterImpl, SecT>;
 - `ValueT`：字段值类型，必须满足 `Serializer::is_supported()`。
 - `SecT`：安全模式，默认无安全加密。
 
-### 类型别名
+### 5.4.2 类型别名
 
 | 别名         | 类型                                   | 说明               |
 | ------------ | -------------------------------------- | ------------------ |
 | `UniquePtr`  | `std::unique_ptr<Setter<ValueT, SecT>>` | unique_ptr 别名    |
 | `SharedPtr`  | `std::shared_ptr<Setter<ValueT, SecT>>` | shared_ptr 别名    |
 
-### 静态常量
+### 5.4.3 静态常量
 
 | 常量           | 类型                  | 值         | 说明                              |
 | -------------- | --------------------- | ---------- | --------------------------------- |
 | `kImplType`    | `ImplType`            | `kSetter`  | 节点角色标识                      |
 | `kValueType`   | `Serializer::Type`    | 编译期推断 | ValueT 对应的序列化类型枚举       |
 
-### 工厂方法
+### 5.4.4 工厂方法
 
 ```cpp
 // 创建 unique_ptr 包装的 Setter
@@ -146,7 +147,7 @@ class Setter : public Node<SetterImpl, SecT>;
     InitType type = InitType::kWithInit);
 ```
 
-### 构造函数
+### 5.4.5 构造函数
 
 ```cpp
 // 从 URL 字符串构造
@@ -161,7 +162,7 @@ explicit Setter(const ConfT& conf,
 
 `InitType::kWithInit`（默认）表示构造时立即调用 `init()` 完成初始化；若传入 `kWithoutInit`，需手动调用 `init()`。
 
-### 核心方法
+### 5.4.6 核心方法
 
 ```cpp
 // 写入新的字段值，广播给所有已连接的 Getter
@@ -177,7 +178,7 @@ void set(const ValueT& value);
 
 当新 Getter 连接时，传输层触发 `sync()` 回调，Setter 重新发送缓存的 `value_`，确保新连接者立即获得当前值。
 
-### 角色切换方法
+### 5.4.7 角色切换方法
 
 ```cpp
 // 将此 Setter 角色切换为 kPublisher（事件发布者语义）
@@ -187,16 +188,16 @@ void mark_as_publisher();
 
 ---
 
-## Getter\<T\> 完整 API
+## 5.5 Getter\<T\> 完整 API
 
-### 类声明
+### 5.5.1 类声明
 
 ```cpp
 template <typename ValueT, SecurityType SecT = SecurityType::kWithoutSecurity>
 class Getter : public Node<GetterImpl, SecT>;
 ```
 
-### 类型别名
+### 5.5.2 类型别名
 
 | 别名           | 类型                                          | 说明                   |
 | -------------- | --------------------------------------------- | ---------------------- |
@@ -204,14 +205,14 @@ class Getter : public Node<GetterImpl, SecT>;
 | `SharedPtr`    | `std::shared_ptr<Getter<ValueT, SecT>>`        | shared_ptr 别名        |
 | `MsgCallback`  | `vlink::Function<void(const ValueT&)>`         | 值变更回调函数类型     |
 
-### 静态常量
+### 5.5.3 静态常量
 
 | 常量           | 类型               | 值        | 说明                        |
 | -------------- | ------------------ | --------- | --------------------------- |
 | `kImplType`    | `ImplType`         | `kGetter` | 节点角色标识                |
 | `kValueType`   | `Serializer::Type` | 编译期推断 | ValueT 对应的序列化类型枚举 |
 
-### 工厂方法
+### 5.5.4 工厂方法
 
 ```cpp
 [[nodiscard]] static UniquePtr create_unique(
@@ -223,7 +224,7 @@ class Getter : public Node<GetterImpl, SecT>;
     InitType type = InitType::kWithInit);
 ```
 
-### 构造函数
+### 5.5.5 构造函数
 
 ```cpp
 explicit Getter(const std::string& url_str,
@@ -234,7 +235,7 @@ explicit Getter(const ConfT& conf,
                 InitType type = InitType::kWithInit);
 ```
 
-### 读取方法
+### 5.5.6 读取方法
 
 ```cpp
 // 主动轮询：返回最新缓存值；尚未收到任何值时返回 std::nullopt
@@ -249,7 +250,7 @@ bool wait_for_value(
     std::chrono::milliseconds timeout = Timeout::kDefaultInterval);
 ```
 
-### 监听方法
+### 5.5.7 监听方法
 
 ```cpp
 // 注册值变更回调，每次 Setter 写入新值时触发
@@ -258,7 +259,7 @@ bool wait_for_value(
 bool listen(MsgCallback&& callback);
 ```
 
-### 配置方法
+### 5.5.8 配置方法
 
 ```cpp
 // 启用/禁用变化过滤：仅当新值原始字节与上次不同时才触发回调
@@ -278,7 +279,7 @@ void set_manual_unloan(bool manual_unloan) override;
 void set_latency_and_lost_enabled(bool enable);
 ```
 
-### 统计/诊断方法
+### 5.5.9 统计/诊断方法
 
 ```cpp
 // 返回是否已启用延迟和丢包统计
@@ -291,11 +292,11 @@ void set_latency_and_lost_enabled(bool enable);
 [[nodiscard]] SampleLostInfo get_lost() const;
 ```
 
-### 继承自 Node 的公共 API
+### 5.5.10 继承自 Node 的公共 API
 
 Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
-### 角色切换方法
+### 5.5.11 角色切换方法
 
 ```cpp
 // 将此 Getter 角色切换为 kSubscriber（事件订阅者语义）
@@ -304,7 +305,7 @@ void mark_as_subscriber();
 
 ---
 
-## std::optional\<T\> 返回值说明
+## 5.6 std::optional\<T\> 返回值说明
 
 `Getter::get()` 返回 `std::optional<ValueT>`，而非直接返回 `ValueT`。这是因为 Getter 在初始化后、Setter 首次写入值之前处于"无值状态"。
 
@@ -342,9 +343,9 @@ if (getter.wait_for_value(std::chrono::seconds(5))) {
 
 ---
 
-## 完整使用示例
+## 5.7 完整使用示例
 
-### 示例 1：基础 Setter / Getter（轮询方式）
+### 5.7.1 示例 1：基础 Setter / Getter（轮询方式）
 
 ```cpp
 #include <vlink/vlink.h>
@@ -376,7 +377,7 @@ int main() {
 }
 ```
 
-### 示例 2：listen 回调方式（变化监听）
+### 5.7.2 示例 2：listen 回调方式（变化监听）
 
 ```cpp
 #include <vlink/vlink.h>
@@ -411,7 +412,7 @@ int main() {
 }
 ```
 
-### 示例 3：wait_for_value 阻塞等待
+### 5.7.3 示例 3：wait_for_value 阻塞等待
 
 ```cpp
 #include <vlink/vlink.h>
@@ -447,7 +448,7 @@ int main() {
 }
 ```
 
-### 示例 4：Protobuf 类型的字段模型
+### 5.7.4 示例 4：Protobuf 类型的字段模型
 
 ```cpp
 #include <vlink/vlink.h>
@@ -482,7 +483,7 @@ int main() {
 }
 ```
 
-### 示例 5：使用配置对象（ShmConf）
+### 5.7.5 示例 5：使用配置对象（ShmConf）
 
 ```cpp
 #include <vlink/vlink.h>
@@ -510,7 +511,7 @@ int main() {
 }
 ```
 
-### 示例 6：Bytes 类型的字段模型（含安全加密）
+### 5.7.6 示例 6：Bytes 类型的字段模型（含安全加密）
 
 ```cpp
 #include <vlink/vlink.h>
@@ -537,7 +538,7 @@ int main() {
 
 ---
 
-## 多 Getter 读取同一 Setter
+## 5.8 多 Getter 读取同一 Setter
 
 字段模型天然支持 **N:N 拓扑**：同一 URL 可以有多个 Setter 和多个 Getter；最常见的形态是一个 Setter 对应多个 Getter。无论 Getter 何时连接，都能通过 sync 机制立即获得当前值：
 
@@ -591,7 +592,7 @@ int main() {
 
 ---
 
-## 安全模式
+## 5.9 安全模式
 
 ```cpp
 // SecuritySetter: 等价于 Setter<ValueT, SecurityType::kWithSecurity>
@@ -615,7 +616,7 @@ SecurityGetter<MyMsg> getter("dds://secure/field", cfg);
 
 ---
 
-## 性能特性
+## 5.10 性能特性
 
 | 指标               | 说明                                                                     |
 | ------------------ | ------------------------------------------------------------------------ |
@@ -636,7 +637,7 @@ SecurityGetter<MyMsg> getter("dds://secure/field", cfg);
 
 ---
 
-## 相关文档
+## 5.11 相关文档
 
 - [节点基类与生命周期](02-node-lifecycle.md) -- Node 通用 API（init / deinit / attach / security 等）
 - [Event 模型（Publisher / Subscriber）](03-event-model.md) -- 事件发布订阅通信

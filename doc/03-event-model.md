@@ -8,30 +8,31 @@
 
 ## 目录
 
-1. [概念与架构](#概念与架构)
-2. [主题命名规则与 URL 中的 transport](#主题命名规则与-url-中的-transport)
-3. [消息类型支持](#消息类型支持)
-4. [Publisher API](#publisher-api)
-5. [Subscriber API](#subscriber-api)
-6. [QoS 配置](#qos-配置)
-7. [完整使用示例](#完整使用示例)
-8. [多订阅者场景](#多订阅者场景)
-9. [内存管理注意事项](#内存管理注意事项)
-10. [性能调优建议](#性能调优建议)
+1. [3.1 概念与架构](#31-概念与架构)
+2. [3.2 主题命名规则与 URL 中的 transport](#32-主题命名规则与-url-中的-transport)
+3. [3.3 消息类型支持](#33-消息类型支持)
+4. [3.4 Publisher API](#34-publisher-api)
+5. [3.5 Subscriber API](#35-subscriber-api)
+6. [3.6 QoS 配置](#36-qos-配置)
+7. [3.7 完整使用示例](#37-完整使用示例)
+8. [3.8 多订阅者场景](#38-多订阅者场景)
+9. [3.9 内存管理注意事项](#39-内存管理注意事项)
+10. [3.10 性能调优建议](#310-性能调优建议)
+11. [3.11 相关文档](#311-相关文档)
 
 ---
 
-## 概念与架构
+## 3.1 概念与架构
 
-### 事件模型数据流
+### 3.1.1 事件模型数据流
 
 ![事件模型数据流](images/event-dataflow.png)
 
-### 多订阅者扇出模式
+### 3.1.2 多订阅者扇出模式
 
 ![多订阅者模式](images/multi-subscriber-pattern.png)
 
-### 关键特性
+### 3.1.3 关键特性
 
 - **多对多**：多个 Publisher 可向同一主题发布，任意数量的 Subscriber 均可接收。
 - **无历史保留（默认）**：消息发出后 Publisher 不缓存；是否可被后续订阅者看见取决于 QoS Durability。
@@ -39,7 +40,7 @@
 - **传输切换**：更换 URL 前缀即可切换后端，业务代码无需改动。
 - **异步回调**：Subscriber 的 `listen()` 注册后由传输层驱动回调，不阻塞发布方。
 
-### 与方法模型、字段模型的区别
+### 3.1.4 与方法模型、字段模型的区别
 
 | 维度         | 事件模型（Event）         | 方法模型（Method）         | 字段模型（Field）          |
 | ------------ | ------------------------- | -------------------------- | -------------------------- |
@@ -53,15 +54,15 @@
 
 ---
 
-## 主题命名规则与 URL 中的 transport
+## 3.2 主题命名规则与 URL 中的 transport
 
-### URL 格式
+### 3.2.1 URL 格式
 
 ```
 <transport>://<topic_path>[?<query_params>]
 ```
 
-### 支持的 Transport
+### 3.2.2 支持的 Transport
 
 **稳定后端（推荐用于生产环境）：**
 
@@ -73,7 +74,7 @@
 | `ddsc://`    | CycloneDDS       | 跨机器         | 否     | **稳定** |
 
 > ^1^ `intra://` 的零拷贝通过 `shared_ptr<IntraDataType 子类>` 实现（由 `VLINK_INTRA_DATA_DECLARE` 宏生成，引用计数共享指针传递），无序列化开销。
-> ^2^ `shm://` / `shm2://` 的零拷贝通过 `loan()` / `return_loan()` 接口实现（共享内存借贷缓冲区），详见 [节点基类与生命周期 -- 零拷贝借贷](02-node-lifecycle.md#7-零拷贝借贷)。
+> ^2^ `shm://` / `shm2://` 的零拷贝通过 `loan()` / `return_loan()` 接口实现（共享内存借贷缓冲区），详见 [节点基类与生命周期 -- 零拷贝借贷](02-node-lifecycle.md#27-零拷贝借贷)。
 
 **Beta 后端（实验性，API 可能变化）：**
 
@@ -88,13 +89,13 @@
 | `fdbus://`   | FDBus IPC        | 同机           | 否     | Beta   |
 | `qnx://`     | QNX IPC          | 同机（QNX）    | 否     | Beta   |
 
-### 主题路径规则
+### 3.2.3 主题路径规则
 
 - 路径分隔符使用 `/`，例如 `dds://vehicle/chassis/speed`
 - 同一传输后端下，Publisher 和 Subscriber 的 topic_path 必须完全一致才能匹配
 - 跨传输后端不互通（`dds://my_topic` 与 `ddsc://my_topic` 是不同的通道）
 
-### 查询参数（以 DDS 为例）
+### 3.2.4 查询参数（以 DDS 为例）
 
 ```
 dds://vehicle/speed?domain=1&depth=10&qos=sensor
@@ -108,7 +109,7 @@ dds://vehicle/speed?domain=1&depth=10&qos=sensor
 
 ---
 
-## 消息类型支持
+## 3.3 消息类型支持
 
 VLink 通过 `Serializer::get_type_of<T>()` 在编译期自动推导序列化方式。共 15 种枚举值（含 `kUnknownType`，14 种被 `Serializer::is_supported()` 接受）—— 详见 [序列化](06-serialization.md)。事件模型常用的类型：
 
@@ -133,9 +134,9 @@ VLink 通过 `Serializer::get_type_of<T>()` 在编译期自动推导序列化方
 
 ---
 
-## Publisher API
+## 3.4 Publisher API
 
-### 类模板声明
+### 3.4.1 类模板声明
 
 ```cpp
 template <typename MsgT, SecurityType SecT = SecurityType::kWithoutSecurity>
@@ -145,7 +146,7 @@ class Publisher : public Node<PublisherImpl, SecT>;
 `Publisher<MsgT, SecT>` 继承自 `Node<PublisherImpl, SecT>`，同时拥有 Node 基类
 的所有通用 API 和 Publisher 专有的发布相关 API。
 
-### 工厂方法
+### 3.4.2 工厂方法
 
 ```cpp
 // 创建 unique_ptr 包装的 Publisher（自动调用 init()）
@@ -157,7 +158,7 @@ class Publisher : public Node<PublisherImpl, SecT>;
                                              InitType type = InitType::kWithInit);
 ```
 
-### 构造函数
+### 3.4.3 构造函数
 
 ```cpp
 // 从 URL 字符串构造（最常用）
@@ -173,7 +174,7 @@ explicit Publisher(const ConfT& conf,
 `InitType::kWithInit`（默认）表示构造时立即调用 `init()`；
 `InitType::kWithoutInit` 表示延迟初始化，可在 `init()` 前调用配置方法。
 
-### 发布方法
+### 3.4.4 发布方法
 
 ```cpp
 // 发布消息（核心方法）
@@ -187,7 +188,7 @@ bool publish(const MsgT& msg, bool force = false);
 bool publish_fbb(const void* fbb, bool force = false);
 ```
 
-### 订阅者感知
+### 3.4.5 订阅者感知
 
 ```cpp
 // 注册订阅者在线/离线通知回调
@@ -205,7 +206,7 @@ bool wait_for_subscribers(std::chrono::milliseconds timeout = Timeout::kDefaultI
 [[nodiscard]] bool has_subscribers() const;
 ```
 
-### 角色切换
+### 3.4.6 角色切换
 
 ```cpp
 // 将此 Publisher 的角色切换为 kSetter（字段写入者语义）
@@ -213,22 +214,22 @@ bool wait_for_subscribers(std::chrono::milliseconds timeout = Timeout::kDefaultI
 void mark_as_setter();
 ```
 
-### 继承自 Node 的公共 API
+### 3.4.7 继承自 Node 的公共 API
 
 Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
 ---
 
-## Subscriber API
+## 3.5 Subscriber API
 
-### 类模板声明
+### 3.5.1 类模板声明
 
 ```cpp
 template <typename MsgT, SecurityType SecT = SecurityType::kWithoutSecurity>
 class Subscriber : public Node<SubscriberImpl, SecT>;
 ```
 
-### 工厂方法
+### 3.5.2 工厂方法
 
 ```cpp
 [[nodiscard]] static UniquePtr create_unique(const std::string& url_str,
@@ -237,7 +238,7 @@ class Subscriber : public Node<SubscriberImpl, SecT>;
                                              InitType type = InitType::kWithInit);
 ```
 
-### 构造函数
+### 3.5.3 构造函数
 
 ```cpp
 explicit Subscriber(const std::string& url_str,
@@ -248,7 +249,7 @@ explicit Subscriber(const ConfT& conf,
                     InitType type = InitType::kWithInit);
 ```
 
-### 订阅方法
+### 3.5.4 订阅方法
 
 ```cpp
 // 注册消息接收回调（核心方法）
@@ -260,7 +261,7 @@ bool listen(MsgCallback&& callback);
 // 其中：using MsgCallback = vlink::Function<void(const MsgT&)>;
 ```
 
-### 零拷贝相关
+### 3.5.5 零拷贝相关
 
 ```cpp
 // 启用手动归还 loan 模式（shm:// 零拷贝接收时使用）
@@ -269,7 +270,7 @@ bool listen(MsgCallback&& callback);
 void set_manual_unloan(bool manual_unloan) override;
 ```
 
-### 延迟与丢样统计
+### 3.5.6 延迟与丢样统计
 
 ```cpp
 // 启用端到端延迟和丢样统计
@@ -289,7 +290,7 @@ void set_latency_and_lost_enabled(bool enable);
 [[nodiscard]] SampleLostInfo get_lost() const;
 ```
 
-### 角色切换
+### 3.5.7 角色切换
 
 ```cpp
 // 将此 Subscriber 的角色切换为 kGetter（字段读取者语义）
@@ -297,17 +298,17 @@ void set_latency_and_lost_enabled(bool enable);
 void mark_as_getter();
 ```
 
-### 继承自 Node 的公共 API
+### 3.5.8 继承自 Node 的公共 API
 
 Node 基类继承的公共 API（init / deinit / attach / interrupt 等）请参阅 [节点基类与生命周期](02-node-lifecycle.md)。
 
 ---
 
-## QoS 配置
+## 3.6 QoS 配置
 
 QoS（Quality of Service，服务质量）控制消息的可靠性、历史深度、持久化策略等。
 
-### 设置方式
+### 3.6.1 设置方式
 
 QoS 通过 URL 查询参数或传输配置对象（Conf）设置，Node 上不存在 `set_qos()` 方法。
 
@@ -359,7 +360,7 @@ conf.qos = "sensor";   // 传感器数据：BestEffort + KeepLast(20) + ASync
 vlink::Publisher<MyMsg> pub(conf);
 ```
 
-### 常用预定义 Profile
+### 3.6.2 常用预定义 Profile
 
 以下摘自 `include/vlink/extension/qos_profile.h`，共 13 个 `QosProfile::k*`；下表只列常用 7 个：
 
@@ -379,9 +380,9 @@ vlink::Publisher<MyMsg> pub(conf);
 
 ---
 
-## 完整使用示例
+## 3.7 完整使用示例
 
-### 示例一：基础 Protobuf 发布/订阅
+### 3.7.1 示例一：基础 Protobuf 发布/订阅
 
 ```cpp
 // sensor.proto -> sensor.pb.h（由 protoc 生成）
@@ -432,7 +433,7 @@ void publisher_main() {
 }
 ```
 
-### 示例二：使用 MessageLoop 绑定（单线程模型）
+### 3.7.2 示例二：使用 MessageLoop 绑定（单线程模型）
 
 ```cpp
 #include <vlink/vlink.h>
@@ -477,7 +478,7 @@ int main() {
 }
 ```
 
-### 示例三：POD 结构体发布（零序列化开销）
+### 3.7.3 示例三：POD 结构体发布（零序列化开销）
 
 ```cpp
 #include <vlink/vlink.h>
@@ -506,7 +507,7 @@ sub.listen([](const ImuData& data) {
 });
 ```
 
-### 示例四：零拷贝 shm:// loan 发布
+### 3.7.4 示例四：零拷贝 shm:// loan 发布
 
 ```cpp
 #include <vlink/vlink.h>
@@ -538,7 +539,7 @@ msg.timestamp = 999;
 pub2.publish(msg);  // 若底层支持 loan，框架会自动 loan + memcpy，减少一次拷贝
 ```
 
-### 示例五：Bytes 类型（原始字节发布）
+### 3.7.5 示例五：Bytes 类型（原始字节发布）
 
 ```cpp
 #include <vlink/vlink.h>
@@ -559,7 +560,7 @@ sub.listen([](const Bytes& bytes) {
 });
 ```
 
-### 安全别名
+### 3.7.6 安全别名
 
 VLink 为事件模型提供安全加密的便捷别名：
 
@@ -573,7 +574,7 @@ template <typename MsgT>
 class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity>;
 ```
 
-### 示例六：安全加密发布订阅
+### 3.7.7 示例六：安全加密发布订阅
 
 ```cpp
 Security::Config cfg;
@@ -589,7 +590,7 @@ sub.listen([](const MyMsg& msg) { /* 消息已自动解密 */ });
 
 ---
 
-## 多订阅者场景
+## 3.8 多订阅者场景
 
 多个 Subscriber 可以订阅同一主题，每个都会独立收到消息副本：
 
@@ -629,7 +630,7 @@ msg.set_value(100.5);
 pub.publish(msg);
 ```
 
-### 多订阅者的 QoS 匹配注意事项
+### 3.8.1 多订阅者的 QoS 匹配注意事项
 
 在 DDS 系列传输中，Publisher 和 Subscriber 的 QoS 策略必须兼容，否则连接不会
 建立。常见的兼容规则：
@@ -642,9 +643,9 @@ pub.publish(msg);
 
 ---
 
-## 内存管理注意事项
+## 3.9 内存管理注意事项
 
-### 1. 消息对象的生命周期
+### 3.9.1 消息对象的生命周期
 
 `publish(msg)` 在内部完成序列化后立即返回，调用后 `msg` 可以安全销毁或复用：
 
@@ -656,7 +657,7 @@ pub.publish(msg);
 msg.set_value(2.0);   // 安全，publish 已完成序列化
 ```
 
-### 2. Loan Buffer 的生命周期
+### 3.9.2 Loan Buffer 的生命周期
 
 通过 `loan()` 获取的 buffer 由传输后端（共享内存）管理：
 
@@ -672,7 +673,7 @@ if (should_skip) {
 }
 ```
 
-### 3. 订阅者回调中的数据引用
+### 3.9.3 订阅者回调中的数据引用
 
 回调参数 `const MsgT& msg` 的生命周期仅限于回调函数体内：
 
@@ -689,7 +690,7 @@ sub.listen([](const sensor::SensorData& msg) {
 });
 ```
 
-### 4. 手动 unloan 模式（shm:// 零拷贝接收）
+### 3.9.4 手动 unloan 模式（shm:// 零拷贝接收）
 
 手动归还模式下，必须拿到原始 loan 后归还。对于 `Bytes` 类型消息更直接：
 
@@ -705,7 +706,7 @@ sub.listen([&sub](const Bytes& data) {
 
 > 其他消息类型（如 POD、Proto）使用手动模式时，需自行从回调参数还原 `Bytes` 句柄；多数情况下使用默认自动归还即可。
 
-### 5. 安全退出（safety_quit）
+### 3.9.5 安全退出（safety_quit）
 
 当节点在多线程环境中可能在回调执行期间被销毁时，开启安全退出：
 
@@ -719,9 +720,9 @@ pub.set_safety_quit(true);   // 启用安全互斥锁
 
 ---
 
-## 性能调优建议
+## 3.10 性能调优建议
 
-### 1. 选择合适的传输后端
+### 3.10.1 选择合适的传输后端
 
 | 场景                     | 推荐传输              | 理由                               | 状态     |
 | ------------------------ | --------------------- | ---------------------------------- | -------- |
@@ -732,7 +733,7 @@ pub.set_safety_quit(true);   // 启用安全互斥锁
 | 跨机器高吞吐             | `zenoh://`            | 现代协议，内置压缩                 | Beta     |
 | 车载以太网 SOA           | `someip://`           | 符合 AUTOSAR 规范                  | Beta     |
 
-### 2. QoS 策略优化
+### 3.10.2 QoS 策略优化
 
 ```cpp
 // 高频传感器数据（每秒 > 100 次）：用 BestEffort + ASync
@@ -744,7 +745,7 @@ vlink::DdsConf::register_qos("event", vlink::QosProfile::kEvent);
 vlink::Publisher<ControlCmd> pub2("dds://control/cmd?qos=event");
 ```
 
-### 3. 序列化格式选择
+### 3.10.3 序列化格式选择
 
 | 格式         | 序列化速度 | 消息大小 | 适用场景                    |
 | ------------ | ---------- | -------- | --------------------------- |
@@ -754,7 +755,7 @@ vlink::Publisher<ControlCmd> pub2("dds://control/cmd?qos=event");
 | Bytes        | 极快       | 任意     | 自定义二进制协议、图像帧     |
 | CDR          | 快         | 中       | 与 DDS 原生类型互通         |
 
-### 4. MessageLoop 线程模型
+### 3.10.4 MessageLoop 线程模型
 
 ```cpp
 // 单线程：所有回调顺序执行，避免并发问题
@@ -774,7 +775,7 @@ sub.listen([](const MyMsg& msg) {
 });
 ```
 
-### 5. 减少不必要的订阅者检测
+### 3.10.5 减少不必要的订阅者检测
 
 ```cpp
 // 低效：每次 publish 前都查询
@@ -797,7 +798,7 @@ for (int i = 0; i < 1000; ++i) {
 }
 ```
 
-### 6. 延迟调试
+### 3.10.6 延迟调试
 
 ```cpp
 Subscriber<SensorData> sub("dds://sensor/data");
@@ -812,7 +813,7 @@ sub.listen([&sub](const SensorData& msg) {
 
 ---
 
-## 相关文档
+## 3.11 相关文档
 
 - [节点基类与生命周期](02-node-lifecycle.md) -- Node 通用 API（init / deinit / attach / security 等）
 - [Method 模型（Client / Server）](04-method-model.md) -- RPC 请求响应通信

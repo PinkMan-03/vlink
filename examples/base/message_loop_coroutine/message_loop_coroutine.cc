@@ -51,7 +51,6 @@ int main() {
 
 #else
 
-namespace Co = vlink::Co;
 using vlink::GraphTask;
 using vlink::GraphTaskPtr;
 using vlink::MessageLoop;
@@ -63,100 +62,106 @@ using vlink::Schedule;
 
 namespace {
 
-Co::Task<> body_hello(std::promise<void>* done) {
+vlink::Co::Task<> body_hello(std::promise<void>* done) {
   VLOG_I("  [body] hello from coroutine, tid={}", std::hash<std::thread::id>{}(std::this_thread::get_id()));
   done->set_value();
   co_return;
 }
 
-Co::Task<int> body_answer() { co_return 42; }
+vlink::Co::Task<int> body_answer() { co_return 42; }
 
-Co::Task<int> body_square_after_delay(MessageLoop* loop, int key) {
-  co_await Co::delay_ms(*loop, 30);
+vlink::Co::Task<int> body_square_after_delay(MessageLoop* loop, int key) {
+  // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+  co_await vlink::Co::delay_ms(*loop, 30);
   co_return key* key;
 }
 
-Co::Task<> body_compose_squares(MessageLoop* loop, std::promise<int>* done) {
+vlink::Co::Task<> body_compose_squares(MessageLoop* loop, std::promise<int>* done) {
   int a = co_await body_square_after_delay(loop, 6);
   int b = co_await body_square_after_delay(loop, 7);
   done->set_value(a + b);
   co_return;
 }
 
-Co::Task<> body_measure_delay(MessageLoop* loop, std::chrono::steady_clock::time_point start,
-                              std::promise<int64_t>* done) {
-  co_await Co::delay_ms(*loop, 100);
+vlink::Co::Task<> body_measure_delay(MessageLoop* loop, std::chrono::steady_clock::time_point start,
+                                     std::promise<int64_t>* done) {
+  // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+  co_await vlink::Co::delay_ms(*loop, 100);
   auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
   done->set_value(elapsed.count());
   co_return;
 }
 
-Co::Task<> body_stamp_then_yield(MessageLoop* loop, std::vector<int>* trace, int tag, int rounds,
-                                 std::promise<void>* done) {
+vlink::Co::Task<> body_stamp_then_yield(MessageLoop* loop, std::vector<int>* trace, int tag, int rounds,
+                                        std::promise<void>* done) {
   for (int i = 0; i < rounds; ++i) {
     trace->push_back(tag);
-    co_await Co::yield(*loop);
+    // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+    co_await vlink::Co::yield(*loop);
   }
   done->set_value();
   co_return;
 }
 
-Co::Task<> body_consumer(MessageLoop* loop, std::future<int> input, std::promise<int>* output) {
-  int value = co_await Co::await_future(*loop, std::move(input));
-  co_await Co::schedule(*loop);
+vlink::Co::Task<> body_consumer(MessageLoop* loop, std::future<int> input, std::promise<int>* output) {
+  int value = co_await vlink::Co::await_future(*loop, std::move(input));
+  // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+  co_await vlink::Co::schedule(*loop);
   output->set_value(value * 2);
   co_return;
 }
 
-Co::Task<> body_run_under_exec(MessageLoop* loop, std::promise<void>* done) {
+vlink::Co::Task<> body_run_under_exec(MessageLoop* loop, std::promise<void>* done) {
   Schedule::Config cfg(/*delay_ms=*/50, MessageLoop::kNormalPriority, /*schedule_timeout_ms=*/1000,
                        /*execution_timeout_ms=*/500);
-  co_await Co::exec(*loop, cfg, [] { VLOG_I("  exec body ran inside Schedule envelope"); });
+  co_await vlink::Co::exec(*loop, cfg, [] { VLOG_I("  exec body ran inside Schedule envelope"); });
   done->set_value();
   co_return;
 }
 
-Co::Task<> body_launch_and_wait_graph(MessageLoop* loop, GraphTaskPtr root, GraphTaskPtr leaf, std::atomic<int>* step,
-                                      std::promise<int>* done) {
+vlink::Co::Task<> body_launch_and_wait_graph(MessageLoop* loop, GraphTaskPtr root, GraphTaskPtr leaf,
+                                             std::atomic<int>* step, std::promise<int>* done) {
   root->execute(loop);
-  co_await Co::await_graph(*loop, leaf);
+  co_await vlink::Co::await_graph(*loop, leaf);
   done->set_value(step->load(std::memory_order_acquire));
   co_return;
 }
 
-Co::Task<int> body_tagged_delay(MessageLoop* loop, uint32_t ms, int tag) {
-  co_await Co::delay_ms(*loop, ms);
+vlink::Co::Task<int> body_tagged_delay(MessageLoop* loop, uint32_t ms, int tag) {
+  // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+  co_await vlink::Co::delay_ms(*loop, ms);
   co_return tag;
 }
 
-Co::Task<> body_orchestration(MessageLoop* loop, std::promise<void>* done) {
-  std::vector<Co::Task<int> > branches;
+vlink::Co::Task<> body_orchestration(MessageLoop* loop, std::promise<void>* done) {
+  std::vector<vlink::Co::Task<int> > branches;
   branches.emplace_back(body_tagged_delay(loop, 30, 100));
   branches.emplace_back(body_tagged_delay(loop, 10, 200));
   branches.emplace_back(body_tagged_delay(loop, 20, 300));
 
-  auto winner = co_await Co::when_any<int>(*loop, std::move(branches));
+  auto winner = co_await vlink::Co::when_any<int>(*loop, std::move(branches));
   VLOG_I("  when_any winner: idx={}, value={}", winner.first, winner.second);
 
-  std::vector<Co::Task<int> > all_tasks;
+  std::vector<vlink::Co::Task<int> > all_tasks;
   all_tasks.emplace_back(body_tagged_delay(loop, 5, 1));
   all_tasks.emplace_back(body_tagged_delay(loop, 10, 2));
   all_tasks.emplace_back(body_tagged_delay(loop, 15, 3));
 
-  auto results = co_await Co::when_all<int>(*loop, std::move(all_tasks));
+  auto results = co_await vlink::Co::when_all<int>(*loop, std::move(all_tasks));
   VLOG_I("  when_all results: [{}, {}, {}]", results[0], results[1], results[2]);
 
   done->set_value();
   co_return;
 }
 
-Co::Task<> body_primed_then_delay(MessageLoop* loop, std::promise<void>* primed) {
+vlink::Co::Task<> body_primed_then_delay(MessageLoop* loop, std::promise<void>* primed) {
   primed->set_value();
-  co_await Co::delay_ms(*loop, 50);
+  // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+  co_await vlink::Co::delay_ms(*loop, 50);
   co_return;
 }
 
-Co::Task<> body_tag_then_signal(std::vector<int>* trace, int tag, std::promise<void>* done) {
+vlink::Co::Task<> body_tag_then_signal(std::vector<int>* trace, int tag, std::promise<void>* done) {
   trace->push_back(tag);
   done->set_value();
   co_return;
@@ -176,7 +181,7 @@ int main() {
 
     std::promise<void> done;
     auto fut = done.get_future();
-    Co::co_spawn(loop, body_hello(&done));
+    vlink::Co::co_spawn(loop, body_hello(&done));
     fut.get();
 
     loop.quit();
@@ -193,7 +198,7 @@ int main() {
 
     std::promise<int> done;
     auto fut = done.get_future();
-    Co::co_spawn(loop, body_answer(), [done_ptr = &done](int v) { done_ptr->set_value(v); });
+    vlink::Co::co_spawn(loop, body_answer(), [done_ptr = &done](int v) { done_ptr->set_value(v); });
 
     VLOG_I("  result = {}", fut.get());
 
@@ -211,7 +216,7 @@ int main() {
 
     std::promise<int> done;
     auto fut = done.get_future();
-    Co::co_spawn(loop, body_compose_squares(&loop, &done));
+    vlink::Co::co_spawn(loop, body_compose_squares(&loop, &done));
 
     VLOG_I("  6^2 + 7^2 = {}", fut.get());
 
@@ -229,7 +234,7 @@ int main() {
 
     std::promise<int64_t> done;
     auto fut = done.get_future();
-    Co::co_spawn(loop, body_measure_delay(&loop, std::chrono::steady_clock::now(), &done));
+    vlink::Co::co_spawn(loop, body_measure_delay(&loop, std::chrono::steady_clock::now(), &done));
 
     VLOG_I("  slept for {} ms (target 100ms)", fut.get());
 
@@ -250,8 +255,8 @@ int main() {
     std::promise<void> done_a;
     std::promise<void> done_b;
 
-    Co::co_spawn(loop, body_stamp_then_yield(&loop, &trace, 0, 5, &done_a));
-    Co::co_spawn(loop, body_stamp_then_yield(&loop, &trace, 1, 5, &done_b));
+    vlink::Co::co_spawn(loop, body_stamp_then_yield(&loop, &trace, 0, 5, &done_a));
+    vlink::Co::co_spawn(loop, body_stamp_then_yield(&loop, &trace, 1, 5, &done_b));
 
     done_a.get_future().get();
     done_b.get_future().get();
@@ -278,7 +283,7 @@ int main() {
     std::promise<int> output;
     auto output_fut = output.get_future();
 
-    Co::co_spawn(loop, body_consumer(&loop, input.get_future(), &output));
+    vlink::Co::co_spawn(loop, body_consumer(&loop, input.get_future(), &output));
 
     std::thread producer([&input]() {
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -302,7 +307,7 @@ int main() {
 
     std::promise<void> done;
     auto fut = done.get_future();
-    Co::co_spawn(loop, body_run_under_exec(&loop, &done));
+    vlink::Co::co_spawn(loop, body_run_under_exec(&loop, &done));
     fut.get();
 
     loop.quit();
@@ -329,7 +334,7 @@ int main() {
 
     std::promise<int> done;
     auto fut = done.get_future();
-    Co::co_spawn(loop, body_launch_and_wait_graph(&loop, a, c, &step, &done));
+    vlink::Co::co_spawn(loop, body_launch_and_wait_graph(&loop, a, c, &step, &done));
 
     VLOG_I("  graph result = {} (expect 111)", fut.get());
 
@@ -347,7 +352,7 @@ int main() {
 
     std::promise<void> done;
     auto fut = done.get_future();
-    Co::co_spawn(loop, body_orchestration(&loop, &done));
+    vlink::Co::co_spawn(loop, body_orchestration(&loop, &done));
     fut.get();
 
     loop.quit();
@@ -364,15 +369,15 @@ int main() {
     loop.async_run();
 
     std::promise<void> primed;
-    Co::co_spawn(loop, body_primed_then_delay(&loop, &primed));
+    vlink::Co::co_spawn(loop, body_primed_then_delay(&loop, &primed));
     primed.get_future().get();
 
     std::vector<int> trace;
     std::promise<void> done_low;
     std::promise<void> done_high;
 
-    Co::co_spawn_with_priority(loop, body_tag_then_signal(&trace, 0, &done_low), MessageLoop::kLowestPriority);
-    Co::co_spawn_with_priority(loop, body_tag_then_signal(&trace, 1, &done_high), MessageLoop::kHighestPriority);
+    vlink::Co::co_spawn_with_priority(loop, body_tag_then_signal(&trace, 0, &done_low), MessageLoop::kLowestPriority);
+    vlink::Co::co_spawn_with_priority(loop, body_tag_then_signal(&trace, 1, &done_high), MessageLoop::kHighestPriority);
 
     done_high.get_future().get();
     done_low.get_future().get();

@@ -1,6 +1,6 @@
 # 18. C API
 
-## 概述
+## 18.1 概述
 
 VLink C API 提供了一套稳定的、语言无关的纯 C 绑定，封装了 VLink C++ 核心库的三种通信模型。通过 C API，可以在 C 语言、Python、Go、Rust 等不支持直接调用 C++ 模板的语言中使用 VLink 的六个通信原语（Publisher/Subscriber、Client/Server、Setter/Getter）的**数据面**能力。
 
@@ -12,9 +12,9 @@ VLink C API 提供了一套稳定的、语言无关的纯 C 绑定，封装了 V
 
 ---
 
-## 设计思路
+## 18.2 设计思路
 
-### 为什么提供 C API
+### 18.2.1 为什么提供 C API
 
 | 需求                       | 说明                                                               |
 | -------------------------- | ------------------------------------------------------------------ |
@@ -24,7 +24,7 @@ VLink C API 提供了一套稳定的、语言无关的纯 C 绑定，封装了 V
 | 遗留代码集成               | 现有 C 项目可直接链接 VLink，无需改写为 C++                        |
 | 动态加载                   | `dlopen` / `LoadLibrary` 加载 VLink 共享库并按名称查找函数        |
 
-### 设计原则
+### 18.2.2 设计原则
 
 - **句柄（Handle）模式**：每种节点类型对应一个不透明的 C 结构体，内含 `native_handle` 指向堆分配的 C++ 对象
 - **统一返回值**：所有函数返回 `vlink_ret_t` 整数，`0` 为成功，非 `0` 为错误或条件码
@@ -33,11 +33,11 @@ VLink C API 提供了一套稳定的、语言无关的纯 C 绑定，封装了 V
 
 ---
 
-## 编译选项
+## 18.3 编译选项
 
 C API 以独立库 `vlink-c_api` 的形式提供，需单独链接。
 
-### CMake 集成
+### 18.3.1 CMake 集成
 
 ```cmake
 # 查找并链接 C API 库
@@ -45,7 +45,7 @@ find_package(vlink REQUIRED)
 target_link_libraries(my_c_app PRIVATE vlink::c_api)
 ```
 
-### 编译宏说明
+### 18.3.2 编译宏说明
 
 | 宏                          | 作用                                               |
 | --------------------------- | -------------------------------------------------- |
@@ -54,7 +54,7 @@ target_link_libraries(my_c_app PRIVATE vlink::c_api)
 | `VLINK_C_API_EXPORT`        | 函数可见性修饰符，自动根据平台和构建类型展开       |
 | `VLINK_ENABLE_C_INTERFACE`  | 库内部编译标志，表明正在构建 C API 模块            |
 
-### 头文件包含
+### 18.3.3 头文件包含
 
 ```c
 #include <vlink/external/c_api.h>
@@ -64,9 +64,9 @@ target_link_libraries(my_c_app PRIVATE vlink::c_api)
 
 ---
 
-## 数据类型说明
+## 18.4 数据类型说明
 
-### 返回值类型 `vlink_ret_t`
+### 18.4.1 返回值类型 `vlink_ret_t`
 
 ```c
 typedef enum {
@@ -90,7 +90,7 @@ typedef enum {
 | `VLINK_RET_TRANSFER_ERROR (5)` | 发送/接收操作失败                              | 无订阅者时调用 `vlink_publish`        |
 | `VLINK_RET_UNKNOWN_ERROR (-1)` | 未分类错误                                     | 极少出现                              |
 
-### 句柄类型
+### 18.4.2 句柄类型
 
 所有句柄类型均为 C 结构体，包含一个 `void* native_handle` 和一个 `void* reserved[8]` 数组：
 
@@ -121,7 +121,7 @@ typedef struct {
 | `reserved[2]` | 响应字节数（存储为指针大小的整数）                 |
 | `reserved[3]` | 非空表示请求处理进行中（由 `vlink_reply` 清零）    |
 
-### 回调类型
+### 18.4.3 回调类型
 
 ```c
 // 连接状态变化回调（Publisher 有订阅者时 / Client 连接到 Server 时）
@@ -137,7 +137,7 @@ typedef void (*vlink_req_callback_t)(const uint8_t* data, const size_t size, voi
 typedef void (*vlink_resp_callback_t)(const uint8_t* data, const size_t size, void* user_data);
 ```
 
-### `schema + ser` 元数据封装
+### 18.4.4 `schema + ser` 元数据封装
 
 从这一版开始，C API 的创建接口统一通过 `vlink_schema_info_t` 输入 `ser + schema`，在节点初始化前一次性写入底层节点：
 
@@ -168,9 +168,9 @@ typedef struct {
 
 ---
 
-## 全部 C API 函数列表
+## 18.5 全部 C API 函数列表
 
-### Publisher 相关
+### 18.5.1 Publisher 相关
 
 | 函数名                      | 参数                                                                      | 返回值           | 功能说明                             |
 | --------------------------- | ------------------------------------------------------------------------- | ---------------- | ------------------------------------ |
@@ -182,14 +182,14 @@ typedef struct {
 | `vlink_publish`             | `handle`, `data`, `size`                                                  | `vlink_ret_t`    | 发布消息（需有订阅者）               |
 | `vlink_publish_by_force`    | `handle`, `data`, `size`                                                  | `vlink_ret_t`    | 强制发布消息（无订阅者也发送）       |
 
-### Subscriber 相关
+### 18.5.2 Subscriber 相关
 
 | 函数名                       | 参数                                                                      | 返回值           | 功能说明                             |
 | ---------------------------- | ------------------------------------------------------------------------- | ---------------- | ------------------------------------ |
 | `vlink_create_subscriber`    | `url`, `*schema_info`, `*handle`, `msg_callback`, `user_data`             | `vlink_ret_t`    | 创建 Subscriber，并显式设置 `ser/schema` |
 | `vlink_destroy_subscriber`   | `*handle`                                                                 | `vlink_ret_t`    | 销毁 Subscriber，释放资源            |
 
-### Server 相关
+### 18.5.3 Server 相关
 
 | 函数名                  | 参数                                                                          | 返回值           | 功能说明                                    |
 | ----------------------- | ----------------------------------------------------------------------------- | ---------------- | ------------------------------------------- |
@@ -197,7 +197,7 @@ typedef struct {
 | `vlink_destroy_server`  | `*handle`                                                                     | `vlink_ret_t`    | 销毁 Server，释放资源（包括内部 mutex）     |
 | `vlink_reply`           | `*handle`, `data`, `size`                                                     | `vlink_ret_t`    | 在请求回调内提供响应数据                    |
 
-### Client 相关
+### 18.5.4 Client 相关
 
 | 函数名                  | 参数                                                                          | 返回值           | 功能说明                             |
 | ----------------------- | ----------------------------------------------------------------------------- | ---------------- | ------------------------------------ |
@@ -208,7 +208,7 @@ typedef struct {
 | `vlink_detect_server`   | `handle`, `connect_callback`, `user_data`                                     | `vlink_ret_t`    | 注册连接状态变化回调                 |
 | `vlink_invoke`          | `handle`, `data`, `size`, `resp_callback`, `user_data`                        | `vlink_ret_t`    | 发送 RPC 请求并注册响应回调          |
 
-### Setter 相关
+### 18.5.5 Setter 相关
 
 | 函数名                  | 参数                                                  | 返回值           | 功能说明                             |
 | ----------------------- | ----------------------------------------------------- | ---------------- | ------------------------------------ |
@@ -216,7 +216,7 @@ typedef struct {
 | `vlink_destroy_setter`  | `*handle`                                             | `vlink_ret_t`    | 销毁 Setter，释放资源                |
 | `vlink_set`             | `handle`, `data`, `size`                              | `vlink_ret_t`    | 发布最新字段值                       |
 
-### Getter 相关
+### 18.5.6 Getter 相关
 
 | 函数名                  | 参数                                                                          | 返回值           | 功能说明                                    |
 | ----------------------- | ----------------------------------------------------------------------------- | ---------------- | ------------------------------------------- |
@@ -226,11 +226,11 @@ typedef struct {
 
 ---
 
-## API 详细说明
+## 18.6 API 详细说明
 
-### Publisher 相关函数
+### 18.6.1 Publisher 相关函数
 
-#### `vlink_create_publisher`
+#### 18.6.1.1 `vlink_create_publisher`
 
 ```c
 int vlink_create_publisher(
@@ -246,7 +246,7 @@ int vlink_create_publisher(
 - 若 `schema_info->schema` 不是合法枚举值，返回 `VLINK_RET_INVALID_ERROR`
 - 返回 `VLINK_RET_RUNTIME_ERROR` 表示底层节点在构造或 `init()` 过程中抛出异常（例如 URL 非法或对应传输不可用）
 
-#### `vlink_publish`
+#### 18.6.1.2 `vlink_publish`
 
 ```c
 int vlink_publish(const vlink_publisher_handle_t handle, const uint8_t* data, const size_t size);
@@ -256,7 +256,7 @@ int vlink_publish(const vlink_publisher_handle_t handle, const uint8_t* data, co
 - 若无匹配的 Subscriber，返回 `VLINK_RET_TRANSFER_ERROR`
 - 使用 `vlink_publish_by_force` 可绕过订阅者检查（适合 late-joining 场景）
 
-#### `vlink_wait_for_subscribers`
+#### 18.6.1.3 `vlink_wait_for_subscribers`
 
 ```c
 int vlink_wait_for_subscribers(const vlink_publisher_handle_t handle, const int timeout_ms);
@@ -265,9 +265,9 @@ int vlink_wait_for_subscribers(const vlink_publisher_handle_t handle, const int 
 - 阻塞当前线程，直到至少一个 Subscriber 匹配或超时
 - `timeout_ms < 0` 表示无限等待
 
-### Subscriber 相关函数
+### 18.6.2 Subscriber 相关函数
 
-#### `vlink_create_subscriber`
+#### 18.6.2.1 `vlink_create_subscriber`
 
 ```c
 int vlink_create_subscriber(
@@ -282,9 +282,9 @@ int vlink_create_subscriber(
 - 回调在 Subscriber 内部接收线程中被调用，注意线程安全
 - 回调内的 `data` 指针在回调返回后可能失效，需要在回调内完成数据消费或深拷贝
 
-### Server 相关函数
+### 18.6.3 Server 相关函数
 
-#### `vlink_create_server`
+#### 18.6.3.1 `vlink_create_server`
 
 ```c
 int vlink_create_server(
@@ -298,7 +298,7 @@ int vlink_create_server(
 - 每次请求到来时，持有该 mutex 后调用 `req_callback`
 - **`vlink_reply` 必须在 `req_callback` 内部调用**，不可在回调返回后再调用
 
-#### `vlink_reply`
+#### 18.6.3.2 `vlink_reply`
 
 ```c
 int vlink_reply(vlink_server_handle_t* handle, const uint8_t* data, const size_t size);
@@ -309,14 +309,14 @@ int vlink_reply(vlink_server_handle_t* handle, const uint8_t* data, const size_t
 - 内部 Server listen 回调在 `vlink_reply` 返回后，从 `reserved[1]` 中读取响应并发送
 - 若 `reserved[3]` 为 NULL（即回调外调用），返回 `VLINK_RET_RUNTIME_ERROR`
 
-#### `vlink_destroy_server`
+#### 18.6.3.3 `vlink_destroy_server`
 
 - 除释放 `native_handle` 外，还会释放 `reserved[0]`（mutex）和 `reserved[1]`（响应缓冲区）
 - 析构是同步阻塞的，会等待进行中的请求完成
 
-### Client 相关函数
+### 18.6.4 Client 相关函数
 
-#### `vlink_invoke`
+#### 18.6.4.1 `vlink_invoke`
 
 ```c
 int vlink_invoke(
@@ -330,9 +330,9 @@ int vlink_invoke(
 - 响应回调在 Client 内部事件线程中异步调用
 - 返回 `VLINK_RET_TRANSFER_ERROR` 表示未连接到 Server 或发送失败
 
-### Getter 相关函数
+### 18.6.5 Getter 相关函数
 
-#### `vlink_create_getter`（轮询模式）
+#### 18.6.5.1 `vlink_create_getter`（轮询模式）
 
 ```c
 int vlink_create_getter(
@@ -345,7 +345,7 @@ int vlink_create_getter(
 - `msg_callback` 为 NULL 时，Getter 工作在轮询模式，使用 `vlink_get` 读取最新值
 - `msg_callback` 非 NULL 时，工作在推送模式，每次字段更新时回调被触发
 
-#### `vlink_get`（轮询读取）
+#### 18.6.5.2 `vlink_get`（轮询读取）
 
 ```c
 int vlink_get(const vlink_getter_handle_t handle, uint8_t* data, size_t* size);
@@ -357,9 +357,9 @@ int vlink_get(const vlink_getter_handle_t handle, uint8_t* data, size_t* size);
 
 ---
 
-## 错误处理机制
+## 18.7 错误处理机制
 
-### 推荐模式
+### 18.7.1 推荐模式
 
 ```c
 vlink_schema_info_t schema = {
@@ -374,7 +374,7 @@ if (ret != VLINK_RET_NO_ERROR) {
 }
 ```
 
-### 错误码处理策略
+### 18.7.2 错误码处理策略
 
 | 错误码                      | 推荐处理策略                                                    |
 | --------------------------- | --------------------------------------------------------------- |
@@ -388,9 +388,9 @@ if (ret != VLINK_RET_NO_ERROR) {
 
 ---
 
-## 完整 C 语言使用示例
+## 18.8 完整 C 语言使用示例
 
-### 示例一：Publisher + Subscriber（Event 模型）
+### 18.8.1 示例一：Publisher + Subscriber（Event 模型）
 
 ```c
 #include <vlink/external/c_api.h>
@@ -474,7 +474,7 @@ int main(void) {
 }
 ```
 
-### 示例二：Server + Client（Method 模型）
+### 18.8.2 示例二：Server + Client（Method 模型）
 
 ```c
 #include <vlink/external/c_api.h>
@@ -568,7 +568,7 @@ int main(void) {
 }
 ```
 
-### 示例三：Setter + Getter（Field 模型，轮询模式）
+### 18.8.3 示例三：Setter + Getter（Field 模型，轮询模式）
 
 ```c
 #include <vlink/external/c_api.h>
@@ -633,7 +633,7 @@ int main(void) {
 }
 ```
 
-### 示例四：Getter 推送模式（回调）
+### 18.8.4 示例四：Getter 推送模式（回调）
 
 ```c
 #include <vlink/external/c_api.h>
@@ -672,7 +672,7 @@ int main(void) {
 
 ---
 
-## C++ Wrapper 与纯 C 的互操作
+## 18.9 C++ Wrapper 与纯 C 的互操作
 
 C API 内部通过以下方式封装 C++ 对象：
 
@@ -693,7 +693,7 @@ vlink_create_publisher("dds://my/topic", &schema, &handle)
 
 ---
 
-## Python 通过 C API 使用 VLink（ctypes）
+## 18.10 Python 通过 C API 使用 VLink（ctypes）
 
 ```python
 import ctypes
@@ -706,13 +706,13 @@ lib = ctypes.CDLL("/usr/local/lib/libvlink-c_api.so")
 class VlinkPublisherHandle(ctypes.Structure):
     _fields_ = [
         ("native_handle", ctypes.c_void_p),
-        ("reserved", ctypes.c_void_p * 4),
+        ("reserved", ctypes.c_void_p * 8),
     ]
 
 class VlinkSubscriberHandle(ctypes.Structure):
     _fields_ = [
         ("native_handle", ctypes.c_void_p),
-        ("reserved", ctypes.c_void_p * 4),
+        ("reserved", ctypes.c_void_p * 8),
     ]
 
 class VlinkSchemaInfo(ctypes.Structure):
@@ -760,7 +760,7 @@ lib.vlink_destroy_publisher(ctypes.byref(pub))
 
 ---
 
-## Go 通过 C API 使用 VLink（cgo）
+## 18.11 Go 通过 C API 使用 VLink（cgo）
 
 ```go
 package main
@@ -826,7 +826,7 @@ func main() {
 
 ---
 
-## Rust 通过 C API 使用 VLink（bindgen + FFI）
+## 18.12 Rust 通过 C API 使用 VLink（bindgen + FFI）
 
 首先用 bindgen 或手动定义绑定：
 
@@ -837,7 +837,7 @@ use std::os::raw::{c_char, c_int, c_void};
 #[repr(C)]
 pub struct VlinkPublisherHandle {
     pub native_handle: *mut c_void,
-    pub reserved: [*mut c_void; 4],
+    pub reserved: [*mut c_void; 8],
 }
 
 pub type VlinkMsgCallback = extern "C" fn(*const u8, usize, *mut c_void);
@@ -882,7 +882,7 @@ fn main() {
 
     let mut pub_handle = VlinkPublisherHandle {
         native_handle: std::ptr::null_mut(),
-        reserved: [std::ptr::null_mut(); 4],
+        reserved: [std::ptr::null_mut(); 8],
     };
 
     let ret = unsafe {
@@ -902,9 +902,9 @@ fn main() {
 
 ---
 
-## 注意事项
+## 18.13 注意事项
 
-### 线程安全
+### 18.13.1 线程安全
 
 | 操作                                       | 线程安全性                                                  |
 | ------------------------------------------ | ----------------------------------------------------------- |
@@ -914,7 +914,7 @@ fn main() {
 | 不同句柄之间的并发操作                     | **安全**，各句柄独立                                        |
 | 回调内调用其他 VLink API                   | 视传输层而定，通常**不安全**（可能死锁），建议通过队列转发  |
 
-### 内存管理
+### 18.13.2 内存管理
 
 1. **create/destroy 必须成对调用**，忘记 destroy 会导致内存和 DDS 资源泄漏
 2. **`vlink_publish` / `vlink_invoke` / `vlink_set` 的 `data` 指针**：函数调用期间需有效，返回后可以安全释放
@@ -922,7 +922,7 @@ fn main() {
 4. **消息回调中的 `data` 指针**：仅在回调执行期间有效，需要在回调内完成拷贝
 5. **`vlink_server_handle_t::reserved[1]`**：由 `vlink_reply` 在堆上 `new[]` 分配，由 `vlink_destroy_server` 负责 `delete[]` 释放，用户代码不应直接操作
 
-### 常见错误
+### 18.13.3 常见错误
 
 ```c
 // 错误：在 create 前使用句柄
@@ -967,7 +967,7 @@ void on_msg(const uint8_t* data, size_t size, void* ud) {
 }
 ```
 
-### 传输 URL 格式
+### 18.13.4 传输 URL 格式
 
 C API 的 `url` 参数与 C++ API 完全一致，格式为 `<transport>://<topic_name>`（完整的传输后端列表参见 [07-transport.md](07-transport.md)）：
 

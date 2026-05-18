@@ -11,6 +11,6 @@
 | `c_rpc` | C API Server/Client（Method 模型） |
 | `c_field` | C API Setter/Getter（Field 模型） |
 
-## 相关文档
+## 1. 相关文档
 
 详细原理参见 [doc/18-c-api.md](../../doc/18-c-api.md)。

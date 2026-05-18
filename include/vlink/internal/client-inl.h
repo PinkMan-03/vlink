@@ -427,7 +427,7 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
   if constexpr (SecT == SecurityType::kWithSecurity) {
     Bytes req_sec_data;
 
-    if VUNLIKELY (!this->security_->encrypt(req_data, req_sec_data)) {
+    if VUNLIKELY (!this->security_ || !this->security_->encrypt(req_data, req_sec_data)) {
       VLOG_T("Client encrypt failed, url: ", this->impl_->url, ".");
       return false;
     }
@@ -437,7 +437,7 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
         [this, callback = std::move(callback)](const Bytes& resp_data) {
           Bytes resp_sec_data;
 
-          if VUNLIKELY (!this->security_->decrypt(resp_data, resp_sec_data)) {
+          if VUNLIKELY (!this->security_ || !this->security_->decrypt(resp_data, resp_sec_data)) {
             VLOG_T("Client decrypt failed, url: ", this->impl_->url, ".");
             return;
           }

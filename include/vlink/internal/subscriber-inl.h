@@ -174,7 +174,7 @@ inline bool Subscriber<MsgT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callbac
     if constexpr (SecT == SecurityType::kWithSecurity) {
       Bytes sec_data;
 
-      if VUNLIKELY (!this->security_->decrypt(data, sec_data)) {
+      if VUNLIKELY (!this->security_ || !this->security_->decrypt(data, sec_data)) {
         VLOG_T("Subscriber decrypt failed, url: ", this->impl_->url, ".");
         return;
       }

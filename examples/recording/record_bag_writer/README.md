@@ -1,10 +1,12 @@
 # VLink BagWriter 手动录制示例
 
-## 概述
+![BagWriter Manual Recording Flow](images/bag-writer-flow.png)
+
+## 1. 概述
 
 本示例演示了 `BagWriter` 的直接使用方法。`BagWriter` 是 VLink 录制子系统的核心抽象类，提供了基于 `MessageLoop` 的异步消息录制能力。与 `set_record_path()` 自动录制不同，`BagWriter` 允许开发者完全控制录制过程，包括自定义压缩、文件分割、时间戳和标签等。
 
-## BagWriter 架构
+## 2. BagWriter 架构
 
 `BagWriter` 是一个抽象基类，继承自 `MessageLoop`。它有两个具体实现：
 
@@ -15,7 +17,7 @@
 
 `BagWriter::create()` 工厂方法根据文件扩展名自动选择实现。
 
-## BagWriter::create() API
+## 3. BagWriter::create() API
 
 ```cpp
 [[nodiscard]] static std::shared_ptr<BagWriter> create(
@@ -30,7 +32,7 @@
 
 返回 `shared_ptr<BagWriter>`。创建后需调用 `async_run()` 启动事件循环线程。
 
-## BagWriter::Config 完整参考
+## 4. BagWriter::Config 完整参考
 
 ```cpp
 struct Config final {
@@ -56,12 +58,12 @@ struct Config final {
 };
 ```
 
-### Config 字段详解
+### 4.1 Config 字段详解
 
-#### tag_name
+#### 4.1.1 tag_name
 嵌入到 bag 文件元数据头部的标签字符串。可用于标识录制会话，如 `"regression_test_v2"`。通过 `VLINK_BAG_TAG` 环境变量也可全局设置默认标签。
 
-#### compress（CompressType 枚举）
+#### 4.1.2 compress（CompressType 枚举）
 
 | 值 | 名称 | 后端实际效果 |
 |----|------|------|
@@ -73,19 +75,19 @@ struct Config final {
 
 > 枚举值不代表后端实际支持。详见 [doc/12-bag-recording.md](../../../doc/12-bag-recording.md) "压缩矩阵"。
 
-#### compress_start_size
+#### 4.1.3 compress_start_size
 只有负载大小 >= 此阈值（字节）的消息才会被压缩。小于此阈值的消息直接存储。默认 128 字节。
 
-#### split_by_size / split_by_time
+#### 4.1.4 split_by_size / split_by_time
 文件分割策略。当 bag 文件大小达到 `split_by_size` 字节或经过 `split_by_time` 毫秒后，自动创建新文件。`split_by_time` 为 0 表示禁用时间分割。
 
-#### wal_mode
+#### 4.1.5 wal_mode
 启用 SQLite WAL（Write-Ahead Log）模式。WAL 模式提供更好的崩溃恢复能力和并发读写性能。仅对 `DatabaseWriter` 有效。
 
-#### optimize_on_exit
+#### 4.1.6 optimize_on_exit
 关闭文件时执行 VACUUM 操作，回收未使用的数据库页。适用于录制完成后需要最小化文件体积的场景。
 
-## BagWriter::push() API
+## 5. BagWriter::push() API
 
 ```cpp
 virtual int64_t push(
@@ -112,7 +114,7 @@ virtual int64_t push(
 
 `schema_type` 与 `ser_type` 分离后，BagWriter 可以在 discovery、proxy、viewer、webviz 等运行时链路中直接选择 protobuf 或 flatbuffers 技术栈，而不需要再靠字符串猜测。
 
-## BagWriter::filter_get() API
+## 6. BagWriter::filter_get() API
 
 ```cpp
 [[nodiscard]] static std::shared_ptr<BagWriter> filter_get(const std::string& path);
@@ -122,7 +124,7 @@ virtual int64_t push(
 
 这是 `set_record_path()` 内部使用的机制，确保多个节点共享同一路径时不会创建重复的 writer。
 
-## register_split_callback() API
+## 7. register_split_callback() API
 
 ```cpp
 virtual void register_split_callback(SplitCallback&& callback, bool before) = 0;
@@ -133,14 +135,14 @@ virtual void register_split_callback(SplitCallback&& callback, bool before) = 0;
 | `callback` | `SplitCallback&&` | 分割发生时的回调，签名为 `void(int split_index, const std::string& split_filename)` |
 | `before` | `bool` | `true` 表示在新文件打开**之前**调用；`false` 表示在**之后**调用 |
 
-## 编译和运行
+## 8. 编译和运行
 
 ```bash
 cmake --build . --target example_record_bag_writer
 ./output/bin/example_record_bag_writer
 ```
 
-## 输出文件
+## 9. 输出文件
 
 | 文件 | 说明 |
 |------|------|
@@ -152,7 +154,7 @@ cmake --build . --target example_record_bag_writer
 | `/tmp/bag_writer_timestamp.vdb` | 自定义时间戳 |
 | `/tmp/bag_writer_shared.vdb` | 共享 writer 实例 |
 
-## 最佳实践
+## 10. 最佳实践
 
 1. **始终调用 `async_run()`**：`BagWriter::create()` 返回的 writer 尚未启动事件循环，必须调用 `async_run()` 后才能录制
 2. **使用 `filter_get()` 共享 writer**：避免多个组件同时打开同一文件

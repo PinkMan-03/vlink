@@ -1,12 +1,14 @@
 # C API 发布/订阅示例
 
-## 概述
+## 1. 概述
 
 本示例演示使用纯 C 语言的 VLink 发布/订阅（事件模型）API。C API 通过 `vlink_publisher_handle_t` 和 `vlink_subscriber_handle_t` 句柄封装底层 C++ 实现，提供稳定的跨语言接口。示例中的 `vlink_schema_info_t` 不是提示字段，而是创建节点时一次性写入的精确 wire metadata。
 
-## 核心 API
+![C API PubSub Flow](images/c-api-pubsub-flow.png)
 
-### 发布者
+## 2. 核心 API
+
+### 2.1 发布者
 
 ```c
 vlink_publisher_handle_t pub;
@@ -20,7 +22,7 @@ vlink_publish(pub, data, size);
 vlink_destroy_publisher(&pub);
 ```
 
-### 订阅者
+### 2.2 订阅者
 
 ```c
 void on_message(const uint8_t* data, size_t size, void* user_data) {
@@ -33,7 +35,7 @@ vlink_create_subscriber("intra://topic", &schema, &sub, on_message, NULL);
 vlink_destroy_subscriber(&sub);
 ```
 
-### 额外 API
+### 2.3 额外 API
 
 | 函数 | 描述 |
 |------|------|
@@ -41,7 +43,8 @@ vlink_destroy_subscriber(&sub);
 | `vlink_wait_for_subscribers(pub, ms)` | 阻塞等待订阅者 |
 | `vlink_detect_subscribers(pub, cb, ud)` | 注册连接变更回调 |
 | `vlink_publish_by_force(pub, data, size)` | 无订阅者时强制发布 |
-## 返回码
+
+## 3. 返回码
 
 | 代码 | 值 | 含义 |
 |------|---|------|
@@ -52,7 +55,7 @@ vlink_destroy_subscriber(&sub);
 | `VLINK_RET_RUNTIME_ERROR` | 4 | C++ 异常 |
 | `VLINK_RET_TRANSFER_ERROR` | 5 | 操作失败 |
 
-## 编译与运行
+## 4. 编译与运行
 
 ```bash
 cd build
@@ -62,14 +65,14 @@ cmake .. && make example_c_pubsub
 
 CMakeLists.txt 使用 `LANGUAGES C` 和 `vlink::c_api` 链接。
 
-## 回调签名
+## 5. 回调签名
 
 ```c
 typedef void (*vlink_msg_callback_t)(const uint8_t* data, size_t size, void* user_data);
 typedef void (*vlink_connect_callback_t)(bool is_connected, void* user_data);
 ```
 
-## 注意事项
+## 6. 注意事项
 
 - C API 内部使用 `Publisher<Bytes>` / `Subscriber<Bytes>`
 - 通过 `vlink_schema_info_t` 在创建时同时设置 `ser + schema`
@@ -79,6 +82,6 @@ typedef void (*vlink_connect_callback_t)(bool is_connected, void* user_data);
 - 回调在订阅者的内部接收线程上执行
 - `data` 指针仅在回调执行期间有效
 
-## 相关文档
+## 7. 相关文档
 
 详细原理参见 [doc/18-c-api.md](../../../doc/18-c-api.md)。

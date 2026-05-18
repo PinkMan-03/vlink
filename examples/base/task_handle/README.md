@@ -9,18 +9,18 @@
 - `state()` / `is_done()`：查询当前状态。
 - `cancellation_token()`：在回调内部用于轮询取消。
 
-## 头文件
+## 1. 头文件
 
 ```cpp
 #include <vlink/base/task_handle.h>    // TaskHandle / PostTaskOptions / 枚举
 #include <vlink/base/cancellation.h>   // 父级 token
 ```
 
-## 调用方与 dispatcher 时序
+## 2. 调用方与 dispatcher 时序
 
 ![TaskHandle 调用方/Dispatcher 时序](images/task-handle-timeline.png)
 
-## 示例覆盖范围（13 段）
+## 3. 示例覆盖范围（13 段）
 
 | 段落 | 主题 |
 |------|------|
@@ -38,7 +38,7 @@
 | 12 | 句柄是共享句柄：copy 出来的句柄与原句柄共享同一 state，相互可见 |
 | 13 | 默认构造的 `TaskHandle` 各 API 的安全语义（`valid=false`、`state=kInvalid`、`wait`/`cancel`返回 false） |
 
-## 构建与运行
+## 4. 构建与运行
 
 ```bash
 cmake -S . -B build
@@ -46,7 +46,7 @@ cmake --build build --target example_task_handle
 ./build/examples/base/task_handle/example_task_handle
 ```
 
-## 关键枚举一览
+## 5. 关键枚举一览
 
 `vlink::TaskExecutionState`：
 
@@ -81,11 +81,11 @@ cmake --build build --target example_task_handle
 > **lock-free 队列**：`kProtected` 仅打印警告日志，**不能**阻止 overflow drop。
 > 需要严格保护请用 `kNormalType` / `kPriorityType` 队列。
 
-## 整体管道架构
+## 6. 整体管道架构
 
 ![post_task_handle Tracked 管道](../../../doc/images/task-handle-pipeline.png)
 
-## 锁顺序
+## 7. 锁顺序
 
 ```
 MessageLoopAliveState::mtx  ->  MessageLoop::Impl::mtx  ->  TaskHandle::State::mtx
@@ -96,7 +96,7 @@ MessageLoopAliveState::mtx  ->  MessageLoop::Impl::mtx  ->  TaskHandle::State::m
 `wait()` / 终态 cv 在 `TaskHandle::State::mtx` 上等待，回调释放该 mtx 后再触发，因此回调内可
 再次调用 `cancel()` / `wait()` 而不会死锁。
 
-## 相关文档与图
+## 8. 相关文档与图
 
 - 章节：[doc/11-base-library.md §11.5 Tracked 任务投递](../../../doc/11-base-library.md)
 - 状态机图：[doc/images/task-handle-state-machine.png](../../../doc/images/task-handle-state-machine.png)
