@@ -39,6 +39,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <string>
 #include <thread>
 
 #include "./config_types.h"
@@ -55,6 +56,7 @@ int main() {
   // Step 1: Initialise logger
   // ---------------------------------------------------------------
   VLOG_I("=== VLink Config Setter ===");
+  const std::string config_url = vlink::Utils::get_env("VLINK_CONFIG_URL", example::kConfigUrl);
 
   // ---------------------------------------------------------------
   // Step 2: Create the Setter
@@ -64,8 +66,8 @@ int main() {
   // connected Getters.  Late-joining Getters automatically receive
   // the most recent value through the internal sync() mechanism.
   // ---------------------------------------------------------------
-  vlink::Setter<example::SensorConfig> setter(example::kConfigUrl);
-  VLOG_I("[Setter] Created on ", example::kConfigUrl);
+  vlink::Setter<example::SensorConfig> setter(config_url);
+  VLOG_I("[Setter] Created on ", config_url);
 
   // ---------------------------------------------------------------
   // Step 3: Set an initial configuration

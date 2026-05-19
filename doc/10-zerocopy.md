@@ -11,9 +11,10 @@ VLink 的零拷贝能力分布在两个正交的层次：
    `Z_FEATURE_SHARED_MEMORY` + `Z_FEATURE_UNSTABLE_API` 时也提供 loan 接口。
    Publisher 直接向共享内存池借出的缓冲区写数据，Subscriber 通过指针收到同一块内存。
    其他后端（`intra`、`dds`、`ddsc` 等）不支持 loan，`is_support_loan()` 返回 `false`。
-2. **容器层零拷贝（zerocopy 结构体）**：`vlink::zerocopy` 命名空间下的 5 个结构体
-   （`RawData`、`CameraFrame`、`PointCloud`、`ProxyData`、`Header`）支持"借用"语义——
-   反序列化时内部指针直接指向 `Bytes` 缓冲区，不复制负载数据。
+2. **容器层零拷贝（zerocopy 结构体）**：`vlink::zerocopy` 命名空间下的负载容器
+   （`RawData`、`CameraFrame`、`PointCloud`、`ProxyData`）支持"借用"语义——
+   反序列化时内部指针直接指向 `Bytes` 缓冲区，不复制负载数据。`Header` 是 POD 元数据结构，
+   不包含负载指针，也不提供借用反序列化语义。
 
 两个层次可独立或组合使用：同一个 `CameraFrame` 可以通过 `shm://` 做双层零拷贝，
 也可以通过 `dds://` 做单层（仅容器反序列化借用）。
@@ -411,7 +412,7 @@ CameraFrame 传输（dds 后端）：
 
 ---
 
-## 10.8 shm/shm2 后端的 loan 机制
+## 10.8 shm/shm2/zenoh 后端的 loan 机制
 
 ![SHM 零拷贝流程](images/shm-zerocopy-flow.png)
 

@@ -37,8 +37,8 @@
  * | FilterType       | Shows                                                   |
  * | ---------------- | ------------------------------------------------------- |
  * | kFilterNone      | All discovered endpoints                                |
- * | kFilterAvailable | Only endpoints that have at least one live process      |
- * | kFilterNative    | Only endpoints from the same host                       |
+ * | kFilterAvailable | All endpoints except local-transport URLs from remote hosts |
+ * | kFilterNative    | Only endpoints reported by the same host                |
  *
  * @par Usage
  * @code
@@ -83,13 +83,13 @@ class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
    * | Value            | Meaning                                              |
    * | ---------------- | ---------------------------------------------------- |
    * | kFilterNone      | All discovered endpoints                             |
-   * | kFilterAvailable | Endpoints with at least one live process             |
-   * | kFilterNative    | Endpoints from the local host only                   |
+   * | kFilterAvailable | All endpoints except local-transport URLs from remote hosts |
+   * | kFilterNative    | Endpoints reported by the same host only             |
    */
   enum FilterType : uint8_t {
     kFilterNone = 0,       ///< Show all endpoints.
-    kFilterAvailable = 1,  ///< Show only endpoints with live processes.
-    kFilterNative = 2,     ///< Show only local-host endpoints.
+    kFilterAvailable = 1,  ///< Hide remote reports for local-only URL schemes.
+    kFilterNative = 2,     ///< Show only same-host reports.
   };
 
   /**
@@ -105,7 +105,10 @@ class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
     double profiler{-1};  ///< CPU utilisation reported by the process (-1 if unavailable).
 
     /**
-     * @brief Sorts processes for stable display (by host, pid).
+     * @brief Sorts processes for stable display.
+     *
+     * @details
+     * Sort order is type, host, IP, process name, then PID.
      *
      * @param target  Right-hand side.
      * @return @c true if @c *this should sort before @p target.
@@ -130,7 +133,11 @@ class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
     std::vector<Process> process_list;             ///< Processes hosting this endpoint.
 
     /**
-     * @brief Sorts entries for stable display (by sort_index, url).
+     * @brief Sorts entries for stable display.
+     *
+     * @details
+     * Sort order is type, sort_index, URL, schema family, serialisation type,
+     * then process list.
      *
      * @param target  Right-hand side.
      * @return @c true if @c *this should sort before @p target.
@@ -148,9 +155,9 @@ class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
   using Callback = Function<void(const std::vector<Info>& info_list)>;
 
   /**
-   * @brief Converts a transport string to the corresponding @c ImplType value.
+   * @brief Converts a discovery endpoint-role token to the corresponding @c ImplType value.
    *
-   * @param str  Transport string (e.g., @c "dds", @c "shm").
+   * @param str  Discovery role token: @c "Ser", @c "Cli", @c "Pub", @c "Sub", @c "Set", or @c "Get".
    * @return Corresponding @c ImplType, or 0 if unknown.
    */
   [[nodiscard]] static ImplType convert_type(std::string_view str);
@@ -173,7 +180,7 @@ class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
   [[nodiscard]] static std::string convert_type_to_view(uint32_t type, const std::vector<Process>& process_list);
 
   /**
-   * @brief Returns the intra-process address used by the discovery subsystem.
+   * @brief Returns the UDP multicast/broadcast address used by the discovery subsystem.
    *
    * @return Discovery listen address string.
    */

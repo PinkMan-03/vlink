@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_memory_pool
-./examples/base/memory_pool/example_memory_pool
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_memory_pool
+./build/output/bin/example_memory_pool
 ```
 
 ## 4. VLINK_MEMORY_LEVEL 环境变量
@@ -38,11 +39,11 @@ cmake --build . --target example_memory_pool
 ```bash
 # 切到 Large 等级（每档 block 数比默认更多）
 export VLINK_MEMORY_LEVEL=4
-./examples/base/memory_pool/example_memory_pool
+./build/output/bin/example_memory_pool
 
 # Bypass 模式：所有分配跳过池
 export VLINK_MEMORY_LEVEL=0
-./examples/base/memory_pool/example_memory_pool
+./build/output/bin/example_memory_pool
 ```
 
 > 该变量仅在 **首次** 构造全局池时被读取（`MemoryPool::global_instance(true)` 或 `Bytes::init_memory_pool()`）；后续 `global_instance()` 调用始终返回同一个对象，不会再次读环境变量。
@@ -57,7 +58,7 @@ export VLINK_MEMORY_LEVEL=0
 ```bash
 # 启用满额预分配，消除热路径上游分配延迟
 export VLINK_MEMORY_PREALLOC=1
-./examples/base/memory_pool/example_memory_pool
+./build/output/bin/example_memory_pool
 ```
 
 > 该变量同样仅在 **首次** 构造全局池时被读取。

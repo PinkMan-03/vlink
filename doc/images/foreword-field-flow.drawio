@@ -9,7 +9,7 @@
         <mxCell id="title" value="Field Model" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=18;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="20" y="20" width="760" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Setter &#8594; latest-value cache &#8594; Getter    &#183;    N : N with automatic late-join sync" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="Setter cache &#8594; transport update &#8594; Getter    &#183;    N : N, late join depends on backend" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
           <mxGeometry x="20" y="48" width="760" height="22" as="geometry" />
         </mxCell>
 
@@ -19,7 +19,7 @@
         </mxCell>
 
         <!-- Cache -->
-        <mxCell id="cache" value="&lt;b&gt;Transport + latest-value cache&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px;&quot;&gt;overwritten on every set(value)&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;dashed=1;arcSize=10;fontSize=12;fontStyle=1;fontColor=#bf360c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
+        <mxCell id="cache" value="&lt;b&gt;Setter-side latest cache&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px;&quot;&gt;sync replay is backend-specific&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;dashed=1;arcSize=10;fontSize=12;fontStyle=1;fontColor=#bf360c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="290" y="110" width="230" height="80" as="geometry" />
         </mxCell>
 

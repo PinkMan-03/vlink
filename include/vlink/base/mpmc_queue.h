@@ -203,12 +203,12 @@ class VLINK_EXPORT MpmcQueueBase {
    * producers that push under @c kConditionBehavior or by @c notify_to_quit().
    *
    * If @p timeout is @c std::chrono::milliseconds(0) the wait is unbounded;
-   * any positive value imposes a maximum wait.  Returns @c false if and only
-   * if @c notify_to_quit() has been called -- timeout alone does not return
-   * false, it returns whatever the wait-predicate evaluated to at wake-up.
+   * any positive value imposes a maximum wait.  Returns @c false when the
+   * timeout expires without the queue becoming non-empty, or when
+   * @c notify_to_quit() has been called.
    *
    * @param timeout  Maximum wait duration; 0 means wait forever.  Default: 0.
-   * @return @c true if the queue became non-empty, @c false on quit.
+   * @return @c true if the queue became non-empty, @c false on timeout or quit.
    */
   bool wait_not_empty(std::chrono::milliseconds timeout = std::chrono::milliseconds(0)) noexcept VLINK_NO_INSTRUMENT;
 
@@ -222,7 +222,7 @@ class VLINK_EXPORT MpmcQueueBase {
    * called.
    *
    * @param timeout  Maximum wait duration; 0 means wait forever.  Default: 0.
-   * @return @c true if space became available, @c false on quit.
+   * @return @c true if space became available, @c false on timeout or quit.
    */
   bool wait_not_full(std::chrono::milliseconds timeout = std::chrono::milliseconds(0)) noexcept VLINK_NO_INSTRUMENT;
 
@@ -234,8 +234,9 @@ class VLINK_EXPORT MpmcQueueBase {
    * variables.  After this call:
    * - All currently blocked @c wait_not_empty / @c wait_not_full calls return @c false.
    * - All subsequent @c emplace / @c push calls are silently dropped (no slot is claimed).
-   * - All subsequent @c pop / @c try_pop calls return without modifying their output
-   *   reference and report failure (for @c try_pop) or simply return (for @c pop).
+   * - @c try_pop returns @c false without modifying its output.  @c pop returns
+   *   without modifying its output if it observes the quit flag while waiting for
+   *   a claimed empty slot; if a claimed slot is already full, it may still consume it.
    * - @c try_emplace / @c try_push return @c false.
    *
    * Intended for graceful shutdown of producer / consumer loops.  Safe to call

@@ -88,9 +88,9 @@ struct VLINK_EXPORT PublicationMatched final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing total and current matched reader counts.
+   * @return @c "PublicationMatched".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -128,9 +128,9 @@ struct VLINK_EXPORT OfferedDeadlineMissed final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing missed deadline counts.
+   * @return @c "OfferedDeadlineMissed".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -165,9 +165,9 @@ struct VLINK_EXPORT OfferedIncompatibleQos final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing incompatible QoS detection counts.
+   * @return @c "OfferedIncompatibleQos".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -202,9 +202,9 @@ struct VLINK_EXPORT LivelinessLost final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing liveliness loss counts.
+   * @return @c "LivelinessLost".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -241,9 +241,9 @@ struct VLINK_EXPORT SubscriptionMatched final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing total and current matched writer counts.
+   * @return @c "SubscriptionMatched".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -280,9 +280,9 @@ struct VLINK_EXPORT RequestedDeadlineMissed final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing missed deadline counts.
+   * @return @c "RequestedDeadlineMissed".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -318,9 +318,9 @@ struct VLINK_EXPORT LivelinessChanged final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing alive and not-alive writer counts.
+   * @return @c "LivelinessChanged".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -375,9 +375,9 @@ struct VLINK_EXPORT SampleRejected final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing rejection counts and last rejection reason.
+   * @return @c "SampleRejected".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -413,9 +413,9 @@ struct VLINK_EXPORT RequestedIncompatibleQos final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing incompatible QoS detection counts.
+   * @return @c "RequestedIncompatibleQos".
    */
   [[nodiscard]] std::string get_string() const override;
 
@@ -451,9 +451,9 @@ struct VLINK_EXPORT SampleLost final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns a human-readable summary of this status.
+   * @brief Returns the status name string.
    *
-   * @return String describing sample loss counts.
+   * @return @c "SampleLost".
    */
   [[nodiscard]] std::string get_string() const override;
 

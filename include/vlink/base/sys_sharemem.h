@@ -50,8 +50,8 @@
  * @note
  * - POSIX shared-memory names must start with '/' (e.g., @c "/vlink_cam0").
  *   On Windows any non-empty name is valid.
- * - Shared memory is @b not initialised to zero by @c create().  The caller
- *   must initialise the region before use.
+ * - A newly created region is provided by the OS mapping backend and is zero-filled
+ *   on the supported POSIX/Windows implementations.
  * - Concurrent access from multiple processes requires external synchronisation
  *   (e.g., @c SysSemaphore or a mutex in the shared region itself).
  * - @c size() returns 0 when not attached.
@@ -117,8 +117,8 @@ class VLINK_EXPORT SysSharemem final {
    * @brief Creates a new named shared memory region of the given size and maps it.
    *
    * @details
-   * Fails if a region with the same name already exists.
-   * The region is @b not zero-initialised.
+   * Fails if a region with the same name already exists.  The supported
+   * POSIX/Windows backends provide a zero-filled new region.
    *
    * @param name  OS name for the shared memory object (POSIX: must start with '/').
    * @param size  Size of the region in bytes.

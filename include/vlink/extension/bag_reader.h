@@ -32,7 +32,7 @@
  *
  * Playback features:
  * - Configurable playback rate (e.g., @c rate=2.0 for 2x speed).
- * - Loop playback via the @c times field (@c kInfinite = -1 for endless loop).
+ * - Loop playback via the @c times field (@c times <= 0 for endless loop; @c kInfinite = -1).
  * - Time-range filtering via @c begin_time and @c end_time.
  * - Jump-to-timestamp seeking with optional forced play.
  * - Per-URL output filtering via @c Config::filter_urls whitelist.
@@ -182,10 +182,10 @@ class VLINK_EXPORT BagReader : public MessageLoop {
   struct Config final {
     int64_t begin_time{0};                        ///< Playback start timestamp (ms).  0 = from beginning.
     int64_t end_time{0};                          ///< Playback end timestamp (ms).  0 = until end.
-    int times{1};                                 ///< Number of loops.  @c kInfinite (-1) = loop forever.
+    int times{1};                                 ///< Number of loops.  Values <= 0 loop forever.
     double rate{1.0};                             ///< Playback rate multiplier.  1.0 = real time.
     bool skip_blank{false};                       ///< If @c true, skip silent gaps between messages.
-    int64_t force_delay{-1};                      ///< Override inter-message delay (ms).  -1 = use timestamps.
+    int64_t force_delay{-1};                      ///< >0 fixed delay (ms), 0 no delay, <0 use timestamps.
     bool auto_pause{false};                       ///< If @c true, pause automatically at each message.
     bool auto_quit{false};                        ///< If @c true, quit the loop thread when playback ends.
     std::unordered_set<std::string> filter_urls;  ///< Final playback URL whitelist.  Empty = all URLs.
@@ -235,7 +235,8 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    *
    * @param path        Path to the bag file.
    * @param read_only   If @c true, open in read-only mode (no write operations).
-   * @param try_to_fix  If @c true, attempt to repair a corrupt bag on open.
+   * @param try_to_fix  If @c true, allows backend-specific recovery while opening
+   *                    (SQLite repair paths when available; MCAP fallback summary scan).
    * @return Shared pointer to the new reader.
    */
   [[nodiscard]] static std::shared_ptr<BagReader> create(const std::string& path, bool read_only = true,
@@ -246,7 +247,7 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    *
    * @param path        Path to the bag file.
    * @param read_only   Open in read-only mode.
-   * @param try_to_fix  Attempt repair if the file is corrupt.
+   * @param try_to_fix  Allows backend-specific recovery while opening.
    */
   explicit BagReader(const std::string& path, bool read_only = true, bool try_to_fix = false);
 
@@ -352,14 +353,14 @@ class VLINK_EXPORT BagReader : public MessageLoop {
   virtual std::future<bool> check() = 0;
 
   /**
-   * @brief Rebuilds the index tables asynchronously.
+   * @brief Rebuilds the index tables asynchronously when supported by the backend.
    *
    * @return @c std::future<bool> that resolves to @c true on success.
    */
   virtual std::future<bool> reindex() = 0;
 
   /**
-   * @brief Repairs a corrupt bag file asynchronously.
+   * @brief Repairs a corrupt bag file asynchronously when supported by the backend.
    *
    * @param rebuild  If @c true, rebuilds the entire index from scratch.
    * @return @c std::future<bool> that resolves to @c true if repair succeeded.
@@ -381,9 +382,9 @@ class VLINK_EXPORT BagReader : public MessageLoop {
   [[nodiscard]] virtual int64_t get_timestamp() const = 0;
 
   /**
-   * @brief Returns the current playback position in real elapsed time.
+   * @brief Returns the last actual playback timestamp reached by delivered data.
    *
-   * @return Elapsed time since playback started (milliseconds).
+   * @return Last data timestamp in milliseconds relative to the recording start, or 0 when stopped.
    */
   [[nodiscard]] virtual int64_t get_real_timestamp() const = 0;
 

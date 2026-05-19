@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_bytes_zerocopy
-./examples/base/bytes_zerocopy/example_bytes_zerocopy
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_bytes_zerocopy
+./build/output/bin/example_bytes_zerocopy
 ```
 
 ## 4. 核心概念

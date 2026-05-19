@@ -23,7 +23,7 @@
 ## 3. 构建与运行
 
 ```bash
-cmake -B build -S . -DENABLE_EXAMPLES=ON -DENABLE_WHOLE_EXAMPLES=ON -DENABLE_SECURITY=ON
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
 cmake --build build --target example_security_custom
 ./build/output/bin/example_security_custom
 ```

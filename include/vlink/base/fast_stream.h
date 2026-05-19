@@ -39,8 +39,8 @@
  *   into the underlying buffer, suitable for pre-formatted C-strings.
  * - Default capacity is 256 bytes; the buffer grows by doubling until it
  *   exceeds 8 KiB (@c kMaxExpandSize), after which growth is linear in
- *   @c kMaxExpandSize-sized increments.  @c shrink_to_fit() can reclaim
- *   excess memory after an unusually long message.
+ *   @c kMaxExpandSize-sized increments.  @c shrink_to_fit() trims the
+ *   vector's implementation capacity to its current backing size.
  *
  * @note
  * - @c FastStream is @b not thread-safe.  Each thread should own its own instance,
@@ -143,11 +143,11 @@ class VLINK_EXPORT FastStream : public std::ostream {
   [[nodiscard]] size_t capacity() const noexcept;
 
   /**
-   * @brief Releases any excess capacity allocated by the internal buffer.
+   * @brief Trims the internal vector capacity to the current backing size.
    *
    * @details
-   * Useful after a particularly large log message to reclaim memory back to
-   * a sensible minimum (@c kMinCapacity = 64 bytes).
+   * This does not shrink to the current formatted message length; the backing
+   * size is kept and the write pointer is reset to the beginning.
    */
   void shrink_to_fit() noexcept;
 

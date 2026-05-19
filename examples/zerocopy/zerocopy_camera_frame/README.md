@@ -47,14 +47,14 @@
 ## 7. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_camera_producer example_camera_consumer
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_camera_producer example_camera_consumer
 
 # 终端 1：启动消费者
-./output/bin/example_camera_consumer
+./build/output/bin/example_camera_consumer
 
 # 终端 2：启动生产者
-./output/bin/example_camera_producer
+./build/output/bin/example_camera_producer
 ```
 
 ## 8. 关键 API

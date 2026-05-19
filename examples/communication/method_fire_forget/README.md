@@ -135,10 +135,9 @@ server.listen_for_reply([&server](uint64_t req_id, const Req& req) {
 ## 8. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_method_fire_forget
-./output/bin/example_method_fire_forget
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_method_fire_forget
+./build/output/bin/example_method_fire_forget
 ```
 
 ## 9. 预期输出

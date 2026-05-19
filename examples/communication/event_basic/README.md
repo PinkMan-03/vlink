@@ -146,10 +146,9 @@ loop.wait_for_quit();
 ## 6. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_event_basic
-./output/bin/example_event_basic
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_event_basic
+./build/output/bin/example_event_basic
 ```
 
 按 Ctrl+C 可以触发优雅关闭。

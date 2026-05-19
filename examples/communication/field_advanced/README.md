@@ -123,10 +123,9 @@ set({100, true})  --> 触发回调（字节不同）
 ## 6. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_field_advanced
-./output/bin/example_field_advanced
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_field_advanced
+./build/output/bin/example_field_advanced
 ```
 
 ## 7. 预期输出

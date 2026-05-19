@@ -44,7 +44,7 @@
  * | --------- | ------------------------------------------------------------------------- |
  * | @c topic  | CycloneDDS topic name; formed from @c host + @c "/" + @c path             |
  * | @c domain | DDS Domain ID (@c ?domain=, default from @c VLINK_DDS_DOMAIN env var)     |
- * | @c depth  | History depth for the endpoint (@c ?depth=, default 0)                    |
+ * | @c depth  | DDS history depth override; 0 keeps the selected QoS history depth         |
  * | @c qos    | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
  *
  * @par QoS Registration
@@ -86,7 +86,7 @@ namespace vlink {
 struct VLINK_EXPORT DdscConf final : public Conf {
   std::string topic;  ///< CycloneDDS topic name (host + "/" + path from URL).
   int32_t domain{0};  ///< DDS Domain Participant ID (non-negative).
-  int32_t depth{0};   ///< DDS history depth for the endpoint; 0 means transport default.
+  int32_t depth{0};   ///< DDS history depth override; 0 keeps the selected QoS history depth.
   std::string qos;    ///< Named QoS profile key registered via @c register_qos().
 
   /**
@@ -94,7 +94,7 @@ struct VLINK_EXPORT DdscConf final : public Conf {
    *
    * @param _topic   CycloneDDS topic name.
    * @param _domain  Domain ID; default 0.
-   * @param _depth   History depth; default 0.
+   * @param _depth   History depth override; default 0.
    * @param _qos     Named QoS profile key; empty by default.
    */
   explicit DdscConf(const std::string& _topic, int32_t _domain = 0, int32_t _depth = 0, const std::string& _qos = "");

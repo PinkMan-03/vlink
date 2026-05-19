@@ -47,7 +47,8 @@
  * -# Destruction automatically calls @c stop() and @c detach().
  *
  * @note
- * - A timer is automatically stopped when its @c MessageLoop is destroyed.
+ * - When its @c MessageLoop is destroyed, a timer is detached/cleared so it
+ *   can no longer fire on that loop; this does not call @c stop() on the timer.
  * - @c call_once() is a convenience factory for fire-and-forget one-shot timers.
  *
  * @par Example
@@ -92,16 +93,16 @@ class VLINK_EXPORT Timer final {
   static constexpr int kInfinite{-1};
 
   /**
-   * @brief Constructs a detached timer with no message loop, interval or callback.
+   * @brief Constructs a detached timer with the default interval and no callback.
    *
    * @details
-   * Must be configured with @c attach(), @c set_interval() and @c set_callback()
-   * before @c start() can be called.
+   * Must be configured with @c attach() and @c set_callback() before @c start()
+   * can fire.  The initial interval is 1000 ms.
    */
   explicit Timer();
 
   /**
-   * @brief Constructs a timer attached to @p message_loop with no interval or callback yet.
+   * @brief Constructs a timer attached to @p message_loop with the default interval and no callback.
    *
    * @param message_loop  The @c MessageLoop to deliver callbacks on.
    */
@@ -146,7 +147,8 @@ class VLINK_EXPORT Timer final {
    * @param message_loop  The @c MessageLoop to deliver the callback on.
    * @param interval_ms   Delay in milliseconds.
    * @param callback      Callback to invoke once.
-   * @param priority      Priority of the timer task (default: 0).
+   * @param priority      Priority of the timer task.  0 keeps the default timer
+   *                      priority; positive values override it.
    * @return @c true if the timer was successfully posted.
    */
   static bool call_once(class MessageLoop* message_loop, uint32_t interval_ms, Callback&& callback,
@@ -192,9 +194,9 @@ class VLINK_EXPORT Timer final {
   [[nodiscard]] int32_t get_remain_loop_count() const;
 
   /**
-   * @brief Returns the total number of times the callback has been invoked since @c start().
+   * @brief Returns the number of timer ticks scheduled since the last start/restart.
    *
-   * @return Cumulative invocation count.
+   * @return Processed tick count, reset by @c stop() and finite-timer completion.
    */
   [[nodiscard]] uint64_t get_invoke_count() const;
 
@@ -228,10 +230,11 @@ class VLINK_EXPORT Timer final {
   bool attach(class MessageLoop* message_loop);
 
   /**
-   * @brief Detaches the timer from its @c MessageLoop without stopping it.
+   * @brief Stops the timer and detaches it from its @c MessageLoop.
    *
    * @details
-   * After detaching the timer stops firing.  It can be re-attached to a different loop.
+   * After detaching the timer is inactive and can be re-attached to a different loop.
+   * This explicit @c detach() path calls @c stop() before removing the timer.
    *
    * @return @c true on success.
    */
@@ -280,7 +283,8 @@ class VLINK_EXPORT Timer final {
    * @brief Changes the tick interval.
    *
    * @details
-   * Takes effect on the next @c start() or @c restart() call.
+   * Takes effect immediately for an active timer: the processed tick count is
+   * recalculated against the existing start time and the loop is woken.
    * When set to zero, the internal tick interval falls back to @c kMinInterval (10000 ns = 10 us).
    *
    * @param interval_ms  New interval in milliseconds.

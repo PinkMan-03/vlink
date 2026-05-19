@@ -185,8 +185,9 @@ if (result.get()) {
 ## 10. 编译和运行
 
 ```bash
-cmake --build . --target example_record_bag_reader
-./output/bin/example_record_bag_reader
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_record_bag_reader
+./build/output/bin/example_record_bag_reader
 ```
 
 ## 11. 注意事项

@@ -61,9 +61,9 @@ pub.interrupt();  // 唤醒挂起的阻塞等待
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_lifecycle
-./output/bin/example_lifecycle
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_lifecycle
+./build/output/bin/example_lifecycle
 ```
 
 ## 5. 推荐生命周期模式

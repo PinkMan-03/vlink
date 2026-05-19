@@ -295,11 +295,10 @@ target_link_libraries(example_plugin_create vlink::all)
 ## 8. 编译与运行
 
 ```bash
-cd build
-cmake .. -DENABLE_WHOLE_EXAMPLES=ON
-make example_plugin_create calculator_plugin
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_plugin_create calculator_plugin
 
-./output/bin/example_plugin_create
+./build/output/bin/example_plugin_create
 ```
 
 预期输出：

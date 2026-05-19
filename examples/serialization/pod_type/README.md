@@ -78,9 +78,9 @@ Serializer::deserialize(buf, restored); // 从 buf 中拷贝 8 字节回来
 ## 4. 构建与运行
 
 ```bash
-cd build
-cmake .. && make example_pod_type
-./output/bin/example_pod_type
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_pod_type
+./build/output/bin/example_pod_type
 ```
 
 ## 5. 文件结构

@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_schedule
-./examples/base/schedule/example_schedule
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_schedule
+./build/output/bin/example_schedule
 ```
 
 ## 4. 核心概念

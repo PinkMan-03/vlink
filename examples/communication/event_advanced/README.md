@@ -117,10 +117,9 @@ pub.publish(SensorReading{id=1, value=10.1})
 ## 6. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_event_advanced
-./output/bin/example_event_advanced
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_event_advanced example_event_advanced_subscriber example_event_advanced_publisher
+./build/output/bin/example_event_advanced
 ```
 
 ## 7. 预期输出
@@ -163,10 +162,10 @@ make example_event_advanced
 
 ```bash
 # 终端 1: 启动 Subscriber
-./output/bin/example_event_advanced_subscriber
+./build/output/bin/example_event_advanced_subscriber
 
 # 终端 2: 启动 Publisher
-./output/bin/example_event_advanced_publisher
+./build/output/bin/example_event_advanced_publisher
 ```
 
 ## 9. 扩展思考

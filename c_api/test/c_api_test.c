@@ -87,6 +87,74 @@ int test_pub_sub(void) {
   return ret + ret2;
 }
 
+typedef struct {
+  const char* expected;
+  int got;
+} expected_msg_ctx_t;
+
+void on_expected_msg(const uint8_t* data, const size_t size, void* user_data) {
+  expected_msg_ctx_t* ctx = (expected_msg_ctx_t*)user_data;
+
+  if (!ctx || !ctx->expected || !data) {
+    return;
+  }
+
+  if (size == strlen(ctx->expected) && memcmp(data, ctx->expected, size) == 0) {
+    ctx->got = 0;
+  }
+}
+
+int test_intra_queue_publish_buffer_reuse(void) {
+  printf("test_intra_queue_publish_buffer_reuse...\n");
+  fflush(stdout);
+
+  int ret = 0;
+  const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
+  expected_msg_ctx_t ctx = {"queue_original", 1};
+
+  vlink_subscriber_handle_t sub_handle = {0};
+  int rc = vlink_create_subscriber("intra://c_interface/buffer_reuse#queue", &schema, &sub_handle, on_expected_msg,
+                                   &ctx);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create intra queue subscriber rc=%d\n", rc);
+    return 1;
+  }
+
+  vlink_publisher_handle_t pub_handle = {0};
+  rc = vlink_create_publisher("intra://c_interface/buffer_reuse#queue", &schema, &pub_handle);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create intra queue publisher rc=%d\n", rc);
+    vlink_destroy_subscriber(&sub_handle);
+    return 1;
+  }
+
+  vlink_wait_for_subscribers(pub_handle, 1000);
+
+  uint8_t msg[] = "queue_original";
+  rc = vlink_publish(pub_handle, msg, strlen((const char*)msg));
+  memset(msg, 'X', sizeof(msg));
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: intra queue publish rc=%d\n", rc);
+    ret = 1;
+  }
+
+  for (int i = 0; i < 50 && ctx.got != 0; ++i) {
+    custom_sleep(20);
+  }
+
+  if (ctx.got != 0) {
+    printf("FAIL: intra queue publish did not preserve payload after caller buffer reuse\n");
+    ret = 1;
+  } else {
+    printf("PASS: intra queue publish preserves payload after caller buffer reuse\n");
+  }
+
+  vlink_destroy_publisher(&pub_handle);
+  vlink_destroy_subscriber(&sub_handle);
+
+  return ret;
+}
+
 // method
 
 void on_server_msg(const uint8_t* req_data, const size_t req_size, void* user_data) {
@@ -497,6 +565,144 @@ int test_security_callback_pubsub(void) {
   return ret;
 }
 
+typedef struct {
+  vlink_server_handle_t* handle;
+  const char* expected_req;
+  const char* response;
+  int saw_request;
+  int reply_rc;
+} relocated_server_ctx_t;
+
+static void on_relocated_server_req(const uint8_t* data, const size_t size, void* user_data) {
+  relocated_server_ctx_t* ctx = (relocated_server_ctx_t*)user_data;
+
+  if (!ctx || !ctx->handle || !ctx->expected_req || !ctx->response) {
+    return;
+  }
+
+  if (data && size == strlen(ctx->expected_req) && memcmp(data, ctx->expected_req, size) == 0) {
+    ctx->saw_request = 1;
+  }
+
+  ctx->reply_rc = vlink_reply(ctx->handle, (const uint8_t*)ctx->response, strlen(ctx->response));
+}
+
+int test_security_handle_storage_relocation(void) {
+  printf("test_security_handle_storage_relocation...\n");
+  fflush(stdout);
+
+  int ret = 0;
+  const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
+
+  vlink_security_config_t cfg;
+  vlink_security_config_init(&cfg);
+  cfg.key = "secure_relocated_handle_key";
+
+  expected_msg_ctx_t sub_ctx = {"relocated_event", 1};
+  vlink_subscriber_handle_t* tmp_sub = (vlink_subscriber_handle_t*)malloc(sizeof(*tmp_sub));
+  if (!tmp_sub) {
+    printf("FAIL: malloc tmp_sub\n");
+    return 1;
+  }
+  memset(tmp_sub, 0, sizeof(*tmp_sub));
+
+  int rc = vlink_create_secure_subscriber("dds://c_interface/secure_relocated_event", &schema, tmp_sub,
+                                          on_expected_msg, &sub_ctx, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create relocated secure subscriber rc=%d\n", rc);
+    free(tmp_sub);
+    return 1;
+  }
+
+  vlink_subscriber_handle_t sub = *tmp_sub;
+  memset(tmp_sub, 0, sizeof(*tmp_sub));
+
+  vlink_publisher_handle_t pub = {0};
+  rc = vlink_create_secure_publisher("dds://c_interface/secure_relocated_event", &schema, &pub, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create relocated secure publisher rc=%d\n", rc);
+    vlink_destroy_subscriber(&sub);
+    free(tmp_sub);
+    return 1;
+  }
+
+  vlink_wait_for_subscribers(pub, 5000);
+  rc = vlink_publish(pub, (const uint8_t*)sub_ctx.expected, strlen(sub_ctx.expected));
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: relocated secure publish rc=%d\n", rc);
+    ret = 1;
+  }
+
+  for (int i = 0; i < 50 && sub_ctx.got != 0; ++i) {
+    custom_sleep(100);
+  }
+
+  if (sub_ctx.got != 0) {
+    printf("FAIL: relocated secure subscriber did not receive message\n");
+    ret = 1;
+  }
+
+  vlink_destroy_publisher(&pub);
+  vlink_destroy_subscriber(&sub);
+  free(tmp_sub);
+
+  vlink_server_handle_t* tmp_server = (vlink_server_handle_t*)malloc(sizeof(*tmp_server));
+  if (!tmp_server) {
+    printf("FAIL: malloc tmp_server\n");
+    return ret + 1;
+  }
+  memset(tmp_server, 0, sizeof(*tmp_server));
+
+  vlink_server_handle_t server = {0};
+  relocated_server_ctx_t server_ctx = {&server, "relocated_req", "relocated_resp", 0, VLINK_RET_UNKNOWN_ERROR};
+  rc = vlink_create_secure_server("intra://c_interface/secure_relocated_rpc#queue", &schema, tmp_server,
+                                  on_relocated_server_req, &server_ctx, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create relocated secure server rc=%d\n", rc);
+    free(tmp_server);
+    return ret + 1;
+  }
+
+  server = *tmp_server;
+  memset(tmp_server, 0, sizeof(*tmp_server));
+
+  expected_msg_ctx_t resp_ctx = {"relocated_resp", 1};
+  vlink_client_handle_t client = {0};
+  rc = vlink_create_secure_client("intra://c_interface/secure_relocated_rpc#queue", &schema, &client, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create relocated secure client rc=%d\n", rc);
+    vlink_destroy_server(&server);
+    free(tmp_server);
+    return ret + 1;
+  }
+
+  vlink_wait_for_server(client, 2000);
+  rc = vlink_invoke(client, (const uint8_t*)server_ctx.expected_req, strlen(server_ctx.expected_req), on_expected_msg,
+                    &resp_ctx);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: relocated secure invoke rc=%d\n", rc);
+    ret = 1;
+  }
+
+  for (int i = 0; i < 50 && resp_ctx.got != 0; ++i) {
+    custom_sleep(20);
+  }
+
+  if (!server_ctx.saw_request || server_ctx.reply_rc != VLINK_RET_NO_ERROR || resp_ctx.got != 0) {
+    printf("FAIL: relocated secure RPC saw_request=%d reply_rc=%d got=%d\n", server_ctx.saw_request,
+           server_ctx.reply_rc, resp_ctx.got);
+    ret = 1;
+  } else {
+    printf("PASS: secure callbacks survive handle storage relocation\n");
+  }
+
+  vlink_destroy_client(&client);
+  vlink_destroy_server(&server);
+  free(tmp_server);
+
+  return ret;
+}
+
 int test_security_getter_poll_reuses_cached_plaintext(void) {
   printf("test_security_getter_poll_reuses_cached_plaintext...\n");
   fflush(stdout);
@@ -750,10 +956,40 @@ int test_ssl_options_init(void) {
   vlink_ssl_options_init(NULL);
   printf("PASS: vlink_ssl_options_init(NULL) is a no-op\n");
 
+  opt.ca_file = "ca.pem";
+
+  const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
+  vlink_publisher_handle_t pub = {0};
+  int rc = vlink_create_publisher_with_ssl_options("intra://c_interface/ssl_create", &schema, &pub, &opt);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create_publisher_with_ssl_options rc=%d\n", rc);
+    ret = 1;
+  } else {
+    printf("PASS: create-time ssl publisher succeeds\n");
+    vlink_destroy_publisher(&pub);
+  }
+
+  memset(&pub, 0, sizeof(pub));
+  rc = vlink_create_publisher("intra://c_interface/ssl_late_setter", &schema, &pub);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create publisher for late ssl setter rc=%d\n", rc);
+    ret = 1;
+  } else {
+    rc = vlink_publisher_set_ssl_options(&pub, &opt);
+    if (rc != VLINK_RET_RUNTIME_ERROR) {
+      printf("FAIL: late publisher ssl setter rc=%d expected %d\n", rc, VLINK_RET_RUNTIME_ERROR);
+      ret = 1;
+    } else {
+      printf("PASS: late ssl setter reports runtime error\n");
+    }
+    vlink_destroy_publisher(&pub);
+  }
+
   return ret;
 }
 
 int test_schema_type_mapping(void);
+int test_ssl_create_options_properties(void);
 
 int main(int argc, char* argv[]) {
   (void)argc;
@@ -762,6 +998,8 @@ int main(int argc, char* argv[]) {
   int ret = 1;
 
   ret = test_pub_sub();
+
+  ret += test_intra_queue_publish_buffer_reuse();
 
   ret += test_server_client();
 
@@ -776,9 +1014,11 @@ int main(int argc, char* argv[]) {
   ret += test_security_passphrase();
   ret += test_security_tamper();
   ret += test_security_callback_pubsub();
+  ret += test_security_handle_storage_relocation();
   ret += test_security_getter_poll_reuses_cached_plaintext();
   ret += test_security_empty_reply();
   ret += test_ssl_options_init();
+  ret += test_ssl_create_options_properties();
 #endif
 
   return ret;

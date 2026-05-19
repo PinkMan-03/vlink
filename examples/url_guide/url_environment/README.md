@@ -165,10 +165,9 @@ export VLINK_INTRA_BIND=1
 ## 5. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_url_environment
-./output/bin/example_url_environment
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_url_environment
+./build/output/bin/example_url_environment
 ```
 
 ## 6. 预期输出

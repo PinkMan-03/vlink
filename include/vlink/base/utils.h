@@ -117,7 +117,9 @@ namespace Utils {  // NOLINT(readability-identifier-naming)
  * @brief Returns the platform-specific temporary directory path.
  *
  * @details
- * Returns @c /tmp on Linux/macOS, @c %TEMP% on Windows, or the equivalent on other platforms.
+ * Returns @c VLINK_TMP_DIR when set; otherwise uses the platform temporary
+ * directory reported by @c std::filesystem::temp_directory_path() (or
+ * @c /var/log on QNX).
  *
  * @return Temporary directory path, or empty string on failure.
  */
@@ -201,7 +203,8 @@ VLINK_EXPORT bool unset_env(const std::string& key) noexcept;
  * @brief Checks that only one instance of the process is running (singleton guard).
  *
  * @details
- * Uses a lock file or named semaphore to ensure mutual exclusion.
+ * Uses a Win32 mutex or a POSIX lock file to ensure mutual exclusion.
+ * @c VLINK_LOCK_DIR can override the POSIX lock directory.
  * Returns @c false if another instance is already running.
  *
  * @param program_name  Program name used for the lock.  Defaults to the executable name.
@@ -350,7 +353,7 @@ VLINK_EXPORT void stop_detect_keyboard() noexcept;
 /**
  * @brief Returns the current terminal window dimensions.
  *
- * @return A pair @c {columns, rows}.  Returns @c {0, 0} on failure or if not a tty.
+ * @return A pair @c {columns, rows}.  Returns @c {-1, -1} on failure or if not a tty.
  */
 [[nodiscard]] VLINK_EXPORT std::pair<int, int> get_terminal_size() noexcept;
 
@@ -373,7 +376,7 @@ VLINK_EXPORT void stop_detect_keyboard() noexcept;
 [[nodiscard]] VLINK_EXPORT double get_cpu_usage() noexcept;
 
 /**
- * @brief Returns the resident set size (RSS) of the process as a percentage of total RAM.
+ * @brief Returns approximate system-wide memory usage as a percentage of total RAM.
  *
  * @return Memory usage percentage in the range [0.0, 100.0].
  */
@@ -388,12 +391,12 @@ VLINK_EXPORT void stop_detect_keyboard() noexcept;
 [[nodiscard]] VLINK_EXPORT bool is_process_running(const std::string& process_name) noexcept;
 
 /**
- * @brief Returns the local timezone offset from UTC in seconds.
+ * @brief Returns the local timezone offset from UTC in minutes.
  *
  * @details
- * For example, UTC+8 returns @c 28800, UTC-5 returns @c -18000.
+ * For example, UTC+8 returns @c 480, UTC-5 returns @c -300.
  *
- * @return Timezone offset in seconds.
+ * @return Timezone offset in minutes.
  */
 [[nodiscard]] VLINK_EXPORT int32_t get_timezone_diff() noexcept;
 

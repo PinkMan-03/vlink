@@ -435,7 +435,7 @@ try {
 
 ### 4.6.3 服务端错误处理
 
-Server 的回调可以通过不填充 `resp`（或填充错误码）来表达处理失败：
+Server 回调不会自动识别“未填充 `resp`”这一状态；回调返回后实现会按当前 `resp` 内容序列化并回复。因此失败语义需要显式编码到 `Resp` 中（例如错误码、状态字段或空 payload 约定）：
 
 ```cpp
 Server<Req, Resp> server("dds://my_service");

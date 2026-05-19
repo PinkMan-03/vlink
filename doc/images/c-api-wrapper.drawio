@@ -8,7 +8,7 @@
         <mxCell id="title" value="VLink C API Wrapper Architecture" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="920" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="sub" value="External FFI &#8594; C API &#8594; C++ core templates (Bytes-based)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="sub" value="External FFI &#8594; C API &#8594; C++ core templates (Bytes-based), plus Security / SSL helpers" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="54" width="920" height="22" as="geometry" />
         </mxCell>
 
@@ -47,7 +47,7 @@
         <mxCell id="L2t" value="VLink C API &#183; c_api.h" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=15;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
           <mxGeometry x="60" y="216" width="400" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="L2h" value="Six primitives &#183; data-plane only" style="text;html=1;align=right;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
+        <mxCell id="L2h" value="Six primitives &#183; Security / SSL helper APIs" style="text;html=1;align=right;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
           <mxGeometry x="480" y="218" width="460" height="22" as="geometry" />
         </mxCell>
 

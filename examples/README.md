@@ -8,7 +8,7 @@
 
 ## 1. 目录总览
 
-本示例集共包含 **14 个分类目录**、**89 个独立示例工程**，其中 87 个默认参与构建（`samples/dds_idl` 在父级 `examples/samples/CMakeLists.txt:21` 注释禁用，`serialization/intra_data` 在父级 `examples/serialization/CMakeLists.txt:25` 注释禁用，需手动取消注释才会被加入构建）。
+本示例集共包含 **14 个分类目录**、**89 个独立示例工程**。启用 `ENABLE_EXAMPLES=ON` 且保持 `ENABLE_WHOLE_EXAMPLES=OFF` 时，仅构建 `samples/` 中当前启用的综合示例；再启用 `ENABLE_WHOLE_EXAMPLES=ON` 时会覆盖其余分类。`samples/dds_idl` 在父级 `examples/samples/CMakeLists.txt:21` 注释禁用，需手动取消注释并准备 FastDDS IDL 工具链才会被加入构建。
 
 | 目录 | 说明 | 工程数 | 前置知识 |
 |------|------|--------|----------|
@@ -307,14 +307,21 @@ c_api/ --> plugin/ --> node_features/
 # 从 VLink 项目根目录构建（推荐方式，自动检测已安装的依赖）
 cd /work/vlink
 
-# 配置 Release 构建
-cmake -DCMAKE_BUILD_TYPE=Release -B build -S .
+# 配置 Release 构建，并启用全量 examples
+cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_EXAMPLES=ON -DENABLE_WHOLE_EXAMPLES=ON -B build -S .
 
 # 编译所有示例（缺少依赖的示例会自动跳过，不会报错）
 cmake --build build -j$(nproc)
 
 # 编译产物位于
-ls build/output/bin/example_*
+ls build/output/bin/example_* build/output/bin/sample_*
+```
+
+如果系统中已安装过其他版本的 VLink，运行源码树 `build/output/bin` 下的示例前请先使用当前 build 的库路径，避免加载到 `/usr/local/lib` 中的旧库：
+
+```bash
+export LD_LIBRARY_PATH=$PWD/build/output/lib:$LD_LIBRARY_PATH
+# 或 source build/output/vlink-setup.sh
 ```
 
 > **提示**：每个 `samples/` 子工程的 CMakeLists.txt 都包含依赖检测逻辑。例如 `shm_raw` 会检测 `vlink::shm` 目标是否存在，不存在则打印 `Skip example_shm_raw.` 并跳过，不会导致构建失败。
@@ -324,9 +331,8 @@ ls build/output/bin/example_*
 ```bash
 # 如果 VLink 已安装到系统路径或自定义路径
 cd /work/vlink/examples
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径> -DCMAKE_BUILD_TYPE=Release
-cmake --build . -j$(nproc)
+cmake -B build -S . -DCMAKE_PREFIX_PATH=<vlink安装路径> -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 ```
 
 ### 4.3 构建特定示例
@@ -334,26 +340,24 @@ cmake --build . -j$(nproc)
 ```bash
 # 直接构建单个示例工程
 cd /work/vlink/examples/samples/helloworld
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径>
-cmake --build .
+cmake -B build -S . -DCMAKE_PREFIX_PATH=<vlink安装路径>
+cmake --build build
 ```
 
 ### 4.4 控制构建范围
 
-在 `examples/CMakeLists.txt` 中，通过注释/取消注释 `add_subdirectory()` 来控制构建哪些分类：
+顶层构建通过两个选项控制范围：`ENABLE_EXAMPLES=ON` 启用示例构建；`ENABLE_WHOLE_EXAMPLES=ON` 在默认 `samples/` 之外继续启用其余 13 个分类。若只想调整 `samples/` 内部的专项示例，可在 `examples/samples/CMakeLists.txt` 中注释/取消注释对应 `add_subdirectory()`：
 
 ```cmake
-# Transport-specific examples (require specific backends)
-add_subdirectory(samples/helloworld)
-add_subdirectory(samples/dds_dynamic)
-# add_subdirectory(samples/dds_idl)    # 默认注释 -- 需 FastDDS IDL 工具链
-add_subdirectory(samples/ddsc_proto)
-add_subdirectory(samples/pub_sub_fbs)
-add_subdirectory(samples/someip_flat)
-add_subdirectory(samples/shm_raw)
-add_subdirectory(samples/fdbus_proto)
-add_subdirectory(samples/ping_pong)
+add_subdirectory(helloworld)
+add_subdirectory(dds_dynamic)
+# add_subdirectory(dds_idl)    # 默认注释 -- 需 FastDDS IDL 工具链
+add_subdirectory(ddsc_proto)
+add_subdirectory(pub_sub_fbs)
+add_subdirectory(someip_flat)
+add_subdirectory(shm_raw)
+add_subdirectory(fdbus_proto)
+add_subdirectory(ping_pong)
 ```
 
 注意 `dds_idl` 默认被注释掉，因为它需要 FastDDS 的 `fastddsgen` IDL 代码生成工具链，需手动启用。
@@ -453,7 +457,7 @@ EVENT_URL="someip://0x01/0x02?groups=0x1&event=0x2" \
 |------|------|
 | 分类目录总数 | 14 |
 | 示例工程总数 | 89 |
-| 已实现工程数 | 87（`samples/dds_idl` 在 `samples/CMakeLists.txt:21` 注释禁用，需手动启用 FastDDS IDL 工具链；`serialization/intra_data` 在 `serialization/CMakeLists.txt:25` 注释禁用，需启用 Protobuf + intra:// 后端） |
+| 全量构建覆盖工程数 | 88（`samples/dds_idl` 在 `samples/CMakeLists.txt:21` 注释禁用，需手动启用 FastDDS IDL 工具链） |
 | 源文件数量 | 99 个 .cc + 4 个 .c + 33 个 .h + 4 个 .proto + 2 个 .fbs + 1 个 .idl |
 | 覆盖传输协议 | intra, shm, shm2, dds, ddsc, ddsr, ddst, zenoh, someip, mqtt, fdbus, qnx（共 12 种 transport，部分依赖编译选项） |
 | 覆盖序列化格式 | Protobuf, FlatBuffers, DDS IDL (CDR), Bytes, DynamicData |

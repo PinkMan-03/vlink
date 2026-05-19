@@ -26,9 +26,10 @@
  * @brief Named, cross-process counting semaphore backed by the OS IPC layer.
  *
  * @details
- * @c SysSemaphore wraps a named POSIX semaphore (on Linux/macOS) or a named
- * Win32 semaphore to allow synchronisation between independent processes
- * (or between processes and drivers) via a shared name in the OS namespace.
+ * @c SysSemaphore wraps a named POSIX semaphore on Linux-like POSIX targets,
+ * a named Win32 semaphore on Windows, or an in-process dispatch semaphore on
+ * macOS.  Cross-process synchronisation via a shared OS name is available on
+ * the named backends, not on the macOS dispatch backend.
  *
  * Lifecycle:
  * -# Construct the @c SysSemaphore object.
@@ -42,11 +43,11 @@
  * - The initial count passed to the constructor is only used when the
  *   semaphore is @b created by @c attach().  If the semaphore already exists
  *   in the OS namespace the constructor count is ignored and the existing
- *   value is used.
- * - Unlike @c Semaphore, this class may throw on @c attach() failures
- *   (e.g., permission denied, namespace exhausted).
- * - Semaphore names on POSIX must start with '/' (e.g., @c "/vlink_ready").
- *   On Windows any non-empty string is accepted.
+ *   value is used.  On macOS, @c attach() creates an unnamed in-process
+ *   dispatch semaphore and ignores the name.
+ * - @c attach() reports creation/open failures by returning @c false.
+ * - Semaphore names on Linux-like POSIX backends must start with '/'
+ *   (e.g., @c "/vlink_ready").  On Windows any non-empty string is accepted.
  *
  * @par Example
  * @code
@@ -78,7 +79,8 @@ namespace vlink {
  *
  * @details
  * Backed by the OS named-semaphore API (POSIX @c sem_open or Win32
- * @c CreateSemaphore) to support synchronisation across process boundaries.
+ * @c CreateSemaphore) where available.  The macOS backend uses an in-process
+ * dispatch semaphore.
  */
 class VLINK_EXPORT SysSemaphore final {
  public:
@@ -110,9 +112,11 @@ class VLINK_EXPORT SysSemaphore final {
    * @details
    * If a semaphore with @p name already exists in the OS namespace, it is
    * opened and the constructor-provided initial count is ignored.  If it does
-   * not exist it is created with that count.
+   * not exist it is created with that count.  On macOS the name is ignored and
+   * a new in-process dispatch semaphore is created.
    *
-   * @param name  OS semaphore name (POSIX: must start with '/').
+   * @param name  OS semaphore name (Linux-like POSIX: must start with '/';
+   *              ignored on macOS).
    * @return @c true on success, @c false if the semaphore could not be created
    *         or opened.
    */
@@ -126,7 +130,8 @@ class VLINK_EXPORT SysSemaphore final {
    * After @c detach(), @c is_attached() returns @c false.
    *
    * @param force  If @c true, the semaphore is unlinked from the OS namespace
-   *               (other processes lose access).  Default: @c true.
+   *               on named POSIX backends.  Ignored on Windows/macOS.
+   *               Default: @c true.
    * @return @c true on success, @c false if not attached or unlink failed.
    */
   bool detach(bool force = true);

@@ -16,8 +16,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_message_loop_basic
-./examples/base/message_loop_basic/example_message_loop_basic
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_message_loop_basic
+./build/output/bin/example_message_loop_basic
 ```
 
 ## 4. 事件循环概念

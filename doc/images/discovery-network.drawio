@@ -62,7 +62,7 @@
         <mxCell id="bus_t" value="UDP Multicast Bus  ·  239.255.0.100 : 51694" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="40" y="268" width="640" height="24" as="geometry" />
         </mxCell>
-        <mxCell id="bus_sub" value="online · heartbeat · offline broadcasts" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#bf360c;" vertex="1" parent="1">
+        <mxCell id="bus_sub" value="online / heartbeat broadcasts; offline packet only with VLINK_DISCOVERY_OFFLINE=1" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#bf360c;" vertex="1" parent="1">
           <mxGeometry x="40" y="296" width="640" height="22" as="geometry" />
         </mxCell>
 
@@ -110,7 +110,7 @@
           <mxGeometry x="364" y="432" width="138" height="42" as="geometry" />
         </mxCell>
 
-        <mxCell id="footer" value="Every DiscoveryReporter both publishes and listens; viewers are passive subscribers." style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="footer" value="DiscoveryReporters publish heartbeats; DiscoveryViewers subscribe and prune stale entries by timeout." style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="510" width="640" height="22" as="geometry" />
         </mxCell>
 

@@ -132,7 +132,7 @@ ProxyAPI 客户端通过心跳检测连接状态。若连续 **5 秒** 未收到
 | `buf_size`             | `uint32_t`              | `0`      | DDS socket 收发缓冲区大小（字节），0 使用内置默认值（8MB）   |
 | `mtu_size`             | `uint32_t`              | `0`      | DDS 分片 MTU 大小（字节），0 使用内置默认值（65500 字节）    |
 | `max_packet_size`      | `double`                | `0`      | 单条消息最大转发大小（MiB），超出则丢弃。**注意**：当前实现不存在"0 表示不限制"的特判，字段为 `0` 时实际会把所有非空消息都丢弃；要放行大包必须显式设置一个足够大的 MiB 值（CLI 默认 4.0，头文件注释与实现不符，以此处描述为准） |
-| `security_key`         | `std::string`           | `""`     | Time/InfoList/Control 通道的对称密钥。**必须非空**——这三条通道使用 `SecurityPublisher`/`SecuritySubscriber`，运行时不再有公共 `enable_security()` 入口，`Security::Config::key` 只能通过构造函数传入。空字符串会让 `NodeImpl::security` 保持空，控制面消息被 drop（启动时打印 `VLOG_W`）。客户端与服务端的 `security_key` 必须一致。 |
+| `security_key`         | `std::string`           | `""`     | Time/InfoList/Control 通道的对称密钥。**必须非空**——这三条通道使用 `SecurityPublisher`/`SecuritySubscriber`，运行时不再有公共 `enable_security()` 入口，`Security::Config::key` 只能通过构造函数传入。空字符串会让 `NodeImpl::security` 保持空，控制面节点初始化时会 fatal 并抛 `RuntimeError`。客户端与服务端的 `security_key` 必须一致。 |
 | `bind_ip`              | `std::string`           | `""`     | DDS socket 绑定的本地 IP，空字符串表示绑定所有接口           |
 | `peer_ip`              | `std::string`           | `""`     | DDS 单播对端 IP，空字符串使用多播发现                        |
 | `dds_impl`             | `std::string`           | `"dds"`  | DDS 实现选择：如 `"dds"`（FastDDS）、`"ddsc"`（CycloneDDS）、`"ddsr"`、`"ddst"` |

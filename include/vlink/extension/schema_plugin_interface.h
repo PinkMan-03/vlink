@@ -138,7 +138,7 @@ class SchemaPluginInterface {
    * @param name         Serialization type / message type name.
    * @param schema_type  Coarse schema family hint, or @c SchemaType::kUnknown for
    *                     family-agnostic lookup.
-   * @return Matching @c SchemaData, or an empty schema when not found.
+   * @return Matching @c SchemaData, or an empty/name-only schema when not found.
    */
   [[nodiscard]] virtual SchemaData search_schema(const std::string& name,
                                                  SchemaType schema_type = SchemaType::kUnknown) = 0;
@@ -164,7 +164,7 @@ class SchemaPluginInterface {
   [[nodiscard]] virtual ProtobufDescriptorPtr search_protobuf_descriptor(const std::string& name) = 0;
 
   /**
-   * @brief Creates a Protobuf dynamic message prototype for the named type.
+   * @brief Creates or returns a cached Protobuf dynamic message instance for the named type.
    *
    * @details
    * For non-Protobuf types this returns @c nullptr.

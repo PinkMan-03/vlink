@@ -589,12 +589,19 @@ bool DatabaseWriter::push_schema(const SchemaData& schema_data, bool immediate) 
     stored_schema.data.deep_copy(schema_data.data);
   }
 
+  if VUNLIKELY (stored_schema.data.size() != schema_data.data.size() ||
+                (stored_schema.data.size() > 0  // NOLINT(readability-container-size-empty)
+                 && !stored_schema.data.data())) {
+    CLOG_E("DatabaseWriter: Failed to create an owned copy for async schema data.");
+    return false;
+  }
+
   if (immediate) {
     std::lock_guard lock(impl_->write_mtx);
     return merge_schema(stored_schema);
   }
 
-  post_task([this, stored_schema]() mutable {
+  bool posted = post_task([this, stored_schema = std::move(stored_schema)]() mutable {
     std::lock_guard lock(impl_->write_mtx);
     if VUNLIKELY (!merge_schema(stored_schema)) {
       CLOG_E("DatabaseWriter: Deferred merge_schema failed for [%s] in async push_schema path.",
@@ -602,7 +609,7 @@ bool DatabaseWriter::push_schema(const SchemaData& schema_data, bool immediate) 
     }
   });
 
-  return true;
+  return posted;
 }
 
 int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type, SchemaType schema_type,
@@ -639,13 +646,18 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
 
     Bytes queued_data = data;
 
-    if VUNLIKELY (!queued_data.is_owner()) {
-      queued_data.deep_copy(data);
+    // NOLINTNEXTLINE(readability-container-size-empty)
+    if VUNLIKELY (queued_data.size() != data.size() || (queued_data.size() > 0 && !queued_data.data())) {
+      CLOG_E("DatabaseWriter: Failed to create an owned copy for async write.");
+      return -1;
     }
 
-    impl_->memory_size += queued_data.size();
+    const auto queued_size = queued_data.size();
 
-    post_task([this, url_index, ser_index, schema_type, action_type, queued_data, target_timestamp]() {
+    impl_->memory_size += queued_size;
+
+    bool posted = post_task([this, url_index, ser_index, schema_type, action_type, queued_data = std::move(queued_data),
+                             queued_size, target_timestamp]() {
       std::string url;
       std::string ser_type;
 
@@ -654,8 +666,13 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
 
       write(url, ser_type, schema_type, action_type, queued_data, target_timestamp);
 
-      impl_->memory_size -= queued_data.size();
+      impl_->memory_size -= queued_size;
     });
+
+    if VUNLIKELY (!posted) {
+      impl_->memory_size -= queued_size;
+      return -1;
+    }
   }
 
   return target_timestamp;

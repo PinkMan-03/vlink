@@ -37,7 +37,8 @@
  * - Per-impl callback maps for all six callback types (server-connect, sub-connect,
  *   req/resp, msg, intra-msg, status).
  * - Traversal helpers that iterate over all registered callbacks while holding
- *   a @c std::recursive_mutex, with early-exit support via @c ignore_called().
+ *   a @c std::recursive_mutex, with @c has_called() accounting that can ignore
+ *   selected callbacks via @c ignore_called().
  *
  * @par AbstractFactory<FilterT>
  * A map-based factory keyed on @c FilterT (typically @c std::string topic name)
@@ -265,6 +266,13 @@ class AbstractObject : public AbstractNode {
   [[nodiscard]] bool msg_map_is_empty() const;
 
   /**
+   * @brief Returns @c true if no in-process message callbacks are registered.
+   *
+   * @return @c true when the intra-message callback map is empty.
+   */
+  [[nodiscard]] bool intra_msg_map_is_empty() const;
+
+  /**
    * @brief Returns @c true if no status callbacks are registered.
    *
    * @return @c true when the status callback map is empty.
@@ -277,8 +285,9 @@ class AbstractObject : public AbstractNode {
    * @details
    * Iterates over all entries in the server-connect map while holding the mutex.
    * The visitor receives the @c NodeImpl* and the stored @c ConnectCallback.
-   * Iteration can be short-circuited by calling @c ignore_called() inside the
-   * visitor.
+   * A visitor can call @c ignore_called() to keep that particular callback from
+   * setting the @c has_called() flag; traversal still continues for remaining
+   * callbacks.
    *
    * @param callback  Visitor called as @c callback(impl, stored_callback) for each entry.
    */
@@ -530,6 +539,12 @@ template <typename FilterT>
 inline bool AbstractObject<FilterT>::msg_map_is_empty() const {
   std::lock_guard lock(this->mtx_);
   return msg_callback_map_.empty();
+}
+
+template <typename FilterT>
+inline bool AbstractObject<FilterT>::intra_msg_map_is_empty() const {
+  std::lock_guard lock(this->mtx_);
+  return intra_msg_callback_map_.empty();
 }
 
 template <typename FilterT>

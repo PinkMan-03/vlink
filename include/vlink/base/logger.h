@@ -255,8 +255,8 @@ class VLINK_EXPORT Logger final {
    * @brief Registers a custom handler for console log output.
    *
    * @details
-   * When set, the provided callback is invoked instead of (or in addition to) the
-   * built-in console sink.  Replaces any previously registered console handler.
+   * When set, the provided callback is invoked instead of the built-in console
+   * sink.  Replaces any previously registered console handler.
    *
    * @param callback  Handler called with (level, message_view) for each log record.
    */
@@ -266,8 +266,8 @@ class VLINK_EXPORT Logger final {
    * @brief Registers a custom handler for file log output.
    *
    * @details
-   * When set, the provided callback is invoked instead of (or in addition to) the
-   * built-in file sink.  Replaces any previously registered file handler.
+   * When set, the provided callback is invoked instead of the built-in file
+   * sink.  Replaces any previously registered file handler.
    *
    * @param callback  Handler called with (level, message_view) for each log record.
    */

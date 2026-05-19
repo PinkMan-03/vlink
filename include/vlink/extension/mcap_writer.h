@@ -27,7 +27,9 @@
  *
  * @details
  * @c McapWriter records VLink messages to the MCAP format (@c .vcap / @c .vcapx extension).
- * It inherits all configuration, compression, and split capabilities from @c BagWriter.
+ * It inherits the shared writer configuration and split support from @c BagWriter.
+ * Compression is Zstd-based for @c kCompressAuto / @c kCompressZstd when Zstd support
+ * is compiled in; other compression selectors are treated as no compression.
  *
  * MCAP files can be opened by the Foxglove Studio visualisation tool and other
  * MCAP-compatible readers.  The file is finalised with an index footer on clean shutdown.
@@ -109,8 +111,8 @@ class VLINK_EXPORT McapWriter final : public BagWriter {
    * @param schema_type            Coarse schema family for the payload.
    * @param action_type            Action type (@c kPublish, @c kRequest, etc.).
    * @param data                   Serialized payload bytes.
-   * @param microseconds_timestamp Optional custom timestamp in microseconds.
-   *                               @c nullptr means use the current system time.
+   * @param microseconds_timestamp Optional recording-relative timestamp in microseconds.
+   *                               @c nullptr means use the writer's elapsed timer.
    * @param immediate              If @c true, writes synchronously bypassing the queue.
    * @return Message timestamp in microseconds, or a negative value on error.
    */
@@ -118,7 +120,7 @@ class VLINK_EXPORT McapWriter final : public BagWriter {
                const Bytes& data, int64_t* microseconds_timestamp = nullptr, bool immediate = false) override;
 
   /**
-   * @brief Returns @c true if the writer is actively recording to disk.
+   * @brief Returns the current value of the internal dumping flag.
    */
   [[nodiscard]] bool is_dumping() const override;
 
@@ -136,7 +138,7 @@ class VLINK_EXPORT McapWriter final : public BagWriter {
    * @brief Sets the expected message loss ratio for a given URL.
    *
    * @param url   Topic URL.
-   * @param loss  Loss ratio in the range [0.0, 1.0].
+   * @param loss  Loss ratio.  Values greater than 1.0 are stored as -1.
    */
   void set_url_loss(const std::string& url, double loss) override;
 

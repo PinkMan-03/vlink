@@ -1236,12 +1236,15 @@ void ProxyServer::update_all() {
             if (impl_->config.async) {
               Bytes queued_bytes = bytes;
 
-              if VUNLIKELY (!queued_bytes.is_owner()) {
-                queued_bytes.deep_copy(bytes);
+              // NOLINTNEXTLINE(readability-container-size-empty)
+              if VUNLIKELY (queued_bytes.size() != bytes.size() || (queued_bytes.size() > 0 && !queued_bytes.data())) {
+                VLOG_E("ProxyServer: Failed to create an owned copy for async forwarding.");
+                return;
               }
 
-              post_task([this, control_id = impl_->control_id.load(), mode = impl_->mode.load(),
-                         elapsed = impl_->main_elapsed.get(), seq = current_seq, url, ser, schema, queued_bytes]() {
+              auto forward_task = [this, control_id = impl_->control_id.load(), mode = impl_->mode.load(),
+                                   elapsed = impl_->main_elapsed.get(), seq = current_seq, url, ser, schema,
+                                   queued_bytes = std::move(queued_bytes)]() {
 #if VLINK_PROXY_ENABLE_ZEROCOPY_DATA
                 zerocopy::ProxyData t_data;
                 t_data.set_control_id(control_id);
@@ -1266,7 +1269,12 @@ void ProxyServer::update_all() {
 
                 impl_->data_pub->publish(data, true);
 #endif
-              });
+              };
+
+              if VUNLIKELY (!post_task(std::move(forward_task))) {
+                VLOG_E("ProxyServer: Failed to post async forwarding task.");
+                return;
+              }
             } else {
 #if VLINK_PROXY_ENABLE_ZEROCOPY_DATA
               zerocopy::ProxyData t_data;

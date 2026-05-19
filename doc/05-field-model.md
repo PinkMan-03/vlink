@@ -7,9 +7,9 @@
 - [5.1 概念介绍](#51-概念介绍)
 - [5.2 与 Event 模型的区别](#52-与-event-模型的区别)
 - [5.3 适用场景](#53-适用场景)
-- [5.4 Setter\<T\> 完整 API](#54-settert-完整-api)
-- [5.5 Getter\<T\> 完整 API](#55-gettert-完整-api)
-- [5.6 std::optional\<T\> 返回值说明](#56-stdoptionalt-返回值说明)
+- [5.4 Setter\<T\> 完整 API](#54-setter-完整-api)
+- [5.5 Getter\<T\> 完整 API](#55-getter-完整-api)
+- [5.6 std::optional\<T\> 返回值说明](#56-stdoptional-返回值说明)
 - [5.7 完整使用示例](#57-完整使用示例)
 - [5.8 多 Getter 读取同一 Setter](#58-多-getter-读取同一-setter)
 - [5.9 安全模式](#59-安全模式)
@@ -28,7 +28,7 @@
 **核心特性：**
 
 - **最新值缓存**：Setter 每次调用 `set()` 都会将新值存入内部缓存，并广播给所有已连接的 Getter。
-- **迟到 Getter 自动同步**：当一个 Getter 在 Setter 已经写值后才连接时，传输层会触发 `sync()` 回调，Setter 自动将缓存值重新发送给新连接的 Getter，使其立即获得当前状态。
+- **迟到 Getter 同步（后端相关）**：Setter 会注册 `sync()` 回调；支持该机制的传输后端在新 Getter 连接后可触发缓存值重发。部分后端的 `sync()` 当前是空实现，不能假设所有传输都自动补发最新值。
 - **轮询或监听两种读取方式**：Getter 支持 `get()`（主动轮询）和 `listen()`（被动回调）两种读取方式，也支持阻塞等待 `wait_for_value()`。
 - **变化过滤**：Getter 支持 `set_change_reporting(true)`，当新值与上次相同时（原始字节比较），不触发回调，降低 CPU 占用。
 
@@ -38,7 +38,7 @@
 
 三种通信模型的对比请参阅 [Event 模型](03-event-model.md) 第 1 节。
 
-字段模型与事件模型的核心区别在于：字段模型维护**最新值缓存**，迟到的 Getter 通过 sync 机制可立即获得当前值；而事件模型不保留历史消息，迟到的 Subscriber 会错过已发布的消息。
+字段模型与事件模型的核心区别在于：字段模型在 Setter 侧维护**最新值缓存**，支持 sync 的后端可在 Getter 连接后触发当前值重发；不支持或空实现 sync 的后端不会自动补发。事件模型默认不保留历史消息，迟到的 Subscriber 会错过已发布的消息，除非所选后端与 QoS 额外提供历史缓存。
 
 ---
 
@@ -176,7 +176,7 @@ void set(const ValueT& value);
 3. 在锁外把值序列化为 `Bytes`（若启用安全，再对序列化结果加密）。
 4. 通过传输层写入，通知所有已连接的 Getter。
 
-当新 Getter 连接时，传输层触发 `sync()` 回调，Setter 重新发送缓存的 `value_`，确保新连接者立即获得当前值。
+当新 Getter 连接时，若传输后端实现了 `sync()` 触发路径，Setter 会重新发送缓存的 `value_`。DDS、DDSR、DDSC、DDST、SOME/IP 等后端当前的 `sync()` 是空实现，迟到 Getter 需要依赖后续 `set()` 或主动 `get()`。
 
 ### 5.4.7 角色切换方法
 
@@ -540,7 +540,7 @@ int main() {
 
 ## 5.8 多 Getter 读取同一 Setter
 
-字段模型天然支持 **N:N 拓扑**：同一 URL 可以有多个 Setter 和多个 Getter；最常见的形态是一个 Setter 对应多个 Getter。无论 Getter 何时连接，都能通过 sync 机制立即获得当前值：
+字段模型天然支持 **N:N 拓扑**：同一 URL 可以有多个 Setter 和多个 Getter；最常见的形态是一个 Setter 对应多个 Getter。支持 `sync()` 的后端可在 Getter 连接后补发当前值；不支持该触发路径的后端需要等待下一次 `set()` 或由 Getter 主动读取：
 
 ```cpp
 #include <vlink/vlink.h>
@@ -555,13 +555,13 @@ int main() {
     Setter<double> temp_setter("dds://sensor/temperature");
     temp_setter.set(25.6);
 
-    // 3 个 Getter 在不同时刻连接，均能立即获得当前值
+    // 3 个 Getter 在不同时刻连接；是否能读到已写入值取决于后端的历史/同步能力
     auto start_getter = [](int id) {
         std::this_thread::sleep_for(std::chrono::milliseconds(id * 100));
 
         Getter<double> getter("dds://sensor/temperature");
 
-        // 无需等待，sync 机制使新连接 Getter 立即收到缓存值
+        // DDS 默认 Field QoS 会尽量保留最新值；仍建议显式等待并处理超时
         if (getter.wait_for_value(1000ms)) {
             auto v = getter.get();
             VLOG_I("Getter", id, "收到温度:", v.value_or(-1.0));
@@ -624,9 +624,9 @@ SecurityGetter<MyMsg> getter("dds://secure/field", cfg);
 | `get()` 开销       | 一次互斥锁 + 值拷贝；大型消息频繁轮询时注意拷贝开销                      |
 | `listen()` 开销    | 回调在传输线程执行，避免在回调中做耗时阻塞操作                           |
 | `set_change_reporting` | 启用后增加每次到达时的字节级比较开销，但可大幅减少回调触发次数       |
-| 迟到 Getter 同步   | sync 重发一次缓存值，开销等同于一次普通 `set()` 调用                     |
+| 迟到 Getter 同步   | 后端实现 `sync()` 时会重发一次缓存值，开销等同于一次普通 `set()` 调用；空实现后端不会自动补发 |
 | 内存               | Getter 内部 `value_` 为 `std::optional<ValueT>`，生命期内始终持有最新值  |
-| 线程安全           | `get()`、`set()`、`listen()` 均线程安全（内部互斥锁保护）                |
+| 线程安全           | `get()` / `set()` 的值访问由互斥锁保护；`listen()` 会更新回调指针和监听状态，避免与并发重配回调交错调用 |
 
 **性能建议：**
 

@@ -250,8 +250,8 @@ class VLINK_EXPORT MemoryPool final {
    *
    * @param bytes      Requested size.
    * @param alignment  Required alignment (power of two).  Defaults to
-   *                   @c kBlockAlignment; non-power-of-two is UB per
-   *                   [new.delete.general].
+   *                   @c kBlockAlignment; non-power-of-two values are logged
+   *                   and cause this function to return @c nullptr.
    * @return Pointer to allocated memory, or @c nullptr if upstream
    *         allocation failed.
    */
@@ -262,7 +262,8 @@ class VLINK_EXPORT MemoryPool final {
    *
    * @param p          Pointer returned by @c allocate.  @c nullptr is a no-op.
    * @param bytes      Original size passed to @c allocate -- MUST match.
-   * @param alignment  Original alignment passed to @c allocate.
+   * @param alignment  Original alignment passed to @c allocate.  Non-power-of-two
+   *                   values are logged and ignored; @p p is not freed.
    */
   void deallocate(void* p, size_t bytes, size_t alignment = kBlockAlignment) noexcept;
 

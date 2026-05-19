@@ -26,8 +26,9 @@
  * @brief Concrete BagReader implementation for the MCAP bag file format.
  *
  * @details
- * @c McapReader reads bag files in the MCAP format (@c .vcap / @c .vcapx extension) and inherits all
- * playback, seeking, and integrity-check capabilities from @c BagReader.
+ * @c McapReader reads bag files in the MCAP format (@c .vcap / @c .vcapx extension) and implements
+ * playback, seeking, and integrity checking.  Reindex and fix operations are not supported for MCAP
+ * and complete with @c false.
  *
  * MCAP (Message Capture Archive Protocol) is a modular, indexed binary format designed
  * for efficient random-access playback.  It supports channel-level schemas, checksums,
@@ -75,7 +76,7 @@ class VLINK_EXPORT McapReader final : public BagReader {
    *
    * @param path        Path to the @c .vcap / @c .vcapx file.
    * @param read_only   Open in read-only mode.
-   * @param try_to_fix  Attempt repair if the file is corrupt.
+   * @param try_to_fix  If @c true, allows a fallback summary scan when the indexed summary is unreadable.
    */
   explicit McapReader(const std::string& path, bool read_only = true, bool try_to_fix = false);
 
@@ -164,22 +165,25 @@ class VLINK_EXPORT McapReader final : public BagReader {
   std::future<bool> check() override;
 
   /**
-   * @brief Rebuilds the index tables asynchronously.
+   * @brief Attempts to rebuild indexes asynchronously.
    *
-   * @return @c std::future<bool> that resolves to @c true on success.
+   * @return @c std::future<bool> that resolves to @c false because MCAP reindex is unsupported.
    */
   std::future<bool> reindex() override;
 
   /**
-   * @brief Repairs a corrupt MCAP file asynchronously.
+   * @brief Attempts to repair a corrupt MCAP file asynchronously.
    *
-   * @param rebuild  If @c true, rebuilds the entire index from scratch.
-   * @return @c std::future<bool> that resolves to @c true if repair succeeded.
+   * @param rebuild  Ignored.
+   * @return @c std::future<bool> that resolves to @c false because MCAP fix is unsupported.
    */
   std::future<bool> fix(bool rebuild = false) override;
 
   /**
-   * @brief Updates the tag name stored in the bag metadata.
+   * @brief Updates the tag name stored in split-bag metadata.
+   *
+   * @details
+   * Only @c .vcapx metadata is updated.  Single @c .vcap files log a warning and are unchanged.
    *
    * @param tag_name  New tag name string.
    */
@@ -193,9 +197,9 @@ class VLINK_EXPORT McapReader final : public BagReader {
   [[nodiscard]] int64_t get_timestamp() const override;
 
   /**
-   * @brief Returns the real elapsed wall-clock time since playback started.
+   * @brief Returns the last actual playback timestamp reached by delivered data.
    *
-   * @return Elapsed wall-clock time in milliseconds.
+   * @return Last data timestamp in milliseconds relative to the recording start, or 0 when stopped.
    */
   [[nodiscard]] int64_t get_real_timestamp() const override;
 

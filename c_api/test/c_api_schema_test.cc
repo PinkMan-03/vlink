@@ -68,3 +68,48 @@ extern "C" int test_schema_type_mapping(void) {
 
   return ret;
 }
+
+extern "C" int test_ssl_create_options_properties(void) {
+  std::printf("test_ssl_create_options_properties...\n");
+  std::fflush(stdout);
+
+  int ret = 0;
+  const vlink_schema_info_t schema_info = {"text", VLINK_SCHEMA_RAW};
+
+  vlink_ssl_options_t opt;
+  vlink_ssl_options_init(&opt);
+  opt.verify_peer = 0;
+  opt.ca_file = "ca.pem";
+  opt.cert_file = "cert.pem";
+  opt.key_file = "key.pem";
+  opt.key_password = "secret";
+  opt.server_name = "mqtt.example.test";
+  opt.ciphers = "TLS_AES_128_GCM_SHA256";
+
+  vlink_publisher_handle_t pub_handle{};
+  int rc =
+      vlink_create_publisher_with_ssl_options("intra://c_interface/ssl_properties", &schema_info, &pub_handle, &opt);
+  if (rc != VLINK_RET_NO_ERROR) {
+    std::printf("FAIL: create_publisher_with_ssl_options rc=%d\n", rc);
+    return 1;
+  }
+
+  auto* publisher = static_cast<vlink::Publisher<vlink::Bytes>*>(pub_handle.native_handle);
+
+  if (publisher == nullptr || publisher->get_property("ssl.verify") != "0" ||
+      publisher->get_property("ssl.ca") != "ca.pem" || publisher->get_property("ssl.cert") != "cert.pem" ||
+      publisher->get_property("ssl.key") != "key.pem" || publisher->get_property("ssl.key_password") != "secret" ||
+      publisher->get_property("ssl.server_name") != "mqtt.example.test" ||
+      publisher->get_property("ssl.ciphers") != "TLS_AES_128_GCM_SHA256") {
+    std::printf("FAIL: create-time ssl properties were not applied before init\n");
+    ret = 1;
+  } else {
+    std::printf("PASS: create-time ssl properties are applied before init\n");
+  }
+
+  if (pub_handle.native_handle != nullptr) {
+    ret += vlink_destroy_publisher(&pub_handle);
+  }
+
+  return ret;
+}

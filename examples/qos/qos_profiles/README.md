@@ -45,9 +45,9 @@ export VLINK_QOS_CONFIG=/path/to/qos_config.json
 ## 5. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_qos_profiles
-./output/bin/example_qos_profiles
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_qos_profiles
+./build/output/bin/example_qos_profiles
 ```
 
 ## 6. 选择指南

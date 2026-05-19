@@ -22,9 +22,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake -S . -B build -DENABLE_CXX_STD_20=ON
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
 cmake --build build --target example_message_loop_coroutine
-./build/examples/base/message_loop_coroutine/example_message_loop_coroutine
+./build/output/bin/example_message_loop_coroutine
 ```
 
 ## 4. 整体架构

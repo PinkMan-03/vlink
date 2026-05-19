@@ -17,8 +17,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_graph_task
-./examples/base/graph_task/example_graph_task
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_graph_task
+./build/output/bin/example_graph_task
 ```
 
 ## 4. DAG 概念

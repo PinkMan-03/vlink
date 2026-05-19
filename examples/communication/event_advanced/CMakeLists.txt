@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 3.15...3.31)
 
 project(example_event_advanced LANGUAGES CXX)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/example_standalone.cmake")
+
 include(GNUInstallDirs)
 
 if(NOT TARGET vlink::vlink)

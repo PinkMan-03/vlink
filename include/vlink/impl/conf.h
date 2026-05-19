@@ -32,7 +32,7 @@
  *
  * -# A @c Url object parses the transport from the URL string and constructs
  *    the corresponding @c Conf subclass.
- * -# When a @c Publisher<T> / @c Subscriber<T> / etc. calls @c init(), the
+ * -# During @c Publisher<T> / @c Subscriber<T> / etc. construction, the
  *    node template calls @c Conf::parse(impl_type) followed by
  *    @c Conf::create_publisher() / @c create_subscriber() / etc. to obtain a
  *    transport-specific @c NodeImpl instance.
@@ -141,7 +141,7 @@ struct VLINK_EXPORT Conf {
    */
   [[nodiscard]] virtual TransportType get_transport_type() const;
 
-  uint32_t hash_code{0};  ///< Hash of the URL string; used for fast URL lookup in caches.
+  uint32_t hash_code{0};  ///< Transport-specific channel/topic hash set by concrete implementations.
 
  protected:
   Conf();

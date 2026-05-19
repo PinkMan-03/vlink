@@ -19,7 +19,7 @@
         <mxCell id="L1bar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ef6c00;strokeColor=none;arcSize=30;" vertex="1" parent="1">
           <mxGeometry x="40" y="98" width="820" height="6" as="geometry" />
         </mxCell>
-        <mxCell id="L1t" value="Layer 1 &#160;&#183;&#160; Transport Zero-Copy (shm / shm2 backend)" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=15;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
+        <mxCell id="L1t" value="Layer 1 &#160;&#183;&#160; Transport Zero-Copy (shm / shm2 / zenoh SHM)" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=15;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="60" y="114" width="500" height="26" as="geometry" />
         </mxCell>
         <mxCell id="L1badge" value="Publisher and Subscriber share the same physical memory region" style="text;html=1;align=right;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#ef6c00;" vertex="1" parent="1">

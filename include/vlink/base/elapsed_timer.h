@@ -36,7 +36,7 @@
  * @par Clock source (Method)
  * | Value              | Clock source                        | Notes                              |
  * | ------------------ | ----------------------------------- | ---------------------------------- |
- * | kCpuTimestamp      | CLOCK_MONOTONIC_RAW / steady_clock  | Monotonic wall time, never jumps   |
+ * | kCpuTimestamp      | steady_clock (instances)            | Monotonic wall time, never jumps   |
  * | kCpuActiveTime     | getrusage / GetProcessTimes         | CPU user+kernel time consumed      |
  *
  * @par Precision (Accuracy)
@@ -54,8 +54,9 @@
  *   calls from different threads lead to a data race on the "is started" semantic.
  * - On Linux, @c get_sys_timestamp() uses @c CLOCK_REALTIME via @c clock_gettime for
  *   nanosecond resolution; on Windows it falls back to @c std::chrono::system_clock.
- * - @c get_cpu_timestamp() uses @c CLOCK_MONOTONIC_RAW on Linux (immune to NTP
- *   adjustments) and @c std::chrono::steady_clock on other platforms.
+ * - Instance timing uses @c std::chrono::steady_clock for @c kCpuTimestamp.
+ *   The static @c get_cpu_timestamp(..., true) helper may use
+ *   @c CLOCK_MONOTONIC_RAW on Linux for a high-resolution monotonic timestamp.
  *
  * @par Example
  * @code
@@ -96,7 +97,7 @@ class VLINK_EXPORT ElapsedTimer final {
    * @brief Selects the underlying clock source for time measurement.
    */
   enum Method : uint8_t {
-    kCpuTimestamp = 0,  ///< Monotonic wall-clock (CLOCK_MONOTONIC_RAW on Linux)
+    kCpuTimestamp = 0,  ///< Monotonic wall-clock (steady_clock for instance timing)
     kCpuActiveTime = 1  ///< Process CPU time (user + kernel, via getrusage)
   };
 
@@ -252,9 +253,10 @@ class VLINK_EXPORT ElapsedTimer final {
    *        since the previous @c start() / @c restart() call.
    *
    * @details
-   * This is equivalent to @c get() followed by @c start(), but performed
-   * atomically using @c exchange.  If the timer was not active, returns a
-   * negative value (the raw @c start_time_ value, which is -1 when stopped).
+   * This reads the elapsed time and resets the start reference to now in one
+   * atomic exchange.  Unlike @c start(), it resets an already-active timer.
+   * If the timer was not active, returns a negative value (the raw
+   * @c start_time_ value, which is -1 when stopped) and starts timing from now.
    *
    * @return
    * - Elapsed time in the configured units since the last start/restart, or

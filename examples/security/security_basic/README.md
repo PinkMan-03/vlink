@@ -10,6 +10,8 @@
 4. 加密 `Bytes` 原始字节
 5. 安全加密的传输限制
 
+![Security Encryption Flow](images/security-encryption-flow.png)
+
 > ⚠️ **传输要求**：`intra://` 与 `dds://` CDR 类型**不**支持安全加密；可用 `shm://`、`shm2://`、`zenoh://`、`mqtt://`、`fdbus://` 等跨进程后端。
 
 ## 2. 文件说明
@@ -23,7 +25,7 @@
 ## 3. 构建与运行
 
 ```bash
-cmake -B build -S . -DENABLE_EXAMPLES=ON -DENABLE_WHOLE_EXAMPLES=ON -DENABLE_SECURITY=ON
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
 cmake --build build --target example_security_basic
 ./build/output/bin/example_security_basic
 ```

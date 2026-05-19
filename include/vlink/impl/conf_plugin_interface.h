@@ -33,9 +33,9 @@
  *
  * @par Plugin Discovery and Loading
  * When a @c Url is constructed and the built-in transport table does not recognise the
- * transport field in the URL, @c Url::load_for_plugin() iterates over all loaded plugins and calls
- * @c get_transport_type() on each to find a matching transport.  If found,
- * @c create() is called to obtain a fresh @c Conf instance for that transport.
+ * transport field in the URL, @c Url::load_for_plugin() looks up a plugin that
+ * registered the matching @c TransportType.  If found, @c create() is called to
+ * obtain a fresh @c Conf instance for that transport.
  *
  * @par Implementing a Plugin
  * @code

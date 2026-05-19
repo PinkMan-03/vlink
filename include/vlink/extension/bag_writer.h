@@ -32,7 +32,8 @@
  *
  * Key features:
  * - Asynchronous recording via the inherited @c MessageLoop queue.
- * - Pluggable compression: none, auto, Zstd, LZ4, LZAV.
+ * - Pluggable compression selectors: database bags currently use LZAV for @c kCompressAuto / @c kCompressLzav,
+ *   and MCAP bags use Zstd for @c kCompressAuto / @c kCompressZstd when Zstd support is compiled in.
  * - File splitting by size or by time, with optional time-stamped names.
  * - WAL (Write-Ahead Log) mode for crash resilience.
  * - Global singleton writer activated by the @c VLINK_BAG_PATH environment variable.
@@ -94,21 +95,21 @@ class SchemaPluginInterface;
 class VLINK_EXPORT BagWriter : public MessageLoop {
  public:
   /**
-   * @brief Compression algorithm applied to each recorded payload.
+   * @brief Compression selector applied by backends that support it.
    *
    * | Kind            | Algorithm    | Notes                                   |
    * | --------------- | ------------ | --------------------------------------- |
    * | kCompressNone   | No compress  | Raw bytes stored as-is                  |
-   * | kCompressAuto   | Auto select  | Picks best algorithm per payload        |
-   * | kCompressZstd   | Zstandard    | Good ratio, moderate speed              |
-   * | kCompressLz4    | LZ4          | Fast compression/decompression          |
-   * | kCompressLzav   | LZAV         | Fast, lightweight, built-in             |
+   * | kCompressAuto   | Auto select  | Uses the backend default codec          |
+   * | kCompressZstd   | Zstandard    | Used by MCAP when Zstd is available     |
+   * | kCompressLz4    | LZ4          | Reserved selector                       |
+   * | kCompressLzav   | LZAV         | Used by database bags                   |
    */
   enum CompressType : uint8_t {
     kCompressNone = 0,  ///< No compression.
     kCompressAuto = 1,  ///< Automatic algorithm selection.
     kCompressZstd = 2,  ///< Zstandard compression.
-    kCompressLz4 = 3,   ///< LZ4 compression.
+    kCompressLz4 = 3,   ///< Reserved selector; built-in writers do not currently use LZ4.
     kCompressLzav = 4,  ///< LZAV built-in compression.
   };
 
@@ -121,24 +122,24 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    */
   struct Config final {
     std::string tag_name;                                      ///< Optional tag name stored in the bag header.
-    CompressType compress{CompressType::kCompressNone};        ///< Compression algorithm.
+    CompressType compress{CompressType::kCompressNone};        ///< Compression selector.
     bool wal_mode{false};                                      ///< Enable SQLite WAL mode for crash resilience.
-    bool enable_limit{false};                                  ///< Enable max_row_count / max_bytes_size limits.
+    bool enable_limit{false};                                  ///< Database writer: delete oldest rows when limits hit.
     bool split_name_by_time{false};                            ///< Append timestamp to split file names.
-    bool sync_mode{false};                                     ///< Enable synchronous writes to disk.
+    bool sync_mode{false};                                     ///< Database writer: disable periodic cache flush timer.
     bool optimize_on_exit{false};                              ///< Run VACUUM/optimise on file close.
-    int64_t max_row_count{5'000'000'000LL};                    ///< Max rows before splitting (if enable_limit).
-    int64_t max_bytes_size{1024LL * 1024LL * 1024LL * 512LL};  ///< Max file bytes before splitting (if enable_limit).
+    int64_t max_row_count{5'000'000'000LL};                    ///< Database row limit; delete old rows or fail writes.
+    int64_t max_bytes_size{1024LL * 1024LL * 1024LL * 512LL};  ///< Database byte limit; delete old rows or fail writes.
     int64_t split_by_size{1024LL * 1024LL * 1024LL * 1LL};     ///< Split file when it reaches this size (bytes).
     int64_t split_by_time{0};                                  ///< Split file every N milliseconds.  0 = disabled.
-    int64_t begin_time{0};                                     ///< Recording start timestamp (ms).  0 = now.
-    int64_t cache_size{1024LL * 1024LL * 4};                   ///< SQLite page cache size (bytes).
-    int64_t compress_start_size{128};                          ///< Minimum payload size (bytes) to compress.
-    int64_t compress_level{3};                                 ///< Compression level (codec-specific).
-    int64_t max_task_depth{20000};                             ///< Max pending write tasks in the queue.
-    int64_t max_memory_size{1024LL * 1024LL * 1024LL * 2LL};   ///< Max in-memory cache size (bytes).
-    int64_t start_timestamp{0};                                ///< Override the bag start timestamp (ms since epoch).
-    std::unordered_set<std::string> ignore_compress_urls;      ///< URLs whose payloads are never compressed.
+    int64_t begin_time{0};                                     ///< Split-time baseline (ms) used with split_by_time.
+    int64_t cache_size{1024LL * 1024LL * 4};                  ///< Database commit threshold or MCAP chunk size (bytes).
+    int64_t compress_start_size{128};                         ///< Minimum payload size (bytes) to compress.
+    int64_t compress_level{3};                                ///< Compression level (codec-specific).
+    int64_t max_task_depth{20000};                            ///< Max pending write tasks in the queue.
+    int64_t max_memory_size{1024LL * 1024LL * 1024LL * 2LL};  ///< Max in-memory cache size (bytes).
+    int64_t start_timestamp{0};                               ///< Override the bag start timestamp (ms since epoch).
+    std::unordered_set<std::string> ignore_compress_urls;     ///< URLs whose payloads are never compressed.
 
     Config() {}  // NOLINT(modernize-use-equals-default)
   };
@@ -263,14 +264,14 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    *
    * @details
    * The message is enqueued on the recording loop and written asynchronously.
-   * If @p microseconds_timestamp is @c nullptr, the current system time is used.
+   * If @p microseconds_timestamp is @c nullptr, the writer's elapsed timer is used.
    *
    * @param url                    VLink URL of the topic (e.g., @c "dds://my/topic").
    * @param ser_type               Serialisation type string (e.g., @c "demo.proto.PointCloud", @c "raw").
    * @param schema_type            Coarse schema family for the payload.
    * @param action_type            Action type (@c kPublish, @c kRequest, etc.).
    * @param data                   Serialized payload bytes.
-   * @param microseconds_timestamp Optional pointer to a custom timestamp (microseconds).
+   * @param microseconds_timestamp Optional pointer to a custom recording-relative timestamp (microseconds).
    * @param immediate              If @c true, writes synchronously bypassing the queue.
    * @return Message timestamp in microseconds, or a negative value on error.
    */
@@ -279,9 +280,9 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
                        bool immediate = false) = 0;
 
   /**
-   * @brief Returns @c true if the writer is actively recording to disk.
+   * @brief Returns the backend dumping flag.
    *
-   * @return @c true if the backing file is open and being written.
+   * @return Current value of the concrete backend's dumping flag.
    */
   [[nodiscard]] virtual bool is_dumping() const = 0;
 
@@ -310,7 +311,7 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    * distinguish intentional drops from unexpected loss.
    *
    * @param url   Topic URL.
-   * @param loss  Loss ratio in the range [0.0, 1.0].
+   * @param loss  Loss ratio.  Values greater than 1.0 are stored as -1.
    */
   virtual void set_url_loss(const std::string& url, double loss) = 0;
 

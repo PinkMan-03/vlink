@@ -58,7 +58,7 @@
  * | Error                 | Value | Description                                       |
  * | --------------------- | ----- | ------------------------------------------------- |
  * | kNoError              |   0   | No error.                                         |
- * | kModeError            |   1   | Unsupported mode requested.                       |
+ * | kModeError            |   1   | Reserved legacy code for unsupported modes.       |
  * | kControlError         |   2   | Control ID mismatch with the server.              |
  * | kReliableCompError    |   3   | reliable setting mismatch between client/server.  |
  * | kTcpCompError         |   4   | enable_tcp setting mismatch.                      |
@@ -198,7 +198,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    */
   enum Error : uint8_t {
     kNoError = 0,            ///< No error; connection is healthy.
-    kModeError = 1,          ///< Unsupported mode requested.
+    kModeError = 1,          ///< Reserved legacy code; unsupported modes are ignored server-side.
     kControlError = 2,       ///< Server responded with a different control_id.
     kReliableCompError = 3,  ///< Client and server have mismatched reliable setting.
     kTcpCompError = 4,       ///< Client and server have mismatched enable_tcp setting.
@@ -314,7 +314,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
     SchemaType schema{SchemaType::kUnknown};  ///< Coarse schema family of the payload.
     Bytes raw;                                ///< Raw serialised message bytes.
     int64_t timestamp{-1};                    ///< Elapsed time in microseconds since session start; -1 if unset.
-    int64_t seq{0};                           ///< Publisher sequence number.
+    int64_t seq{0};                           ///< Proxy relay sequence number for the URL.
   };
 
   /**
@@ -381,7 +381,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @details
    * Fired for every message forwarded by the server in observe, record, or
-   * play mode.  The @c Data::raw bytes are shallow-borrowed; copy if you need
+   * auto modes.  The @c Data::raw bytes are shallow-borrowed; copy if you need
    * to retain them beyond the callback.
    */
   using DataCallback = MoveFunction<void(const Data& data)>;
@@ -405,8 +405,8 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @details
    * Quits the inherited @c MessageLoop (if it is running), waits for it to stop,
-   * and then releases DDS/SHM handles.  Destruction does not publish an extra
-   * @c kOffline control message.
+   * and then releases DDS/SHM handles.  For controller instances, normal
+   * MessageLoop shutdown publishes @c kOffline from @c on_end().
    */
   ~ProxyAPI() override;
 
@@ -481,10 +481,11 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * accepted.  When @c async is @c false it is executed synchronously on the
    * calling thread and the return value reports the actual publish result.
    *
-   * Every entry in @c control.url_meta_list must provide both @c ser and a
-   * known @c schema value.  Proxy no longer back-fills missing routing
-   * metadata from discovery caches because that would hide broken
-   * schema-propagation paths.
+   * Entries in @c control.url_meta_list are encoded with their supplied
+   * @c ser and @c schema values.  Proxy no longer back-fills missing routing
+   * metadata from discovery caches: entries with an empty @c ser or unknown
+   * @c schema are ignored by the direct map synchronisation path and cannot
+   * create usable server-side routes.
    *
    * If @c direct mode is configured, corresponding SHM publishers are created
    * or destroyed to match publisher entries in @c url_meta_list.  Direct
@@ -563,7 +564,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @details
    * Populated from the server's @c Time heartbeat.  Returns an empty string
-   * before the first heartbeat is received.
+   * before the first heartbeat is received or after disconnection.
    *
    * @return Machine ID string, or empty if not yet connected.
    */
@@ -649,7 +650,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @details
    * Populated from the first valid heartbeat.  Returns an empty string before
-   * connection or after disconnection.
+   * connection or after handle reset.
    *
    * @return Server VLink version string, e.g. @c "2.0.0".
    */

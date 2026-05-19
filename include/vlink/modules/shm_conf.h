@@ -37,7 +37,7 @@
  *
  * @par URL Format
  * @code
- *   shm://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<0|1>]
+ *   shm://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<ms>]
  * @endcode
  *
  * | Component  | Description                                                          |
@@ -45,9 +45,9 @@
  * | @c address | Service/topic name; formed from @c host + @c "/" + @c path           |
  * | @c event   | Optional secondary event name (@c ?event=)                           |
  * | @c domain  | Iceoryx domain ID (@c ?domain=, default 0)                           |
- * | @c depth   | History buffer depth (@c ?depth=, default 0)                         |
- * | @c history | History count (@c ?history=); default 0 for pub/sub, 1 for field     |
- * | @c wait    | Blocking-wait mode for pub/sub (@c ?wait=1); not valid for RPC/field |
+ * | @c depth   | Queue capacity override (@c ?depth=, default 0 uses backend default) |
+ * | @c history | History count (@c ?history=); URL default 0, or 1 for field nodes    |
+ * | @c wait    | Blocking-wait timeout in ms for pub/sub; not valid for RPC/field     |
  *
  * @par RouDi Lifecycle
  * RouDi is the Iceoryx memory manager daemon.  It can be started externally
@@ -93,9 +93,9 @@ struct VLINK_EXPORT ShmConf final : public Conf {
   std::string address;  ///< Service/topic address (host + "/" + path from URL); max 80 characters.
   std::string event;    ///< Optional secondary event name; max 80 characters.
   int32_t domain{0};    ///< Iceoryx domain identifier (non-negative).
-  int32_t depth{0};     ///< History buffer depth; 0 means no buffering.
-  int32_t history{0};   ///< History count; defaults to 0 for pub/sub and 1 for setter/getter.
-  int32_t wait{0};      ///< Non-zero enables blocking-wait mode (pub/sub only).
+  int32_t depth{0};     ///< Queue capacity override; 0 means use the backend default.
+  int32_t history{0};   ///< History count; URL parsing defaults to 0, or 1 for setter/getter.
+  int32_t wait{0};      ///< Blocking-wait timeout in ms; positive values enable pub/sub wait mode.
 
   /**
    * @brief Constructs a @c ShmConf with explicit parameters.
@@ -103,9 +103,9 @@ struct VLINK_EXPORT ShmConf final : public Conf {
    * @param _address  Service/topic address string; max 80 characters.
    * @param _event    Optional event name; max 80 characters; empty by default.
    * @param _domain   Domain identifier; default 0.
-   * @param _depth    Buffer depth; default 0.
+   * @param _depth    Queue capacity override; default 0.
    * @param _history  History count; default 0.
-   * @param _wait     Blocking-wait flag; default 0 (disabled).
+   * @param _wait     Blocking-wait timeout in ms; default 0 (disabled).
    */
   explicit ShmConf(const std::string& _address, const std::string& _event = "", int32_t _domain = 0, int32_t _depth = 0,
                    int32_t _history = 0, int32_t _wait = 0);
@@ -177,12 +177,13 @@ struct VLINK_EXPORT ShmConf final : public Conf {
    * @brief One-line preflight: ensure RouDi is available for @c shm:// nodes.
    *
    * @details
-   * POSIX: starts an in-process RouDi if none is running. Windows: returns
-   * @c false when no external RouDi is detected (in-process RouDi is not
-   * supported there). Result is cached across calls.
+   * POSIX: starts an in-process RouDi if none is running. Windows: when no
+   * external RouDi is detected, returns @c false only if @p same_process_from_roudi
+   * is @c true; otherwise it initializes the runtime without starting RouDi.
+   * Result is cached across calls.
    *
-   * @note Does NOT register @c init_runtime(); that happens lazily on first
-   *       node creation.
+   * @note Calls @c init_runtime() during this preflight and deinitializes it
+   *       when the cached manager is destroyed.
    *
    * @param same_process_from_roudi  @c true when the RouDi runs in the same
    *                                 process (see @c init_roudi()).
@@ -212,8 +213,9 @@ struct VLINK_EXPORT ShmConf final : public Conf {
    *
    * @details
    * Must be called once before creating any @c shm:// nodes when connecting
-   * to an external RouDi.  The @p name must be unique across all processes
-   * connecting to the same RouDi instance and must not exceed 80 characters.
+   * to an external RouDi.  The @p name should be unique across all processes
+   * connecting to the same RouDi instance; Iceoryx truncates it to the runtime
+   * name capacity.
    *
    * @param name                   Process registration name; empty uses a generated name.
    * @param same_process_from_roudi  @c true when the RouDi runs in the same process

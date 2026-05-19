@@ -27,7 +27,8 @@
  *
  * @details
  * @c DynamicData stores a serialized payload (@c Bytes) together with a type-name tag
- * (up to @c kOffset = 20 bytes) embedded in the leading bytes of the buffer.  This allows
+ * in a reserved @c kOffset = 20 byte prefix of the buffer.  The type-name string
+ * literal, including its trailing NUL, must be shorter than this prefix.  This allows
  * the payload to be transported through channels that do not know the compile-time message
  * type, and later deserialized back to the concrete type.
  *
@@ -242,7 +243,8 @@ class VLINK_EXPORT DynamicData final {
    * @brief Serializes this @c DynamicData to a wire-format @c Bytes blob.
    *
    * @param bytes  Output buffer.
-   * @return @c true on success; @c false if the internal buffer is empty.
+   * @return @c true on success; @c false if the internal buffer is empty, non-owning,
+   *         or does not include the reserved prefix.
    */
   bool operator>>(Bytes& bytes) const noexcept;
 

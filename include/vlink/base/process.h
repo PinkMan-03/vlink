@@ -375,8 +375,9 @@ class VLINK_EXPORT Process {
    * @brief Launches the child process.
    *
    * @details
-   * The child is started asynchronously.  Call @c wait_for_started() to block until
-   * the child is in @c kRunningState.
+   * The launch attempt runs synchronously and returns after the child is either
+   * in @c kRunningState or start failure has been recorded.  I/O monitoring and
+   * exit notification continue asynchronously on the monitor thread.
    *
    * @param program    Path to the executable.
    * @param arguments  Command-line arguments.  Default: empty.
@@ -387,7 +388,8 @@ class VLINK_EXPORT Process {
    * @brief Parses and launches a shell command string.
    *
    * @details
-   * Splits @p command by whitespace into a program and argument list, then calls @c start().
+   * Parses @p command into a program and argument list with whitespace separation,
+   * quote handling and backslash escapes, then calls @c start().
    *
    * @param command  Shell command string.
    */
@@ -436,7 +438,7 @@ class VLINK_EXPORT Process {
    * @brief Calls @c terminate() and optionally force-kills after a timeout.
    *
    * @param force_kill_on_timeout  If @c true, calls @c kill() if the process has not exited
-   *                               after @c kDestructorWaitTimeoutMs. If @c false and the child
+   *                               after @c kDefaultWaitTimeoutMs. If @c false and the child
    *                               does not exit in time, the process remains running. On Windows,
    *                               @c terminate() is already forceful. Default: @c false.
    */
@@ -473,16 +475,18 @@ class VLINK_EXPORT Process {
   /**
    * @brief Reads one line from stdout into @p line.
    *
-   * @param line  Output string. Includes the trailing newline when one is buffered.
-   * @return @c true if a line was read.
+   * @param line  Output string. Includes the trailing newline when one is buffered;
+   *              if buffered data has no newline, that partial data is returned.
+   * @return @c true if any stdout data was read.
    */
   bool read_line_stdout(std::string& line);
 
   /**
    * @brief Reads one line from stderr into @p line.
    *
-   * @param line  Output string. Includes the trailing newline when one is buffered.
-   * @return @c true if a line was read.
+   * @param line  Output string. Includes the trailing newline when one is buffered;
+   *              if buffered data has no newline, that partial data is returned.
+   * @return @c true if any stderr data was read.
    */
   bool read_line_stderr(std::string& line);
 

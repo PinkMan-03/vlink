@@ -45,8 +45,12 @@
  * | @c kStringType      | @c T == std::string                                    | UTF-8 string.                     |
  * | @c kCharsType       | Constructible as @c std::string but not @c std::string | C string literal / @c char*.      |
  * | @c kStreamType      | Has @c operator<< and @c operator>> with stringstream  | Stream-based text encoding.       |
- * | @c kStandardType    | Trivial standard-layout value (POD)                    | Byte-copied directly.             |
+ * | @c kStandardType    | Trivial standard-layout value (POD)                    | Byte-copied during serialization. |
  * | @c kStandardPtrType | Pointer to trivial standard-layout type                | Zero-copy POD pointer.            |
+ *
+ * Most value-like detectors unwrap @c std::shared_ptr<T> before matching
+ * (for example protobuf values, CDR values, FlatBuffers native tables, custom
+ * codecs, strings, stream types, and standard-layout values).
  *
  * @par Type Detection
  * @code
@@ -222,9 +226,9 @@ template <typename T>
  *
  * @details
  * Used to pre-allocate loaned buffers before serializing.  Returns @c 0 for
- * types whose serialized size is not known ahead of time (e.g. @c kBytesType,
- * @c kStringType, @c kFlatTableType).  For @c kStandardType returns
- * @c sizeof(T).
+ * types whose serialized size is not known ahead of time or not reported by
+ * the implementation (for example @c kBytesType, @c kStringType,
+ * @c kFlatTableType, and @c kStandardType).
  *
  * @tparam TypeT  Serializer type.
  * @tparam T      C++ message type.
@@ -443,16 +447,16 @@ template <typename T>
 [[nodiscard]] static constexpr bool is_custom_type() noexcept;
 
 /**
- * @brief Returns @c true if @c T is @c std::string.
+ * @brief Returns @c true if @c T is @c std::string after unwrapping @c shared_ptr.
  *
  * @tparam T  Type to test.
- * @return    @c true only for @c std::string.
+ * @return    @c true for @c std::string and @c std::shared_ptr<std::string>.
  */
 template <typename T>
 [[nodiscard]] static constexpr bool is_string_type() noexcept;
 
 /**
- * @brief Returns @c true if @c T is constructible from @c std::string (but is not @c std::string).
+ * @brief Returns @c true if @c std::string is constructible from @c T.
  *
  * @details
  * Matches @c char*, @c const char*, and string literal types.

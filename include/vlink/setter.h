@@ -166,7 +166,7 @@ class Setter : public Node<SetterImpl, SecT> {
    * callback that re-sends the cached latest value when a new @c Getter joins
    * after this setter has already been written to.
    *
-   * @return @c true on success, @c false if transport initialization fails.
+   * @return @c true on first initialisation; @c false if already initialised.
    */
   bool init() override;
 
@@ -178,7 +178,7 @@ class Setter : public Node<SetterImpl, SecT> {
    * the setter stops participating in transport sync and write operations until
    * it is initialized again.
    *
-   * @return @c true on success, @c false if the underlying transport reports failure.
+   * @return @c true on first deinitialisation; @c false if not initialised.
    */
   bool deinit() override;
 
@@ -239,7 +239,7 @@ class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecuritySetter on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound updates).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new setter.
    */
@@ -252,7 +252,7 @@ class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecuritySetter on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound updates).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new setter.
    */
@@ -266,7 +266,7 @@ class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -279,12 +279,12 @@ class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
    *
    * @details
    * Always builds the base @c Setter with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security is
-   * either populated or left empty.  Finally calls @c init() unless the
-   * caller requests deferred initialisation.
+   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
+   * @c NodeImpl::security was populated successfully; finally calls @c init()
+   * unless the caller requests deferred initialisation.
    *
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound updates).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

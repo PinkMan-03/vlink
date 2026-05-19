@@ -104,10 +104,9 @@ export VLINK_URL_REMAP=/etc/vlink/remap.json
 ## 7. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_url_remap
-./output/bin/example_url_remap
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_url_remap
+./build/output/bin/example_url_remap
 ```
 
 ## 8. 预期输出

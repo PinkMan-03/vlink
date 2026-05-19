@@ -86,9 +86,9 @@ static_assert(Serializer::get_type_of<Vec3>() == Serializer::kCustomType, "...")
 ## 4. 构建与运行
 
 ```bash
-cd build
-cmake .. && make example_custom_type
-./output/bin/example_custom_type
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_custom_type
+./build/output/bin/example_custom_type
 ```
 
 ## 5. 文件结构

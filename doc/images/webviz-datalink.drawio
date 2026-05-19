@@ -6,10 +6,10 @@
         <mxCell id="1" parent="0" />
 
         <!-- Title -->
-        <mxCell id="title" value="VLink WebViz - Complete Data Link" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
+        <mxCell id="title" value="VLink WebViz - proxy_api Data Link" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="22" width="1820" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Application processes, ProxyServer, C++ bridge processes and frontend viewers" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="External ProxyServer deployment; proxy_server mode embeds discovery and subscriptions in the bridge process" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="56" width="1820" height="22" as="geometry" />
         </mxCell>
 
@@ -88,7 +88,7 @@
           <mxGeometry x="480" y="150" width="300" height="54" as="geometry" />
         </mxCell>
 
-        <mxCell id="proxy_discover" value="Node Discovery&#10;Auto-discover all pub/sub nodes&#10;Track online URLs and serializers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.3;fontSize=11;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
+        <mxCell id="proxy_discover" value="Node Discovery&#10;Discover online VLink nodes&#10;Track URLs and serializers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.3;fontSize=11;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="480" y="220" width="300" height="66" as="geometry" />
         </mxCell>
 
@@ -117,7 +117,7 @@
         </mxCell>
 
         <!-- App -> Proxy arrow -->
-        <mxCell id="e_app_proxy" value="All Transports&#10;(DDS/SHM/Intra/Zenoh/...)" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#616161;fontSize=11;fontStyle=2;fontColor=#455a64;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="app_bg" target="proxy_bg" parent="1">
+        <mxCell id="e_app_proxy" value="Built Transports&#10;(DDS/SHM/Intra/Zenoh/...)" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#616161;fontSize=11;fontStyle=2;fontColor=#455a64;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="app_bg" target="proxy_bg" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 

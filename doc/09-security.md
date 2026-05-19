@@ -156,7 +156,7 @@ explicit SecurityPublisher(const ConfT& conf, SecurityConfigT&& sec_cfg = {},
 - 不再暴露 `enable_security()` / `security()` 给用户代码（前者已移到 `Node` 的 protected 入口，仅供 `SecurityXxx` 子类内部调用）。需要再次更换配置的场景，请销毁并重新构造节点。
 - 验证失败（PEM 损坏、RSA 长度 < 2048、缺失 salt 等）会打印 warning 并把对应槽位置空；只要还有其他合法槽位即视为成功（`is_configured() == true`）。
 - 自定义回调必须**成对**安装（`encrypt_callback` 与 `decrypt_callback` 同时设置）；仅设其中之一会被忽略并打印 warning。
-- 不支持的传输（`intra://` 或 `dds://` CDR）会打印 warning 并忽略 `Security::Config`，节点继续按明文工作。
+- 不支持的传输（`intra://` 或 `dds://` CDR）会打印 warning 并忽略 `Security::Config`；安全节点随后执行 `init()` 会因没有可用 `Security` fatal 并抛 `RuntimeError`，不会自动降级为明文。
 
 ---
 
@@ -329,7 +329,7 @@ Wire format（所有长度字段均小端）：
 - `intra://`：进程内直接传对象，不进入序列化/加密管道。
 - `dds://` 配合 CDR 类型（`is_cdr_type == true`）：CDR 直接交给 Fast-DDS 处理，不经过 VLink 的 Bytes 管道。
 
-这些组合下 `NodeImpl::security` 保持 `nullptr`，发送 / 接收路径的加解密分支直接 drop 消息并打 log，不会 UB。其他传输后端（shm/shm2/ddsc/ddsr/ddst/zenoh/mqtt/fdbus/someip/qnx 以及 `dds://` 的非 CDR 类型）均支持消息级加密。
+这些组合下 `NodeImpl::security` 保持 `nullptr`；安全节点初始化时会触发 fatal 并抛 `RuntimeError`，不会进入正常明文收发路径。其他传输后端（shm/shm2/ddsc/ddsr/ddst/zenoh/mqtt/fdbus/someip/qnx 以及 `dds://` 的非 CDR 类型）均支持消息级加密。
 
 如需在 CDR 链路上保护消息，请使用 DDS Security 插件（FastDDS 官方方案）或传输层 TLS。
 
@@ -576,7 +576,7 @@ vlink::SecurityPublisher<Bytes> pub("dds://topic", cfg);
 vlink::SecuritySubscriber<Bytes> sub("dds://topic", cfg);
 ```
 
-> 提醒：构造 `SecurityXxx` 时不传 `Security::Config`（或传空 `Config{}`）等价于不安装 `Security` —— `publish()` / `listen()` 路径会 drop 消息并打 log，**不会**自动 fall back 到明文。
+> 提醒：构造 `SecurityXxx` 时不传 `Security::Config`（或传空 `Config{}`）等价于不安装 `Security`；安全节点初始化会 fatal 并抛 `RuntimeError`，**不会**自动 fall back 到明文。
 
 ### 9.12.6 不替代传输层安全
 

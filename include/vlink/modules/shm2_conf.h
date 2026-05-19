@@ -37,7 +37,7 @@
  *
  * @par URL Format
  * @code
- *   shm2://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<0|1>][#<size>]
+ *   shm2://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<ms>][#<size>]
  * @endcode
  *
  * | Component  | Description                                                          |
@@ -45,9 +45,9 @@
  * | @c address | Service/topic name; formed from @c host + @c "/" + @c path           |
  * | @c event   | Optional secondary event name (@c ?event=)                           |
  * | @c domain  | Domain ID (@c ?domain=, default 0)                                   |
- * | @c depth   | History buffer depth (@c ?depth=, default 0)                         |
- * | @c history | History count; defaults to 0 for pub/sub and 1 for field nodes       |
- * | @c wait    | Blocking-wait mode for pub/sub only (@c ?wait=1)                     |
+ * | @c depth   | Queue/loan capacity override; 0 uses the Iceoryx2 default            |
+ * | @c history | History count; URL default 0, or 1 for field nodes                   |
+ * | @c wait    | Blocking-wait timeout in ms for pub/sub only (@c ?wait=ms)           |
  * | @c size    | Shared-memory allocation size from URL fragment (see below)          |
  *
  * @par Size Fragment Syntax
@@ -62,7 +62,10 @@
  *
  * @note This header is compiled only when @c VLINK_SUPPORT_SHM2 is defined.
  * @note Address and event strings must not exceed 80 characters each.
- * @note The @c wait mode is only valid for @c kPublisher / @c kSubscriber nodes.
+ * @note The @c wait mode is only valid for @c kPublisher / @c kSubscriber nodes;
+ *       using it with RPC or field nodes causes @c parse_protocol() to return @c false.
+ * @note @c is_valid() also requires @c size to be in @c (0, @c kMaxMemSize] and
+ *       @c domain, @c depth, and @c history to be non-negative.
  */
 
 #pragma once
@@ -89,9 +92,9 @@ struct VLINK_EXPORT Shm2Conf final : public Conf {
   std::string address;             ///< Topic address (host + "/" + path from URL); max 80 characters.
   std::string event;               ///< Optional secondary event name; max 80 characters.
   int32_t domain{0};               ///< Domain identifier (non-negative).
-  int32_t depth{0};                ///< History buffer depth; 0 means no buffering.
-  int32_t history{0};              ///< History count; defaults to 0 for pub/sub and 1 for field nodes.
-  int32_t wait{0};                 ///< Non-zero enables blocking-wait mode (pub/sub only).
+  int32_t depth{0};                ///< Queue/loan capacity override; 0 means use the Iceoryx2 default.
+  int32_t history{0};              ///< History count; URL parsing defaults to 0, or 1 for setter/getter.
+  int32_t wait{0};                 ///< Blocking-wait timeout in ms; positive values enable pub/sub wait mode.
   uint64_t size{kDefaultMemSize};  ///< Per-message shared-memory region size in bytes.
 
   /**
@@ -100,9 +103,9 @@ struct VLINK_EXPORT Shm2Conf final : public Conf {
    * @param _address  Topic address string; max 80 characters.
    * @param _event    Optional event name; max 80 characters; empty by default.
    * @param _domain   Domain identifier; default 0.
-   * @param _depth    Buffer depth; default 0.
+   * @param _depth    Queue/loan capacity override; default 0.
    * @param _history  History count; default 0.
-   * @param _wait     Blocking-wait flag; default 0 (disabled).
+   * @param _wait     Blocking-wait timeout in ms; default 0 (disabled).
    * @param _size     Memory region size in bytes; default @c kDefaultMemSize (128 B).
    */
   explicit Shm2Conf(const std::string& _address, const std::string& _event = "", int32_t _domain = 0,

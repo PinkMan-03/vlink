@@ -47,7 +47,7 @@ struct SensorConfig {
 };
 
 /// Topic URL shared by both setter and getter programs.
-/// Change the transport to switch transport (e.g. "shm://", "dds://").
+/// The example programs allow overriding this with VLINK_CONFIG_URL.
 static const char* const kConfigUrl = "intra://sensor/config";
 
 }  // namespace example

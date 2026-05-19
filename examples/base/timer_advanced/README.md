@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_timer_advanced
-./examples/base/timer_advanced/example_timer_advanced
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_timer_advanced
+./build/output/bin/example_timer_advanced
 ```
 
 ## 4. 核心功能详解

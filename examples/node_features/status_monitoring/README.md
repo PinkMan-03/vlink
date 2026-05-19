@@ -32,9 +32,9 @@ double usage = pub.get_cpu_usage();
 ## 3. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_status_monitoring
-./output/bin/example_status_monitoring
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_status_monitoring
+./build/output/bin/example_status_monitoring
 ```
 
 ## 4. 适用场景

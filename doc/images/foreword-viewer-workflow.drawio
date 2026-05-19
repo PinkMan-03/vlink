@@ -8,7 +8,7 @@
         <mxCell id="title" value="Viewer Workflow &#160;&#183;&#160; From development to post-drive analysis" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="820" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="vlink-viewer works the same way across three phases: only the source URL changes" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="Live topics use ProxyAPI; post-drive analysis replays bags through viewer, player and analyzer" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="52" width="820" height="20" as="geometry" />
         </mxCell>
 

@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_process
-./examples/base/process/example_process
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_process
+./build/output/bin/example_process
 ```
 
 ## 4. 核心概念

@@ -40,6 +40,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
 
 #include "./config_types.h"
@@ -59,6 +60,7 @@ int main() {
   // Step 1: Initialise logger
   // ---------------------------------------------------------------
   VLOG_I("=== VLink Config Getter ===");
+  const std::string config_url = vlink::Utils::get_env("VLINK_CONFIG_URL", example::kConfigUrl);
 
   // ---------------------------------------------------------------
   // Step 2: Create MessageLoop for callback dispatch
@@ -75,9 +77,9 @@ int main() {
   // polling (get()), blocking (wait_for_value()), or callback
   // notification (listen()).
   // ---------------------------------------------------------------
-  vlink::Getter<example::SensorConfig> getter(example::kConfigUrl);
+  vlink::Getter<example::SensorConfig> getter(config_url);
   getter.attach(&loop);
-  VLOG_I("[Getter] Created on ", example::kConfigUrl);
+  VLOG_I("[Getter] Created on ", config_url);
 
   // ---------------------------------------------------------------
   // Step 4: Register value-change callback (Pattern: listen)

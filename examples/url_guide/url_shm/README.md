@@ -75,10 +75,9 @@ ShmConf::init_runtime("my_app");
 # 先启动 RouDi 守护进程
 iox-roudi &
 
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_url_shm
-./output/bin/example_url_shm
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_url_shm
+./build/output/bin/example_url_shm
 ```
 
 ## 6. 预期输出

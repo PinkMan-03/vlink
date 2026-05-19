@@ -94,6 +94,18 @@ struct GilSafePyFunction {
   }
 };
 
+struct GilSafePyObject {
+  nb::object obj;
+  explicit GilSafePyObject(nb::object o) : obj(std::move(o)) {}
+  ~GilSafePyObject() {
+    nb::handle leaked = obj.release();
+    if (leaked.is_valid() && Py_IsInitialized()) {
+      nb::gil_scoped_acquire gil;
+      leaked.dec_ref();
+    }
+  }
+};
+
 inline void report_current_exception(const char* context) noexcept {
   try {
     throw;
@@ -351,11 +363,11 @@ NodeT* make_url_node(const std::string& url, const std::string& ser_type, vlink:
   const bool has_ser_type = !ser_type.empty();
   const bool has_schema_type = schema_type != vlink::SchemaType::kUnknown;
 
-  if VUNLIKELY (has_ser_type != has_schema_type) {
-    throw nb::value_error("ser_type and schema_type must be provided together");
+  if VUNLIKELY (!has_ser_type && has_schema_type) {
+    throw nb::value_error("schema_type requires ser_type");
   }
 
-  auto* node = new NodeT(url, vlink::InitType::kWithoutInit);
+  auto node = std::make_unique<NodeT>(url, vlink::InitType::kWithoutInit);
 
   if (has_ser_type) {
     node->set_ser_type(ser_type, schema_type);
@@ -364,7 +376,7 @@ NodeT* make_url_node(const std::string& url, const std::string& ser_type, vlink:
   if (auto_init) {
     node->init();
   }
-  return node;
+  return node.release();
 }
 
 template <typename NodeT>
@@ -373,20 +385,21 @@ NodeT* make_url_security_node(const std::string& url, vlink::Security::Config se
   const bool has_ser_type = !ser_type.empty();
   const bool has_schema_type = schema_type != vlink::SchemaType::kUnknown;
 
-  if VUNLIKELY (has_ser_type != has_schema_type) {
-    throw nb::value_error("ser_type and schema_type must be provided together");
+  if VUNLIKELY (!has_ser_type && has_schema_type) {
+    throw nb::value_error("schema_type requires ser_type");
   }
 
   // SecurityXxx installs Security in its constructor, before this helper can call set_ser_type().
   if (has_ser_type && sec_cfg.advanced.aad_context.empty()) {
+    const auto resolved_schema_type = has_schema_type ? schema_type : vlink::SchemaData::infer_ser_type(ser_type);
     sec_cfg.advanced.aad_context = url;
     sec_cfg.advanced.aad_context += "|";
     sec_cfg.advanced.aad_context += ser_type;
     sec_cfg.advanced.aad_context += "|";
-    sec_cfg.advanced.aad_context += std::to_string(static_cast<uint32_t>(schema_type));
+    sec_cfg.advanced.aad_context += std::to_string(static_cast<uint32_t>(resolved_schema_type));
   }
 
-  auto* node = new NodeT(url, std::move(sec_cfg), vlink::InitType::kWithoutInit);
+  auto node = std::make_unique<NodeT>(url, std::move(sec_cfg), vlink::InitType::kWithoutInit);
 
   if (has_ser_type) {
     node->set_ser_type(ser_type, schema_type);
@@ -395,7 +408,7 @@ NodeT* make_url_security_node(const std::string& url, vlink::Security::Config se
   if (auto_init) {
     node->init();
   }
-  return node;
+  return node.release();
 }
 
 template <typename Class, typename NodeT>
@@ -507,6 +520,14 @@ void bind_publisher(nb::module_& m, const char* name, const char* doc) {
             return self.publish(value, force);
           },
           "data"_a, "force"_a = false)
+      .def(
+          "publish_fbb",
+          [](PubT& self, nb::handle data, bool force) {
+            auto value = Codec::from_python_owned(data);
+            nb::gil_scoped_release release;
+            return self.publish(value, force);
+          },
+          "data"_a, "force"_a = false, "Publish a finished FlatBuffers byte buffer.")
       .def("mark_as_setter", &PubT::mark_as_setter)
       .def("__repr__", [](const PubT& self) { return "Publisher(url='" + self.get_url() + "')"; });
 }
@@ -590,6 +611,35 @@ void bind_server(nb::module_& m, const char* name, const char* doc) {
       .def("__repr__", [](const ServerT& self) { return "Server(url='" + self.get_url() + "')"; });
 }
 
+template <typename ServerT, typename ReqT, typename ReqCodec = PythonCodec<ReqT>, bool SecurityNode = false>
+void bind_fire_forget_server(nb::module_& m, const char* name, const char* doc) {
+  auto cls = nb::class_<ServerT>(m, name, doc);
+  if constexpr (SecurityNode) {
+    bind_node_security_ctor<decltype(cls), ServerT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<ServerT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
+  }
+  bind_node_common<decltype(cls), ServerT>(cls);
+  cls.def(
+         "listen",
+         [](ServerT& self, nb::callable callback) {
+           auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
+           return self.listen([cb](const ReqT& req) {
+             if (!Py_IsInitialized()) return;
+             nb::gil_scoped_acquire gil;
+             try {
+               cb->fn(ReqCodec::to_python(req));
+             } catch (std::exception&) {
+               report_current_exception("vlink::FireForgetServer.listen");
+             }
+           });
+         },
+         "callback"_a, "callback(request) -> None")
+      .def("__repr__", [](const ServerT& self) { return "FireForgetServer(url='" + self.get_url() + "')"; });
+}
+
 template <typename ClientT, typename ReqT, typename RespT, typename ReqCodec = PythonCodec<ReqT>,
           typename RespCodec = PythonCodec<RespT>, bool SecurityNode = false>
 void bind_client(nb::module_& m, const char* name, const char* doc) {
@@ -647,8 +697,73 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
             });
           },
           "data"_a, "callback"_a)
+      .def(
+          "async_invoke",
+          [](ClientT& self, nb::handle data) {
+            auto req = ReqCodec::from_python_owned(data);
+            nb::object py_future = nb::module_::import_("concurrent.futures").attr("Future")();
+            auto future_ref = std::make_shared<GilSafePyObject>(nb::object(py_future));
+            const bool accepted = self.invoke(req, [future_ref](const RespT& resp) {
+              if (!Py_IsInitialized()) return;
+              nb::gil_scoped_acquire gil;
+              try {
+                future_ref->obj.attr("set_result")(RespCodec::to_python(resp));
+              } catch (std::exception&) {
+                report_current_exception("vlink::Client.async_invoke.set_result");
+              }
+            });
+
+            if (!accepted) {
+              nb::object exc =
+                  nb::module_::import_("builtins").attr("RuntimeError")("VLink async_invoke failed to submit request");
+              py_future.attr("set_exception")(exc);
+            }
+
+            return py_future;
+          },
+          "data"_a, "Return a concurrent.futures.Future resolved with the response bytes.")
       .def("__repr__", [](const ClientT& self) {
         return "Client(url='" + self.get_url() + "', connected=" + (self.is_connected() ? "True" : "False") + ")";
+      });
+}
+
+template <typename ClientT, typename ReqT, typename ReqCodec = PythonCodec<ReqT>, bool SecurityNode = false>
+void bind_fire_forget_client(nb::module_& m, const char* name, const char* doc) {
+  auto cls = nb::class_<ClientT>(m, name, doc);
+  if constexpr (SecurityNode) {
+    bind_node_security_ctor<decltype(cls), ClientT>(cls);
+  } else {
+    cls.def(nb::new_([](const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
+                        bool auto_init) { return make_url_node<ClientT>(url, ser_type, schema_type, auto_init); }),
+            "url"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
+  }
+  bind_node_common<decltype(cls), ClientT>(cls);
+  cls.def(
+         "detect_connected",
+         [](ClientT& self, nb::callable callback) {
+           self.detect_connected(
+               make_connect_callback(std::move(callback), "vlink::FireForgetClient.detect_connected"));
+         },
+         "callback"_a)
+      .def(
+          "wait_for_connected",
+          [](ClientT& self, int timeout_ms) {
+            nb::gil_scoped_release release;
+            return self.wait_for_connected(std::chrono::milliseconds(timeout_ms));
+          },
+          "timeout_ms"_a = 5000)
+      .def("is_connected", &ClientT::is_connected)
+      .def(
+          "send",
+          [](ClientT& self, nb::handle data) {
+            auto req = ReqCodec::from_python_owned(data);
+            nb::gil_scoped_release release;
+            return self.send(req);
+          },
+          "data"_a)
+      .def("__repr__", [](const ClientT& self) {
+        return "FireForgetClient(url='" + self.get_url() + "', connected=" + (self.is_connected() ? "True" : "False") +
+               ")";
       });
 }
 
@@ -990,7 +1105,7 @@ NB_MODULE(_vlink_nanobind, m) {
               if (!Py_IsInitialized()) return;
               nb::gil_scoped_acquire gil;
               try {
-                cb->fn(static_cast<int>(level), std::string(msg));
+                cb->fn(level, std::string(msg));
               } catch (std::exception&) {
                 report_current_exception("vlink::Logger.register_console_handler");
               }
@@ -1005,7 +1120,7 @@ NB_MODULE(_vlink_nanobind, m) {
               if (!Py_IsInitialized()) return;
               nb::gil_scoped_acquire gil;
               try {
-                cb->fn(static_cast<int>(level), std::string(msg));
+                cb->fn(level, std::string(msg));
               } catch (std::exception&) {
                 report_current_exception("vlink::Logger.register_file_handler");
               }
@@ -1405,7 +1520,7 @@ NB_MODULE(_vlink_nanobind, m) {
                   nb::rv_policy::reference);
   mp_cls.attr("kBlockAlignment") = vlink::MemoryPool::kBlockAlignment;
 
-#ifdef VLINK_ENABLE_MEMORY_RESOURCE
+#ifdef VLINK_ENABLE_BASE_MEMORY_RESOURCE
   nb::class_<vlink::MemoryResource>(m, "MemoryResource",
                                     "std::pmr::memory_resource adapter delegating to a vlink::MemoryPool")
       .def(nb::init<>())
@@ -2030,12 +2145,16 @@ NB_MODULE(_vlink_nanobind, m) {
   using BytesSub = vlink::Subscriber<vlink::Bytes>;
   using BytesSrv = vlink::Server<vlink::Bytes, vlink::Bytes>;
   using BytesCli = vlink::Client<vlink::Bytes, vlink::Bytes>;
+  using BytesFireSrv = vlink::Server<vlink::Bytes, vlink::Traits::EmptyType>;
+  using BytesFireCli = vlink::Client<vlink::Bytes, vlink::Traits::EmptyType>;
   using BytesSet = vlink::Setter<vlink::Bytes>;
   using BytesGet = vlink::Getter<vlink::Bytes>;
   using SecBytesPub = vlink::SecurityPublisher<vlink::Bytes>;
   using SecBytesSub = vlink::SecuritySubscriber<vlink::Bytes>;
   using SecBytesSrv = vlink::SecurityServer<vlink::Bytes, vlink::Bytes>;
   using SecBytesCli = vlink::SecurityClient<vlink::Bytes, vlink::Bytes>;
+  using SecBytesFireSrv = vlink::SecurityServer<vlink::Bytes, vlink::Traits::EmptyType>;
+  using SecBytesFireCli = vlink::SecurityClient<vlink::Bytes, vlink::Traits::EmptyType>;
   using SecBytesSet = vlink::SecuritySetter<vlink::Bytes>;
   using SecBytesGet = vlink::SecurityGetter<vlink::Bytes>;
 
@@ -2043,6 +2162,8 @@ NB_MODULE(_vlink_nanobind, m) {
   bind_subscriber<BytesSub, vlink::Bytes>(m, "Subscriber", "Event-model subscriber");
   bind_server<BytesSrv, vlink::Bytes, vlink::Bytes>(m, "Server", "Method-model server");
   bind_client<BytesCli, vlink::Bytes, vlink::Bytes>(m, "Client", "Method-model client");
+  bind_fire_forget_server<BytesFireSrv, vlink::Bytes>(m, "FireForgetServer", "Fire-and-forget method server");
+  bind_fire_forget_client<BytesFireCli, vlink::Bytes>(m, "FireForgetClient", "Fire-and-forget method client");
   bind_setter<BytesSet, vlink::Bytes>(m, "Setter", "Field-model setter");
   bind_getter<BytesGet, vlink::Bytes>(m, "Getter", "Field-model getter");
   bind_publisher<SecBytesPub, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(
@@ -2053,6 +2174,10 @@ NB_MODULE(_vlink_nanobind, m) {
       m, "SecurityServer", "Method-model server with payload security");
   bind_client<SecBytesCli, vlink::Bytes, vlink::Bytes, PythonCodec<vlink::Bytes>, PythonCodec<vlink::Bytes>, true>(
       m, "SecurityClient", "Method-model client with payload security");
+  bind_fire_forget_server<SecBytesFireSrv, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(
+      m, "SecurityFireForgetServer", "Fire-and-forget method server with payload security");
+  bind_fire_forget_client<SecBytesFireCli, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(
+      m, "SecurityFireForgetClient", "Fire-and-forget method client with payload security");
   bind_setter<SecBytesSet, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(m, "SecuritySetter",
                                                                           "Field-model setter with payload security");
   bind_getter<SecBytesGet, vlink::Bytes, PythonCodec<vlink::Bytes>, true>(m, "SecurityGetter",
@@ -2153,13 +2278,14 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(
           "push",
           [](vlink::BagWriter& self, const std::string& url, const std::string& ser_type, vlink::SchemaType schema_type,
-             vlink::ActionType action_type, nb::handle data, int64_t timestamp_us, bool immediate) {
+             vlink::ActionType action_type, nb::handle data, std::optional<int64_t> timestamp_us, bool immediate) {
             auto bytes = PythonCodec<vlink::Bytes>::from_python_owned(data);
-            int64_t ts = timestamp_us;
-            int64_t* ts_ptr = (ts > 0) ? &ts : nullptr;
+            int64_t ts = timestamp_us.value_or(0);
+            int64_t* ts_ptr = timestamp_us.has_value() ? &ts : nullptr;
+            nb::gil_scoped_release release;
             return self.push(url, ser_type, schema_type, action_type, bytes, ts_ptr, immediate);
           },
-          "url"_a, "ser_type"_a, "schema_type"_a, "action_type"_a, "data"_a, "timestamp_us"_a = 0,
+          "url"_a, "ser_type"_a, "schema_type"_a, "action_type"_a, "data"_a, "timestamp_us"_a = nb::none(),
           "immediate"_a = false)
       .def(
           "register_schema_callback",
@@ -2181,7 +2307,14 @@ NB_MODULE(_vlink_nanobind, m) {
             });
           },
           "callback"_a)
-      .def("push_schema", &vlink::BagWriter::push_schema, "schema_data"_a, "immediate"_a = false)
+      .def(
+          "push_schema",
+          [](vlink::BagWriter& self, const vlink::SchemaData& schema_data, bool immediate) {
+            auto schema_copy = schema_data;
+            nb::gil_scoped_release release;
+            return self.push_schema(schema_copy, immediate);
+          },
+          "schema_data"_a, "immediate"_a = false)
       .def(
           "register_split_callback",
           [](vlink::BagWriter& self, nb::callable callback, bool before) {
@@ -2302,7 +2435,7 @@ NB_MODULE(_vlink_nanobind, m) {
                   if (!Py_IsInitialized()) return;
                   nb::gil_scoped_acquire gil;
                   try {
-                    cb->fn(ts, url, static_cast<int>(action_type), PythonCodec<vlink::Bytes>::to_python(data));
+                    cb->fn(ts, url, action_type, PythonCodec<vlink::Bytes>::to_python(data));
                   } catch (std::exception&) {
                     report_current_exception("vlink::BagReader.register_output_callback");
                   }

@@ -101,7 +101,7 @@ typedef struct {
 } vlink_publisher_handle_t;
 ```
 
-`reserved[0..4]` 用于内部状态（server callback 协调、Security 实例指针等）；`reserved[5..7]` 用于 Security 替换链表与未来扩展。用户代码不得直接读写。
+`reserved[0..4]` 用于内部状态（server callback 协调、Security holder 等）；`reserved[5..7]` 当前未承载公开语义，保留给内部扩展。用户代码不得直接读写。
 
 | 句柄类型                     | 对应 C++ 类型                                   | 用途         |
 | ---------------------------- | ----------------------------------------------- | ------------ |
@@ -112,14 +112,13 @@ typedef struct {
 | `vlink_setter_handle_t`      | `vlink::Setter<vlink::Bytes>`                   | Field 写入   |
 | `vlink_getter_handle_t`      | `vlink::Getter<vlink::Bytes>`                   | Field 读取   |
 
-`vlink_server_handle_t` 的 `reserved` 数组有特殊用途：
+`vlink_server_handle_t` 的 `reserved` 数组有特殊用途。当前实现把服务端请求状态封装在 `server_state` 中，并通过 holder 管理生命周期：
 
 | 字段          | 用途                                               |
 | ------------- | -------------------------------------------------- |
-| `reserved[0]` | 指向 `std::mutex`，在请求回调期间持有锁            |
-| `reserved[1]` | 指向响应字节缓冲区（由 `vlink_reply` 分配）        |
-| `reserved[2]` | 响应字节数（存储为指针大小的整数）                 |
-| `reserved[3]` | 非空表示请求处理进行中（由 `vlink_reply` 清零）    |
+| `reserved[0]` | 指向 `std::shared_ptr<server_state>` holder；`server_state` 内部保存 mutex、响应 `Bytes`、请求处理中标记和可选 Security 状态 |
+| `reserved[1..3]` | 当前服务端实现不再分别存放响应缓冲、响应字节数或请求处理中标记，用户不得依赖 |
+| `reserved[4]` | 安全服务端路径可用于保存 Security holder |
 
 ### 18.4.3 回调类型
 
@@ -130,7 +129,7 @@ typedef void (*vlink_connect_callback_t)(const bool is_connected, void* user_dat
 // 收到消息回调（Subscriber、Getter 推送模式）
 typedef void (*vlink_msg_callback_t)(const uint8_t* data, const size_t size, void* user_data);
 
-// Server 收到 RPC 请求回调（必须在此回调内调用 vlink_reply）
+// Server 收到 RPC 请求回调（需要非空响应时在此回调内调用 vlink_reply）
 typedef void (*vlink_req_callback_t)(const uint8_t* data, const size_t size, void* user_data);
 
 // Client 收到 RPC 响应回调
@@ -168,7 +167,9 @@ typedef struct {
 
 ---
 
-## 18.5 全部 C API 函数列表
+## 18.5 核心 C API 函数列表
+
+本节列出基础通信路径的核心函数。安全节点创建、独立加解密、SSL/TLS 配置等扩展 C API 也已导出，详见 `include/vlink/external/c_api.h` 中的 security / SSL 相关声明。
 
 ### 18.5.1 Publisher 相关
 
@@ -293,10 +294,10 @@ int vlink_create_server(
     const vlink_req_callback_t req_callback, void* user_data);
 ```
 
-- 内部在 `reserved[0]` 中分配一个 `std::mutex`
+- 内部在 `reserved[0]` 中保存 `server_state` holder，`server_state` 内部包含 mutex、响应缓冲、请求处理中标记和可选 Security 状态
 - 若 `schema_info != NULL`，会在 `init()` 前同步设置 `ser/schema`
-- 每次请求到来时，持有该 mutex 后调用 `req_callback`
-- **`vlink_reply` 必须在 `req_callback` 内部调用**，不可在回调返回后再调用
+- 每次请求到来时，持有 `server_state::mutex` 后调用 `req_callback`
+- 如需返回非空响应，**`vlink_reply` 必须在 `req_callback` 内部调用**；不调用时请求以空响应完成，回调返回后再调用会返回运行时错误
 
 #### 18.6.3.2 `vlink_reply`
 
@@ -304,14 +305,14 @@ int vlink_create_server(
 int vlink_reply(vlink_server_handle_t* handle, const uint8_t* data, const size_t size);
 ```
 
-- 将 `data[0..size-1]` 深拷贝到 `reserved[1]` 指向的堆缓冲区
-- 将 `reserved[2]` 设置为 `size`，将 `reserved[3]` 清零（标志响应就绪）
-- 内部 Server listen 回调在 `vlink_reply` 返回后，从 `reserved[1]` 中读取响应并发送
-- 若 `reserved[3]` 为 NULL（即回调外调用），返回 `VLINK_RET_RUNTIME_ERROR`
+- 检查 `reserved[0]` 中的 `server_state` 是否存在且 `request_active == true`
+- 普通服务端将 `data[0..size-1]` 深拷贝到 `server_state::response`；安全服务端先加密响应再写入该字段
+- 写入响应后将 `server_state::request_active` 置为 `false`；内部 Server listen 回调随后移动 `server_state::response` 作为响应
+- 若当前没有进行中的请求（即回调外调用），返回 `VLINK_RET_RUNTIME_ERROR`
 
 #### 18.6.3.3 `vlink_destroy_server`
 
-- 除释放 `native_handle` 外，还会释放 `reserved[0]`（mutex）和 `reserved[1]`（响应缓冲区）
+- 除释放 `native_handle` 外，还会释放 `reserved[0]` 的 `server_state` holder；安全服务端还会释放 `reserved[4]` 的 Security holder
 - 析构是同步阻塞的，会等待进行中的请求完成
 
 ### 18.6.4 Client 相关函数
@@ -483,7 +484,7 @@ int main(void) {
 #include <unistd.h>
 
 /* Server 请求处理回调
- * 注意：vlink_reply 必须在此函数内调用！ */
+ * 注意：要返回非空响应时，vlink_reply 必须在此函数内调用。 */
 static void on_request(const uint8_t* data, const size_t size, void* user_data) {
     vlink_server_handle_t* handle = (vlink_server_handle_t*)user_data;
 
@@ -689,7 +690,7 @@ vlink_create_publisher("dds://my/topic", &schema, &handle)
 
 - C API 使用 `vlink::Bytes` 作为统一类型，C++ API 支持任意模板参数类型
 - C API 的 `schema_info` 参数等价于 C++ API 的 `node.set_ser_type(ser, schema)`
-- C API 不暴露 QoS 配置、安全配置等高级功能，如需这些功能请直接使用 C++ API
+- C API 当前不暴露 QoS 配置；安全配置、独立加解密和 SSL/TLS options 已通过 security / SSL 相关 C API 暴露
 
 ---
 
@@ -920,7 +921,7 @@ fn main() {
 2. **`vlink_publish` / `vlink_invoke` / `vlink_set` 的 `data` 指针**：函数调用期间需有效，返回后可以安全释放
 3. **`vlink_get` 的 `data` 缓冲区**：由调用方分配和管理，`*size` 入参必须是缓冲区容量
 4. **消息回调中的 `data` 指针**：仅在回调执行期间有效，需要在回调内完成拷贝
-5. **`vlink_server_handle_t::reserved[1]`**：由 `vlink_reply` 在堆上 `new[]` 分配，由 `vlink_destroy_server` 负责 `delete[]` 释放，用户代码不应直接操作
+5. **`vlink_server_handle_t::reserved`**：属于内部实现细节。当前服务端状态通过 `reserved[0]` 的 `server_state` holder 管理，响应内容保存在 `server_state::response`；`reserved[1]` 不承载响应缓冲语义，用户代码不应直接操作任何 `reserved` 字段
 
 ### 18.13.3 常见错误
 

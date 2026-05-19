@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_multi_loop
-./examples/base/multi_loop/example_multi_loop
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_multi_loop
+./build/output/bin/example_multi_loop
 ```
 
 ## 4. 核心概念

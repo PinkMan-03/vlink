@@ -69,7 +69,7 @@ int main() {
 
     // Access the embedded value directly -- no serialisation
     data->value.id = 42;
-    data->value.temperature = 36.6f;
+    data->value.temperature = 36.6F;
     std::strncpy(data->value.label, "sensor_A", sizeof(data->value.label) - 1);
 
     std::cout << "  id:          " << data->value.id << std::endl;
@@ -88,7 +88,7 @@ int main() {
 
     auto original = MyIntra::create();
     original->value.id = 100;
-    original->value.temperature = 25.0f;
+    original->value.temperature = 25.0F;
     std::strncpy(original->value.label, "motor_B", sizeof(original->value.label) - 1);
 
     // Serialise to Bytes
@@ -113,28 +113,19 @@ int main() {
   {
     std::cout << "\n[3] Zero-Copy Pub/Sub on intra://" << std::endl;
 
-    vlink::MessageLoop loop;
-    loop.set_name("intra_data_loop");
-    loop.async_run();
-
     int received_count = 0;
+    const std::string topic_url = "intra://example/intra_data/struct#direct";
 
-    // NOTE: For IntraData types, use the base IntraData type for Subscriber,
-    // then downcast in the callback. This is because VLink's internal
-    // listen_intra() expects IntraMsgCallback = void(const IntraData&).
-    vlink::Subscriber<vlink::IntraData> sub("intra://example/intra_data/struct");
-    sub.listen([&](const vlink::IntraData& base_ptr) {
+    vlink::Subscriber<MyIntra> sub(topic_url);
+    sub.listen([&](const MyIntra& typed) {
       received_count++;
-      // Downcast from base IntraDataType to our concrete MyIntraType
-      auto typed = std::static_pointer_cast<MyIntraType>(base_ptr);
       if (typed) {
         std::cout << "  [Sub] #" << received_count << " id=" << typed->value.id << " temp=" << typed->value.temperature
                   << " label=" << typed->value.label << std::endl;
       }
     });
 
-    // Publisher can use either MyIntra or IntraData
-    vlink::Publisher<MyIntra> pub("intra://example/intra_data/struct");
+    vlink::Publisher<MyIntra> pub(topic_url);
 
     pub.wait_for_subscribers();
 
@@ -142,16 +133,12 @@ int main() {
     for (int i = 1; i <= 5; ++i) {
       auto data = MyIntra::create();
       data->value.id = i;
-      data->value.temperature = 20.0f + static_cast<float>(i);
+      data->value.temperature = 20.0F + static_cast<float>(i);
       std::snprintf(data->value.label, sizeof(data->value.label), "reading_%d", i);
       pub.publish(data);
     }
 
-    loop.wait_for_idle(1000);
     std::cout << "  Total received: " << received_count << std::endl;
-
-    loop.quit();
-    loop.wait_for_quit();
   }
 
   // ======== Section 4: Shared Ownership ========
@@ -164,7 +151,7 @@ int main() {
     data->value.id = 999;
 
     // Copy the handle (increments reference count, not data)
-    MyIntra alias = data;
+    MyIntra alias = data;  // NOLINT(performance-unnecessary-copy-initialization)
     std::cout << "  data use_count:  " << data.use_count() << std::endl;
     std::cout << "  alias use_count: " << alias.use_count() << std::endl;
     std::cout << "  Same object:     " << std::boolalpha << (data.get() == alias.get()) << std::endl;

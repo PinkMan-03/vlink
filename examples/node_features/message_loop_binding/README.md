@@ -43,9 +43,9 @@ sub.listen([](const T& msg) { /* 在 loop 线程上运行 */ });
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_message_loop_binding
-./output/bin/example_message_loop_binding
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_message_loop_binding
+./build/output/bin/example_message_loop_binding
 ```
 
 ## 5. 设计模式

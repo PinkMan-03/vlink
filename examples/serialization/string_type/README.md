@@ -61,9 +61,9 @@ Serializer::deserialize(buf, restored);  // Bytes -> string
 ## 4. 构建与运行
 
 ```bash
-cd build
-cmake .. && make example_string_type
-./output/bin/example_string_type
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_string_type
+./build/output/bin/example_string_type
 ```
 
 ## 5. 要点总结

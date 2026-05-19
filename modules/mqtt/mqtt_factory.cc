@@ -850,7 +850,8 @@ void MqttSubscriber::subscribe() {
           return;
         }
 
-        Bytes msg_bytes = Bytes::deep_copy(data + kMqttHeaderSize, size - kMqttHeaderSize);
+        Bytes msg_bytes =
+            (size > kMqttHeaderSize) ? Bytes::shallow_copy(data + kMqttHeaderSize, size - kMqttHeaderSize) : Bytes();
 
         self->process_message(header.channel, header.seq, header.guid, header.timestamp, msg_bytes);
       });
@@ -969,30 +970,31 @@ void MqttServer::start_listening() {
 
   auto weak_self = weak_from_this();
 
-  MqttFactory::get().subscribe_topic(this, domain_, fragment_, properties_, topic_, qos_,
-                                     [weak_self](const std::string& /*topic*/, const uint8_t* data, size_t size) {
-                                       auto self = weak_self.lock();
+  MqttFactory::get().subscribe_topic(
+      this, domain_, fragment_, properties_, topic_, qos_,
+      [weak_self](const std::string& /*topic*/, const uint8_t* data, size_t size) {
+        auto self = weak_self.lock();
 
-                                       if VUNLIKELY (!self) {
-                                         return;
-                                       }
+        if VUNLIKELY (!self) {
+          return;
+        }
 
-                                       if VUNLIKELY (self->is_suspend_) {
-                                         return;
-                                       }
+        if VUNLIKELY (self->is_suspend_) {
+          return;
+        }
 
-                                       MqttHeader header;
+        MqttHeader header;
 
-                                       if VUNLIKELY (!MqttFactory::decode_header(header, data, size)) {
-                                         VLOG_E("MqttFactory: Failed to decode server header.");
-                                         return;
-                                       }
+        if VUNLIKELY (!MqttFactory::decode_header(header, data, size)) {
+          VLOG_E("MqttFactory: Failed to decode server header.");
+          return;
+        }
 
-                                       Bytes req_bytes =
-                                           Bytes::deep_copy(data + kMqttHeaderSize, size - kMqttHeaderSize);
+        Bytes req_bytes =
+            (size > kMqttHeaderSize) ? Bytes::shallow_copy(data + kMqttHeaderSize, size - kMqttHeaderSize) : Bytes();
 
-                                       self->process_message(header.channel, header.seq, req_bytes);
-                                     });
+        self->process_message(header.channel, header.seq, req_bytes);
+      });
 }
 
 MqttServer::~MqttServer() { MqttFactory::get().unsubscribe_topic(this, domain_, fragment_, properties_, topic_); }

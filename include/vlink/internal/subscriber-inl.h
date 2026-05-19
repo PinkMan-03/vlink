@@ -193,7 +193,7 @@ inline bool Subscriber<MsgT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callbac
 }
 
 template <typename MsgT, SecurityType SecT>
-inline bool Subscriber<MsgT, SecT>::listen_intra(NodeImpl::IntraMsgCallback&& callback) {
+inline bool Subscriber<MsgT, SecT>::listen_intra(MsgCallback&& callback) {
   if VUNLIKELY (!this->has_inited_) {
     VLOG_F("Subscriber::listen_intra() called before init().");
     return false;
@@ -217,7 +217,8 @@ inline bool Subscriber<MsgT, SecT>::listen_intra(NodeImpl::IntraMsgCallback&& ca
 #endif
 
       if VLIKELY (intra_msg) {
-        this->invoke_callback(callback, intra_msg);
+        MsgT typed_msg(std::move(intra_msg));
+        this->invoke_callback(callback, typed_msg);
       } else {
         VLOG_T("Subscriber get intra data failed, url: ", this->impl_->url, ".");
       }

@@ -99,7 +99,7 @@ class ThreadPool;
 enum class TaskExecutionState : uint8_t {
   kInvalid = 0,  ///< Non-terminal: empty handle or not yet associated with a queued task.
   kQueued,       ///< Non-terminal: task has been accepted by the dispatcher but has not started running.
-  kRunning,      ///< Non-terminal: task callback is currently executing on a worker thread.
+  kRunning,      ///< Non-terminal: task callback is currently executing on a dispatcher or worker thread.
   kCompleted,    ///< Terminal: task callback returned normally.
   kCancelled,    ///< Terminal: task was cancelled before its callback started executing.
   kDropped,      ///< Terminal: task was removed from a bounded queue before execution (drop-oldest path).

@@ -8,7 +8,7 @@
         <mxCell id="title" value="vlink-test  &#8212;  doctest Layering" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="820" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Single binary  &#183;  two layers  &#183;  each cell is one test suite directory under test/" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="Single binary  &#183;  transport suites plus base / extension / impl utility suites" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="54" width="820" height="22" as="geometry" />
         </mxCell>
 
@@ -75,10 +75,10 @@
         <mxCell id="L2bar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#455a64;strokeColor=none;arcSize=30;" vertex="1" parent="1">
           <mxGeometry x="40" y="350" width="820" height="6" as="geometry" />
         </mxCell>
-        <mxCell id="L2title" value="Base Library Tests" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=15;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
+        <mxCell id="L2title" value="Base / Extension / Impl Tests" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=15;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="60" y="364" width="400" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="L2badge" value="Unit tests for utilities in include/vlink/base" style="text;html=1;align=right;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#616161;" vertex="1" parent="1">
+        <mxCell id="L2badge" value="Representative utility suites under test/base, test/extension and test/impl" style="text;html=1;align=right;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#616161;" vertex="1" parent="1">
           <mxGeometry x="380" y="366" width="464" height="22" as="geometry" />
         </mxCell>
 
@@ -113,7 +113,7 @@
           <mxGeometry x="692" y="450" width="148" height="40" as="geometry" />
         </mxCell>
 
-        <mxCell id="foot" value="Each backend/utility is only compiled in if its CMake feature flag is ON. The suite list above is the superset across all features." style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+        <mxCell id="foot" value="Transport suites are gated by VLINK_SUPPORT_*; the diagram shows the superset across enabled features." style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
           <mxGeometry x="60" y="504" width="780" height="40" as="geometry" />
         </mxCell>
 

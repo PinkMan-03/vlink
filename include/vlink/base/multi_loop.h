@@ -35,12 +35,13 @@
  *
  * Differences from @c MessageLoop:
  * - Tasks may run concurrently on multiple worker threads; they are @b not serialised.
- * - @c is_in_same_thread() returns @c true if the caller is one of the internal pool's worker
- *   threads (not the dispatcher thread).
+ * - @c is_in_same_thread() returns @c true if the caller is the dispatcher thread or one of
+ *   the internal pool's worker threads.
  * - @c on_begin() / @c on_end() (overrides) are still invoked once on the dispatcher thread;
  *   they are used to construct and tear down the internal @c ThreadPool.
  * - The @c on_task_changed() override runs on the dispatcher thread and posts the task to
- *   the pool; the base @c MessageLoop::on_task_changed() then runs on the executing worker.
+ *   the pool when possible; if the pool rejects the post (for example a zero-worker
+ *   pool), the base @c MessageLoop::on_task_changed() runs inline on the dispatcher.
  *
  * @note
  * - Shared state accessed inside task callbacks must be protected by its own synchronisation.
@@ -87,7 +88,9 @@ class VLINK_EXPORT MultiLoop : public MessageLoop {
   /**
    * @brief Constructs a @c MultiLoop with the default @c kNormalType queue and @p thread_num workers.
    *
-   * @param thread_num  Number of worker threads.  Default: 4.
+   * @param thread_num  Number of worker threads.  Default: 4.  A zero-worker
+   *                    pool rejects forwarded posts, so tasks fall back to the
+   *                    dispatcher thread.
    */
   explicit MultiLoop(size_t thread_num = 4U);
 
@@ -145,8 +148,9 @@ class VLINK_EXPORT MultiLoop : public MessageLoop {
    * @brief Called on the dispatcher thread before a task is forwarded to the worker pool.
    *
    * @details
-   * Forwards @p callback (and @p start_time) onto the internal @c ThreadPool, where
-   * the base @c MessageLoop::on_task_changed() will subsequently run on the executing worker.
+   * Forwards @p callback (and @p start_time) onto the internal @c ThreadPool when
+   * the pool accepts the post.  If forwarding fails, falls back to the base
+   * @c MessageLoop::on_task_changed() on the dispatcher thread.
    *
    * @param callback    The task about to be executed.
    * @param start_time  Millisecond steady_clock timestamp captured when the task was

@@ -65,8 +65,8 @@ data->value.temperature = 36.6f;
 ### 3.3 零拷贝发布 / 订阅
 
 ```cpp
-Publisher<MyIntra> pub("intra://example/intra_data/struct");
-Subscriber<MyIntra> sub("intra://example/intra_data/struct");
+Publisher<MyIntra> pub("intra://example/intra_data/struct#direct");
+Subscriber<MyIntra> sub("intra://example/intra_data/struct#direct");
 
 sub.listen([](const MyIntra& intra) {
   // 直接通过 shared_ptr 访问——零拷贝
@@ -95,9 +95,9 @@ auto restored = MyIntra::create();
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_intra_data
-./output/bin/example_intra_data
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_intra_data
+./build/output/bin/example_intra_data
 ```
 
 ## 5. IntraData 与普通类型对比

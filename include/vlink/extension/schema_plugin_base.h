@@ -102,7 +102,7 @@ class SchemaPluginBase : public SchemaPluginInterface {
    * @param name         Serialization type or fully-qualified message name.
    * @param schema_type  Coarse schema family hint, or @c SchemaType::kUnknown for
    *                     family-agnostic lookup.
-   * @return Matching @c SchemaData, or an empty schema when not found.
+   * @return Matching @c SchemaData, or an empty/name-only schema when not found.
    */
   [[nodiscard]] SchemaData search_schema(const std::string& name,
                                          SchemaType schema_type = SchemaType::kUnknown) override;
@@ -124,7 +124,7 @@ class SchemaPluginBase : public SchemaPluginInterface {
   [[nodiscard]] ProtobufDescriptorPtr search_protobuf_descriptor(const std::string& name) override;
 
   /**
-   * @brief Creates a cached Protobuf dynamic message prototype for a type.
+   * @brief Creates or returns a cached Protobuf dynamic message instance for a type.
    *
    * @param name  Fully-qualified Protobuf message type.
    * @return Opaque message pointer, or @c nullptr if not found.
@@ -496,7 +496,9 @@ inline SchemaPluginInterface::FlatbuffersParserPtr SchemaPluginBase::create_flat
 
   auto* target_ptr = reinterpret_cast<FlatbuffersParserPtr>(parser.get());
   flatbuffers_parser_map_[name].emplace_back(target_ptr);
-  (void)parser.release();
+
+  (void)parser.release();  // NOLINT(bugprone-unused-return-value)
+
   return target_ptr;
 #else
   (void)name;

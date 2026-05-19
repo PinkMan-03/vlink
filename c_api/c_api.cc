@@ -26,7 +26,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -72,22 +74,6 @@ static void pool_delete(T* obj) noexcept {
   vlink::MemoryPool::global_instance().deallocate(obj, sizeof(T), alignof(T));
 }
 
-static uint8_t* pool_alloc_raw(size_t size) noexcept {
-  if VUNLIKELY (size == 0U) {
-    return nullptr;
-  }
-
-  return static_cast<uint8_t*>(vlink::MemoryPool::global_instance().allocate(size));
-}
-
-static void pool_free_raw(uint8_t* ptr, size_t size) noexcept {
-  if (ptr == nullptr || size == 0U) {
-    return;
-  }
-
-  vlink::MemoryPool::global_instance().deallocate(ptr, size);
-}
-
 static uint8_t* pool_alloc_buffer(size_t size) noexcept {
   if VUNLIKELY (size == 0U) {
     return nullptr;
@@ -117,6 +103,47 @@ static void pool_free_buffer(uint8_t* ptr) noexcept {
 
   vlink::MemoryPool::global_instance().deallocate(raw, kPoolBufferHeaderSize + size);
 }
+
+template <typename T, typename... Args>
+static std::shared_ptr<T>* shared_state_new(Args&&... args) {
+  try {
+    auto state = std::make_shared<T>(std::forward<Args>(args)...);
+    return pool_new<std::shared_ptr<T>>(std::move(state));
+  } catch (const std::bad_alloc&) {
+    return nullptr;
+  }
+}
+
+template <typename T>
+static std::shared_ptr<T> shared_state_get(void* slot) {
+  auto* holder = static_cast<std::shared_ptr<T>*>(slot);
+
+  if (!holder) {
+    return {};
+  }
+
+  return *holder;
+}
+
+template <typename T>
+static void shared_state_delete(std::shared_ptr<T>*& holder) noexcept {
+  pool_delete(holder);
+  holder = nullptr;
+}
+
+template <typename T>
+static void shared_state_delete(void*& slot) noexcept {
+  auto* holder = static_cast<std::shared_ptr<T>*>(slot);
+  pool_delete(holder);
+  slot = nullptr;
+}
+
+struct c_api_security_state {  // NOLINT(readability-identifier-naming)
+  vlink::Security security;
+
+  explicit c_api_security_state(const vlink::Security::Config& cfg) : security(cfg) {}
+  explicit c_api_security_state(vlink::Security::Config&& cfg) : security(std::move(cfg)) {}
+};
 
 static vlink::Security::Config build_security_config(const vlink_security_config_t* cfg) {
   vlink::Security::Config out;
@@ -235,6 +262,42 @@ static vlink::Security::Config build_security_config(const vlink_security_config
   return out;
 }
 
+static vlink::SslOptions build_ssl_options(const vlink_ssl_options_t* opt) {
+  vlink::SslOptions out;
+
+  if VUNLIKELY (!opt) {
+    return out;
+  }
+
+  out.verify_peer = (opt->verify_peer != 0);
+
+  if (opt->ca_file) {
+    out.ca_file = opt->ca_file;
+  }
+
+  if (opt->cert_file) {
+    out.cert_file = opt->cert_file;
+  }
+
+  if (opt->key_file) {
+    out.key_file = opt->key_file;
+  }
+
+  if (opt->key_password) {
+    out.key_password = opt->key_password;
+  }
+
+  if (opt->server_name) {
+    out.server_name = opt->server_name;
+  }
+
+  if (opt->ciphers) {
+    out.ciphers = opt->ciphers;
+  }
+
+  return out;
+}
+
 static std::string build_security_aad_context(const char* url, const vlink_schema_info_t* schema_info) {
   std::string context = url ? url : "";
   context += "|";
@@ -266,24 +329,6 @@ static vlink::Security::Config build_node_security_config(const vlink_security_c
   return out;
 }
 
-struct retired_security_node {  // NOLINT(readability-identifier-naming)
-  vlink::Security* sec;
-  retired_security_node* next;
-};
-
-static void free_retired_securities(void** retired_slot) noexcept {
-  auto* node = static_cast<retired_security_node*>(*retired_slot);
-
-  while (node != nullptr) {
-    auto* next = node->next;
-    pool_delete(node->sec);
-    pool_delete(node);
-    node = next;
-  }
-
-  *retired_slot = nullptr;
-}
-
 template <typename NodeT>
 static bool apply_schema_info(NodeT& node, const vlink_schema_info_t* schema_info) {
   if (!schema_info) {
@@ -311,11 +356,26 @@ static bool apply_schema_info(NodeT& node, const vlink_schema_info_t* schema_inf
   return true;
 }
 
+template <typename NodeT>
+static bool apply_create_options(NodeT& node, const vlink_schema_info_t* schema_info,
+                                 const vlink_ssl_options_t* ssl_opt) {
+  if VUNLIKELY (!apply_schema_info(node, schema_info)) {
+    return false;
+  }
+
+  if (ssl_opt) {
+    node.set_ssl_options(build_ssl_options(ssl_opt));
+  }
+
+  return true;
+}
+
 ////////////////////////////////////////////////////////////////
 /// Publisher
 ////////////////////////////////////////////////////////////////
 
-int vlink_create_publisher(const char* url, const vlink_schema_info_t* schema_info, vlink_publisher_handle_t* handle) {
+static int create_publisher_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                 vlink_publisher_handle_t* handle, const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle) {
     return VLINK_RET_INVALID_ERROR;
   }
@@ -328,7 +388,7 @@ int vlink_create_publisher(const char* url, const vlink_schema_info_t* schema_in
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -345,37 +405,42 @@ int vlink_create_publisher(const char* url, const vlink_schema_info_t* schema_in
   }
 }
 
-int vlink_create_secure_publisher(const char* url, const vlink_schema_info_t* schema_info,
-                                  vlink_publisher_handle_t* handle, const vlink_security_config_t* security_cfg) {
+int vlink_create_publisher(const char* url, const vlink_schema_info_t* schema_info, vlink_publisher_handle_t* handle) {
+  return create_publisher_impl(url, schema_info, handle, nullptr);
+}
+
+static int create_secure_publisher_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                        vlink_publisher_handle_t* handle, const vlink_security_config_t* security_cfg,
+                                        const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle || !security_cfg) {
     return VLINK_RET_INVALID_ERROR;
   }
 
-  vlink::Security* sec = nullptr;
+  std::shared_ptr<c_api_security_state>* state_holder = nullptr;
   vlink::Publisher<vlink::Bytes>* ptr = nullptr;
 
   try {
-    sec = pool_new<vlink::Security>(build_node_security_config(security_cfg, url, schema_info));
+    state_holder = shared_state_new<c_api_security_state>(build_node_security_config(security_cfg, url, schema_info));
 
-    if VUNLIKELY (!sec) {
+    if VUNLIKELY (!state_holder) {
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->can_encrypt()) {
+    if VUNLIKELY (!(*state_holder)->security.can_encrypt()) {
       VLOG_W("vlink_create_secure_publisher: security_cfg cannot encrypt.");
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
     ptr = pool_new<vlink::Publisher<vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
 
     if VUNLIKELY (!ptr) {
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
@@ -383,14 +448,19 @@ int vlink_create_secure_publisher(const char* url, const vlink_schema_info_t* sc
 
     handle->native_handle = ptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    handle->reserved[4] = sec;
+    handle->reserved[4] = state_holder;
 
     return VLINK_RET_NO_ERROR;
   } catch (std::exception&) {
     pool_delete(ptr);
-    pool_delete(sec);
+    shared_state_delete(state_holder);
     return VLINK_RET_RUNTIME_ERROR;
   }
+}
+
+int vlink_create_secure_publisher(const char* url, const vlink_schema_info_t* schema_info,
+                                  vlink_publisher_handle_t* handle, const vlink_security_config_t* security_cfg) {
+  return create_secure_publisher_impl(url, schema_info, handle, security_cfg, nullptr);
 }
 
 int vlink_destroy_publisher(vlink_publisher_handle_t* handle) {
@@ -408,9 +478,7 @@ int vlink_destroy_publisher(vlink_publisher_handle_t* handle) {
   handle->native_handle = nullptr;
 
   if (handle->reserved[4]) {
-    pool_delete(static_cast<vlink::Security*>(handle->reserved[4]));
-    free_retired_securities(&handle->reserved[5]);
-    handle->reserved[4] = nullptr;
+    shared_state_delete<c_api_security_state>(handle->reserved[4]);
   }
 
   return VLINK_RET_NO_ERROR;
@@ -484,12 +552,12 @@ int vlink_publish(const vlink_publisher_handle_t handle, const uint8_t* data, co
     return VLINK_RET_INVALID_ERROR;
   }
 
-  auto* sec = static_cast<vlink::Security*>(handle.reserved[4]);
+  auto sec_state = shared_state_get<c_api_security_state>(handle.reserved[4]);
 
-  if VUNLIKELY (sec) {
+  if VUNLIKELY (sec_state) {
     vlink::Bytes cipher;
 
-    if VUNLIKELY (!sec->encrypt(vlink::Bytes::shallow_copy(data, size), cipher)) {
+    if VUNLIKELY (!sec_state->security.encrypt(vlink::Bytes::shallow_copy(data, size), cipher)) {
       VLOG_W("vlink_publish: encrypt failed.");
       return VLINK_RET_TRANSFER_ERROR;
     }
@@ -523,12 +591,12 @@ int vlink_publish_by_force(const vlink_publisher_handle_t handle, const uint8_t*
     return VLINK_RET_INVALID_ERROR;
   }
 
-  auto* sec = static_cast<vlink::Security*>(handle.reserved[4]);
+  auto sec_state = shared_state_get<c_api_security_state>(handle.reserved[4]);
 
-  if VUNLIKELY (sec) {
+  if VUNLIKELY (sec_state) {
     vlink::Bytes cipher;
 
-    if VUNLIKELY (!sec->encrypt(vlink::Bytes::shallow_copy(data, size), cipher)) {
+    if VUNLIKELY (!sec_state->security.encrypt(vlink::Bytes::shallow_copy(data, size), cipher)) {
       VLOG_W("vlink_publish_by_force: encrypt failed.");
       return VLINK_RET_TRANSFER_ERROR;
     }
@@ -551,8 +619,9 @@ int vlink_publish_by_force(const vlink_publisher_handle_t handle, const uint8_t*
 /// Subscriber
 ////////////////////////////////////////////////////////////////
 
-int vlink_create_subscriber(const char* url, const vlink_schema_info_t* schema_info, vlink_subscriber_handle_t* handle,
-                            const vlink_msg_callback_t msg_callback, void* user_data) {
+static int create_subscriber_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                  vlink_subscriber_handle_t* handle, const vlink_msg_callback_t msg_callback,
+                                  void* user_data, const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle || !msg_callback) {
     return VLINK_RET_INVALID_ERROR;
   }
@@ -565,7 +634,7 @@ int vlink_create_subscriber(const char* url, const vlink_schema_info_t* schema_i
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -575,24 +644,8 @@ int vlink_create_subscriber(const char* url, const vlink_schema_info_t* schema_i
     handle->native_handle = ptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
 
-    bool ret = ptr->listen([handle, msg_callback, user_data](const vlink::Bytes& data) {
-      auto* sec = static_cast<vlink::Security*>(handle->reserved[4]);
-
-      if VUNLIKELY (sec) {
-        vlink::Bytes plain;
-
-        if VUNLIKELY (!sec->decrypt(data, plain)) {
-          VLOG_W("vlink_subscriber: decrypt failed, message dropped.");
-          return;
-        }
-
-        msg_callback(plain.data(), plain.size(), user_data);
-
-        return;
-      }
-
-      msg_callback(data.data(), data.size(), user_data);
-    });
+    bool ret = ptr->listen(
+        [msg_callback, user_data](const vlink::Bytes& data) { msg_callback(data.data(), data.size(), user_data); });
 
     if VUNLIKELY (!ret) {
       pool_delete(ptr);
@@ -608,38 +661,44 @@ int vlink_create_subscriber(const char* url, const vlink_schema_info_t* schema_i
   }
 }
 
-int vlink_create_secure_subscriber(const char* url, const vlink_schema_info_t* schema_info,
-                                   vlink_subscriber_handle_t* handle, const vlink_msg_callback_t msg_callback,
-                                   void* user_data, const vlink_security_config_t* security_cfg) {
+int vlink_create_subscriber(const char* url, const vlink_schema_info_t* schema_info, vlink_subscriber_handle_t* handle,
+                            const vlink_msg_callback_t msg_callback, void* user_data) {
+  return create_subscriber_impl(url, schema_info, handle, msg_callback, user_data, nullptr);
+}
+
+static int create_secure_subscriber_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                         vlink_subscriber_handle_t* handle, const vlink_msg_callback_t msg_callback,
+                                         void* user_data, const vlink_security_config_t* security_cfg,
+                                         const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle || !msg_callback || !security_cfg) {
     return VLINK_RET_INVALID_ERROR;
   }
 
-  vlink::Security* sec = nullptr;
+  std::shared_ptr<c_api_security_state>* state_holder = nullptr;
   vlink::Subscriber<vlink::Bytes>* ptr = nullptr;
 
   try {
-    sec = pool_new<vlink::Security>(build_node_security_config(security_cfg, url, schema_info));
+    state_holder = shared_state_new<c_api_security_state>(build_node_security_config(security_cfg, url, schema_info));
 
-    if VUNLIKELY (!sec) {
+    if VUNLIKELY (!state_holder) {
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->can_decrypt()) {
+    if VUNLIKELY (!(*state_holder)->security.can_decrypt()) {
       VLOG_W("vlink_create_secure_subscriber: security_cfg cannot decrypt.");
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
     ptr = pool_new<vlink::Subscriber<vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
 
     if VUNLIKELY (!ptr) {
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
@@ -647,19 +706,13 @@ int vlink_create_secure_subscriber(const char* url, const vlink_schema_info_t* s
 
     handle->native_handle = ptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    handle->reserved[4] = sec;
+    handle->reserved[4] = state_holder;
 
-    bool ret = ptr->listen([handle, msg_callback, user_data](const vlink::Bytes& data) {
-      auto* attached = static_cast<vlink::Security*>(handle->reserved[4]);
-
-      if VUNLIKELY (!attached) {
-        VLOG_W("vlink_subscriber: security slot cleared, message dropped.");
-        return;
-      }
-
+    auto state = *state_holder;
+    bool ret = ptr->listen([state, msg_callback, user_data](const vlink::Bytes& data) {
       vlink::Bytes plain;
 
-      if VUNLIKELY (!attached->decrypt(data, plain)) {
+      if VUNLIKELY (!state->security.decrypt(data, plain)) {
         VLOG_W("vlink_subscriber: decrypt failed, message dropped.");
         return;
       }
@@ -669,7 +722,7 @@ int vlink_create_secure_subscriber(const char* url, const vlink_schema_info_t* s
 
     if VUNLIKELY (!ret) {
       pool_delete(ptr);
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       handle->native_handle = nullptr;
       handle->reserved[4] = nullptr;
       return VLINK_RET_TRANSFER_ERROR;
@@ -678,11 +731,17 @@ int vlink_create_secure_subscriber(const char* url, const vlink_schema_info_t* s
     return VLINK_RET_NO_ERROR;
   } catch (std::exception&) {
     pool_delete(ptr);
-    pool_delete(sec);
+    shared_state_delete(state_holder);
     handle->native_handle = nullptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
     return VLINK_RET_RUNTIME_ERROR;
   }
+}
+
+int vlink_create_secure_subscriber(const char* url, const vlink_schema_info_t* schema_info,
+                                   vlink_subscriber_handle_t* handle, const vlink_msg_callback_t msg_callback,
+                                   void* user_data, const vlink_security_config_t* security_cfg) {
+  return create_secure_subscriber_impl(url, schema_info, handle, msg_callback, user_data, security_cfg, nullptr);
 }
 
 int vlink_destroy_subscriber(vlink_subscriber_handle_t* handle) {
@@ -700,9 +759,7 @@ int vlink_destroy_subscriber(vlink_subscriber_handle_t* handle) {
   handle->native_handle = nullptr;
 
   if (handle->reserved[4]) {
-    pool_delete(static_cast<vlink::Security*>(handle->reserved[4]));
-    free_retired_securities(&handle->reserved[5]);
-    handle->reserved[4] = nullptr;
+    shared_state_delete<c_api_security_state>(handle->reserved[4]);
   }
 
   return VLINK_RET_NO_ERROR;
@@ -712,23 +769,42 @@ int vlink_destroy_subscriber(vlink_subscriber_handle_t* handle) {
 /// Server
 ////////////////////////////////////////////////////////////////
 
-int vlink_create_server(const char* url, const vlink_schema_info_t* schema_info, vlink_server_handle_t* handle,
-                        const vlink_req_callback_t req_callback, void* user_data) {
+struct server_state {  // NOLINT(readability-identifier-naming)
+  std::mutex mutex;
+  vlink::Bytes response;
+  bool request_active{false};
+  std::shared_ptr<c_api_security_state> security;
+
+  server_state() = default;
+  explicit server_state(std::shared_ptr<c_api_security_state> sec) : security(std::move(sec)) {}
+};
+
+static int create_server_impl(const char* url, const vlink_schema_info_t* schema_info, vlink_server_handle_t* handle,
+                              const vlink_req_callback_t req_callback, void* user_data,
+                              const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle || !req_callback) {
     return VLINK_RET_INVALID_ERROR;
   }
 
   vlink::Server<vlink::Bytes, vlink::Bytes>* ptr = nullptr;
-  std::mutex* mtx = nullptr;
+  std::shared_ptr<server_state>* state_holder = nullptr;
 
   try {
+    state_holder = shared_state_new<server_state>();
+
+    if VUNLIKELY (!state_holder) {
+      return VLINK_RET_MEMORY_ERROR;
+    }
+
     ptr = pool_new<vlink::Server<vlink::Bytes, vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
 
     if VUNLIKELY (!ptr) {
+      shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
@@ -736,53 +812,47 @@ int vlink_create_server(const char* url, const vlink_schema_info_t* schema_info,
 
     handle->native_handle = ptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    mtx = pool_new<std::mutex>();
-    handle->reserved[0] = mtx;
+    handle->reserved[0] = state_holder;
 
-    if VUNLIKELY (!handle->reserved[0]) {
-      pool_delete(ptr);
-      handle->native_handle = nullptr;
-      return VLINK_RET_MEMORY_ERROR;
-    }
+    auto state = *state_holder;
+    const std::string server_url = url;
+    bool ret = ptr->listen(
+        [state, server_url, req_callback, user_data](const vlink::Bytes& req_data, vlink::Bytes& resp_data) {
+          std::unique_lock lock(state->mutex);
 
-    bool ret = ptr->listen([handle, req_callback, user_data](const vlink::Bytes& req_data, vlink::Bytes& resp_data) {
-      std::unique_lock lock(*static_cast<std::mutex*>(handle->reserved[0]));
+          state->request_active = true;
+          state->response = vlink::Bytes{};
 
-      handle->reserved[3] = reinterpret_cast<void*>(1);
+          if VUNLIKELY (state->security) {
+            vlink::Bytes plain;
 
-      auto* sec = static_cast<vlink::Security*>(handle->reserved[4]);
+            if VUNLIKELY (!state->security->security.decrypt(req_data, plain)) {
+              VLOG_W(
+                  "vlink_server: decrypt request failed, dropping (url='%s'). vlink_reply on this request will return "
+                  "VLINK_RET_RUNTIME_ERROR.",
+                  server_url.c_str());
 
-      if VUNLIKELY (sec) {
-        vlink::Bytes plain;
+              state->request_active = false;
+              return;
+            }
 
-        if VUNLIKELY (!sec->decrypt(req_data, plain)) {
-          auto* server_ptr = static_cast<vlink::Server<vlink::Bytes, vlink::Bytes>*>(handle->native_handle);
+            req_callback(plain.data(), plain.size(), user_data);
+          } else {
+            req_callback(req_data.data(), req_data.size(), user_data);
+          }
 
-          VLOG_W(
-              "vlink_server: decrypt request failed, dropping (url='%s'). vlink_reply on this request will return "
-              "VLINK_RET_RUNTIME_ERROR.",
-              server_ptr ? server_ptr->get_url().c_str() : "<null>");
+          if (state->request_active) {
+            state->request_active = false;
+            state->response = vlink::Bytes{};
+            return;
+          }
 
-          handle->reserved[3] = nullptr;
-          return;
-        }
-
-        req_callback(plain.data(), plain.size(), user_data);
-      } else {
-        req_callback(req_data.data(), req_data.size(), user_data);
-      }
-
-      if (!handle->reserved[1] || !handle->reserved[2] || handle->reserved[3]) {
-        handle->reserved[3] = nullptr;
-        return;
-      }
-
-      resp_data = vlink::Bytes::shallow_copy(static_cast<uint8_t*>(handle->reserved[1]),
-                                             reinterpret_cast<size_t>(handle->reserved[2]));
-    });
+          resp_data = std::move(state->response);
+          state->response = vlink::Bytes{};
+        });
 
     if VUNLIKELY (!ret) {
-      pool_delete(static_cast<std::mutex*>(handle->reserved[0]));
+      shared_state_delete(state_holder);
       pool_delete(ptr);
       handle->native_handle = nullptr;
 
@@ -793,8 +863,121 @@ int vlink_create_server(const char* url, const vlink_schema_info_t* schema_info,
 
     return VLINK_RET_NO_ERROR;
   } catch (std::exception&) {
-    pool_delete(mtx);
     pool_delete(ptr);
+    shared_state_delete(state_holder);
+    handle->native_handle = nullptr;
+    std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
+    return VLINK_RET_RUNTIME_ERROR;
+  }
+}
+
+int vlink_create_server(const char* url, const vlink_schema_info_t* schema_info, vlink_server_handle_t* handle,
+                        const vlink_req_callback_t req_callback, void* user_data) {
+  return create_server_impl(url, schema_info, handle, req_callback, user_data, nullptr);
+}
+
+static int create_secure_server_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                     vlink_server_handle_t* handle, const vlink_req_callback_t req_callback,
+                                     void* user_data, const vlink_security_config_t* security_cfg,
+                                     const vlink_ssl_options_t* ssl_opt) {
+  if VUNLIKELY (!url || !handle || !req_callback || !security_cfg) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  std::shared_ptr<c_api_security_state>* sec_holder = nullptr;
+  std::shared_ptr<server_state>* state_holder = nullptr;
+  vlink::Server<vlink::Bytes, vlink::Bytes>* ptr = nullptr;
+
+  try {
+    sec_holder = shared_state_new<c_api_security_state>(build_node_security_config(security_cfg, url, schema_info));
+
+    if VUNLIKELY (!sec_holder) {
+      return VLINK_RET_MEMORY_ERROR;
+    }
+
+    if VUNLIKELY (!(*sec_holder)->security.can_encrypt() || !(*sec_holder)->security.can_decrypt()) {
+      VLOG_W("vlink_create_secure_server: security_cfg cannot encrypt and decrypt.");
+      shared_state_delete(sec_holder);
+      return VLINK_RET_INVALID_ERROR;
+    }
+
+    state_holder = shared_state_new<server_state>(*sec_holder);
+
+    if VUNLIKELY (!state_holder) {
+      shared_state_delete(sec_holder);
+      return VLINK_RET_MEMORY_ERROR;
+    }
+
+    ptr = pool_new<vlink::Server<vlink::Bytes, vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
+
+    if VUNLIKELY (!ptr) {
+      shared_state_delete(state_holder);
+      shared_state_delete(sec_holder);
+      return VLINK_RET_MEMORY_ERROR;
+    }
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
+      pool_delete(ptr);
+      shared_state_delete(state_holder);
+      shared_state_delete(sec_holder);
+      return VLINK_RET_INVALID_ERROR;
+    }
+
+    ptr->init();
+
+    handle->native_handle = ptr;
+    std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
+    handle->reserved[0] = state_holder;
+    handle->reserved[4] = sec_holder;
+
+    auto state = *state_holder;
+    const std::string server_url = url;
+    bool ret = ptr->listen(
+        [state, server_url, req_callback, user_data](const vlink::Bytes& req_data, vlink::Bytes& resp_data) {
+          std::unique_lock lock(state->mutex);
+
+          state->request_active = true;
+          state->response = vlink::Bytes{};
+
+          vlink::Bytes plain;
+
+          if VUNLIKELY (!state->security || !state->security->security.decrypt(req_data, plain)) {
+            VLOG_W(
+                "vlink_server: decrypt request failed, dropping (url='%s'). vlink_reply on this request will return "
+                "VLINK_RET_RUNTIME_ERROR.",
+                server_url.c_str());
+
+            state->request_active = false;
+            return;
+          }
+
+          req_callback(plain.data(), plain.size(), user_data);
+
+          if (state->request_active) {
+            state->request_active = false;
+            state->response = vlink::Bytes{};
+            return;
+          }
+
+          resp_data = std::move(state->response);
+          state->response = vlink::Bytes{};
+        });
+
+    if VUNLIKELY (!ret) {
+      shared_state_delete(state_holder);
+      pool_delete(ptr);
+      shared_state_delete(sec_holder);
+      handle->native_handle = nullptr;
+
+      std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
+
+      return VLINK_RET_TRANSFER_ERROR;
+    }
+
+    return VLINK_RET_NO_ERROR;
+  } catch (std::exception&) {
+    pool_delete(ptr);
+    shared_state_delete(state_holder);
+    shared_state_delete(sec_holder);
     handle->native_handle = nullptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
     return VLINK_RET_RUNTIME_ERROR;
@@ -804,113 +987,7 @@ int vlink_create_server(const char* url, const vlink_schema_info_t* schema_info,
 int vlink_create_secure_server(const char* url, const vlink_schema_info_t* schema_info, vlink_server_handle_t* handle,
                                const vlink_req_callback_t req_callback, void* user_data,
                                const vlink_security_config_t* security_cfg) {
-  if VUNLIKELY (!url || !handle || !req_callback || !security_cfg) {
-    return VLINK_RET_INVALID_ERROR;
-  }
-
-  vlink::Security* sec = nullptr;
-  vlink::Server<vlink::Bytes, vlink::Bytes>* ptr = nullptr;
-  std::mutex* mtx = nullptr;
-
-  try {
-    sec = pool_new<vlink::Security>(build_node_security_config(security_cfg, url, schema_info));
-
-    if VUNLIKELY (!sec) {
-      return VLINK_RET_MEMORY_ERROR;
-    }
-
-    if VUNLIKELY (!sec->can_encrypt() || !sec->can_decrypt()) {
-      VLOG_W("vlink_create_secure_server: security_cfg cannot encrypt and decrypt.");
-      pool_delete(sec);
-      return VLINK_RET_INVALID_ERROR;
-    }
-
-    ptr = pool_new<vlink::Server<vlink::Bytes, vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
-
-    if VUNLIKELY (!ptr) {
-      pool_delete(sec);
-      return VLINK_RET_MEMORY_ERROR;
-    }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
-      pool_delete(ptr);
-      pool_delete(sec);
-      return VLINK_RET_INVALID_ERROR;
-    }
-
-    ptr->init();
-
-    handle->native_handle = ptr;
-    std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    mtx = pool_new<std::mutex>();
-    handle->reserved[0] = mtx;
-
-    if VUNLIKELY (!handle->reserved[0]) {
-      pool_delete(ptr);
-      pool_delete(sec);
-      handle->native_handle = nullptr;
-      return VLINK_RET_MEMORY_ERROR;
-    }
-
-    handle->reserved[4] = sec;
-
-    bool ret = ptr->listen([handle, req_callback, user_data](const vlink::Bytes& req_data, vlink::Bytes& resp_data) {
-      std::unique_lock lock(*static_cast<std::mutex*>(handle->reserved[0]));
-
-      handle->reserved[3] = reinterpret_cast<void*>(1);
-
-      auto* attached = static_cast<vlink::Security*>(handle->reserved[4]);
-
-      if VUNLIKELY (!attached) {
-        VLOG_W("vlink_server: security slot cleared, request dropped.");
-        handle->reserved[3] = nullptr;
-        return;
-      }
-
-      vlink::Bytes plain;
-
-      if VUNLIKELY (!attached->decrypt(req_data, plain)) {
-        auto* server_ptr = static_cast<vlink::Server<vlink::Bytes, vlink::Bytes>*>(handle->native_handle);
-
-        VLOG_W(
-            "vlink_server: decrypt request failed, dropping (url='%s'). vlink_reply on this request will return "
-            "VLINK_RET_RUNTIME_ERROR.",
-            server_ptr ? server_ptr->get_url().c_str() : "<null>");
-
-        handle->reserved[3] = nullptr;
-        return;
-      }
-
-      req_callback(plain.data(), plain.size(), user_data);
-
-      if (!handle->reserved[1] || !handle->reserved[2] || handle->reserved[3]) {
-        handle->reserved[3] = nullptr;
-        return;
-      }
-
-      resp_data = vlink::Bytes::shallow_copy(static_cast<uint8_t*>(handle->reserved[1]),
-                                             reinterpret_cast<size_t>(handle->reserved[2]));
-    });
-
-    if VUNLIKELY (!ret) {
-      pool_delete(static_cast<std::mutex*>(handle->reserved[0]));
-      pool_delete(ptr);
-      pool_delete(sec);
-      handle->native_handle = nullptr;
-
-      std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-
-      return VLINK_RET_TRANSFER_ERROR;
-    }
-
-    return VLINK_RET_NO_ERROR;
-  } catch (std::exception&) {
-    pool_delete(mtx);
-    pool_delete(ptr);
-    pool_delete(sec);
-    handle->native_handle = nullptr;
-    std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    return VLINK_RET_RUNTIME_ERROR;
-  }
+  return create_secure_server_impl(url, schema_info, handle, req_callback, user_data, security_cfg, nullptr);
 }
 
 int vlink_destroy_server(vlink_server_handle_t* handle) {
@@ -929,21 +1006,11 @@ int vlink_destroy_server(vlink_server_handle_t* handle) {
   handle->native_handle = nullptr;
 
   if (handle->reserved[0]) {
-    pool_delete(static_cast<std::mutex*>(handle->reserved[0]));
-  }
-
-  if (handle->reserved[1]) {
-    const auto buf_size = reinterpret_cast<size_t>(handle->reserved[2]);  // NOLINT(performance-no-int-to-ptr)
-    pool_free_raw(static_cast<uint8_t*>(handle->reserved[1]), buf_size);
-  }
-
-  if (handle->reserved[2]) {
-    handle->reserved[2] = nullptr;
+    shared_state_delete<server_state>(handle->reserved[0]);
   }
 
   if (handle->reserved[4]) {
-    pool_delete(static_cast<vlink::Security*>(handle->reserved[4]));
-    free_retired_securities(&handle->reserved[5]);
+    shared_state_delete<c_api_security_state>(handle->reserved[4]);
   }
 
   std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
@@ -966,85 +1033,50 @@ int vlink_reply(vlink_server_handle_t* handle, const uint8_t* data, const size_t
     return VLINK_RET_INVALID_ERROR;
   }
 
-  auto* mtx = static_cast<std::mutex*>(handle->reserved[0]);
+  auto state = shared_state_get<server_state>(handle->reserved[0]);
 
-  if VUNLIKELY (!mtx) {
+  if VUNLIKELY (!state) {
     return VLINK_RET_INVALID_ERROR;
   }
 
-  if VUNLIKELY (!handle->reserved[3]) {
+  if VUNLIKELY (!state->request_active) {
     return VLINK_RET_RUNTIME_ERROR;
   }
 
-  auto* sec = static_cast<vlink::Security*>(handle->reserved[4]);
-
-  if VUNLIKELY (sec) {
+  if VUNLIKELY (state->security) {
     if (size == 0U) {
-      if (handle->reserved[1]) {
-        const auto prev_size = reinterpret_cast<size_t>(handle->reserved[2]);  // NOLINT(performance-no-int-to-ptr)
-        pool_free_raw(static_cast<uint8_t*>(handle->reserved[1]), prev_size);
-        handle->reserved[1] = nullptr;
-      }
-
-      handle->reserved[2] = nullptr;
-      handle->reserved[3] = nullptr;
+      state->response = vlink::Bytes{};
+      state->request_active = false;
 
       return VLINK_RET_NO_ERROR;
     }
 
     vlink::Bytes cipher;
 
-    if VUNLIKELY (!sec->encrypt(vlink::Bytes::shallow_copy(data, size), cipher)) {
+    if VUNLIKELY (!state->security->security.encrypt(vlink::Bytes::shallow_copy(data, size), cipher)) {
       VLOG_W("vlink_reply: encrypt response failed.");
       return VLINK_RET_TRANSFER_ERROR;
     }
 
-    if (handle->reserved[1]) {
-      const auto prev_size = reinterpret_cast<size_t>(handle->reserved[2]);  // NOLINT(performance-no-int-to-ptr)
-      pool_free_raw(static_cast<uint8_t*>(handle->reserved[1]), prev_size);
-      handle->reserved[1] = nullptr;
-    }
-
-    handle->reserved[2] = nullptr;
-
-    if VLIKELY (!cipher.empty()) {
-      auto* buf = pool_alloc_raw(cipher.size());
-
-      if VUNLIKELY (!buf) {
-        return VLINK_RET_MEMORY_ERROR;
-      }
-
-      std::memcpy(buf, cipher.data(), cipher.size());
-      handle->reserved[1] = buf;
-      handle->reserved[2] = reinterpret_cast<void*>(cipher.size());  // NOLINT(performance-no-int-to-ptr)
-    }
-
-    handle->reserved[3] = nullptr;
+    state->response = std::move(cipher);
+    state->request_active = false;
 
     return VLINK_RET_NO_ERROR;
   }
 
-  if (handle->reserved[1]) {
-    const auto prev_size = reinterpret_cast<size_t>(handle->reserved[2]);  // NOLINT(performance-no-int-to-ptr)
-    pool_free_raw(static_cast<uint8_t*>(handle->reserved[1]), prev_size);
-    handle->reserved[1] = nullptr;
-  }
-
-  handle->reserved[2] = nullptr;
-
   if VLIKELY (size > 0U) {
-    auto* buf = pool_alloc_raw(size);
+    auto response = vlink::Bytes::deep_copy(data, size);
 
-    if VUNLIKELY (!buf) {
+    if VUNLIKELY (!response.data() || response.size() != size) {
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    std::memcpy(buf, data, size);
-    handle->reserved[1] = buf;
-    handle->reserved[2] = reinterpret_cast<void*>(size);  // NOLINT(performance-no-int-to-ptr)
+    state->response = std::move(response);
+  } else {
+    state->response = vlink::Bytes{};
   }
 
-  handle->reserved[3] = nullptr;
+  state->request_active = false;
 
   return VLINK_RET_NO_ERROR;
 }
@@ -1053,7 +1085,8 @@ int vlink_reply(vlink_server_handle_t* handle, const uint8_t* data, const size_t
 /// Client
 ////////////////////////////////////////////////////////////////
 
-int vlink_create_client(const char* url, const vlink_schema_info_t* schema_info, vlink_client_handle_t* handle) {
+static int create_client_impl(const char* url, const vlink_schema_info_t* schema_info, vlink_client_handle_t* handle,
+                              const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle) {
     return VLINK_RET_INVALID_ERROR;
   }
@@ -1066,7 +1099,7 @@ int vlink_create_client(const char* url, const vlink_schema_info_t* schema_info,
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -1083,37 +1116,42 @@ int vlink_create_client(const char* url, const vlink_schema_info_t* schema_info,
   }
 }
 
-int vlink_create_secure_client(const char* url, const vlink_schema_info_t* schema_info, vlink_client_handle_t* handle,
-                               const vlink_security_config_t* security_cfg) {
+int vlink_create_client(const char* url, const vlink_schema_info_t* schema_info, vlink_client_handle_t* handle) {
+  return create_client_impl(url, schema_info, handle, nullptr);
+}
+
+static int create_secure_client_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                     vlink_client_handle_t* handle, const vlink_security_config_t* security_cfg,
+                                     const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle || !security_cfg) {
     return VLINK_RET_INVALID_ERROR;
   }
 
-  vlink::Security* sec = nullptr;
+  std::shared_ptr<c_api_security_state>* state_holder = nullptr;
   vlink::Client<vlink::Bytes, vlink::Bytes>* ptr = nullptr;
 
   try {
-    sec = pool_new<vlink::Security>(build_node_security_config(security_cfg, url, schema_info));
+    state_holder = shared_state_new<c_api_security_state>(build_node_security_config(security_cfg, url, schema_info));
 
-    if VUNLIKELY (!sec) {
+    if VUNLIKELY (!state_holder) {
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!sec->can_encrypt() || !sec->can_decrypt()) {
+    if VUNLIKELY (!(*state_holder)->security.can_encrypt() || !(*state_holder)->security.can_decrypt()) {
       VLOG_W("vlink_create_secure_client: security_cfg cannot encrypt and decrypt.");
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
     ptr = pool_new<vlink::Client<vlink::Bytes, vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
 
     if VUNLIKELY (!ptr) {
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
-      pool_delete(sec);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
@@ -1121,14 +1159,19 @@ int vlink_create_secure_client(const char* url, const vlink_schema_info_t* schem
 
     handle->native_handle = ptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    handle->reserved[4] = sec;
+    handle->reserved[4] = state_holder;
 
     return VLINK_RET_NO_ERROR;
   } catch (std::exception&) {
     pool_delete(ptr);
-    pool_delete(sec);
+    shared_state_delete(state_holder);
     return VLINK_RET_RUNTIME_ERROR;
   }
+}
+
+int vlink_create_secure_client(const char* url, const vlink_schema_info_t* schema_info, vlink_client_handle_t* handle,
+                               const vlink_security_config_t* security_cfg) {
+  return create_secure_client_impl(url, schema_info, handle, security_cfg, nullptr);
 }
 
 int vlink_destroy_client(vlink_client_handle_t* handle) {
@@ -1146,9 +1189,7 @@ int vlink_destroy_client(vlink_client_handle_t* handle) {
   handle->native_handle = nullptr;
 
   if (handle->reserved[4]) {
-    pool_delete(static_cast<vlink::Security*>(handle->reserved[4]));
-    free_retired_securities(&handle->reserved[5]);
-    handle->reserved[4] = nullptr;
+    shared_state_delete<c_api_security_state>(handle->reserved[4]);
   }
 
   return VLINK_RET_NO_ERROR;
@@ -1218,12 +1259,12 @@ int vlink_invoke(const vlink_client_handle_t handle, const uint8_t* data, const 
   }
 
   auto* ptr = static_cast<vlink::Client<vlink::Bytes, vlink::Bytes>*>(handle.native_handle);
-  auto* enc_sec = static_cast<vlink::Security*>(handle.reserved[4]);
+  auto sec_state = shared_state_get<c_api_security_state>(handle.reserved[4]);
 
   vlink::Bytes payload;
 
-  if VUNLIKELY (enc_sec) {
-    if VUNLIKELY (!enc_sec->encrypt(vlink::Bytes::shallow_copy(data, size), payload)) {
+  if VUNLIKELY (sec_state) {
+    if VUNLIKELY (!sec_state->security.encrypt(vlink::Bytes::shallow_copy(data, size), payload)) {
       VLOG_W("vlink_invoke: encrypt request failed.");
       return VLINK_RET_TRANSFER_ERROR;
     }
@@ -1231,31 +1272,32 @@ int vlink_invoke(const vlink_client_handle_t handle, const uint8_t* data, const 
     payload = vlink::Bytes::shallow_copy(data, size);
   }
 
-  const bool ret = ptr->invoke(payload, [enc_sec, resp_callback, user_data](const vlink::Bytes& resp_data) {
-    if (!resp_callback) {
-      return;
-    }
+  const bool ret =
+      ptr->invoke(payload, [sec_state = std::move(sec_state), resp_callback, user_data](const vlink::Bytes& resp_data) {
+        if (!resp_callback) {
+          return;
+        }
 
-    if VUNLIKELY (enc_sec) {
-      if (resp_data.empty()) {
-        resp_callback(nullptr, 0U, user_data);
-        return;
-      }
+        if VUNLIKELY (sec_state) {
+          if (resp_data.empty()) {
+            resp_callback(nullptr, 0U, user_data);
+            return;
+          }
 
-      vlink::Bytes plain;
+          vlink::Bytes plain;
 
-      if VUNLIKELY (!enc_sec->decrypt(resp_data, plain)) {
-        VLOG_W("vlink_invoke: decrypt response failed.");
-        return;
-      }
+          if VUNLIKELY (!sec_state->security.decrypt(resp_data, plain)) {
+            VLOG_W("vlink_invoke: decrypt response failed.");
+            return;
+          }
 
-      resp_callback(plain.data(), plain.size(), user_data);
+          resp_callback(plain.data(), plain.size(), user_data);
 
-      return;
-    }
+          return;
+        }
 
-    resp_callback(resp_data.data(), resp_data.size(), user_data);
-  });
+        resp_callback(resp_data.data(), resp_data.size(), user_data);
+      });
 
   if VUNLIKELY (!ret) {
     return VLINK_RET_TRANSFER_ERROR;
@@ -1268,7 +1310,8 @@ int vlink_invoke(const vlink_client_handle_t handle, const uint8_t* data, const 
 /// Setter
 ////////////////////////////////////////////////////////////////
 
-int vlink_create_setter(const char* url, const vlink_schema_info_t* schema_info, vlink_setter_handle_t* handle) {
+static int create_setter_impl(const char* url, const vlink_schema_info_t* schema_info, vlink_setter_handle_t* handle,
+                              const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle) {
     return VLINK_RET_INVALID_ERROR;
   }
@@ -1281,7 +1324,7 @@ int vlink_create_setter(const char* url, const vlink_schema_info_t* schema_info,
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -1298,9 +1341,12 @@ int vlink_create_setter(const char* url, const vlink_schema_info_t* schema_info,
   }
 }
 
+int vlink_create_setter(const char* url, const vlink_schema_info_t* schema_info, vlink_setter_handle_t* handle) {
+  return create_setter_impl(url, schema_info, handle, nullptr);
+}
+
 struct setter_security_state {  // NOLINT(readability-identifier-naming)
   vlink::Security security;
-  std::vector<uint8_t> cache;
   std::mutex mutex;
 
   explicit setter_security_state(const vlink::Security::Config& cfg) : security(cfg) {}
@@ -1316,24 +1362,6 @@ struct getter_security_state {  // NOLINT(readability-identifier-naming)
   explicit getter_security_state(const vlink::Security::Config& cfg) : security(cfg) {}
   explicit getter_security_state(vlink::Security::Config&& cfg) : security(std::move(cfg)) {}
 };
-
-struct retired_setter_state_node {  // NOLINT(readability-identifier-naming)
-  setter_security_state* state;
-  retired_setter_state_node* next;
-};
-
-static void free_retired_setter_states(void** retired_slot) noexcept {
-  auto* node = static_cast<retired_setter_state_node*>(*retired_slot);
-
-  while (node != nullptr) {
-    auto* next = node->next;
-    pool_delete(node->state);
-    pool_delete(node);
-    node = next;
-  }
-
-  *retired_slot = nullptr;
-}
 
 static bool bytes_equal(const std::vector<uint8_t>& lhs, const vlink::Bytes& rhs) noexcept {
   if (lhs.size() != rhs.size()) {
@@ -1381,37 +1409,38 @@ static bool decrypt_getter_value(getter_security_state* state, const vlink::Byte
   return true;
 }
 
-int vlink_create_secure_setter(const char* url, const vlink_schema_info_t* schema_info, vlink_setter_handle_t* handle,
-                               const vlink_security_config_t* security_cfg) {
+static int create_secure_setter_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                     vlink_setter_handle_t* handle, const vlink_security_config_t* security_cfg,
+                                     const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle || !security_cfg) {
     return VLINK_RET_INVALID_ERROR;
   }
 
-  setter_security_state* state = nullptr;
+  std::shared_ptr<setter_security_state>* state_holder = nullptr;
   vlink::Setter<vlink::Bytes>* ptr = nullptr;
 
   try {
-    state = pool_new<setter_security_state>(build_node_security_config(security_cfg, url, schema_info));
+    state_holder = shared_state_new<setter_security_state>(build_node_security_config(security_cfg, url, schema_info));
 
-    if VUNLIKELY (!state) {
+    if VUNLIKELY (!state_holder) {
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!state->security.can_encrypt()) {
+    if VUNLIKELY (!(*state_holder)->security.can_encrypt()) {
       VLOG_W("vlink_create_secure_setter: security_cfg cannot encrypt.");
-      pool_delete(state);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
     ptr = pool_new<vlink::Setter<vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
 
     if VUNLIKELY (!ptr) {
-      pool_delete(state);
+      shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
-      pool_delete(state);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
@@ -1419,16 +1448,21 @@ int vlink_create_secure_setter(const char* url, const vlink_schema_info_t* schem
 
     handle->native_handle = ptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    handle->reserved[4] = state;
+    handle->reserved[4] = state_holder;
 
     return VLINK_RET_NO_ERROR;
   } catch (std::exception&) {
     pool_delete(ptr);
-    pool_delete(state);
+    shared_state_delete(state_holder);
     handle->native_handle = nullptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
     return VLINK_RET_RUNTIME_ERROR;
   }
+}
+
+int vlink_create_secure_setter(const char* url, const vlink_schema_info_t* schema_info, vlink_setter_handle_t* handle,
+                               const vlink_security_config_t* security_cfg) {
+  return create_secure_setter_impl(url, schema_info, handle, security_cfg, nullptr);
 }
 
 int vlink_destroy_setter(vlink_setter_handle_t* handle) {
@@ -1446,9 +1480,7 @@ int vlink_destroy_setter(vlink_setter_handle_t* handle) {
   handle->native_handle = nullptr;
 
   if (handle->reserved[4]) {
-    pool_delete(static_cast<setter_security_state*>(handle->reserved[4]));
-    free_retired_setter_states(&handle->reserved[5]);
-    handle->reserved[4] = nullptr;
+    shared_state_delete<setter_security_state>(handle->reserved[4]);
   }
 
   return VLINK_RET_NO_ERROR;
@@ -1469,7 +1501,7 @@ int vlink_set(const vlink_setter_handle_t handle, const uint8_t* data, const siz
     return VLINK_RET_INVALID_ERROR;
   }
 
-  auto* state = static_cast<setter_security_state*>(handle.reserved[4]);
+  auto state = shared_state_get<setter_security_state>(handle.reserved[4]);
 
   if VUNLIKELY (state) {
     std::lock_guard lock(state->mutex);
@@ -1480,9 +1512,7 @@ int vlink_set(const vlink_setter_handle_t handle, const uint8_t* data, const siz
       return VLINK_RET_TRANSFER_ERROR;
     }
 
-    state->cache.assign(cipher.data(), cipher.data() + cipher.size());
-
-    ptr->set(vlink::Bytes::shallow_copy(state->cache.data(), state->cache.size()));
+    ptr->set(cipher);
 
     return VLINK_RET_NO_ERROR;
   }
@@ -1496,8 +1526,9 @@ int vlink_set(const vlink_setter_handle_t handle, const uint8_t* data, const siz
 /// Getter
 ////////////////////////////////////////////////////////////////
 
-int vlink_create_getter(const char* url, const vlink_schema_info_t* schema_info, vlink_getter_handle_t* handle,
-                        const vlink_msg_callback_t msg_callback, void* user_data) {
+static int create_getter_impl(const char* url, const vlink_schema_info_t* schema_info, vlink_getter_handle_t* handle,
+                              const vlink_msg_callback_t msg_callback, void* user_data,
+                              const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle) {
     return VLINK_RET_INVALID_ERROR;
   }
@@ -1510,7 +1541,7 @@ int vlink_create_getter(const char* url, const vlink_schema_info_t* schema_info,
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
     }
@@ -1522,24 +1553,8 @@ int vlink_create_getter(const char* url, const vlink_schema_info_t* schema_info,
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
 
     if (msg_callback) {
-      bool ret = ptr->listen([handle, msg_callback, user_data](const vlink::Bytes& data) {
-        auto* sec = static_cast<vlink::Security*>(handle->reserved[4]);
-
-        if VUNLIKELY (sec) {
-          vlink::Bytes plain;
-
-          if VUNLIKELY (!sec->decrypt(data, plain)) {
-            VLOG_W("vlink_getter: decrypt failed, update dropped.");
-            return;
-          }
-
-          msg_callback(plain.data(), plain.size(), user_data);
-
-          return;
-        }
-
-        msg_callback(data.data(), data.size(), user_data);
-      });
+      bool ret = ptr->listen(
+          [msg_callback, user_data](const vlink::Bytes& data) { msg_callback(data.data(), data.size(), user_data); });
 
       if VUNLIKELY (!ret) {
         pool_delete(ptr);
@@ -1556,38 +1571,44 @@ int vlink_create_getter(const char* url, const vlink_schema_info_t* schema_info,
   }
 }
 
-int vlink_create_secure_getter(const char* url, const vlink_schema_info_t* schema_info, vlink_getter_handle_t* handle,
-                               const vlink_msg_callback_t msg_callback, void* user_data,
-                               const vlink_security_config_t* security_cfg) {
+int vlink_create_getter(const char* url, const vlink_schema_info_t* schema_info, vlink_getter_handle_t* handle,
+                        const vlink_msg_callback_t msg_callback, void* user_data) {
+  return create_getter_impl(url, schema_info, handle, msg_callback, user_data, nullptr);
+}
+
+static int create_secure_getter_impl(const char* url, const vlink_schema_info_t* schema_info,
+                                     vlink_getter_handle_t* handle, const vlink_msg_callback_t msg_callback,
+                                     void* user_data, const vlink_security_config_t* security_cfg,
+                                     const vlink_ssl_options_t* ssl_opt) {
   if VUNLIKELY (!url || !handle || !security_cfg) {
     return VLINK_RET_INVALID_ERROR;
   }
 
-  getter_security_state* state = nullptr;
+  std::shared_ptr<getter_security_state>* state_holder = nullptr;
   vlink::Getter<vlink::Bytes>* ptr = nullptr;
 
   try {
-    state = pool_new<getter_security_state>(build_node_security_config(security_cfg, url, schema_info));
+    state_holder = shared_state_new<getter_security_state>(build_node_security_config(security_cfg, url, schema_info));
 
-    if VUNLIKELY (!state) {
+    if VUNLIKELY (!state_holder) {
       return VLINK_RET_MEMORY_ERROR;
     }
 
-    if VUNLIKELY (!state->security.can_decrypt()) {
+    if VUNLIKELY (!(*state_holder)->security.can_decrypt()) {
       VLOG_W("vlink_create_secure_getter: security_cfg cannot decrypt.");
-      pool_delete(state);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
     ptr = pool_new<vlink::Getter<vlink::Bytes>>(url, vlink::InitType::kWithoutInit);
 
     if VUNLIKELY (!ptr) {
-      pool_delete(state);
+      shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
-    if VUNLIKELY (!apply_schema_info(*ptr, schema_info)) {
+    if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
-      pool_delete(state);
+      shared_state_delete(state_holder);
       return VLINK_RET_INVALID_ERROR;
     }
 
@@ -1595,20 +1616,14 @@ int vlink_create_secure_getter(const char* url, const vlink_schema_info_t* schem
 
     handle->native_handle = ptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
-    handle->reserved[4] = state;
+    handle->reserved[4] = state_holder;
 
     if (msg_callback) {
-      bool ret = ptr->listen([handle, msg_callback, user_data](const vlink::Bytes& data) {
-        auto* attached = static_cast<getter_security_state*>(handle->reserved[4]);
-
-        if VUNLIKELY (!attached) {
-          VLOG_W("vlink_getter: security slot cleared, update dropped.");
-          return;
-        }
-
+      auto state = *state_holder;
+      bool ret = ptr->listen([state, msg_callback, user_data](const vlink::Bytes& data) {
         std::vector<uint8_t> plain;
 
-        if VUNLIKELY (!decrypt_getter_value(attached, data, plain, false)) {
+        if VUNLIKELY (!decrypt_getter_value(state.get(), data, plain, false)) {
           VLOG_W("vlink_getter: decrypt failed, update dropped.");
           return;
         }
@@ -1618,7 +1633,7 @@ int vlink_create_secure_getter(const char* url, const vlink_schema_info_t* schem
 
       if VUNLIKELY (!ret) {
         pool_delete(ptr);
-        pool_delete(state);
+        shared_state_delete(state_holder);
         handle->native_handle = nullptr;
         handle->reserved[4] = nullptr;
         return VLINK_RET_TRANSFER_ERROR;
@@ -1628,11 +1643,17 @@ int vlink_create_secure_getter(const char* url, const vlink_schema_info_t* schem
     return VLINK_RET_NO_ERROR;
   } catch (std::exception&) {
     pool_delete(ptr);
-    pool_delete(state);
+    shared_state_delete(state_holder);
     handle->native_handle = nullptr;
     std::memset(static_cast<void*>(handle->reserved), 0, sizeof(handle->reserved));
     return VLINK_RET_RUNTIME_ERROR;
   }
+}
+
+int vlink_create_secure_getter(const char* url, const vlink_schema_info_t* schema_info, vlink_getter_handle_t* handle,
+                               const vlink_msg_callback_t msg_callback, void* user_data,
+                               const vlink_security_config_t* security_cfg) {
+  return create_secure_getter_impl(url, schema_info, handle, msg_callback, user_data, security_cfg, nullptr);
 }
 
 int vlink_destroy_getter(vlink_getter_handle_t* handle) {
@@ -1650,8 +1671,7 @@ int vlink_destroy_getter(vlink_getter_handle_t* handle) {
   handle->native_handle = nullptr;
 
   if (handle->reserved[4]) {
-    pool_delete(static_cast<getter_security_state*>(handle->reserved[4]));
-    handle->reserved[4] = nullptr;
+    shared_state_delete<getter_security_state>(handle->reserved[4]);
   }
 
   return VLINK_RET_NO_ERROR;
@@ -1680,12 +1700,12 @@ int vlink_get(const vlink_getter_handle_t handle, uint8_t* data, size_t* size) {
 
   const auto& val = result.value();
 
-  auto* state = static_cast<getter_security_state*>(handle.reserved[4]);
+  auto state = shared_state_get<getter_security_state>(handle.reserved[4]);
 
   if VUNLIKELY (state) {
     std::vector<uint8_t> plain;
 
-    if VUNLIKELY (!decrypt_getter_value(state, val, plain, true)) {
+    if VUNLIKELY (!decrypt_getter_value(state.get(), val, plain, true)) {
       VLOG_W("vlink_get: decrypt failed.");
       return VLINK_RET_TRANSFER_ERROR;
     }
@@ -1841,42 +1861,6 @@ void vlink_security_free_buffer(uint8_t* buf) { pool_free_buffer(buf); }
 /// SslOptions
 ////////////////////////////////////////////////////////////////
 
-static vlink::SslOptions build_ssl_options(const vlink_ssl_options_t* opt) {
-  vlink::SslOptions out;
-
-  if VUNLIKELY (!opt) {
-    return out;
-  }
-
-  out.verify_peer = (opt->verify_peer != 0);
-
-  if (opt->ca_file) {
-    out.ca_file = opt->ca_file;
-  }
-
-  if (opt->cert_file) {
-    out.cert_file = opt->cert_file;
-  }
-
-  if (opt->key_file) {
-    out.key_file = opt->key_file;
-  }
-
-  if (opt->key_password) {
-    out.key_password = opt->key_password;
-  }
-
-  if (opt->server_name) {
-    out.server_name = opt->server_name;
-  }
-
-  if (opt->ciphers) {
-    out.ciphers = opt->ciphers;
-  }
-
-  return out;
-}
-
 template <typename NodeT>
 static int apply_ssl_options(void* native_handle, const vlink_ssl_options_t* opt) {
   if VUNLIKELY (!native_handle || !opt) {
@@ -1885,6 +1869,12 @@ static int apply_ssl_options(void* native_handle, const vlink_ssl_options_t* opt
 
   try {
     auto* ptr = static_cast<NodeT*>(native_handle);
+
+    if VUNLIKELY (ptr->has_inited()) {
+      VLOG_W("vlink_*_set_ssl_options: C API handles are already initialised; use *_with_ssl_options at create time.");
+      return VLINK_RET_RUNTIME_ERROR;
+    }
+
     ptr->set_ssl_options(build_ssl_options(opt));
 
     return VLINK_RET_NO_ERROR;
@@ -1900,6 +1890,130 @@ void vlink_ssl_options_init(vlink_ssl_options_t* opt) {
 
   *opt = vlink_ssl_options_t{};
   opt->verify_peer = 1;
+}
+
+int vlink_create_publisher_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                            vlink_publisher_handle_t* handle, const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_publisher_impl(url, schema_info, handle, opt);
+}
+
+int vlink_create_subscriber_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                             vlink_subscriber_handle_t* handle, const vlink_msg_callback_t msg_callback,
+                                             void* user_data, const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_subscriber_impl(url, schema_info, handle, msg_callback, user_data, opt);
+}
+
+int vlink_create_server_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                         vlink_server_handle_t* handle, const vlink_req_callback_t req_callback,
+                                         void* user_data, const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_server_impl(url, schema_info, handle, req_callback, user_data, opt);
+}
+
+int vlink_create_client_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                         vlink_client_handle_t* handle, const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_client_impl(url, schema_info, handle, opt);
+}
+
+int vlink_create_setter_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                         vlink_setter_handle_t* handle, const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_setter_impl(url, schema_info, handle, opt);
+}
+
+int vlink_create_getter_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                         vlink_getter_handle_t* handle, const vlink_msg_callback_t msg_callback,
+                                         void* user_data, const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_getter_impl(url, schema_info, handle, msg_callback, user_data, opt);
+}
+
+int vlink_create_secure_publisher_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                   vlink_publisher_handle_t* handle,
+                                                   const vlink_security_config_t* security_cfg,
+                                                   const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_secure_publisher_impl(url, schema_info, handle, security_cfg, opt);
+}
+
+int vlink_create_secure_subscriber_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                    vlink_subscriber_handle_t* handle,
+                                                    const vlink_msg_callback_t msg_callback, void* user_data,
+                                                    const vlink_security_config_t* security_cfg,
+                                                    const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_secure_subscriber_impl(url, schema_info, handle, msg_callback, user_data, security_cfg, opt);
+}
+
+int vlink_create_secure_server_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                vlink_server_handle_t* handle, const vlink_req_callback_t req_callback,
+                                                void* user_data, const vlink_security_config_t* security_cfg,
+                                                const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_secure_server_impl(url, schema_info, handle, req_callback, user_data, security_cfg, opt);
+}
+
+int vlink_create_secure_client_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                vlink_client_handle_t* handle,
+                                                const vlink_security_config_t* security_cfg,
+                                                const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_secure_client_impl(url, schema_info, handle, security_cfg, opt);
+}
+
+int vlink_create_secure_setter_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                vlink_setter_handle_t* handle,
+                                                const vlink_security_config_t* security_cfg,
+                                                const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_secure_setter_impl(url, schema_info, handle, security_cfg, opt);
+}
+
+int vlink_create_secure_getter_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                vlink_getter_handle_t* handle, const vlink_msg_callback_t msg_callback,
+                                                void* user_data, const vlink_security_config_t* security_cfg,
+                                                const vlink_ssl_options_t* opt) {
+  if VUNLIKELY (!opt) {
+    return VLINK_RET_INVALID_ERROR;
+  }
+
+  return create_secure_getter_impl(url, schema_info, handle, msg_callback, user_data, security_cfg, opt);
 }
 
 int vlink_publisher_set_ssl_options(vlink_publisher_handle_t* handle, const vlink_ssl_options_t* opt) {

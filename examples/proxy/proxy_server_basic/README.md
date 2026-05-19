@@ -38,9 +38,9 @@ ProxyAPI (kController)
 ## 5. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_proxy_server_basic
-./output/bin/example_proxy_server_basic
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_proxy_server_basic
+./build/output/bin/example_proxy_server_basic
 ```
 
 需要链接 `vlink::proxy_server`。

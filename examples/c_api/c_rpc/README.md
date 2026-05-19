@@ -57,9 +57,9 @@ void on_request(const uint8_t* data, size_t size, void* user_data) {
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_c_rpc
-./output/bin/example_c_rpc
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_c_rpc
+./build/output/bin/example_c_rpc
 ```
 
 ## 5. 注意事项

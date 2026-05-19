@@ -55,8 +55,8 @@
  * @endcode
  *
  * @note
- * - @c load() returns @c false (and sets the error string) if the file does not
- *   exist, cannot be parsed, or is already loaded.
+ * - @c load() returns @c false if the file does not exist, cannot be parsed, or
+ *   the instance is already loaded.  File and parse failures set the error string.
  * - @c unload() clears the remap table and the result cache.
  * - @c convert() returns the original URL unchanged if @c is_valid() is @c false
  *   or no matching rule is found.
@@ -101,9 +101,9 @@ class VLINK_EXPORT UrlRemap {
    * modifying state (call @c unload() or @c reload() first).
    *
    * @param file_path  Absolute or relative path to the JSON file.
-   * @return @c true on success; @c false if the file is missing, unreadable,
-   *         or contains invalid JSON.  The error description is accessible via
-   *         @c get_error_string().
+   * @return @c true on success; @c false if the instance is already loaded, the file
+   *         is missing or unreadable, or the file contains invalid JSON.  File and
+   *         parse errors are accessible via @c get_error_string().
    */
   bool load(const std::string& file_path) noexcept;
 

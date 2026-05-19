@@ -144,9 +144,8 @@ enum class InitType : uint8_t {
  * @c kWithSecurity enables authenticated AES-128-GCM encryption (with optional
  * RSA-OAEP hybrid key wrap and RSA-PSS signature) on the serialised message
  * payload.  Supported on all transports except @c intra:// and @c dds:// with
- * CDR serialisation; on those, the @c Security::Config passed to the
- * @c SecurityXxx constructor is ignored with a warning and the node continues
- * in plaintext mode.
+ * CDR serialisation; on those, @c enable_security() rejects the config and a
+ * @c SecurityXxx node has no usable security object for @c init().
  */
 enum class SecurityType : uint8_t {
   kWithoutSecurity = 0,  ///< Plain (unauthenticated) transport.

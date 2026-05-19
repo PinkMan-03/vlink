@@ -130,8 +130,8 @@ class VLINK_EXPORT AbstractNode {
  * - An @c interrupt() mechanism to unblock blocking operations.
  * - Hooks for data recording (@c try_record) and discovery reporting
  *   (@c init_ext / @c deinit_ext).
- * - A static @c global_init() that must be called before any node is created
- *   (invoked automatically by the constructor, but safe to call multiple times).
+ * - A static @c global_init() for process-wide singletons, invoked automatically
+ *   by the constructor and also safe to call explicitly.
  *
  * @note @c suspend() and @c resume() are optional -- the default implementations
  *       log a warning and return @c false if not overridden.
@@ -186,6 +186,10 @@ class VLINK_EXPORT NodeImpl {
    * to the payload type, so no copy occurs.
    */
   using IntraMsgCallback = Function<void(const IntraData&)>;
+
+  /**
+   * @brief Move-only task callback posted to a node-bound @c MessageLoop.
+   */
   using PostCallback = MoveFunction<void()>;
 
   /**
@@ -252,8 +256,8 @@ class VLINK_EXPORT NodeImpl {
    * @brief Returns @c true if the transport supports zero-copy loaning.
    *
    * @details
-   * Zero-copy loan is a DDS / SHM feature that lets the publisher write
-   * directly into pre-allocated shared memory.  The base returns @c false.
+   * Zero-copy loan support is transport-specific and lets senders write
+   * directly into transport-managed memory.  The base returns @c false.
    *
    * @return @c true if @c loan() / @c return_loan() are supported.
    */
@@ -290,8 +294,8 @@ class VLINK_EXPORT NodeImpl {
    *
    * @details
    * When @p manual_unloan is @c true the transport does not automatically
-   * release the loaned buffer after publish; the caller must call
-   * @c return_loan() explicitly.  The base is a no-op.
+   * release received loaned buffers after callback dispatch; the caller must
+   * call @c return_loan() explicitly.  The base is a no-op.
    *
    * @param manual_unloan  @c true to enable manual release; @c false for automatic.
    */
@@ -349,10 +353,10 @@ class VLINK_EXPORT NodeImpl {
    *
    * @details
    * Once attached, @c call_status() posts callbacks onto the loop thread.
-   * Returns @c false if a loop is already attached.
+   * Returns @c false if another loop is already attached.
    *
-   * @param message_loop  Loop to attach to; must not be @c nullptr.
-   * @return              @c true on success; @c false if already attached.
+   * @param message_loop  Loop to attach to.
+   * @return              @c true on success; @c false if another loop is already attached.
    */
   virtual bool attach(class MessageLoop* message_loop);
 
@@ -360,9 +364,9 @@ class VLINK_EXPORT NodeImpl {
    * @brief Detaches the node from its @c MessageLoop.
    *
    * @details
-   * Waits for the loop to become idle (if the call is from a different thread)
-   * before clearing the pointer, ensuring no callbacks are in-flight after
-   * this call returns.
+   * Clears the attached-loop pointer and then waits for the previous loop to
+   * become idle if the call is from a different thread, ensuring no already
+   * posted callbacks are in-flight after this call returns.
    *
    * @return @c true on success; @c false if no loop was attached.
    */
@@ -375,6 +379,13 @@ class VLINK_EXPORT NodeImpl {
    */
   [[nodiscard]] class MessageLoop* get_message_loop() const;
 
+  /**
+   * @brief Posts @p callback to the attached node @c MessageLoop.
+   *
+   * @param callback  Move-only task to execute on the attached loop.
+   * @return @c true if the task was accepted; @c false if no loop is attached
+   *         or the loop rejected the task.
+   */
   bool post_task(PostCallback&& callback);
 
   /**
@@ -531,8 +542,8 @@ class VLINK_EXPORT NodeImpl {
    *
    * @details
    * Queries the global @c BagWriter (if one is active) and the per-node writer
-   * set by @c set_record_path().  CDR DDS messages and intra messages are
-   * excluded by default.
+   * set by @c set_record_path().  DDS CDR messages are skipped; intra messages
+   * are skipped only when the internal ignore-intra filter is enabled.
    *
    * @param action_type  The role this message is being recorded for.
    * @param data         Raw serialised message bytes.
@@ -569,7 +580,8 @@ class VLINK_EXPORT NodeImpl {
    * @brief Deregisters the node from the global @c DiscoveryReporter.
    *
    * @details
-   * Called at the start of @c deinit() by all Node<> template specialisations.
+   * Called after the transport-specific @c deinit() by all Node<> template
+   * specialisations.
    * Restarts the @c CpuProfiler if global profiling was running.
    */
   void deinit_ext();

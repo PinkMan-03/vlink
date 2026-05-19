@@ -306,15 +306,14 @@ export VLINK_SCHEMA_PLUGIN=/opt/vlink/lib/libvlink_schema_plugin.so
 ## 10. 编译与运行
 
 ```bash
-cd build
-cmake .. -DENABLE_WHOLE_EXAMPLES=ON
-make example_plugin_schema
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_plugin_schema
 
 # 不设置环境变量（展示 API 概念）
-./output/bin/example_plugin_schema
+./build/output/bin/example_plugin_schema
 
 # 设置环境变量（如果有 schema plugin .so）
-VLINK_SCHEMA_PLUGIN=/path/to/schema_plugin.so ./output/bin/example_plugin_schema
+VLINK_SCHEMA_PLUGIN=/path/to/schema_plugin.so ./build/output/bin/example_plugin_schema
 ```
 
 预期输出（无 schema plugin .so 时）：

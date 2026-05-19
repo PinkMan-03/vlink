@@ -174,7 +174,8 @@ class VLINK_EXPORT WheelTimer {
    * @param timeout_ms  Initial delay in milliseconds (rounded up to the nearest slot).
    * @param callback    Function to call on expiry.  Receives the timer's @c Key as argument.
    * @param repeat_ms   Re-fire interval in milliseconds.  0 = one-shot.  Default: 0.
-   * @return A unique @c Key identifying this timer entry.
+   * @return A unique @c Key identifying this timer entry, or -1 on invalid input
+   *         or key allocation failure.
    */
   Key add(uint32_t timeout_ms, Callback&& callback, uint32_t repeat_ms = 0);
 

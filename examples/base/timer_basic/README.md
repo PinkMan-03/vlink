@@ -16,8 +16,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_timer_basic
-./examples/base/timer_basic/example_timer_basic
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_timer_basic
+./build/output/bin/example_timer_basic
 ```
 
 ## 4. Timer 生命周期

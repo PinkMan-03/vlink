@@ -26,10 +26,11 @@
  * @brief Concrete BagReader implementation for the SQLite-backed VLink bag format.
  *
  * @details
- * @c DatabaseReader reads bag files in the SQLite-backed @c .vdb format and inherits all
+ * @c DatabaseReader reads bag files in the SQLite-backed @c .vdb / @c .vdbx format and inherits all
  * playback, seeking, fix, and reindex capabilities from @c BagReader.
  *
- * The @c .vdb format stores messages in a structured SQLite database, enabling efficient
+ * The SQLite bag format stores messages in structured @c .vdb databases; @c .vdbx
+ * files are JSON manifests that reference split @c .vdb files.  This enables efficient
  * random-access queries, indexed playback, and in-place repair with @c fix().
  *
  * @par Usage
@@ -72,9 +73,9 @@ class VLINK_EXPORT DatabaseReader final : public BagReader {
   /**
    * @brief Constructs a @c DatabaseReader for the given @p path.
    *
-   * @param path        Path to the @c .vdb file.
+   * @param path        Path to the @c .vdb / @c .vdbx file.
    * @param read_only   Open in read-only mode (no write operations allowed).
-   * @param try_to_fix  Attempt repair if the database is corrupt.
+   * @param try_to_fix  Reserved for table-rebuild recovery when table checks are enabled.
    */
   explicit DatabaseReader(const std::string& path, bool read_only = true, bool try_to_fix = false);
 
@@ -163,7 +164,7 @@ class VLINK_EXPORT DatabaseReader final : public BagReader {
   std::future<bool> check() override;
 
   /**
-   * @brief Rebuilds the index tables asynchronously.
+   * @brief Rebuilds the SQLite index tables asynchronously.
    *
    * @return @c std::future<bool> that resolves to @c true on success.
    */
@@ -192,9 +193,9 @@ class VLINK_EXPORT DatabaseReader final : public BagReader {
   [[nodiscard]] int64_t get_timestamp() const override;
 
   /**
-   * @brief Returns the real elapsed wall-clock time since playback started.
+   * @brief Returns the last actual playback timestamp reached by delivered data.
    *
-   * @return Elapsed wall-clock time in milliseconds.
+   * @return Last data timestamp in milliseconds relative to the recording start, or 0 when stopped.
    */
   [[nodiscard]] int64_t get_real_timestamp() const override;
 

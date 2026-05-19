@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 3.15...3.31)
 
 project(example_proxy_server_basic LANGUAGES CXX)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/example_standalone.cmake")
+
 include(GNUInstallDirs)
 
 if(NOT TARGET vlink::proxy_server)

@@ -123,10 +123,9 @@ qnx://address[?event=X]
 ## 5. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_url_basics
-./output/bin/example_url_basics
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_url_basics
+./build/output/bin/example_url_basics
 ```
 
 ## 6. 预期输出

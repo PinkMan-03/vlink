@@ -49,6 +49,8 @@ int main() {
   // Step 1: Initialise logger and signal handler
   // ---------------------------------------------------------------
   VLOG_I("=== VLink Calculator Server ===");
+  const std::string calculator_url = vlink::Utils::get_env("VLINK_CALCULATOR_URL", example::kCalculatorUrl);
+  const std::string notify_url = vlink::Utils::get_env("VLINK_NOTIFY_URL", example::kNotifyUrl);
 
   std::atomic<bool> running{true};
   vlink::Utils::register_terminate_signal([&running](int sig) {
@@ -74,7 +76,7 @@ int main() {
   // response before returning -- the framework then serialises and
   // sends it back to the client.
   // ---------------------------------------------------------------
-  vlink::Server<example::CalcRequest, example::CalcResponse> server(example::kCalculatorUrl);
+  vlink::Server<example::CalcRequest, example::CalcResponse> server(calculator_url);
   server.attach(&server_loop);
 
   server.listen([](const example::CalcRequest& req, example::CalcResponse& resp) {
@@ -98,7 +100,7 @@ int main() {
     VLOG_I("[Server] ", req.a, " ", req.op, " ", req.b, " = ", resp.result);
   });
 
-  VLOG_I("[Server] Calculator service listening on ", example::kCalculatorUrl);
+  VLOG_I("[Server] Calculator service listening on ", calculator_url);
 
   // ---------------------------------------------------------------
   // Step 4: Create the Notification Server (fire-and-forget)
@@ -107,14 +109,14 @@ int main() {
   // The handler receives only the request -- there is no response
   // to fill or return.
   // ---------------------------------------------------------------
-  vlink::Server<example::CalcRequest> notify_server(example::kNotifyUrl);
+  vlink::Server<example::CalcRequest> notify_server(notify_url);
   notify_server.attach(&server_loop);
 
   notify_server.listen([](const example::CalcRequest& req) {
     VLOG_I("[NotifyServer] Fire-and-forget received: ", req.a, " ", req.op, " ", req.b);
   });
 
-  VLOG_I("[Server] Notification service listening on ", example::kNotifyUrl);
+  VLOG_I("[Server] Notification service listening on ", notify_url);
 
   // ---------------------------------------------------------------
   // Step 5: Run until signal received

@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_spin_lock
-./examples/base/spin_lock/example_spin_lock
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_spin_lock
+./build/output/bin/example_spin_lock
 ```
 
 ## 4. 核心概念

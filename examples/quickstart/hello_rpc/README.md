@@ -21,7 +21,7 @@
 │  auto resp = ...  <──│ <================= │       resp.result = ...   │
 │                      │   response         │                           │
 └──────────────────────┘                    └───────────────────────────┘
-           intra://hello/calculator
+           dds://hello/calculator
 ```
 
 ## 2. 文件结构
@@ -175,26 +175,29 @@ notify_client.send(req);
 
 ```bash
 # 编译两个目标
-cmake --build . --target example_calculator_server
-cmake --build . --target example_calculator_client
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_calculator_server example_calculator_client
 
 # 运行 Server（先启动，保持运行）
-./output/bin/example_calculator_server
+VLINK_CALCULATOR_URL=dds://hello/calculator \
+VLINK_NOTIFY_URL=dds://hello/notify \
+  ./build/output/bin/example_calculator_server
 
-# 在另一个终端运行 Client（需要 shm:// 或 dds:// 传输）
-./output/bin/example_calculator_client
+# 在另一个终端运行 Client
+VLINK_CALCULATOR_URL=dds://hello/calculator \
+VLINK_NOTIFY_URL=dds://hello/notify \
+  ./build/output/bin/example_calculator_client
 ```
 
-> **注意**：使用 `intra://` 传输时，server 和 client 必须在同一进程内。
-> 跨进程部署需要切换到 `shm://` 或 `dds://`。
+> **注意**：源码默认 URL 是 `intra://`，仅适合同一进程内联演示。两个独立可执行文件跨进程运行时，需要像上面一样用 `VLINK_CALCULATOR_URL` 和 `VLINK_NOTIFY_URL` 切换到 `dds://`、`shm://` 等跨进程传输。
 
 ## 8. 预期输出
 
 ### 8.1 calculator_server 输出
 ```
 [I] === VLink Calculator Server ===
-[I] [Server] Calculator service listening on intra://hello/calculator
-[I] [Server] Notification service listening on intra://hello/notify
+[I] [Server] Calculator service listening on dds://hello/calculator
+[I] [Server] Notification service listening on dds://hello/notify
 [I] [Server] Ready -- waiting for client requests (Ctrl+C to stop)...
 [I] [Server] 10 + 3 = 13
 [I] [Server] 20 * 4 = 80
@@ -206,7 +209,7 @@ cmake --build . --target example_calculator_client
 ### 8.2 calculator_client 输出
 ```
 [I] === VLink Calculator Client ===
-[I] [Client] Connected to intra://hello/calculator
+[I] [Client] Connected to dds://hello/calculator
 [I] --- Mode 1: invoke(req, resp) ---
 [I] [Client] 10 + 3 = 13
 [I] --- Mode 2: invoke(req) -> optional ---

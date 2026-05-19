@@ -81,9 +81,9 @@ Serializer::serialize(c, buf);
 ## 4. 构建与运行
 
 ```bash
-cd build
-cmake .. && make example_stream_type
-./output/bin/example_stream_type
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_stream_type
+./build/output/bin/example_stream_type
 ```
 
 ## 5. 文件结构

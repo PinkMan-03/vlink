@@ -13,10 +13,10 @@
 
 ## 2. 编译运行
 
-启用 `ENABLE_SECURITY=ON` + `ENABLE_C_API=ON` + `ENABLE_EXAMPLES=ON`：
+使用已安装且启用 C API / Security 的 VLink：
 
 ```bash
-cmake -S . -B build -DENABLE_SECURITY=ON -DENABLE_C_API=ON -DENABLE_EXAMPLES=ON
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
 cmake --build build --target example_c_security
 ./build/output/bin/example_c_security
 ```

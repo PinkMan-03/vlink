@@ -254,8 +254,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * @brief Borrows the pixel buffer from @p target without copying.
    *
    * @details
-   * Sets metadata and data pointer to match @p target; @c is_owner() becomes
-   * @c false.  Any previously owned buffer is freed first.
+   * Sets header, camera metadata, and data pointer to match @p target;
+   * @c is_owner() becomes @c false.  Any previously owned buffer is freed
+   * first.  The reserved field is not copied.
    *
    * @param target  Source frame to borrow from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
@@ -267,7 +268,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    *
    * @details
    * If @c *this already owns a same-size buffer the data is copied in-place;
-   * otherwise a new buffer is allocated.
+   * otherwise a new buffer is allocated.  The reserved field is not copied.
    *
    * @param target  Source frame to copy.
    * @return        @c false if @p target == @c *this, otherwise @c true.
@@ -298,7 +299,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
   bool create(size_t size) noexcept;
 
   /**
-   * @brief Releases all resources and zeroes all fields including @c header.
+   * @brief Releases owned resources and resets frame metadata and @c header.
+   *
+   * @details
+   * The reserved field returned by @c get_reserved() is left unchanged.
    */
   void clear() noexcept;
 
@@ -323,7 +327,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    *
    * @param data  Source pixel data pointer.  Must be non-null.
    * @param size  Number of bytes to copy.  Must be non-zero.
-   * @return      @c false on invalid arguments, otherwise @c true.
+   * @return      @c false if @p data is null, @p size is zero, this object
+   *              claims ownership but has no buffer, or @p data already equals
+   *              the current internal pointer; otherwise @c true.
    */
   bool deep_copy(uint8_t* data, size_t size) noexcept;
 
@@ -447,6 +453,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
 
   /**
    * @brief Gets the reserved field.
+   *
+   * @details
+   * This field is not reset by @c clear() and is not copied by the current
+   * copy/move helpers.
    *
    * @return Reference to the reserved field.
    */

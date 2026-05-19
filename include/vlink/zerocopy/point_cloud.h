@@ -62,7 +62,7 @@
  * @par Usage -- float XYZ + intensity
  * @code
  * vlink::zerocopy::PointCloud pc;
- * pc.create_v3f<float>(1000, {"x", "y", "z", "intensity"});
+ * pc.create_v3f<float>(1000, {"intensity"});
  *
  * // Append points
  * pc.push_value_v3f(1.0f, 2.0f, 3.0f, 0.8f);
@@ -486,8 +486,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Returns the maximum number of points the current allocation can hold.
    *
    * @details
-   * Computed as @c capacity_ / @c pack_size_.  For buffers obtained from
-   * @c operator<< (non-owned) this returns 0.
+   * Computed as @c capacity_ / @c pack_size_.  For borrowed buffers obtained
+   * from @c operator<< or @c shallow_copy(), this returns 0.
    *
    * @return Reserved (pre-allocated) point capacity.
    */
@@ -672,9 +672,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    *
    * @param size     Maximum number of points to pre-allocate.
    * @param size_num Protocol size encoding (nibbles = byte sizes per field).
-   * @param type_num Protocol type encoding (nibbles = @c Type per field).
+   * @param type_num Protocol type encoding (nibbles = @c Type per field), stored as provided.
    * @param key_str  Comma-separated field names (max 160 bytes, 3-16 fields).
-   * @return         @c false if the protocol parameters are invalid.
+   * @return         @c false if @p size_num or @p key_str fail protocol validation.
    */
   bool create(size_t size, uint64_t size_num, uint64_t type_num, std::string_view key_str) noexcept;
 
@@ -688,7 +688,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @tparam T...    Field types; must all be fundamental.  3-16 types required.
    * @param  _size   Maximum number of points.
    * @param  keys    Field names in the same order as @c T... .
-   * @return         @c false if the number of keys does not match or is out of range.
+   * @return         @c false if the number of keys does not match, the field
+   *                 count is out of range, key packing fails, or a type is not
+   *                 supported by the protocol.
    */
   template <typename... T>
   bool create(size_t _size, const std::vector<std::string>& keys = {}) noexcept;
@@ -750,7 +752,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    *
    * @tparam T...  Field value types; must all be fundamental.  3-16 required.
    * @param  args  Field values in schema order.
-   * @return       @c false if the buffer is full or the pack size does not match.
+   * @return       @c false if there is no owned buffer, the buffer is full, or
+   *               the pack size does not match.
    */
   template <typename... T>
   bool push_value(T... args) noexcept;
@@ -812,7 +815,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * zero-initialise newly exposed records.
    *
    * @param size  New logical point count.  Must not exceed allocated capacity.
-   * @return      @c false if no owned buffer exists or @c pack_size_ is zero.
+   * @return      @c false if no owned buffer exists, @c pack_size_ is zero, or
+   *              @p size exceeds allocated capacity.
    */
   bool resize(size_t size) noexcept;
 
@@ -827,7 +831,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @tparam T...       Field value types; must all be fundamental.  3-16 required.
    * @param  loop_index Zero-based point index to overwrite.
    * @param  args       Field values in schema order.
-   * @return            @c false on out-of-range, schema mismatch, or invalid state.
+   * @return            @c false if there is no owned buffer, @p loop_index is
+   *                    out of range, current size exceeds capacity, the write
+   *                    cursor is inconsistent, or the pack size does not match.
    */
   template <typename... T>
   bool set_value(size_t loop_index, T... args) noexcept;

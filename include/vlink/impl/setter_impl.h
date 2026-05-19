@@ -32,8 +32,8 @@
  *
  * - Value write via @c write() -- sends the serialised latest value to all registered
  *   getters on the same topic.
- * - Synchronous notification via @c sync() -- waits for the written value to be
- *   acknowledged or propagated, then fires a completion callback.
+ * - Late-getter synchronisation via @c sync() -- registers a callback that can
+ *   be fired when a getter connects and needs the cached latest value.
  *
  * @par Field Model Overview
  * Unlike the event model (publish/subscribe), the field model maintains a single
@@ -57,8 +57,8 @@ namespace vlink {
  *
  * @details
  * Concrete backends override @c write() to push the serialised value onto the
- * transport and @c sync() to provide a completion notification after the value
- * has been accepted by the underlying transport.
+ * transport and @c sync() to provide the transport-specific late-join
+ * notification used by @c Setter<T> to re-send its cached value.
  */
 class VLINK_EXPORT SetterImpl : public NodeImpl {
  public:
@@ -80,16 +80,14 @@ class VLINK_EXPORT SetterImpl : public NodeImpl {
   virtual void write(const Bytes& msg_data) = 0;
 
   /**
-   * @brief Waits for the most recently written value to be propagated, then fires
-   *        the completion callback.
+   * @brief Registers the transport-specific late-getter sync callback.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  The exact semantics
-   * depend on the transport: some backends fire the callback immediately after the
-   * write is queued; others wait until the value has been acknowledged by all
-   * connected getters.
+   * Must be implemented by each concrete transport backend.  Backends that can
+   * detect late getters invoke @p callback when the cached value should be sent
+   * again; backends without that concept may ignore the callback.
    *
-   * @param callback  Callable invoked once the synchronisation is complete.
+   * @param callback  Callable invoked when a late-getter sync is requested.
    */
   virtual void sync(SyncCallback&& callback) = 0;
 

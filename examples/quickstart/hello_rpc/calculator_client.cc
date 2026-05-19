@@ -50,12 +50,14 @@ int main() {
   // Step 1: Initialise logger
   // ---------------------------------------------------------------
   VLOG_I("=== VLink Calculator Client ===");
+  const std::string calculator_url = vlink::Utils::get_env("VLINK_CALCULATOR_URL", example::kCalculatorUrl);
+  const std::string notify_url = vlink::Utils::get_env("VLINK_NOTIFY_URL", example::kNotifyUrl);
 
   // ---------------------------------------------------------------
   // Step 2: Create a Client for the calculator service
   // ---------------------------------------------------------------
-  vlink::Client<example::CalcRequest, example::CalcResponse> client(example::kCalculatorUrl);
-  VLOG_I("[Client] Connected to ", example::kCalculatorUrl);
+  vlink::Client<example::CalcRequest, example::CalcResponse> client(calculator_url);
+  VLOG_I("[Client] Connected to ", calculator_url);
 
   // Small delay to ensure server is ready.
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -142,7 +144,7 @@ int main() {
   // ---------------------------------------------------------------
   VLOG_I("--- Mode 5: send(req) fire-and-forget ---");
   {
-    vlink::Client<example::CalcRequest> notify_client(example::kNotifyUrl);
+    vlink::Client<example::CalcRequest> notify_client(notify_url);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 

@@ -57,9 +57,9 @@ int ret = vlink_get(getter, buf, &buf_size);
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_c_field
-./output/bin/example_c_field
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_c_field
+./build/output/bin/example_c_field
 ```
 
 ## 5. 注意事项

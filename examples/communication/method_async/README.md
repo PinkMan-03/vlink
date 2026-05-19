@@ -141,10 +141,9 @@ Client                    Transport               Server
 ## 6. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_method_async
-./output/bin/example_method_async
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_method_async example_method_async_server example_method_async_client
+./build/output/bin/example_method_async
 ```
 
 ## 7. 预期输出
@@ -186,10 +185,10 @@ make example_method_async
 
 ```bash
 # 终端 1: 启动 Server
-./output/bin/example_method_async_server
+./build/output/bin/example_method_async_server
 
 # 终端 2: 启动 Client
-./output/bin/example_method_async_client
+./build/output/bin/example_method_async_client
 ```
 
 ## 9. 扩展思考

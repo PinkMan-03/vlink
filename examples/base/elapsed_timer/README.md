@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_elapsed_timer
-./examples/base/elapsed_timer/example_elapsed_timer
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_elapsed_timer
+./build/output/bin/example_elapsed_timer
 ```
 
 ## 4. 核心概念

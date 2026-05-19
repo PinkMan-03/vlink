@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_utils
-./examples/base/utils/example_utils
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_utils
+./build/output/bin/example_utils
 ```
 
 ## 4. 核心功能分类

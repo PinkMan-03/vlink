@@ -100,7 +100,7 @@
         <mxCell id="c3t" value="Field" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="790" y="60" width="340" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="c3r" value="Latest Value &#160;&#160;&#183;&#160;&#160; N : N &#160;(late-join OK)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#ef6c00;" vertex="1" parent="1">
+        <mxCell id="c3r" value="Latest Value &#160;&#160;&#183;&#160;&#160; N : N &#160;(sync backend-specific)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=1;fontColor=#ef6c00;" vertex="1" parent="1">
           <mxGeometry x="790" y="96" width="340" height="22" as="geometry" />
         </mxCell>
         <mxCell id="c3div" value="" style="endArrow=none;html=1;strokeWidth=1;strokeColor=#ffe082;" edge="1" parent="1">
@@ -112,7 +112,7 @@
         <mxCell id="c3se" value="&lt;b&gt;Setter&amp;lt;T&amp;gt;&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ef6c00;strokeColor=#bf360c;strokeWidth=1.5;fontSize=14;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="860" y="150" width="200" height="48" as="geometry" />
         </mxCell>
-        <mxCell id="c3lv" value="&lt;b&gt;latest value&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px&quot;&gt;cached &#183; late-join sync&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;dashed=1;fontSize=13;fontColor=#bf360c;" vertex="1" parent="1">
+        <mxCell id="c3lv" value="&lt;b&gt;latest value&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px&quot;&gt;Setter cache &#183; optional sync&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;dashed=1;fontSize=13;fontColor=#bf360c;" vertex="1" parent="1">
           <mxGeometry x="865" y="230" width="190" height="58" as="geometry" />
         </mxCell>
         <mxCell id="c3g1" value="&lt;b&gt;Getter&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=13;fontFamily=Courier New;fontStyle=1;fontColor=#bf360c;shadow=1;" vertex="1" parent="1">

@@ -9,7 +9,7 @@
         <mxCell id="title" value="Field Model: Setter Fan-out to Multiple Getters" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="20" y="22" width="860" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="one Setter updates the cache &#183; every live Getter receives it  &#183;  late joiners get the cached value automatically" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="one Setter updates its cache &#183; live Getters receive updates &#183; late join depends on backend sync" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
           <mxGeometry x="20" y="54" width="860" height="22" as="geometry" />
         </mxCell>
 
@@ -18,8 +18,8 @@
           <mxGeometry x="40" y="200" width="170" height="80" as="geometry" />
         </mxCell>
 
-        <!-- Cache (latest-value store) -->
-        <mxCell id="cache" value="&lt;b&gt;latest-value cache&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px;&quot;&gt;held by transport&lt;br/&gt;overwritten on each set&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;dashed=1;arcSize=10;fontSize=13;fontStyle=1;fontColor=#bf360c;verticalAlign=middle;align=center;" vertex="1" parent="1">
+        <!-- Setter-side latest-value cache -->
+        <mxCell id="cache" value="&lt;b&gt;latest-value cache&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px;&quot;&gt;held by Setter&lt;br/&gt;overwritten on each set&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff3e0;strokeColor=#ef6c00;strokeWidth=2;dashed=1;arcSize=10;fontSize=13;fontStyle=1;fontColor=#bf360c;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="340" y="200" width="210" height="80" as="geometry" />
         </mxCell>
 
@@ -56,7 +56,7 @@
         <mxCell id="notebg" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ffcc80;strokeWidth=1.2;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="40" y="420" width="820" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="notetxt" value="Cardinality: N Setters &#8594; shared cache &#8594; N Getters  (N : N)   &#183;   late-join is automatic" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
+        <mxCell id="notetxt" value="Cardinality: N Setters &#8594; latest-value updates &#8594; N Getters (N : N) &#183; late-join is backend-dependent" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="40" y="420" width="820" height="40" as="geometry" />
         </mxCell>
 

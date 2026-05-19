@@ -43,8 +43,8 @@
  * | ------------ | ------------------------------------------------------------------------- |
  * | @c address   | MQTT topic path; formed from @c host + @c "/" + @c path                   |
  * | @c event     | Optional secondary event filter (@c ?event=)                              |
- * | @c domain    | Domain/namespace identifier (@c ?domain=, default 0)                      |
- * | @c qos       | MQTT QoS level: 0 (at most once), 1 (at least once), 2 (exactly once)    |
+ * | @c domain    | Domain/namespace identifier (@c ?domain=, default from @c MqttFactory)    |
+ * | @c qos       | MQTT QoS level; default from @c MqttFactory: 0, 1, or 2                  |
  * | @c fragment  | Optional broker URI override (e.g. @c tcp://192.168.1.1:1883)             |
  *
  * @par Environment Variables
@@ -58,6 +58,11 @@
  * | VLINK_MQTT_CLIENT_ID   | Client ID prefix                      | vlink_mqtt               |
  *
  * @note This header is compiled only when @c VLINK_SUPPORT_MQTT is defined.
+ * @note URL parsing uses @c MqttFactory::get_default_domain_id() and
+ *       @c MqttFactory::get_default_qos() when @c domain or @c qos are absent;
+ *       direct construction defaults remain @c domain=0 and @c qos=1.
+ * @note @c is_valid() returns @c false if @c address is empty, @c domain is
+ *       negative, or @c qos is outside @c [0, 2].
  */
 
 #pragma once

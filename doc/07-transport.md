@@ -63,10 +63,10 @@ VLink 的核心设计哲学是 **URL 即传输**：通过 URL 前缀选择传输
 | `fdbus://`   | FDBus IPC         | 同机            |
 | `qnx://`     | QNX IPC           | 同机（QNX）     |
 
-> **源码可识别 ≠ 默认构建启用**：上表中的 scheme 都能被 `Url` 解析，但对应模块是否参与当前构建取决于 CMake 配置阶段依赖探测。各 module 的 `CMakeLists.txt` 提供 `SKIP_<NAME>` 选项和依赖 `find_package()`，依赖缺失时该模块被跳过。特别地：
+> **源码可识别 ≠ 默认构建启用**：大多数 scheme 都能被 `Url` 解析，但解析分支也受平台宏影响：`qnx://` 只在 QNX 构建中识别，Android 构建不启用 `shm://` / `shm2://` 的解析分支。对应模块是否参与当前构建还取决于 CMake 配置阶段依赖探测。各 module 的 `CMakeLists.txt` 提供 `SKIP_<NAME>` 选项和依赖 `find_package()`，依赖缺失时该模块被跳过。特别地：
 > - `shm2`：检测到 `ANDROID` 即跳过。
-> - `ddsr` / `ddst` / `fdbus` / `qnx`：`SKIP_DDSR` / `SKIP_DDST` / `SKIP_FDBUS` / `SKIP_QNX` 默认 `ON`，需要对应专有 SDK 或系统服务时再显式打开。
-> - `intra` / `shm` / `shm2` / `dds` / `ddsc` / `zenoh` / `someip` / `mqtt` 的 `SKIP_*` 默认 `OFF`，依赖缺失时跳过。
+> - `ddsr` / `ddst` / `qnx`：`SKIP_DDSR` / `SKIP_DDST` / `SKIP_QNX` 默认 `ON`，需要对应专有 SDK 或系统服务时再显式打开。
+> - `intra` / `shm` / `shm2` / `dds` / `ddsc` / `zenoh` / `someip` / `mqtt` / `fdbus` 的 `SKIP_*` 默认 `OFF`，依赖缺失时跳过。
 >
 > **Conan 组件**：`conanfile.py` 当前只导出 `vlink`、`dds`、`ddsc`、`shm`、`intra`、`c_api`、`proxy_api`、`proxy_server`、`all`（`all = vlink+dds+ddsc+shm+intra`）。`shm2` / `zenoh` / `ddsr` / `ddst` / `someip` / `fdbus` / `mqtt` / `qnx` **不在 Conan 组件导出范围**，需自行构建。
 
@@ -123,13 +123,15 @@ Publisher<Imu> pub("zenoh://sensor/imu");    // Zenoh 云边
 | `shm2://`   | 同机跨进程    | 是     | iceoryx2-c         | 是       | 部分     | 支持       | Beta |
 | `ddsr://`   | 跨机器/局域网 | 否     | RTI Connext DDS    | 是       | 完整     | 支持       | Beta |
 | `ddst://`   | 跨机         | 否     | TravoDDS（国产 DDS） | 是       | 完整     | 支持       | Beta |
-| `zenoh://`  | 跨机/云边     | 否     | zenoh-c/zenoh-pico | 是       | 部分     | 支持       | Beta |
+| `zenoh://`  | 跨机/云边     | 条件支持 | zenoh-c/zenoh-pico | 是       | 部分     | 支持       | Beta |
 | `someip://` | 车载以太网    | 否     | vsomeip            | 是       | SOME/IP  | 支持       | Beta |
 | `mqtt://`   | 跨机/物联网   | 否     | Paho MQTT C        | 是       | 部分     | 支持       | Beta |
 | `fdbus://`  | 同机          | 否     | fdbus              | 是       | 否       | 支持       | Beta |
 | `qnx://`    | 同机（QNX）   | 否     | QNX SDK            | 是       | 否       | 支持       | Beta |
 
-> 消息级加密说明：`intra://` 不经过序列化管道，`dds://` 与 CDR 类型组合绕过 VLink Bytes 路径，这两种组合下 `SecurityXxx` 构造时会打 warning 并忽略 `Security::Config`，`NodeImpl::security` 保持空，发送 / 接收路径直接 drop 消息。详见 [09-security.md](09-security.md)。
+> 零拷贝说明：`zenoh://` 只有在编译期启用 shared-memory/unstable API 且运行时启用 SHM 时才提供 loan。
+>
+> 消息级加密说明：`intra://` 不经过序列化管道，`dds://` 与 CDR 类型组合绕过 VLink Bytes 路径，这两种组合下 `SecurityXxx` 构造时会打 warning 并忽略 `Security::Config`；安全节点初始化时会因 `NodeImpl::security` 为空而 fatal，不会静默明文收发。详见 [09-security.md](09-security.md)。
 
 **通信模型支持矩阵：**
 
@@ -1070,7 +1072,7 @@ int main() {
 
 **注意事项：**
 - 该后端仅在 QNX Neutrino RTOS 上可用，在 Linux 编译时此头文件内容为空（`#ifdef VLINK_SUPPORT_QNX`）。
-- `modules/qnx/CMakeLists.txt` 的 `SKIP_QNX` 选项**默认 `ON`**：即使在 QNX 工具链下也要显式 `-DSKIP_QNX=OFF` 才会编译该模块。类似地，`ddsr` / `ddst` / `fdbus` 也因依赖专有 SDK 或系统服务而默认跳过。
+- `modules/qnx/CMakeLists.txt` 的 `SKIP_QNX` 选项**默认 `ON`**：即使在 QNX 工具链下也要显式 `-DSKIP_QNX=OFF` 才会编译该模块。类似地，`ddsr` / `ddst` 也因依赖专有 SDK 而默认跳过；`fdbus` 的 `SKIP_FDBUS` 默认是 `OFF`，但仍会在依赖缺失时跳过。
 - `address` 不能为空，否则 `is_valid()` 返回 false。
 - QNX IPC 通道需要适当的权限配置。
 

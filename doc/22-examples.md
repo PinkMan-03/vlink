@@ -38,7 +38,7 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 | quickstart        | `examples/quickstart/`       | 3        | 最小化入门示例（PubSub、RPC、Field）        |
 | base              | `examples/base/`             | 23       | 基础库（Logger、Timer、Bytes、内存池、线程池、协程、Cancellation、TaskHandle 等）|
 | communication     | `examples/communication/`    | 7        | 三种通信模型的基础和进阶用法                |
-| serialization     | `examples/serialization/`    | 7        | 各序列化类型的独立演示                      |
+| serialization     | `examples/serialization/`    | 7        | 各序列化类型的独立演示；当前 CMake 已启用 `intra_data/` |
 | url_guide         | `examples/url_guide/`        | 9        | URL 格式与各传输后端配置指南                |
 | qos               | `examples/qos/`              | 3        | QoS 策略配置和预置 Profile                  |
 | security          | `examples/security/`         | 4        | AES-128-GCM、自定义加密、RSA hybrid、SSL/TLS |
@@ -58,7 +58,7 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 `ENABLE_WHOLE_EXAMPLES` 控制是否编译全部分类：
 
 - **默认**（`ENABLE_WHOLE_EXAMPLES=OFF`）：仅编译 `samples/` 目录下当前启用的示例目标
-- **完整模式**（`ENABLE_WHOLE_EXAMPLES=ON`）：编译全部 14 个分类
+- **完整模式**（`ENABLE_WHOLE_EXAMPLES=ON`）：进入全部 14 个分类，并编译其中当前 CMake 启用的目标
 
 ```bash
 # 只编译 samples（默认）
@@ -300,7 +300,7 @@ ls build/output/bin/
 | `stream_type`   | 流式类型            | 通过 `operator<<`/`operator>>` 的 stringstream |
 | `custom_type`   | 自定义类型          | 用户实现 `operator>>`/`operator<<` (Bytes)     |
 | `dynamic_data`  | `DynamicData`       | 运行时类型擦除容器                             |
-| `intra_data`    | `IntraData`         | 进程内零拷贝数据类型                           |
+| `intra_data`    | `IntraData`         | 进程内零拷贝数据类型；当前 CMake 已启用 |
 
 ---
 
@@ -445,7 +445,7 @@ URL 格式说明和各传输后端的配置指南。
 
 ![Helloworld Example Flow](images/helloworld-example-flow.png)
 
-`samples/` 目录保留了项目早期的综合示例，每个示例演示完整的端到端场景。这些示例在默认配置下即被编译（不需要 `ENABLE_WHOLE_EXAMPLES`）。
+`samples/` 目录保留了项目早期的综合示例，每个示例演示完整的端到端场景。启用 `ENABLE_EXAMPLES=ON` 且保持 `ENABLE_WHOLE_EXAMPLES=OFF` 时，会编译 `samples/` 下当前启用的示例目标。
 
 | 示例名          | 目录                           | 涉及传输       | 序列化       | 通信模型                   | 说明                              |
 | --------------- | ------------------------------ | -------------- | ------------ | -------------------------- | --------------------------------- |

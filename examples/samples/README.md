@@ -74,14 +74,14 @@ fdbus://服务名?event=话题名    例：fdbus://phone?event=req
 ```bash
 # 从 VLink 项目根目录
 cd /work/vlink
-cmake -DCMAKE_BUILD_TYPE=Release -B build -S .
+cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_EXAMPLES=ON -B build -S .
 cmake --build build -j$(nproc)
 
 # 查看编译产物
-ls build/output/bin/example_*
+ls build/output/bin/sample_*
 ```
 
-缺少依赖的示例会自动跳过（CMakeLists.txt 中有 `find_package` + `return()` 保护）。各示例的链接目标如下：
+缺少依赖的示例会自动跳过（CMakeLists.txt 中有 `find_package` + `return()` 保护）。`dds_idl` 默认未加入 `examples/samples/CMakeLists.txt`，需要 FastDDS IDL 工具链时再手动启用。各示例的链接目标如下：
 
 | 示例 | CMake 链接目标 | find_package 组件 |
 |------|---------------|-------------------|
@@ -117,17 +117,17 @@ ls build/output/bin/example_*
 
 | 示例 | 启动命令 | 前置操作 |
 |------|----------|----------|
-| helloworld (dds, 默认) | `./sample_helloworld_server` + `./sample_helloworld_client sub` | 无 |
-| helloworld (shm) | `METHOD_TRANSPORT=shm EVENT_TRANSPORT=shm ./sample_helloworld_server` | `iox-roudi &` |
-| helloworld (someip) | `METHOD_TRANSPORT=someip EVENT_TRANSPORT=someip ./sample_helloworld_server` | 启动 vsomeip routing manager |
-| ping_pong | `./sample_pong` + `./sample_ping [payload_size]` | 无（默认 dds） |
-| shm_raw | `./sample_shm_raw` | `iox-roudi &` |
-| dds_dynamic | `./sample_dds_dynamic` | 无 |
-| dds_idl | `./sample_dds_idl` | 无（需手动启用构建） |
-| ddsc_proto | `./sample_ddsc_proto` | 无 |
+| helloworld (dds, 默认) | `./build/output/bin/sample_helloworld_server` + `./build/output/bin/sample_helloworld_client sub` | 无 |
+| helloworld (shm) | `METHOD_TRANSPORT=shm EVENT_TRANSPORT=shm ./build/output/bin/sample_helloworld_server` | `iox-roudi &` |
+| helloworld (someip) | `METHOD_TRANSPORT=someip EVENT_TRANSPORT=someip ./build/output/bin/sample_helloworld_server` | 启动 vsomeip routing manager |
+| ping_pong | `./build/output/bin/sample_pong` + `./build/output/bin/sample_ping [payload_size]` | 无（默认 dds） |
+| shm_raw | `./build/output/bin/sample_shm_raw` | `iox-roudi &` |
+| dds_dynamic | `./build/output/bin/sample_dds_dynamic` | 无 |
+| dds_idl | `./build/output/bin/sample_dds_idl` | 无（需手动启用构建） |
+| ddsc_proto | `./build/output/bin/sample_ddsc_proto` | 无 |
 | pub_sub_fbs | `./build/output/bin/sample_pub_sub_fbs sub` + `./build/output/bin/sample_pub_sub_fbs pub` | 无 |
-| fdbus_proto | `./sample_fdbus_proto` | `fdb_name_server &` |
-| someip_flat | `./sample_someip_flat` | 启动 vsomeip routing manager |
+| fdbus_proto | `./build/output/bin/sample_fdbus_proto` | `fdb_name_server &` |
+| someip_flat | `./build/output/bin/sample_someip_flat` | 启动 vsomeip routing manager |
 
 ## 7. 相关文档
 

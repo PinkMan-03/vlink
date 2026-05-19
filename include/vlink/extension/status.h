@@ -167,9 +167,9 @@ struct VLINK_EXPORT Base : public std::enable_shared_from_this<Base> {
   [[nodiscard]] virtual Type get_type() const = 0;
 
   /**
-   * @brief Returns a human-readable description of this status event.
+   * @brief Returns the status event name.
    *
-   * @return String representation of the status and its field values.
+   * @return String name of the concrete status type.  Use @c operator<< to include field values.
    */
   [[nodiscard]] virtual std::string get_string() const = 0;
 

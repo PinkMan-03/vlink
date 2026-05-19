@@ -240,16 +240,16 @@ class VLINK_EXPORT MessageLoop {
   [[nodiscard]] Type get_type() const;
 
   /**
-   * @brief Returns the current idle dispatch strategy.
+   * @brief Returns the current push-side back-pressure strategy.
    *
    * @return Current strategy.
    */
   [[nodiscard]] Strategy get_strategy() const;
 
   /**
-   * @brief Changes the idle dispatch strategy.
+   * @brief Changes the push-side back-pressure strategy.
    *
-   * @param strategy  New strategy.  Takes effect on the next idle cycle.
+   * @param strategy  New strategy.  Takes effect on subsequent queue-full posts.
    */
   void set_strategy(Strategy strategy);
 
@@ -344,7 +344,8 @@ class VLINK_EXPORT MessageLoop {
    * @brief Waits until the loop has fully exited (after @c quit() was called).
    *
    * @param ms     Maximum wait time in milliseconds.  @c Timer::kInfinite for unlimited.  Default: @c kInfinite.
-   * @param check  If @c true, also verify the loop thread has joined.  Default: @c true.
+   * @param check  If @c true, reject calls made from the loop's own thread to
+   *               avoid self-deadlock.  Default: @c true.
    * @return @c true if the loop exited within the timeout.
    */
   bool wait_for_quit(int ms = Timer::kInfinite, bool check = true);
@@ -615,6 +616,8 @@ class VLINK_EXPORT MessageLoop {
    * @param function  Callable to dispatch.
    * @param args      Arguments forwarded to the callable.
    * @return @c std::future<ResultT> that becomes ready when the task completes.
+   *         If posting fails, the returned future becomes ready with
+   *         @c std::future_error / @c broken_promise.
    */
   template <class FunctionT, class... ArgsT, typename ResultT = std::invoke_result_t<FunctionT, ArgsT...>>
   [[nodiscard]] std::future<ResultT> invoke_task(FunctionT&& function, ArgsT&&... args);
@@ -624,7 +627,9 @@ class VLINK_EXPORT MessageLoop {
    *
    * @details
    * Same as @c invoke_task() but the task is enqueued at @p priority level.
-   * Requires a @c kPriorityType loop for priority to take effect.
+   * Requires a @c kPriorityType loop; on other loop types posting fails and
+   * the returned future becomes ready with @c std::future_error /
+   * @c broken_promise.
    *
    * @tparam FunctionT  Callable type.
    * @tparam ArgsT      Argument types.

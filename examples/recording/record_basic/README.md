@@ -102,17 +102,17 @@ void Node<ImplT, SecT>::set_record_path(const std::string& path);
 ## 5. 编译和运行
 
 ```bash
-# 在 VLink 构建目录中编译
-cmake --build . --target example_record_basic
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_record_basic
 
 # 运行（逐节点录制）
-./output/bin/example_record_basic
+./build/output/bin/example_record_basic
 
 # 运行（全局录制）
-VLINK_BAG_PATH=/tmp/global_record.vdb ./output/bin/example_record_basic
+VLINK_BAG_PATH=/tmp/global_record.vdb ./build/output/bin/example_record_basic
 
 # 运行（全局录制 + 标签）
-VLINK_BAG_PATH=/tmp/global_record.vdb VLINK_BAG_TAG=my_tag ./output/bin/example_record_basic
+VLINK_BAG_PATH=/tmp/global_record.vdb VLINK_BAG_TAG=my_tag ./build/output/bin/example_record_basic
 ```
 
 ## 6. 输出文件说明

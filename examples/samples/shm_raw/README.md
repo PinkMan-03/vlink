@@ -60,15 +60,14 @@ SecuritySetter  -->  SecurityGetter
 
 ```bash
 # 构建
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径>
-cmake --build .
+cmake -B build -S . -DCMAKE_PREFIX_PATH=<vlink安装路径>
+cmake --build build
 
 # 前置：先启动 Iceoryx RouDi 守护进程
 iox-roudi &
 
 # 运行
-./sample_shm_raw
+./build/output/bin/sample_shm_raw
 ```
 
 程序在单进程内完成所有通信，无需启动多个终端，但需要 `iox-roudi` 守护进程已经在后台运行。

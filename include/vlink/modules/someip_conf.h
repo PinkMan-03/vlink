@@ -58,7 +58,9 @@
  *   someip://<service>/<instance>?groups=<g1,g2,...>&event=<event_id>&field=1
  * @endcode
  *
- * All numeric values are decimal.  Service and instance must be non-zero.
+ * Numeric values are parsed with @c Helpers::to_int(), so decimal, @c 0x-prefixed
+ * hexadecimal, and leading-zero octal strings are accepted.  Service and instance
+ * must be non-zero.
  *
  * @par Example
  * @code
@@ -163,15 +165,16 @@ struct VLINK_EXPORT SomeipConf final : public Conf {
   [[nodiscard]] TransportType get_transport_type() const override;
 
   /**
-   * @brief Loads a vsomeip JSON configuration file as the global vsomeip config.
+   * @brief Sets a vsomeip JSON configuration file as the global vsomeip config.
    *
    * @details
-   * Delegates to @c SomeipFactory::load_global_config_file().  Must be called
-   * before any @c someip:// nodes are created.  The file configures the vsomeip
-   * routing, application name, logging, and network bindings.
+   * Delegates to @c SomeipFactory::load_global_config_file(), which sets the
+   * @c VSOMEIP_CONFIGURATION environment variable.  Must be called before any
+   * @c someip:// nodes are created so vsomeip can read the file during application
+   * initialization.
    *
    * @param filepath  Path to the vsomeip JSON configuration file.
-   * @return          @c true if the file was loaded and applied; @c false otherwise.
+   * @return          @c true if the environment variable was set; @c false otherwise.
    */
   static bool load_global_config_file(const std::string& filepath);
 

@@ -108,6 +108,10 @@ class VLINK_EXPORT ObjectPoolBase {
  public:
   /**
    * @brief Controls when the @c ResetCallback is invoked relative to acquire and release.
+   *
+   * @details
+   * Release-side reset failures are caught and the object is discarded.  Acquire-side
+   * reset failures return the object to the pool and rethrow the exception.
    */
   enum Policy : uint8_t {
     kPolicyNone = 0,     ///< Never invoke reset callback.

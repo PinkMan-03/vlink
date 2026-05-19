@@ -28,7 +28,7 @@
         <mxCell id="cat_qs" value="&lt;b&gt;quickstart/&lt;/b&gt;  (3)&lt;br/&gt;&lt;span style=&quot;font-size:11px;color:#1b5e20;&quot;&gt;hello_pubsub  ·  hello_rpc  ·  hello_field&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#1b5e20;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="40" y="164" width="355" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="cat_base" value="&lt;b&gt;base/&lt;/b&gt;  (19)&lt;br/&gt;&lt;span style=&quot;font-size:10px;color:#bf360c;&quot;&gt;logger · timer · bytes · thread_pool · object_pool · spin_lock · process · msg_loop · …&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#bf360c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
+        <mxCell id="cat_base" value="&lt;b&gt;base/&lt;/b&gt;  (23)&lt;br/&gt;&lt;span style=&quot;font-size:10px;color:#bf360c;&quot;&gt;logger · timer · bytes · thread_pool · object_pool · graph_task · cancellation · …&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#bf360c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="415" y="164" width="355" height="80" as="geometry" />
         </mxCell>
         <mxCell id="cat_comm" value="&lt;b&gt;communication/&lt;/b&gt;  (7)&lt;br/&gt;&lt;span style=&quot;font-size:10px;color:#0d47a1;&quot;&gt;event_basic/advanced · method_sync/async/fire_forget · field_basic/advanced&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#0d47a1;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
@@ -62,7 +62,7 @@
         <mxCell id="cat_plugin" value="&lt;b&gt;plugin/&lt;/b&gt;  (4)&lt;br/&gt;&lt;span style=&quot;font-size:11px;color:#b71c1c;&quot;&gt;basic · create · runnable · schema&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#d32f2f;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#b71c1c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="790" y="356" width="355" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="cat_capi" value="&lt;b&gt;c_api/&lt;/b&gt;  (3)&lt;br/&gt;&lt;span style=&quot;font-size:11px;color:#b71c1c;&quot;&gt;c_pubsub · c_rpc · c_field&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#d32f2f;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#b71c1c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
+        <mxCell id="cat_capi" value="&lt;b&gt;c_api/&lt;/b&gt;  (4)&lt;br/&gt;&lt;span style=&quot;font-size:11px;color:#b71c1c;&quot;&gt;c_pubsub · c_rpc · c_field · c_security&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#d32f2f;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#b71c1c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="1165" y="356" width="355" height="80" as="geometry" />
         </mxCell>
 
@@ -70,7 +70,7 @@
         <mxCell id="cat_node" value="&lt;b&gt;node_features/&lt;/b&gt;  (4)&lt;br/&gt;&lt;span style=&quot;font-size:11px;color:#0d47a1;&quot;&gt;lifecycle · message_loop_binding · properties · status_monitoring&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#0d47a1;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="227" y="452" width="543" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="cat_samples" value="&lt;b&gt;samples/&lt;/b&gt;  (8)&lt;br/&gt;&lt;span style=&quot;font-size:11px;color:#bf360c;&quot;&gt;helloworld · dds_dynamic · ddsc_proto · pub_sub_fbs · someip_flat · shm_raw · fdbus_proto · ping_pong&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#bf360c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
+        <mxCell id="cat_samples" value="&lt;b&gt;samples/&lt;/b&gt;  (9; default build 8)&lt;br/&gt;&lt;span style=&quot;font-size:11px;color:#bf360c;&quot;&gt;helloworld · dds_dynamic · dds_idl · ddsc_proto · pub_sub_fbs · someip_flat · shm_raw · fdbus_proto · ping_pong&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.2;arcSize=8;fontSize=12;fontFamily=Courier New;fontColor=#bf360c;shadow=1;verticalAlign=middle;align=center;" vertex="1" parent="1">
           <mxGeometry x="790" y="452" width="543" height="80" as="geometry" />
         </mxCell>
 

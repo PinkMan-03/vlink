@@ -8,7 +8,7 @@
         <mxCell id="title" value="Event Model &#8212; N:N Topology" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="920" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Any number of Publishers &#160;&#183;&#160; Any number of Subscribers &#160;&#183;&#160; Each Subscriber receives a copy" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="Any number of Publishers &#160;&#183;&#160; Any number of Subscribers &#160;&#183;&#160; Fan-out follows backend QoS" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="50" width="920" height="22" as="geometry" />
         </mxCell>
 
@@ -70,7 +70,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="footnote" value="N:N fan-out &#8212; every online Subscriber receives each published message" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
+        <mxCell id="footnote" value="N:N fan-out &#8212; online Subscribers are delivery targets; actual delivery follows transport QoS and backend state" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#546e7a;" vertex="1" parent="1">
           <mxGeometry x="40" y="480" width="920" height="24" as="geometry" />
         </mxCell>
 

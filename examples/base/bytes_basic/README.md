@@ -15,10 +15,9 @@
 ## 3. 构建与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_bytes_basic
-./output/bin/example_bytes_basic
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_bytes_basic
+./build/output/bin/example_bytes_basic
 ```
 
 ## 4. 内存模型深入解析

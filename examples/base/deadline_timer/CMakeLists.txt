@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 3.15...3.31)
 
 project(example_deadline_timer LANGUAGES CXX)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/example_standalone.cmake")
+
 if(NOT TARGET vlink::vlink)
   find_package(vlink QUIET COMPONENTS ALL)
 endif()

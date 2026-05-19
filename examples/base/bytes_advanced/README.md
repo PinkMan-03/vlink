@@ -74,8 +74,7 @@ auto reversed = Bytes::reverse_order(original);
 ## 8. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_bytes_advanced
-./output/bin/example_bytes_advanced
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_bytes_advanced
+./build/output/bin/example_bytes_advanced
 ```

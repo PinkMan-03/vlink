@@ -213,12 +213,11 @@ target_link_libraries(example_plugin_basic vlink::all)
 ## 9. 编译与运行
 
 ```bash
-# 在 VLink 项目根目录的 build 目录中
-cd build
-cmake .. -DENABLE_WHOLE_EXAMPLES=ON && make example_plugin_basic greeter_plugin
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_plugin_basic greeter_plugin
 
 # 运行（确保 .so 在搜索路径中）
-./output/bin/example_plugin_basic
+./build/output/bin/example_plugin_basic
 ```
 
 预期输出（简化）：

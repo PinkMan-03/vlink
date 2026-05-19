@@ -43,9 +43,9 @@ config.compress_start_size = 64;     // 仅压缩 >= 64 字节的负载
 ## 5. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_record_compression
-./output/bin/example_record_compression
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_record_compression
+./build/output/bin/example_record_compression
 ```
 
 输出文件保存在 `/tmp/record_compress_*.vdb`。

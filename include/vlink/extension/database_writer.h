@@ -26,9 +26,9 @@
  * @brief Concrete BagWriter implementation for the SQLite-backed VLink bag format.
  *
  * @details
- * @c DatabaseWriter records VLink messages to a SQLite @c .vdb file.  It extends
+ * @c DatabaseWriter records VLink messages to SQLite-backed @c .vdb / @c .vdbx files.  It extends
  * @c BagWriter with transactional write caching (WAL mode, batch commit), optional
- * VACUUM optimisation on exit, and in-place schema embedding for Protobuf introspection.
+ * VACUUM optimisation on exit, and in-place schema embedding for offline introspection.
  *
  * Internally, messages are accumulated in a memory cache and committed in batches to
  * reduce SQLite write overhead.  Cache parameters are configurable via @c BagWriter::Config.
@@ -72,7 +72,7 @@ class VLINK_EXPORT DatabaseWriter final : public BagWriter {
   /**
    * @brief Constructs a @c DatabaseWriter for the given @p path.
    *
-   * @param path    Path to the output @c .vdb file.  Created if it does not exist.
+   * @param path    Path to the output @c .vdb / @c .vdbx file.  Created if it does not exist.
    * @param config  Recording configuration.
    */
   explicit DatabaseWriter(const std::string& path, const Config& config = {});
@@ -114,8 +114,8 @@ class VLINK_EXPORT DatabaseWriter final : public BagWriter {
    * @param schema_type            Coarse schema family for the payload.
    * @param action_type            Action type (@c kPublish, @c kRequest, etc.).
    * @param data                   Serialized payload bytes.
-   * @param microseconds_timestamp Optional custom timestamp in microseconds.
-   *                               @c nullptr means use the current system time.
+   * @param microseconds_timestamp Optional recording-relative timestamp in microseconds.
+   *                               @c nullptr means use the writer's elapsed timer.
    * @param immediate              If @c true, writes synchronously bypassing the queue.
    * @return Message timestamp in microseconds, or a negative value on error.
    */
@@ -123,7 +123,7 @@ class VLINK_EXPORT DatabaseWriter final : public BagWriter {
                const Bytes& data, int64_t* microseconds_timestamp = nullptr, bool immediate = false) override;
 
   /**
-   * @brief Returns @c true if the writer is actively recording to disk.
+   * @brief Returns the current value of the internal dumping flag.
    */
   [[nodiscard]] bool is_dumping() const override;
 
@@ -141,7 +141,7 @@ class VLINK_EXPORT DatabaseWriter final : public BagWriter {
    * @brief Sets the expected message loss ratio for a given URL.
    *
    * @param url   Topic URL.
-   * @param loss  Loss ratio in the range [0.0, 1.0].
+   * @param loss  Loss ratio.  Values greater than 1.0 are stored as -1.
    */
   void set_url_loss(const std::string& url, double loss) override;
 

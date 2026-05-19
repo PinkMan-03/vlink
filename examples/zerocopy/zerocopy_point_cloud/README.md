@@ -103,9 +103,9 @@ pc.set_value_v3f(50, 1.0f, 2.0f, 3.0f);  // 覆写第 50 个点
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_zerocopy_point_cloud
-./output/bin/example_zerocopy_point_cloud
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_zerocopy_point_cloud
+./build/output/bin/example_zerocopy_point_cloud
 ```
 
 ## 5. 二进制线格式

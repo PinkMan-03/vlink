@@ -30,7 +30,7 @@
  * @c "03-18 14:30:01.042") without formatting the full string every call.
  * Instead it caches the date-and-second part and only updates the millisecond
  * field on sub-second increments, significantly reducing the number of expensive
- * @c strftime / @c localtime_r calls under high log throughput.
+ * @c snprintf / @c localtime_r calls under high log throughput.
  *
  * The caching strategy:
  * - The full timestamp (up to seconds) is formatted only once per second.
@@ -43,9 +43,9 @@
  *   the millisecond field.
  *
  * @note
- * - The internal buffer is 32 bytes, which is sufficient for most strftime
- *   format strings.  Using a format that produces a longer string results in
- *   truncated output.
+ * - The internal buffer is 32 bytes, which is sufficient for the default
+ *   format.  Using a format that produces fewer than 3 characters or does not
+ *   fit in the buffer results in an empty returned view for that refresh.
  * - The default format @c "%02d-%02d %02d:%02d:%02d.%03d" produces
  *   @c "MM-DD HH:MM:SS.mmm" (18 characters).  Do not include year if character
  *   count matters.
@@ -112,7 +112,10 @@ class VLINK_EXPORT CachedTimestamp final {
    *                 second, milliseconds (0-999).  Must end with a 3-digit milliseconds
    *                 field (e.g., @c %03d) because the cached buffer is patched
    *                 in-place at the last three characters of the formatted string.
-   *                 The resulting string must fit within 31 characters.
+   *                 The resulting string must fit within 31 characters.  A
+   *                 changed @p format is applied only when the cached seconds
+   *                 value or @p use_utc mode changes; same-second calls patch
+   *                 only the millisecond field.
    *                 Default: @c "%02d-%02d %02d:%02d:%02d.%03d"
    * @param use_utc  If @c true, formats in UTC; if @c false (default), in local time.
    * @return A @c std::string_view into the internal buffer with the current timestamp.

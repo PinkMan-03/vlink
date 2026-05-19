@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 3.15...3.31)
 
 project(example_plugin_create LANGUAGES CXX)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/example_standalone.cmake")
+
 include(GNUInstallDirs)
 
 if(NOT TARGET vlink::vlink)
@@ -22,6 +24,17 @@ set_target_properties(
   calculator_plugin PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
                                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
 )
+foreach(OUTPUTCONFIG DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+  if(DEFINED CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG})
+    set(_plugin_runtime_output_dir ${CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG}})
+  else()
+    set(_plugin_runtime_output_dir ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+  endif()
+  set_target_properties(
+    calculator_plugin PROPERTIES LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${_plugin_runtime_output_dir}
+                                 RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${_plugin_runtime_output_dir}
+  )
+endforeach()
 
 # --- Host executable (loader) ---
 add_executable(${PROJECT_NAME} loader.cc)

@@ -85,7 +85,7 @@ cat version.txt
 
 ## 1.3 CMake 构建
 
-### 1.3.1 最简编译（仅核心库 + intra 模块）
+### 1.3.1 精简编译（关闭可选功能与 CLI）
 
 ```bash
 mkdir build && cd build
@@ -110,6 +110,8 @@ cmake .. \
 cmake --build . -j$(nproc)
 ```
 
+该配置只关闭安全、压缩、SQLite、CLI、Proxy 和测试等可选功能；各传输模块仍按根 `CMakeLists.txt` 的 `add_subdirectory(modules/...)` 与模块自身 `SKIP_*` 开关、依赖探测结果决定是否构建。
+
 ### 1.3.2 标准编译（推荐，全功能）
 
 ```bash
@@ -117,7 +119,8 @@ mkdir build && cd build
 
 cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr/local
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DENABLE_TEST=ON
 
 cmake --build . -j$(nproc)
 
@@ -384,8 +387,8 @@ cmake -B build-doc \
     -DENABLE_DOC=ON \
     -DENABLE_TEST=OFF
 
-cmake --build build-doc --target doxygen
-# 文档输出位于 build-doc/doc/html/
+cmake --build build-doc --target doc
+# 文档输出位于 build-doc/output/doc/en_us/ 和 build-doc/output/doc/zh_cn/
 ```
 
 ### 1.3.7 ccache 加速编译
@@ -417,7 +420,7 @@ VLink 支持通过 [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) 自动下
 
 #### 1.3.8.1 CPM 基础构建
 
-启用后 CMake 会自动下载 OpenSSL、SQLite3、Protobuf 等依赖：
+启用 `ENABLE_CPM_BUILD=ON` 后，CMake 会通过 CPM 下载并构建基础第三方依赖；OpenSSL、SQLite3、Protobuf、FlatBuffers 等全量依赖位于 `ENABLE_CPM_WHOLE_BUILD=ON` 分支：
 
 ```bash
 cmake -B build-cpm \

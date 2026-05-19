@@ -41,9 +41,9 @@
 ## 4. 构建与运行
 
 ```bash
-cmake -S . -B build
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
 cmake --build build --target example_task_handle
-./build/examples/base/task_handle/example_task_handle
+./build/output/bin/example_task_handle
 ```
 
 ## 5. 关键枚举一览

@@ -34,7 +34,8 @@
  * 1. Collects all registered @c NodeImpl objects.
  * 2. Serialises their metadata (URL, type, process info, CPU profiler data) into a discovery message.
  * 3. Sends the message via UDP multicast/broadcast (default address @c 239.255.0.100).
- * 4. Sends an offline notification on destruction.
+ * 4. Can send an offline notification on destruction when offline reporting is compiled in
+ *    (it is disabled in the default build).
  *
  * A process-global singleton is available via @c global_get(); it is created on first use
  * and destroyed with the process.
@@ -73,17 +74,25 @@ class VLINK_EXPORT DiscoveryReporter : public MessageLoop {
    * @details
    * Created on first call.  The singleton is destroyed when the process exits.
    *
-   * @return Raw pointer to the global @c DiscoveryReporter.
+   * @return Raw pointer to the global @c DiscoveryReporter, or @c nullptr when
+   *         @c VLINK_DISCOVER_DISABLE=1 disables discovery.
    */
   static DiscoveryReporter* global_get();
 
   /**
-   * @brief Constructs the reporter and starts its background loop.
+   * @brief Constructs the reporter, socket, and periodic report timer.
+   *
+   * @details
+   * The message loop is not started by the constructor; the global singleton calls
+   * @c async_run() after construction.
    */
   DiscoveryReporter();
 
   /**
-   * @brief Destructor -- sends an offline notification and stops the loop.
+   * @brief Destructor -- stops the loop and releases the UDP socket.
+   *
+   * @details
+   * An offline notification is sent only when offline reporting is compiled in.
    */
   ~DiscoveryReporter() override;
 

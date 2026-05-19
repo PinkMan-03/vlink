@@ -17,8 +17,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_thread_pool
-./examples/base/thread_pool/example_thread_pool
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_thread_pool
+./build/output/bin/example_thread_pool
 ```
 
 ## 4. ThreadPool vs MessageLoop

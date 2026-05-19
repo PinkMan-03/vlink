@@ -22,4 +22,4 @@ add_subdirectory(string_type)
 add_subdirectory(custom_type)
 add_subdirectory(stream_type)
 add_subdirectory(dynamic_data)
-# add_subdirectory(intra_data)  # TODO: fix Subscriber<MyIntra> type conversion
+add_subdirectory(intra_data)

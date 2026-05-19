@@ -134,7 +134,13 @@ def test_field():
     assert values[-1] == b"v2"
 
     # Polling
-    val = getter.get()
+    deadline = time.time() + 2.0
+    val = None
+    while time.time() < deadline:
+        val = getter.get()
+        if val == b"v2":
+            break
+        time.sleep(0.01)
     assert val == b"v2"
 
     setter.deinit()

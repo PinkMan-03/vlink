@@ -38,7 +38,7 @@
  * -# Publishes per-topic statistics (@c freq, @c rate, @c loss, @c latency)
  *    once per second via a security-authenticated @c InfoList channel.
  * -# Relays raw message bytes from discovered publishers/setters to connected
- *    @c ProxyAPI listeners when operating in observe, record, or play mode.
+ *    @c ProxyAPI listeners when operating in observe, record, or auto modes.
  *    Setter endpoints are observed with getter semantics to preserve field
  *    last-value delivery.
  * -# Optionally manages an embedded Iceoryx RouDi daemon when
@@ -228,8 +228,8 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    * @details
    * Stops and waits for the MessageLoop, all runnable plugins, the
    * @c DiscoveryViewer, and all DDS handles in a deterministic teardown
-   * sequence.  Also marks the singleton guard so future constructions in
-   * the same process behave correctly.
+   * sequence.  The process-global singleton guard remains set for the process
+   * lifetime.
    */
   ~ProxyServer() override;
 

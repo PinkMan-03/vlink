@@ -604,7 +604,7 @@ vlink::DiscoveryViewer viewer(vlink::DiscoveryViewer::kFilterNative);
 
 `DiscoveryReporter` 在构建发现消息时，会读取每个 `NodeImpl` 的 `profiler` 字段（`CpuProfiler` 实例）。
 
-若要在发现数据中包含 CPU 使用率，需要在全局启用 CPU Profiler（VLink 内部自动处理，无需用户配置）。`DiscoveryViewer::Process::profiler` 字段的值：
+若要在发现数据中包含 CPU 使用率，需要启用全局 CPU Profiler；运行时可设置 `VLINK_PROFILER_ENABLE=1`，默认值为 `0`。`DiscoveryViewer::Process::profiler` 字段的值：
 
 - `>= 0.0`：当前节点的 CPU 使用率百分比
 - `< 0`（即 `-1`）：CpuProfiler 未启用或数据不可用

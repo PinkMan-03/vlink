@@ -36,7 +36,7 @@
  *      |                          |                             |
  *      |-- publish(msg) --------> |                             |
  *      |   serialize(msg)         |                             |
- *      |   [loan if shm://]       |-- bytes delivery ---------> |
+ *      |   [loan if supported]    |-- bytes delivery ---------> |
  *      |                          |                             |--> callback(msg)
  *      |                          |                             |    deserialize(bytes)
  * @endcode
@@ -64,9 +64,9 @@
  * if (pub.has_subscribers()) { ... }          // non-blocking query
  * @endcode
  *
- * @par Zero-copy on shm://
+ * @par Zero-copy on loan-capable transports
  * @code
- * Publisher<MyStruct> pub("shm://topic");
+ * Publisher<Bytes> pub("shm://topic");
  * if (pub.is_support_loan()) {
  *     Bytes buf = pub.loan(sizeof(MyStruct));
  *     new (buf.data()) MyStruct{...};
@@ -208,8 +208,8 @@ class Publisher : public Node<PublisherImpl, SecT> {
    *
    * @details
    * Serialization is performed according to @c kMsgType.  On loan-capable
-   * transports (e.g. @c shm://) the output buffer is a loaned segment to
-   * avoid an extra copy.  Loaned buffers are not used when security is
+   * transports the output buffer may be a loaned segment to avoid an extra
+   * copy.  Loaned buffers are not used when security is
    * enabled (@c kWithSecurity) because the encrypted payload size differs
    * from the serialized size.
    *
@@ -285,7 +285,7 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityPublisher on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Topic URL string (e.g. @c "dds://vehicle/speed").
-   * @param sec_cfg  Security configuration aggregate (empty by default → no encryption).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new publisher instance.
    */
@@ -298,7 +298,7 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityPublisher on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Topic URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → no encryption).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new publisher instance.
    */
@@ -312,13 +312,13 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    *
    * @details
    * Builds the base @c Publisher with @c InitType::kWithoutInit using @p conf,
-   * then forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security
-   * is either populated or left empty.  Finally calls @c init() unless the
-   * caller requests deferred initialisation.
+   * then forwards @p sec_cfg into @c enable_security().  @c init() requires that
+   * @c NodeImpl::security was populated successfully; finally calls @c init()
+   * unless the caller requests deferred initialisation.
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -331,13 +331,12 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    *
    * @details
    * Always builds the base @c Publisher with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security is
-   * either populated (when @p sec_cfg contains a usable cryptographic slot)
-   * or left empty (when @p sec_cfg is empty or invalid).  Finally calls
-   * @c init() unless the caller requests deferred initialisation.
+   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
+   * @c NodeImpl::security was populated successfully; finally calls @c init()
+   * unless the caller requests deferred initialisation.
    *
    * @param url_str  Topic URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → no encryption).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

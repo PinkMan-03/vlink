@@ -101,10 +101,9 @@ SomeipConf field_conf(0x1234, 0x5678, {0x0001}, 0x0020, true);
 ## 6. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_url_someip
-./output/bin/example_url_someip
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_url_someip
+./build/output/bin/example_url_someip
 ```
 
 ## 7. 预期输出

@@ -31,11 +31,9 @@
  * @c vlink::Exception namespace to avoid naming conflicts with application
  * code.
  *
- * To guarantee a single typeinfo / vtable per type across shared library
- * boundaries (notably on macOS where libc++abi compares typeinfo by pointer
- * equality), every class is exported via @c VLINK_EXPORT and the constructors
- * plus the virtual @c what() function are defined out-of-line in
- * @c exception.cc -- which acts as the key-function translation unit.
+ * The wrappers are header-only and inherit the constructors and @c what()
+ * behavior of their standard exception bases, except
+ * @c OperationCancelled which overrides @c what() inline with a fixed message.
  *
  * The mapping between VLink exceptions and standard bases is:
  *

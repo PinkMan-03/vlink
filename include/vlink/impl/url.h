@@ -115,11 +115,11 @@ namespace vlink {
  * @c TransportType from the transport string.  Only @c Url may construct a @c Protocol
  * (private constructor, friend @c Url).
  *
- * @note The @c str field always holds the canonical URL string after any remap
- *       has been applied, not the raw input.
+ * @note The @c str field holds the input URL after any remap has been applied;
+ *       it is not rebuilt from parsed components.
  */
 struct VLINK_EXPORT Protocol final {
-  std::string str;                                ///< Canonical URL string (post-remap).
+  std::string str;                                ///< URL string after remap, if any.
   TransportType transport;                        ///< Resolved transport backend.
   std::string host;                               ///< Hostname or IP address component.
   std::string path;                               ///< Topic path component.
@@ -166,7 +166,8 @@ struct Url final : public Conf {
    * @details
    * Passed to @c global_init() and @c init_plugins() to selectively initialise
    * only the transports that are compiled in and needed for the current process.
-   * The bits correspond directly to the @c TransportType enumeration values.
+   * Each bit enables one transport family; the bit positions are listed below
+   * and are independent of the numeric @c TransportType values.
    *
    * | Flag           | Bit Position | Transport      |
    * | -------------- | ------------ | -------------- |
@@ -260,9 +261,9 @@ struct Url final : public Conf {
   Url& operator=(Url&& url) noexcept;
 
   /**
-   * @brief Returns the original (or remapped) URL string.
+   * @brief Returns the stored URL string after any remap.
    *
-   * @return Const reference to the canonical URL string stored in @c Protocol::str.
+   * @return Const reference to the URL string stored in @c Protocol::str.
    */
   [[nodiscard]] const std::string& get_str() const;
 
@@ -323,16 +324,18 @@ struct Url final : public Conf {
   [[nodiscard]] TransportType get_transport_type() const override;
 
   /**
-   * @brief Loads and registers @c ConfPluginInterface plugins for the enabled transports.
+   * @brief Loads and registers external @c ConfPluginInterface transport plugins.
    *
    * @details
    * Searches for plugin shared libraries listed in the @c VLINK_URL_PLUGINS
-   * environment variable and registers any that advertise a transport in
-   * @p transport_enable_flags.  This is called automatically when a @c Url is first
-   * constructed; explicit calls are only needed in unusual initialisation order.
+   * environment variable.  The @p transport_enable_flags argument is the set of
+   * built-in transports already available in this process; matching plugin names
+   * are skipped so linked modules take precedence over external plugins.  This
+   * is called automatically when a @c Url is first constructed; explicit calls
+   * are only needed in unusual initialisation order.
    *
-   * @param transport_enable_flags  Bitmask of @c TransportEnableFlag values; default 0
-   *                             (no plugins searched unless env var is set).
+   * @param transport_enable_flags  Bitmask of built-in @c TransportEnableFlag
+   *                                values to skip; default @c 0 skips none.
    */
   VLINK_EXPORT static void init_plugins(uint16_t transport_enable_flags = 0);
 
@@ -340,9 +343,8 @@ struct Url final : public Conf {
    * @brief Searches loaded plugins for a @c Conf factory matching @p type.
    *
    * @details
-   * Iterates over all loaded @c ConfPluginInterface instances and returns the first
-   * one whose @c get_transport_type() matches @p type.  Returns @c nullptr if no
-   * matching plugin is found.
+   * Looks up a previously loaded @c ConfPluginInterface for @p type and calls
+   * @c create() on it.  Returns @c nullptr if no matching plugin is registered.
    *
    * @param type  Transport backend to search for.
    * @return      A new @c Conf instance from the plugin, or @c nullptr.
@@ -357,7 +359,7 @@ struct Url final : public Conf {
    * (@c intra://, @c shm://) return lower indices than network transports.
    *
    * @param url  URL string to classify.
-   * @return     Non-negative sort index; lower values = higher priority.
+   * @return     Sort index; lower values = higher priority, @c -1 for an empty URL.
    */
   [[nodiscard]] VLINK_EXPORT static int get_sort_index(std::string_view url);
 

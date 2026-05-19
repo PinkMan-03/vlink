@@ -45,13 +45,13 @@
  * | ---------- | ------------------------------------------------------------------------- |
  * | @c topic   | RTI DDS topic name; formed from @c host + @c "/" + @c path                |
  * | @c domain  | DDS Domain ID (@c ?domain=, default from @c VLINK_DDS_DOMAIN env var)     |
- * | @c depth   | History depth (@c ?depth=, default 0)                                     |
+ * | @c depth   | DDS history depth override; 0 keeps the selected QoS history depth        |
  * | @c qos     | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
- * | @c qos_ext | Extended QoS map: @c part, @c topic, @c pub, @c sub, @c writer, @c reader |
+ * | @c qos_ext | Remaining query map after @c domain, @c depth, and @c qos are removed     |
  *
  * @note This header is compiled only when @c VLINK_SUPPORT_DDSR is defined.
  * @note @c qos and @c qos_ext are mutually exclusive.
- * @note Response topics for RPC are automatically registered with a @c "___resp" suffix.
+ * @note RPC response topic names are derived by appending a @c "___resp" suffix.
  */
 
 #pragma once
@@ -79,17 +79,17 @@ namespace vlink {
 struct VLINK_EXPORT DdsrConf final : public Conf {
   std::string topic;  ///< RTI DDS topic name (host + "/" + path from URL).
   int32_t domain{0};  ///< DDS Domain Participant ID (non-negative).
-  int32_t depth{0};   ///< DDS history depth for the endpoint; 0 means transport default.
+  int32_t depth{0};   ///< DDS history depth override; 0 keeps the selected QoS history depth.
   std::string qos;    ///< Named QoS profile key registered via @c register_qos().
   PropertiesMap
-      qos_ext;  ///< Extended per-entity QoS map (keys: @c part, @c topic, @c pub, @c sub, @c writer, @c reader).
+      qos_ext;  ///< Query map after removing @c domain, @c depth, and @c qos; unknown keys are kept but warned.
 
   /**
    * @brief Constructs a @c DdsrConf with topic, domain, depth, and named QoS.
    *
    * @param _topic   RTI DDS topic name.
    * @param _domain  Domain ID; default 0.
-   * @param _depth   History depth; default 0.
+   * @param _depth   History depth override; default 0.
    * @param _qos     Named QoS profile key; empty by default.
    */
   explicit DdsrConf(const std::string& _topic, int32_t _domain = 0, int32_t _depth = 0, const std::string& _qos = "");

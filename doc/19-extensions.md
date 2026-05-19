@@ -130,7 +130,7 @@ plugin.unload<vlink::LoggerPluginInterface>("my_logger");
 ```cpp
 class RunablePluginInterface : public MessageLoop {
 public:
-    // 事件循环启动后由宿主调用，在此创建订阅者、定时器等资源
+    // 由宿主在线程外调用，在此创建订阅者、定时器等资源
     virtual void on_init() = 0;
 
     // 插件卸载前由宿主调用，在此释放所有资源
@@ -140,14 +140,14 @@ public:
 
 ### 19.3.2 生命周期
 
-`RunablePluginInterface` 的公开契约是：宿主先启动插件自己的 `MessageLoop`，再由宿主线程显式调用
-`on_init()`；`on_deinit()` 同样由宿主在线程外显式触发。它们都不是插件 loop 线程里的隐式回调。
+`RunablePluginInterface` 的公开契约是：宿主先由宿主线程显式调用 `on_init()`，再启动插件自己的
+`MessageLoop`；`on_deinit()` 同样由宿主在线程外显式触发。它们都不是插件 loop 线程里的隐式回调。
 
 ```
 dlopen
   -> create (VLINK_PLUGIN_DECLARE)
-    -> async_run()       // 启动插件自己的 MessageLoop 线程
     -> on_init()         // 宿主线程调用，初始化订阅/定时器等资源
+    -> async_run()       // 启动插件自己的 MessageLoop 线程
       ... 运行中 ...
     -> on_deinit()       // 宿主线程调用，释放资源
     -> quit()            // 停止循环线程
@@ -368,14 +368,14 @@ if (mgr.is_valid()) {
 
 头文件：`<vlink/impl/conf_plugin_interface.h>`
 
-`ConfPluginInterface` 是所有外部传输插件必须实现的接口。每个传输插件导出一个实现该接口的具体类，VLink URL 系统在解析未知 Transport 时动态加载匹配插件。
+`ConfPluginInterface` 是所有外部传输插件必须实现的接口。每个传输插件导出一个实现该接口的具体类，VLink URL 系统会按已识别的 `TransportType` 动态加载匹配插件。
 
 ### 19.6.1 插件发现机制
 
 - 环境变量 `VLINK_URL_PLUGINS` 设置插件基础名列表（分号分隔，不含路径、`lib` 前缀和 `.so` 后缀；`vlink-` 前缀可省略）
 - 或调用 `Url::init_plugins()` 显式注册
 
-当 `Url` 构造时遇到未知 transport 时，`Url::load_for_plugin()` 会遍历所有已加载插件，调用 `get_transport_type()` 进行匹配，匹配成功后再调用 `create()` 获取 `Conf` 实例。
+当 `Url` 构造得到一个已识别的 `TransportType` 时，`Url::load_for_plugin()` 会遍历已加载插件，调用 `get_transport_type()` 进行匹配，匹配成功后再调用 `create()` 获取 `Conf` 实例。若 URL 前缀无法映射到任何内置枚举值，transport 会是 `kUnknown`，当前 `load_for_plugin(kUnknown)` 直接返回 `nullptr`，不会为任意未知字符串动态匹配插件。
 
 ### 19.6.2 接口定义
 
@@ -1008,4 +1008,4 @@ monitor->shutdown();
 
 ### 19.16.4 版本兼容性规则
 
-`VLINK_PLUGIN_DECLARE(ImplType, Major, Minor)` 中的版本号必须与 `Plugin::load<T>(lib_name, major, minor)` 调用方指定的版本一致，否则加载失败并记录错误日志。版本检验在 `process_plugin_internal()` 内完成，此函数在共享库内部执行，不跨越库边界传递异常。
+`VLINK_PLUGIN_DECLARE(ImplType, Major, Minor)` 中的版本号需要满足兼容性规则：`Major` 必须与 `Plugin::load<T>(lib_name, major, minor)` 调用方指定的 major 一致，插件声明的 `Minor` 必须大于等于调用方要求的 minor；否则加载失败并记录错误日志。版本检验在 `process_plugin_internal()` 内完成，此函数在共享库内部执行，不跨越库边界传递异常。

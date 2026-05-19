@@ -222,14 +222,9 @@ static const std::string kTopicUrl = "zenoh://sensor/temperature";
 ## 8. 编译与运行
 
 ```bash
-# 在 VLink 构建目录中
-cmake --build . --target example_hello_pubsub
-./output/bin/example_hello_pubsub
-
-# 或者独立编译
-mkdir build && cd build
-cmake /path/to/examples/quickstart/hello_pubsub -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_hello_pubsub
+./build/output/bin/example_hello_pubsub
 ```
 
 ## 9. 预期输出

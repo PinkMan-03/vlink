@@ -80,10 +80,9 @@ mosquitto -d -p 1883
 ## 7. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_url_mqtt
-./output/bin/example_url_mqtt
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_url_mqtt
+./build/output/bin/example_url_mqtt
 ```
 
 ## 8. 预期输出

@@ -140,8 +140,9 @@ virtual void register_split_callback(SplitCallback&& callback, bool before) = 0;
 ## 8. 编译和运行
 
 ```bash
-cmake --build . --target example_record_bag_writer
-./output/bin/example_record_bag_writer
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_record_bag_writer
+./build/output/bin/example_record_bag_writer
 ```
 
 ## 9. 输出文件

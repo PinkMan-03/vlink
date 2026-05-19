@@ -51,8 +51,8 @@
  * - All fields are plain data; no virtual functions, no dynamic allocation.
  * - The struct is 8-byte aligned (@c VLINK_EXPORT_AND_ALIGNED(8)) to ensure
  *   consistent padding across compilers and architectures.
- * - 32-bit architectures (arm, x86, i386) emit a compile-time warning and are
- *   not officially supported for zero-copy types.
+ * - Other zero-copy containers emit 32-bit architecture warnings; @c Header
+ *   itself only verifies its fixed size with @c static_assert.
  */
 
 #pragma once
@@ -85,8 +85,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) Header final {
    * @brief Default constructor.
    *
    * @details
-   * Verifies via @c static_assert that the struct is exactly 40 bytes on
-   * 64-bit platforms (the check is omitted on 32-bit architectures).
+   * Verifies via @c static_assert that the struct is exactly 40 bytes.
    */
   Header() noexcept;
 };

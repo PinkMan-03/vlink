@@ -38,7 +38,8 @@
  *
  * All handles are opaque structs that contain a @c native_handle pointer to the
  * underlying C++ object and a @c reserved array used for internal state
- * (e.g., the @c std::mutex and response buffer used by @c vlink_server_handle_t).
+ * (e.g., security state and request/reply coordination data).  Callers must
+ * treat every @c reserved slot as opaque.
  *
  * @par Return value conventions
  * Every function returns a @c vlink_ret_t integer:
@@ -48,8 +49,8 @@
  * | VLINK_RET_NO_ERROR (0)        | Success                                          |
  * | VLINK_RET_UNEXPECTED_ERROR    | Condition not met (e.g., no subscribers yet)     |
  * | VLINK_RET_INVALID_ERROR       | Null pointer or invalid handle                   |
- * | VLINK_RET_MEMORY_ERROR        | Output buffer too small                          |
- * | VLINK_RET_RUNTIME_ERROR       | Exception thrown during C++ construction         |
+ * | VLINK_RET_MEMORY_ERROR        | Allocation failure or output buffer too small    |
+ * | VLINK_RET_RUNTIME_ERROR       | Runtime state error or construction exception    |
  * | VLINK_RET_TRANSFER_ERROR      | Publish / listen / invoke operation failed       |
  * | VLINK_RET_UNKNOWN_ERROR (-1)  | Unclassified error                               |
  *
@@ -149,8 +150,8 @@ typedef enum {
   VLINK_RET_NO_ERROR = 0,         /**< Operation succeeded. */
   VLINK_RET_UNEXPECTED_ERROR = 1, /**< Condition not yet met (e.g., no subscribers). */
   VLINK_RET_INVALID_ERROR = 2,    /**< Null pointer argument or invalid handle. */
-  VLINK_RET_MEMORY_ERROR = 3,     /**< Caller-provided buffer is too small. */
-  VLINK_RET_RUNTIME_ERROR = 4,    /**< C++ exception thrown during node construction. */
+  VLINK_RET_MEMORY_ERROR = 3,     /**< Allocation failure or caller-provided buffer is too small. */
+  VLINK_RET_RUNTIME_ERROR = 4,    /**< Runtime state error or C++ construction exception. */
   VLINK_RET_TRANSFER_ERROR = 5,   /**< Publish, listen, or invoke operation failed. */
 } vlink_ret_t;
 
@@ -220,15 +221,8 @@ typedef struct {
  * @c vlink_destroy_server().  @c native_handle points to a heap-allocated
  * @c vlink::Server<vlink::Bytes, vlink::Bytes> object.
  * The @c reserved array is used internally to coordinate the synchronous
- * request-reply flow:
- * - @c reserved[0]: pointer to a @c std::mutex (lock held during callback).
- * - @c reserved[1]: pointer to the response byte buffer.
- * - @c reserved[2]: response byte count (stored as a pointer-sized integer).
- * - @c reserved[3]: non-null while a request is being processed (cleared by
- *   @c vlink_reply()).
- * - @c reserved[4]: pointer to an attached @c vlink::Security instance, or
- *   @c NULL when the server was created via @c vlink_create_server() rather
- *   than @c vlink_create_secure_server().
+ * request-reply flow.  Its layout is intentionally private and may change
+ * between releases.
  */
 typedef struct {
   void* native_handle; /**< Internal C++ Server object pointer. */
@@ -342,7 +336,8 @@ typedef struct vlink_security_config_s vlink_security_config_t;
  * @param handle       Output handle to fill.  Must not be @c NULL.
  * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR if
  *                @p url or @p handle is @c NULL, if @p schema_info is only
- *                partially filled, if @p schema_info->schema is invalid, or
+ *                partially filled, if @p schema_info->schema is invalid,
+ *                @c VLINK_RET_MEMORY_ERROR on pool allocation failure, or
  *                @c VLINK_RET_RUNTIME_ERROR if construction throws.
  */
 VLINK_C_API_EXPORT int vlink_create_publisher(const char* url, const vlink_schema_info_t* schema_info,
@@ -406,7 +401,8 @@ VLINK_C_API_EXPORT int vlink_detect_subscribers(const vlink_publisher_handle_t h
  * @param data    Payload to publish.  Must remain valid until the call returns.
  * @param size    Number of bytes in @p data.
  * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_TRANSFER_ERROR
- *                if publishing failed, or @c VLINK_RET_INVALID_ERROR on bad handle.
+ *                if publishing failed, or @c VLINK_RET_INVALID_ERROR on bad
+ *                handle or @p data == @c NULL with @p size > 0.
  */
 VLINK_C_API_EXPORT int vlink_publish(const vlink_publisher_handle_t handle, const uint8_t* data, const size_t size);
 
@@ -422,7 +418,8 @@ VLINK_C_API_EXPORT int vlink_publish(const vlink_publisher_handle_t handle, cons
  * @param data    Payload to publish.
  * @param size    Number of bytes in @p data.
  * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_TRANSFER_ERROR
- *                on failure, or @c VLINK_RET_INVALID_ERROR on bad handle.
+ *                on failure, or @c VLINK_RET_INVALID_ERROR on bad handle or
+ *                @p data == @c NULL with @p size > 0.
  */
 VLINK_C_API_EXPORT int vlink_publish_by_force(const vlink_publisher_handle_t handle, const uint8_t* data,
                                               const size_t size);
@@ -447,6 +444,7 @@ VLINK_C_API_EXPORT int vlink_publish_by_force(const vlink_publisher_handle_t han
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR if
  *                      any required argument is @c NULL, if @p schema_info is only
  *                      partially filled, if @p schema_info->schema is invalid,
+ *                      @c VLINK_RET_MEMORY_ERROR on pool allocation failure,
  *                      @c VLINK_RET_TRANSFER_ERROR if @c listen() fails, or
  *                      @c VLINK_RET_RUNTIME_ERROR on construction exception.
  */
@@ -463,8 +461,9 @@ VLINK_C_API_EXPORT int vlink_create_subscriber(const char* url, const vlink_sche
  * @c Security::decrypt().  Security configuration is one-shot at creation;
  * there is no separate runtime entry point.
  *
- * On failure (bad URL / schema / cfg, no usable cryptographic slot, listen
- * failure) the handle is left @c NULL and no resources leak.
+ * On failure (bad URL / schema / cfg, no decrypt-capable security state,
+ * listen failure) no resources leak; if the implementation had already stored
+ * an internal handle before the failure, that stored handle is cleared.
  *
  * @param url           VLink subscriber URL.  Must not be @c NULL.
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
@@ -472,9 +471,10 @@ VLINK_C_API_EXPORT int vlink_create_subscriber(const char* url, const vlink_sche
  * @param msg_callback  Message handler.  Must not be @c NULL.
  * @param user_data     Opaque pointer forwarded to @p msg_callback.
  * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      contain at least one usable cryptographic slot.
+ *                      provide a decrypt-capable slot.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
- *                      on bad arguments (including an unconfigured @p security_cfg),
+ *                      on bad arguments (including a non-decrypt-capable
+ *                      @p security_cfg),
  *                      @c VLINK_RET_MEMORY_ERROR on pool allocation failure,
  *                      @c VLINK_RET_TRANSFER_ERROR if @c listen() fails, or
  *                      @c VLINK_RET_RUNTIME_ERROR on construction exception.
@@ -504,9 +504,9 @@ VLINK_C_API_EXPORT int vlink_destroy_subscriber(vlink_subscriber_handle_t* handl
  * Allocates a @c vlink::Server<vlink::Bytes, vlink::Bytes> and calls @c listen()
  * with an internal handler that wraps @p req_callback.
  *
- * The internal handler holds a @c std::mutex (stored in @c handle->reserved[0])
- * during each invocation.  Call @c vlink_reply() from within @p req_callback
- * to set a non-empty response before the callback returns.
+ * The internal handler serialises request/reply state during each invocation.
+ * Call @c vlink_reply() from within @p req_callback to set a response before
+ * the callback returns.
  *
  * @param url           VLink service URL.  Must not be @c NULL.
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
@@ -518,9 +518,10 @@ VLINK_C_API_EXPORT int vlink_destroy_subscriber(vlink_subscriber_handle_t* handl
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR if
  *                      @p url or @p handle is @c NULL, if @p req_callback is
  *                      @c NULL, if @p schema_info is only partially filled, if
- *                      @p schema_info->schema is invalid, @c VLINK_RET_TRANSFER_ERROR
- *                      if @c listen() fails, or @c VLINK_RET_RUNTIME_ERROR on
- *                      construction exception.
+ *                      @p schema_info->schema is invalid,
+ *                      @c VLINK_RET_MEMORY_ERROR on pool allocation failure,
+ *                      @c VLINK_RET_TRANSFER_ERROR if @c listen() fails, or
+ *                      @c VLINK_RET_RUNTIME_ERROR on construction exception.
  */
 VLINK_C_API_EXPORT int vlink_create_server(const char* url, const vlink_schema_info_t* schema_info,
                                            vlink_server_handle_t* handle, const vlink_req_callback_t req_callback,
@@ -547,7 +548,7 @@ VLINK_C_API_EXPORT int vlink_create_server(const char* url, const vlink_schema_i
  * @param req_callback   Request handler.  Must not be @c NULL.
  * @param user_data      Opaque pointer forwarded to @p req_callback.
  * @param security_cfg   Security configuration.  Must not be @c NULL and must
- *                       contain at least one usable cryptographic slot.
+ *                       provide both encrypt- and decrypt-capable slots.
  * @return               @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                       on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                       allocation failure, @c VLINK_RET_TRANSFER_ERROR if
@@ -561,7 +562,7 @@ VLINK_C_API_EXPORT int vlink_create_secure_server(const char* url, const vlink_s
 
 /**
  * @brief Destroys a Server node and frees all internal resources including the
- *        internal mutex and any pending response buffer.
+ *        internal request/reply state.
  *
  * @param handle  Server handle to destroy.  Must not be @c NULL.
  * @return        @c VLINK_RET_NO_ERROR on success, or @c VLINK_RET_INVALID_ERROR
@@ -574,18 +575,16 @@ VLINK_C_API_EXPORT int vlink_destroy_server(vlink_server_handle_t* handle);
  *
  * @details
  * Must be called from within the @c vlink_req_callback_t while the internal
- * mutex lock is still held.  Copies @p data into a heap buffer stored in
- * @c handle->reserved[1] and sets @c handle->reserved[2] to the size.
- * Sets @c handle->reserved[3] to @c NULL to signal that a reply is ready.
- * For secure servers, @p size must be non-zero to produce an encrypted
- * response payload; @p size == 0 is accepted and produces the protocol's empty
- * response.
+ * request context is active.  The response is copied into owned internal
+ * storage, or encrypted into owned internal storage for secure servers.  A
+ * @p size of 0 is accepted and produces the protocol's empty response.
  *
  * @param handle  Server handle.  Must not be @c NULL.
  * @param data    Response payload bytes.
  * @param size    Number of bytes in @p data.
  * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
- *                on bad handle, @c VLINK_RET_RUNTIME_ERROR if no pending
+ *                on bad handle or @p data == @c NULL with @p size > 0,
+ *                @c VLINK_RET_RUNTIME_ERROR if no pending
  *                request is in progress, @c VLINK_RET_MEMORY_ERROR if the
  *                internal response buffer allocation fails, or
  *                @c VLINK_RET_TRANSFER_ERROR if secure response encryption
@@ -605,7 +604,8 @@ VLINK_C_API_EXPORT int vlink_reply(vlink_server_handle_t* handle, const uint8_t*
  * @param handle       Output handle.  Must not be @c NULL.
  * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR if
  *                @p url or @p handle is @c NULL, if @p schema_info is only
- *                partially filled, if @p schema_info->schema is invalid, or
+ *                partially filled, if @p schema_info->schema is invalid,
+ *                @c VLINK_RET_MEMORY_ERROR on pool allocation failure, or
  *                @c VLINK_RET_RUNTIME_ERROR on construction exception.
  */
 VLINK_C_API_EXPORT int vlink_create_client(const char* url, const vlink_schema_info_t* schema_info,
@@ -670,7 +670,9 @@ VLINK_C_API_EXPORT int vlink_detect_server(const vlink_client_handle_t handle,
  * @param resp_callback  Callback invoked with the response, or @c NULL.
  * @param user_data      Opaque pointer forwarded to @p resp_callback.
  * @return               @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_TRANSFER_ERROR
- *                       if the invoke failed, or @c VLINK_RET_INVALID_ERROR on bad handle.
+ *                       if encryption or invoke failed, or
+ *                       @c VLINK_RET_INVALID_ERROR on bad handle or
+ *                       @p data == @c NULL with @p size > 0.
  */
 VLINK_C_API_EXPORT int vlink_invoke(const vlink_client_handle_t handle, const uint8_t* data, const size_t size,
                                     const vlink_resp_callback_t resp_callback, void* user_data);
@@ -687,7 +689,8 @@ VLINK_C_API_EXPORT int vlink_invoke(const vlink_client_handle_t handle, const ui
  * @param handle       Output handle.  Must not be @c NULL.
  * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR if
  *                @p url or @p handle is @c NULL, if @p schema_info is only
- *                partially filled, if @p schema_info->schema is invalid, or
+ *                partially filled, if @p schema_info->schema is invalid,
+ *                @c VLINK_RET_MEMORY_ERROR on pool allocation failure, or
  *                @c VLINK_RET_RUNTIME_ERROR on construction exception.
  */
 VLINK_C_API_EXPORT int vlink_create_setter(const char* url, const vlink_schema_info_t* schema_info,
@@ -707,26 +710,19 @@ VLINK_C_API_EXPORT int vlink_destroy_setter(vlink_setter_handle_t* handle);
  *
  * @details
  * The new value overwrites the previous value held by all matched Getters.
- * Internally wraps @p data in a shallow-copy @c vlink::Bytes (zero-copy).
- *
- * @warning
- * The Setter caches the latest value internally so that late-joining Getters
- * can sync.  Because @p data is wrapped without copying, the buffer it points
- * to **must remain valid until either** (a) the next @c vlink_set() call on
- * the same handle (which overrides the cached value), or (b)
- * @c vlink_destroy_setter() is called.  Releasing @p data sooner causes a
- * use-after-free when a late Getter tries to read the cache.  Static
- * storage (string literals, file-scope buffers) or a pinned allocation that
- * lives for the Setter's lifetime is the typical pattern; if that is
- * inconvenient, copy the value into a long-lived buffer before calling
- * @c vlink_set().
+ * The input buffer is only read during the @c vlink_set() call.  The
+ * underlying @c Setter<vlink::Bytes> keeps its latest-value cache as an owned
+ * @c Bytes copy, so callers may reuse or release @p data after the function
+ * returns.
  *
  * @param handle  Setter handle.
- * @param data    New field value bytes.  Must remain valid until the next
- *                @c vlink_set() or @c vlink_destroy_setter().
+ * @param data    New field value bytes.  Must remain valid for the duration
+ *                of the call.
  * @param size    Number of bytes in @p data.
- * @return        @c VLINK_RET_NO_ERROR on success, or @c VLINK_RET_INVALID_ERROR
- *                on bad handle.
+ * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_TRANSFER_ERROR
+ *                if secure payload encryption fails, or
+ *                @c VLINK_RET_INVALID_ERROR on bad handle or
+ *                @p data == @c NULL with @p size > 0.
  */
 VLINK_C_API_EXPORT int vlink_set(const vlink_setter_handle_t handle, const uint8_t* data, const size_t size);
 
@@ -750,7 +746,9 @@ VLINK_C_API_EXPORT int vlink_set(const vlink_setter_handle_t handle, const uint8
  * @param user_data     Opaque pointer forwarded to @p msg_callback.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR if
  *                      @p url or @p handle is @c NULL, if @p schema_info is only
- *                      partially filled, if @p schema_info->schema is invalid, or
+ *                      partially filled, if @p schema_info->schema is invalid,
+ *                      @c VLINK_RET_MEMORY_ERROR on pool allocation failure,
+ *                      @c VLINK_RET_TRANSFER_ERROR if @c listen() fails, or
  *                      @c VLINK_RET_RUNTIME_ERROR on construction exception.
  */
 VLINK_C_API_EXPORT int vlink_create_getter(const char* url, const vlink_schema_info_t* schema_info,
@@ -777,7 +775,7 @@ VLINK_C_API_EXPORT int vlink_create_getter(const char* url, const vlink_schema_i
  * @param msg_callback   Callback for push-mode updates, or @c NULL for poll mode.
  * @param user_data      Opaque pointer forwarded to @p msg_callback.
  * @param security_cfg   Security configuration.  Must not be @c NULL and must
- *                       contain at least one usable cryptographic slot.
+ *                       provide a decrypt-capable slot.
  * @return               @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                       on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                       allocation failure, @c VLINK_RET_TRANSFER_ERROR if
@@ -1004,7 +1002,8 @@ VLINK_C_API_EXPORT void vlink_security_destroy(vlink_security_handle_t sec);
  * @param out_size  Output pointer receiving the byte count of the ciphertext.
  *                  Must not be @c NULL.
  * @return          @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
- *                  on bad arguments, or @c VLINK_RET_TRANSFER_ERROR if the
+ *                  on bad arguments, @c VLINK_RET_MEMORY_ERROR if output
+ *                  allocation fails, or @c VLINK_RET_TRANSFER_ERROR if the
  *                  underlying @c Security::encrypt() call fails.
  */
 VLINK_C_API_EXPORT int vlink_security_encrypt(vlink_security_handle_t sec, const uint8_t* in, const size_t in_size,
@@ -1029,7 +1028,8 @@ VLINK_C_API_EXPORT int vlink_security_encrypt(vlink_security_handle_t sec, const
  * @param out_size  Output pointer receiving the byte count of the plaintext.
  *                  Must not be @c NULL.
  * @return          @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
- *                  on bad arguments, or @c VLINK_RET_TRANSFER_ERROR if the
+ *                  on bad arguments, @c VLINK_RET_MEMORY_ERROR if output
+ *                  allocation fails, or @c VLINK_RET_TRANSFER_ERROR if the
  *                  underlying @c Security::decrypt() call fails.
  */
 VLINK_C_API_EXPORT int vlink_security_decrypt(vlink_security_handle_t sec, const uint8_t* in, const size_t in_size,
@@ -1060,9 +1060,10 @@ VLINK_C_API_EXPORT void vlink_security_free_buffer(uint8_t* buf);
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
  * @param handle        Output handle.  Must not be @c NULL.
  * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      contain at least one usable cryptographic slot.
+ *                      provide an encrypt-capable slot.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
- *                      on bad arguments (including an unconfigured @p security_cfg),
+ *                      on bad arguments (including a non-encrypt-capable
+ *                      @p security_cfg),
  *                      @c VLINK_RET_MEMORY_ERROR on pool allocation failure, or
  *                      @c VLINK_RET_RUNTIME_ERROR on construction exception.
  */
@@ -1083,7 +1084,7 @@ VLINK_C_API_EXPORT int vlink_create_secure_publisher(const char* url, const vlin
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
  * @param handle        Output handle.  Must not be @c NULL.
  * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      contain at least one usable cryptographic slot.
+ *                      provide both encrypt- and decrypt-capable slots.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                      on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                      allocation failure, or @c VLINK_RET_RUNTIME_ERROR on
@@ -1099,15 +1100,15 @@ VLINK_C_API_EXPORT int vlink_create_secure_client(const char* url, const vlink_s
  * @details
  * Builds the @c vlink::Security from @p security_cfg @b before @c init()
  * returns, so the encrypt path is wired up the first time @c vlink_set() is
- * called.  The Setter retains a heap-allocated cache of the latest ciphertext
- * (owned by the security state object stored in @c handle->reserved[4]) so
- * late-joining Getters receive the current value.
+ * called.  The Setter's normal latest-value cache owns the encrypted
+ * @c Bytes payload, so late-joining Getters receive the current value without
+ * depending on the caller's input buffer.
  *
  * @param url           VLink field URL.  Must not be @c NULL.
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
  * @param handle        Output handle.  Must not be @c NULL.
  * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      contain at least one usable cryptographic slot.
+ *                      provide an encrypt-capable slot.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                      on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                      allocation failure, or @c VLINK_RET_RUNTIME_ERROR on
@@ -1122,7 +1123,7 @@ VLINK_C_API_EXPORT int vlink_create_secure_setter(const char* url, const vlink_s
  *
  * @details
  * Mirrors @c vlink::SslOptions; populated by the caller and passed to the
- * per-handle @c vlink_*_set_ssl_options() setters.  String fields are
+ * @c vlink_create_*_with_ssl_options() entry points.  String fields are
  * null-terminated; @c NULL or empty strings disable the corresponding slot.
  * @c verify_peer follows C semantics: non-zero enables peer-certificate
  * verification, @c 0 disables it.  TLS is considered enabled by the transport
@@ -1157,7 +1158,7 @@ typedef struct {
  * opt.ca_file   = "/etc/certs/ca.pem";
  * opt.cert_file = "/etc/certs/client.pem";
  * opt.key_file  = "/etc/certs/client-key.pem";
- * vlink_publisher_set_ssl_options(&pub, &opt);
+ * vlink_create_publisher_with_ssl_options("mqtt://sensor/data", &schema, &pub, &opt);
  * @endcode
  *
  * @param opt  Options aggregate to initialise.  No-op when @p opt is @c NULL.
@@ -1165,18 +1166,119 @@ typedef struct {
 VLINK_C_API_EXPORT void vlink_ssl_options_init(vlink_ssl_options_t* opt);
 
 /**
+ * @brief Creates a Publisher and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_publisher_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                               vlink_publisher_handle_t* handle,
+                                                               const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a Subscriber and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_subscriber_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                                vlink_subscriber_handle_t* handle,
+                                                                const vlink_msg_callback_t msg_callback,
+                                                                void* user_data, const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a Server and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_server_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                            vlink_server_handle_t* handle,
+                                                            const vlink_req_callback_t req_callback, void* user_data,
+                                                            const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a Client and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_client_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                            vlink_client_handle_t* handle,
+                                                            const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a Setter and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_setter_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                            vlink_setter_handle_t* handle,
+                                                            const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a Getter and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_getter_with_ssl_options(const char* url, const vlink_schema_info_t* schema_info,
+                                                            vlink_getter_handle_t* handle,
+                                                            const vlink_msg_callback_t msg_callback, void* user_data,
+                                                            const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a secure Publisher and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_publisher_with_ssl_options(const char* url,
+                                                                      const vlink_schema_info_t* schema_info,
+                                                                      vlink_publisher_handle_t* handle,
+                                                                      const vlink_security_config_t* security_cfg,
+                                                                      const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a secure Subscriber and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_subscriber_with_ssl_options(
+    const char* url, const vlink_schema_info_t* schema_info, vlink_subscriber_handle_t* handle,
+    const vlink_msg_callback_t msg_callback, void* user_data, const vlink_security_config_t* security_cfg,
+    const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a secure Server and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_server_with_ssl_options(
+    const char* url, const vlink_schema_info_t* schema_info, vlink_server_handle_t* handle,
+    const vlink_req_callback_t req_callback, void* user_data, const vlink_security_config_t* security_cfg,
+    const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a secure Client and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_client_with_ssl_options(const char* url,
+                                                                   const vlink_schema_info_t* schema_info,
+                                                                   vlink_client_handle_t* handle,
+                                                                   const vlink_security_config_t* security_cfg,
+                                                                   const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a secure Setter and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_setter_with_ssl_options(const char* url,
+                                                                   const vlink_schema_info_t* schema_info,
+                                                                   vlink_setter_handle_t* handle,
+                                                                   const vlink_security_config_t* security_cfg,
+                                                                   const vlink_ssl_options_t* opt);
+
+/**
+ * @brief Creates a secure Getter and applies TLS options before transport initialisation.
+ */
+VLINK_C_API_EXPORT int vlink_create_secure_getter_with_ssl_options(
+    const char* url, const vlink_schema_info_t* schema_info, vlink_getter_handle_t* handle,
+    const vlink_msg_callback_t msg_callback, void* user_data, const vlink_security_config_t* security_cfg,
+    const vlink_ssl_options_t* opt);
+
+/**
  * @brief Applies TLS options to a Publisher handle.
  *
  * @details
  * Forwards @p opt to @c Node::set_ssl_options() on the underlying transport,
- * which writes the corresponding @c ssl.* property entries and activates TLS
- * when @c ca_file or @c cert_file is non-empty.  Must be called before
- * @c vlink_init() for the setting to take effect on the transport handshake.
+ * which writes the corresponding @c ssl.* property entries.  The transport
+ * backend reads those entries during connection setup.  Handles returned by
+ * this C API are already initialised, so this setter returns
+ * @c VLINK_RET_RUNTIME_ERROR for normal C handles.  Use the corresponding
+ * @c vlink_create_*_with_ssl_options() function when TLS must affect the
+ * initial transport connection.
  *
  * @param handle  Publisher handle.  Must not be @c NULL.
  * @param opt     Options aggregate.  Must not be @c NULL.
- * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR on
- *                bad arguments, or @c VLINK_RET_RUNTIME_ERROR on internal failure.
+ * @return        @c VLINK_RET_NO_ERROR on success for an uninitialised internal
+ *                handle, @c VLINK_RET_INVALID_ERROR on bad arguments, or
+ *                @c VLINK_RET_RUNTIME_ERROR when the handle has already been
+ *                initialised.
  */
 VLINK_C_API_EXPORT int vlink_publisher_set_ssl_options(vlink_publisher_handle_t* handle,
                                                        const vlink_ssl_options_t* opt);

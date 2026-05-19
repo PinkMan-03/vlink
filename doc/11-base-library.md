@@ -1,7 +1,7 @@
 # 11. 基础库
 
 VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，供通信核心与上层应用共同使用。
-所有组件均以 C++17 编写，无第三方强制依赖，可独立集成。
+除 Coroutine 组件依赖 C++20 协程支持外，其余组件以 C++17 为基线，无第三方强制依赖，可独立集成。
 
 **相关文档：**
 
@@ -328,7 +328,7 @@ alignof(std::max_align_t)` 时走 oversized 直通路径，直接 `::operator ne
 64B / 128B / 256B / 512B / 1KB / 2KB / 4KB / 8KB / 16KB / 32KB / 64KB / 128KB /
 256KB / 512KB / 1MB / 4MB / 8MB / 16MB`，覆盖 Function/MoveFunction 及
 Bytes 的常见尺寸），由环境变量 `VLINK_MEMORY_LEVEL`（`0`..`9`，默认 `3`）
-从一张编译期常量表中按行索引。`1..9` 渐进激活大 tier 并加密尾部 block 数：`1` 把
+从一张编译期常量表中按行索引。`1..9` 渐进激活大 tier 并增加尾部 block 数：`1` 把
 `1MB / 4MB / 8MB / 16MB` 全部留为 sentinel；`2` 启用 `1MB`；
 `4` 起激活 `4MB`（**L3 默认不激活 4MB**，让 4K 帧走 oversized 直通以节省常驻
 内存）；`5` 起激活 `8MB`；`6` 起激活 `16MB`。每级内 `blocks_per_chunk`
@@ -960,7 +960,7 @@ snapshot、map 返回-by-value、跨域 const-ref 遍历、模板下游可见性
 - **单线程串行**：所有投递到同一个 `MessageLoop` 的任务严格串行，不会并发。
 - **线程安全投递**：`post_task()` 本身是线程安全的，可从任意线程调用。
 - **集成定时器**：`Timer` attach 到 `MessageLoop` 后，定时回调与普通任务共用同一线程。
-- **最大队列深度**：默认 10000（`kMaxTaskSize`），超出时 `post_task()` 返回 `false`。
+- **最大队列深度**：默认 10000（`kMaxTaskSize`）；队列满时由 `Strategy` 与 `TaskOverflowPolicy` 决定是重试、丢弃可丢任务、阻塞还是拒绝，只有拒绝路径会让 `post_task()` 返回 `false`。
 - **最大定时器数**：默认 100（`kMaxTimerSize`），超出时 `Timer::attach()` 失败。
 
 ### 11.8.2 队列类型

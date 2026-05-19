@@ -134,10 +134,9 @@ auto result = client.invoke(req, 1000ms);          // 1 秒超时
 ## 6. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_method_sync
-./output/bin/example_method_sync
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_method_sync example_method_sync_server example_method_sync_client
+./build/output/bin/example_method_sync
 ```
 
 ## 7. 预期输出
@@ -176,10 +175,10 @@ make example_method_sync
 
 ```bash
 # 终端 1: 启动 Server
-./output/bin/example_method_sync_server
+./build/output/bin/example_method_sync_server
 
 # 终端 2: 启动 Client
-./output/bin/example_method_sync_client
+./build/output/bin/example_method_sync_client
 ```
 
 ## 9. 扩展思考

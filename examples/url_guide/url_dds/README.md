@@ -87,10 +87,9 @@ Domain 3: V2X 通信   dds://v2x/bsm?domain=3
 ## 5. 编译与运行
 
 ```bash
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-make example_url_dds
-./output/bin/example_url_dds
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_url_dds
+./build/output/bin/example_url_dds
 ```
 
 ## 6. 预期输出

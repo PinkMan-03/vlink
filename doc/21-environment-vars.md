@@ -2,7 +2,7 @@
 
 本章列出 VLink **运行时**读取的环境变量。数据来源：对源码 `Utils::get_env("VLINK_*")` 调用的完整扫描（截至当前提交）。
 
-所有 VLink 专有环境变量以 `VLINK_` 前缀开头。`vlink-check env` 会按编译时启用的模块（`VLINK_SUPPORT_*` 宏）和 CLI 子工具（`VLINK_ENABLE_CLI_*`）动态裁剪输出：模块未编译则对应私有 env 不会展示（例如未启用 Zenoh 时不列 `VLINK_ZENOH_*`、未启用 SHM2 时不列 `VLINK_SHM2_*`）。若要确认某变量是否被使用，最权威的方法是搜索源码 `Utils::get_env("<NAME>")`。参见 [13-cli-tools.md](13-cli-tools.md#134-vlink-check--系统配置与环境诊断)。
+所有 VLink 专有环境变量以 `VLINK_` 前缀开头。`vlink-check env` 会按编译时启用的传输模块（`VLINK_SUPPORT_*` 宏）裁剪 `cli/check/check.cc` 内置清单：模块未编译则对应私有 env 不会展示（例如未启用 Zenoh 时不列 `VLINK_ZENOH_*`、未启用 SHM2 时不列 `VLINK_SHM2_*`）。它不是完整运行时变量枚举，例如 `VLINK_BENCH_*` 由 `vlink-bench` 读取但不在 `vlink-check env` 输出中。若要确认某变量是否被使用，最权威的方法是搜索源码 `Utils::get_env("<NAME>")`。参见 [13-cli-tools.md](13-cli-tools.md#134-vlink-check--系统配置与环境诊断)。
 
 ---
 
@@ -343,12 +343,15 @@ export VLINK_BAG_TAG=test_session_01
 | `QNX_TARGET`             | QNX                | QNX SDP target 库目录（**必须设置**）                                |
 | `QNX_INSTALL_PREFIX`     | QNX                | 自定义安装前缀                                                      |
 | `OE_CMAKE_TOOLCHAIN_FILE`| Yocto              | Yocto SDK 生成的 CMake 工具链文件                                    |
+| `VLINK_DDSGEN_PROGRAM`   | DDS IDL 代码生成   | 显式指定 `fastddsgen`/DDS 代码生成器路径                             |
+| `VLINK_PROTOC_PROGRAM`   | Protobuf 代码生成  | 显式指定 `protoc` 路径                                               |
+| `VLINK_FLATC_PROGRAM`    | FlatBuffers 代码生成 | 显式指定 `flatc` 路径                                              |
 
 ---
 
 ## 21.11 示例应用中的自定义环境变量
 
-VLink 官方示例通过 `vlink::Utils::get_env()` 读取以下自定义环境变量：
+VLink 官方示例通过 `vlink::Utils::get_env()` 读取以下常见自定义环境变量；示例目录仍可能包含更多演示用变量，完整情况以源码为准。
 
 ### 21.11.1 环境变量加载流程
 
@@ -380,6 +383,14 @@ export EVENT_TRANSPORT=shm
 | `PONG_URL`   | 空     | 直接指定 Pong 发布 URL                                  |
 | `PING_TRANSPORT` | `dds`  | Ping 传输后端                                          |
 | `PONG_TRANSPORT` | `dds`  | Pong 传输后端                                          |
+
+### 21.11.4 quickstart 示例
+
+| 变量名                  | 默认值 | 说明                                  |
+| ----------------------- | ------ | ------------------------------------- |
+| `VLINK_CONFIG_URL`      | `intra://sensor/config` | 覆盖 `hello_field` 配置 Field URL |
+| `VLINK_CALCULATOR_URL`  | `intra://hello/calculator` | 覆盖 `hello_rpc` 计算服务 Method URL |
+| `VLINK_NOTIFY_URL`      | `intra://hello/notify` | 覆盖 `hello_rpc` 通知 Event URL |
 
 ---
 

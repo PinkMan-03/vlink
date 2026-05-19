@@ -5,10 +5,10 @@
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
-        <mxCell id="title" value="VLink WebViz Architecture" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
+        <mxCell id="title" value="VLink WebViz Architecture (proxy_api path)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="1360" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Application Nodes  →  ProxyServer  →  C++ bridges  →  Visualizers" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="proxy_api mode: Application Nodes  →  ProxyServer  →  C++ bridges  →  Visualizers" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="54" width="1360" height="22" as="geometry" />
         </mxCell>
 
@@ -52,7 +52,7 @@
         <mxCell id="proxy_bar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ef6c00;strokeColor=none;arcSize=30;" vertex="1" parent="1">
           <mxGeometry x="380" y="100" width="320" height="6" as="geometry" />
         </mxCell>
-        <mxCell id="proxy_t" value="VLink ProxyServer" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
+        <mxCell id="proxy_t" value="VLink ProxyServer (external)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="380" y="114" width="320" height="22" as="geometry" />
         </mxCell>
 

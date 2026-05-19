@@ -47,7 +47,7 @@
 | 通信方向     | 单向（Publisher -> Subscriber） | 双向（Client <-> Server）*  | 双向（Setter <-> Getter）  |
 | 响应         | 无                        | 有（请求/响应）            | 有（最新值同步）           |
 | 消费者数量   | 多对多                    | N:1（多Client对一Server）  | 多对多                     |
-| 历史值保留   | 取决于 Durability QoS     | 不适用                     | 始终保留最新值             |
+| 历史值保留   | 取决于 Durability QoS     | 不适用                     | Setter 内缓存最新值；迟到 Getter 是否自动同步取决于后端 |
 | 典型用途     | 传感器数据流、状态广播    | RPC 调用、服务请求         | 参数同步、配置下发         |
 
 > *注：方法模型的 fire-and-forget 模式（`RespT` 为 `EmptyType` 时）为单向通信（Client -> Server），无响应。
@@ -75,6 +75,7 @@
 
 > ^1^ `intra://` 的零拷贝通过 `shared_ptr<IntraDataType 子类>` 实现（由 `VLINK_INTRA_DATA_DECLARE` 宏生成，引用计数共享指针传递），无序列化开销。
 > ^2^ `shm://` / `shm2://` 的零拷贝通过 `loan()` / `return_loan()` 接口实现（共享内存借贷缓冲区），详见 [节点基类与生命周期 -- 零拷贝借贷](02-node-lifecycle.md#27-零拷贝借贷)。
+> ^3^ `zenoh://` 只有在编译期启用 Zenoh shared-memory/unstable API 且运行时启用 SHM 时才提供 loan。
 
 **Beta 后端（实验性，API 可能变化）：**
 
@@ -83,7 +84,7 @@
 | `shm2://`    | Iceoryx2         | 同机跨进程     | 是     | Beta   |
 | `ddsr://`    | RTI DDS          | 跨机器         | 否     | Beta   |
 | `ddst://`    | TravoDDS（国产 DDS） | 跨机器       | 否     | Beta   |
-| `zenoh://`   | Zenoh            | 跨机/云边      | 否     | Beta   |
+| `zenoh://`   | Zenoh            | 跨机/云边      | 条件支持 ^3^ | Beta   |
 | `someip://`  | vsomeip          | 车载以太网     | 否     | Beta   |
 | `mqtt://`    | MQTT             | 跨机/物联网    | 否     | Beta   |
 | `fdbus://`   | FDBus IPC        | 同机           | 否     | Beta   |
@@ -532,11 +533,12 @@ if (pub.is_support_loan()) {
     }
 }
 
-// 方式二：使用 Publisher<BigStruct>，框架内部自动执行 loan
+// 方式二：使用 Publisher<BigStruct> 保持类型安全；
+// 标准布局类型当前走序列化 deep_copy，不会自动写入 loan buffer
 Publisher<BigStruct> pub2("shm://big/data");
 BigStruct msg{};
 msg.timestamp = 999;
-pub2.publish(msg);  // 若底层支持 loan，框架会自动 loan + memcpy，减少一次拷贝
+pub2.publish(msg);
 ```
 
 ### 3.7.5 示例五：Bytes 类型（原始字节发布）

@@ -45,7 +45,7 @@
 - [ ] **代码注释一律用英文**（含 `//`、`/* */`、Doxygen 块、提交时自动生成的临时注释）；中文仅允许出现在 `doc/*.md`、`examples/**/README.md`、`CHANGELOG.md`、`README.md` 等文档资产中（英文副本位于 `README.en_us.md`）
 
 ### 92.1.2 构建
-- [ ] `cmake -B build -DCMAKE_BUILD_TYPE=Debug` 过 —— 默认应开启 warning-as-error
+- [ ] `cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_TEST_WARN=ON` 过 —— 需要显式开启 warning-as-error
 - [ ] `cmake --build build -j` 全量通过（不是 `-j1` 偶发通过）
 - [ ] 如果改了 module/CLI，对应的 `ENABLE_*` 开关两种取值（ON/OFF）都要构建通过
 - [ ] **不提交 `build/` 目录**（`.gitignore` 已排除，但不要 `git add -f`）
@@ -831,8 +831,9 @@ drawio --no-sandbox -x -f png -o <topic>.png <topic>.drawio
 - [ ] 更新 `doc/90-cheatsheet.md` 的 Transport 表
 
 ### 92.14.3 测试
-- [ ] `test/modules/<name>/` 至少覆盖：Pub/Sub 双向、Server/Client 双向、Setter/Getter 双向
-- [ ] 如果依赖外部 broker（如 mqtt），测试要能用 `--docker` 起 broker（参照 `test/modules/mqtt/`）
+- [ ] 行为测试放在 `test/<name>_test.cc`，至少覆盖：Pub/Sub 双向、Server/Client 双向、Setter/Getter 双向
+- [ ] 配置解析测试放在 `test/modules/<name>_conf_test.cc`
+- [ ] 如果依赖外部 broker（如 mqtt），测试要能用 `--docker` 起 broker（参照现有 `test/mqtt_test.cc`）
 
 ### 92.14.4 文档
 - [ ] 示例：`examples/url_guide/url_<name>/` 新建一个完整示例 + README
@@ -851,7 +852,7 @@ drawio --no-sandbox -x -f png -o <topic>.png <topic>.drawio
 
 完整 checklist：
 
-- [ ] `cli/<toolname>/` 目录，含 `main.cc` / `<tool>.cc` / `<tool>.h` / `CMakeLists.txt`
+- [ ] `cli/<toolname>/` 目录，至少含 `<tool>.cc` / `CMakeLists.txt`；只有工具复杂到需要拆分时再增加额外 `.h/.cc`
 - [ ] CMake 里 `project(vlink-<toolname> LANGUAGES CXX)` + `add_executable`
 - [ ] 根 `CMakeLists.txt` 加 `option(ENABLE_CLI_<TOOLNAME>)` 和 `add_subdirectory`
 - [ ] 工具名统一 `vlink-<toolname>`；install 时创建无前缀符号链接
@@ -867,7 +868,7 @@ drawio --no-sandbox -x -f png -o <topic>.png <topic>.drawio
 
 在 `examples/<category>/<name>/` 下：
 
-- [ ] `CMakeLists.txt`：`add_executable(<name>_example ...)` + `target_link_libraries(... PRIVATE vlink::...)`
+- [ ] `CMakeLists.txt`：使用 `project(example_<name> LANGUAGES CXX)`，再 `add_executable(${PROJECT_NAME} ...)` + `target_link_libraries(... PRIVATE vlink::...)`
 - [ ] `README.md`：必须包含
   - 一句话说明示例目标
   - 使用到的 API 列表
@@ -956,7 +957,7 @@ drawio --no-sandbox -x -f png -o <topic>.png <topic>.drawio
 ### 92.19.2 步骤
 
 1. 打开 `release/vX.Y.Z` 分支
-2. 更新 `version.txt` / `CMakeLists.txt` 的版本号
+2. 更新 `version.txt` 的版本号（顶层 `CMakeLists.txt` 会读取该文件作为项目版本）
 3. 整理 `CHANGELOG.md` 的 `Unreleased` 段 → 正式版本段
 4. 跑完整 CI（所有平台、所有模块）
 5. 合并 `release/vX.Y.Z` 到 `master`（带 `Rebase and merge`）

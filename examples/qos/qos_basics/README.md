@@ -4,7 +4,7 @@
 
 ## 1. 概述
 
-本示例演示 VLink 的服务质量（QoS）配置系统，包括创建自定义 `Qos` 结构体、配置所有子策略，以及通过 `set_property` API 应用 QoS 参数。
+本示例演示 VLink 的服务质量（QoS）配置系统，包括创建自定义 `Qos` 结构体、配置所有子策略、注册 QoS profile，并通过 URL 的 `?qos=` 参数应用到 DDS 节点。
 
 ## 2. 核心概念
 
@@ -27,10 +27,11 @@ VLink 的 `Qos` 结构体包含以下子策略：
 | ResourceLimits | 资源限制 | max_samples, max_instances, max_samples_per_instance |
 | Additions | 扩展选项 | priority, is_express |
 
-### 2.2 两种配置方式
+### 2.2 配置流程
 
-1. **Qos 结构体**：直接构造并填充字段值
-2. **set_property API**：通过字符串键值对逐项设置
+1. 直接构造并填充 `Qos` 结构体
+2. 通过 `DdsConf::register_qos("name", qos)` 注册 profile
+3. 在 URL 中使用 `?qos=name` 引用该 profile
 
 ### 2.3 valid 标志
 
@@ -43,19 +44,19 @@ VLink 的 `Qos` 结构体包含以下子策略：
 Qos sensor_qos;
 sensor_qos.valid = true;
 sensor_qos.reliability.kind = Qos::Reliability::kBestEffort;
-sensor_qos.history.depth = 20;
+sensor_qos.history.depth = 5;
 
-// 方式 2：set_property
-pub.set_property("qos.reliability.kind", "1");  // Reliable
-pub.set_property("qos.history.depth", "50");
+DdsConf::register_qos("sensor", sensor_qos);
+Publisher<std::string> pub("dds://sensor/lidar_data?qos=sensor");
+Subscriber<std::string> sub("dds://sensor/lidar_data?qos=sensor");
 ```
 
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_qos_basics
-./output/bin/example_qos_basics
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_qos_basics
+./build/output/bin/example_qos_basics
 ```
 
 ## 5. 源文件说明
@@ -78,7 +79,6 @@ cmake .. && make example_qos_basics
 - 不同传输协议可能忽略不支持的 QoS 参数
 - `intra://` 对 QoS 参数的支持有限
 - DDS 传输完整支持所有 QoS 策略
-- `set_property` 必须在 `init()` 之前调用
 - Qos 名称字段最多 20 字节（19 字符 + NUL）
 
 ## 8. 相关文档

@@ -80,12 +80,15 @@
  * cfg.key = "my-secret";
  * SecurityPublisher<MyMsg> pub("shm://topic", cfg);
  * @endcode
- * @note @c intra:// and @c dds:// with CDR serialisation do NOT support security.
+ * @note @c intra:// and @c dds:// with CDR serialisation do NOT support security;
+ *       using a Security* node there leaves no usable security object for init.
  *
  * @par Zero-copy Loans
- * On @c shm:// (Iceoryx) and @c shm2:// (Iceoryx2) transports, a loaned
- * buffer avoids extra copies:
+ * On loan-capable transports, a loaned buffer avoids extra copies.  The exact
+ * support is reported by the active transport implementation (for example
+ * shm/shm2, and Zenoh when SHM support is available):
  * @code
+ * Publisher<Bytes> pub("shm://topic");
  * if (pub.is_support_loan()) {
  *     Bytes buf = pub.loan(sizeof(MyStruct));
  *     // fill buf ...
@@ -180,9 +183,9 @@ class Node {
    * @brief Returns @c true if the transport supports zero-copy loaned buffers.
    *
    * @details
-   * Currently the @c shm:// (Iceoryx) and @c shm2:// (Iceoryx2) back-ends
-   * return @c true here.  When loans are supported, @c publish() / @c set()
-   * / @c reply() will automatically use them to avoid an extra memory copy.
+   * This delegates to the active transport implementation.  When loans are
+   * supported, @c publish() / @c set() / @c reply() will automatically use them
+   * to avoid an extra memory copy.
    *
    * @return @c true if @c loan() / @c return_loan() are meaningful.
    */
@@ -267,7 +270,7 @@ class Node {
    * rather than invoked on the transport thread.  This serialises delivery to
    * the loop's thread, which is useful for single-threaded application code.
    *
-   * @param message_loop  Non-null pointer to the target @c MessageLoop.
+   * @param message_loop  Pointer to the target @c MessageLoop.
    * @return              @c true on success; @c false if a @c MessageLoop is
    *                      already attached.
    */
@@ -363,7 +366,7 @@ class Node {
    *
    * @details
    * Non-empty only when the node was constructed via a URL string or @c Url
-   * object; empty for @c ConfT-based construction.
+   * object; typed @c ConfT-based construction leaves this string empty.
    *
    * @return Reference to the URL (e.g. @c "dds://vehicle/speed").
    */

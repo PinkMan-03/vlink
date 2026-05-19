@@ -102,9 +102,9 @@ if (pub.is_support_loan()) {
 ## 5. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_zerocopy_loan
-./output/bin/example_zerocopy_loan
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_zerocopy_loan
+./build/output/bin/example_zerocopy_loan
 ```
 
 ## 6. 预期输出

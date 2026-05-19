@@ -29,7 +29,7 @@
  * @c ThreadPool maintains a fixed number of worker threads that dequeue and execute
  * tasks posted via @c post_task() or @c invoke_task().  Unlike @c MessageLoop, there
  * is no timer support or loop lifecycle; the pool is started on construction and shut
- * down with @c shutdown().
+ * down with @c shutdown().  A zero-thread pool is left shut down and rejects posts.
  *
  * Queue types:
  *
@@ -120,14 +120,16 @@ class VLINK_EXPORT ThreadPool {
   /**
    * @brief Constructs a @c ThreadPool with @p thread_count worker threads and @c kNormalType queue.
    *
-   * @param thread_count  Number of worker threads.  Default: 4.
+   * @param thread_count  Number of worker threads.  Default: 4.  If 0, the pool is
+   *                      created in a shut-down state and rejects posted tasks.
    */
   explicit ThreadPool(size_t thread_count = 4U);
 
   /**
    * @brief Constructs a @c ThreadPool with the specified thread count and queue type.
    *
-   * @param thread_count  Number of worker threads.
+   * @param thread_count  Number of worker threads.  If 0, the pool is created in a
+   *                      shut-down state and rejects posted tasks.
    * @param type          Queue implementation type.
    */
   explicit ThreadPool(size_t thread_count, Type type);
@@ -187,9 +189,9 @@ class VLINK_EXPORT ThreadPool {
    * The shared @c Impl block is owned through a @c std::shared_ptr, so the
    * detached worker continues to see a valid pool state until it exits.
    *
-   * After @c shutdown() returns, the pool can no longer accept tasks; the
-   * first @c shutdown() call returns @c true and subsequent calls return
-   * @c false.
+   * After @c shutdown() returns, the pool can no longer accept tasks; workers
+   * finish any current and already queued tasks before exiting.  The first
+   * @c shutdown() call returns @c true and subsequent calls return @c false.
    *
    * @return @c true on the first successful shutdown; @c false if the pool
    *         was already shut down.
@@ -277,6 +279,8 @@ class VLINK_EXPORT ThreadPool {
    * @param function  Callable to dispatch.
    * @param args      Arguments forwarded to the callable.
    * @return @c std::future<ResultT> that becomes ready when the task completes.
+   *         If posting fails, the returned future becomes ready with
+   *         @c std::future_error / @c broken_promise.
    */
   template <class FunctionT, class... ArgsT, typename ResultT = std::invoke_result_t<FunctionT, ArgsT...>>
   [[nodiscard]] std::future<ResultT> invoke_task(FunctionT&& function, ArgsT&&... args);

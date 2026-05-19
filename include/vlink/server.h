@@ -230,8 +230,8 @@ class Server : public Node<ServerImpl, SecT> {
    * @details
    * Must only be called after @c listen_for_reply() (calling after a synchronous
    * @c listen() triggers a fatal log).  The @p req_id must match the value
-   * passed to the async callback; an unrecognised ID is silently ignored by
-   * the transport.
+   * passed to the async callback; an unrecognised ID may be rejected or ignored
+   * by the transport backend.
    *
    * @param req_id  Opaque request identifier received in the async callback.
    * @param resp    Response value to serialise and send back to the client.
@@ -273,7 +273,7 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityServer on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Service URL string (e.g. @c "dds://my_service").
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound requests).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new server.
    */
@@ -286,7 +286,7 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityServer on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound requests).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new server.
    */
@@ -300,7 +300,7 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -313,12 +313,12 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    *
    * @details
    * Always builds the base @c Server with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security is
-   * either populated or left empty.  Finally calls @c init() unless the
-   * caller requests deferred initialisation.
+   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
+   * @c NodeImpl::security was populated successfully; finally calls @c init()
+   * unless the caller requests deferred initialisation.
    *
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound requests).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

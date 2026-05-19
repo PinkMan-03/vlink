@@ -42,8 +42,8 @@
  * - A default-constructed @c DeadlineTimer has @c deadline() == 0 and
  *   @c is_valid() == false.  Always call @c set_deadline() before
  *   checking @c has_expired().
- * - @c remaining_time() returns 0 once the deadline has already passed; callers
- *   should treat any value <= 0 as expired.
+ * - @c remaining_time() returns 0 once the deadline has already passed, or when
+ *   no deadline is set.
  * - The internal deadline is stored as a 64-bit atomic, so concurrent reads are
  *   safe.  Concurrent writes from multiple threads are technically racy at the
  *   application level, but the store itself is atomic.

@@ -58,9 +58,9 @@ vlink_destroy_subscriber(&sub);
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_c_pubsub
-./output/bin/example_c_pubsub
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_c_pubsub
+./build/output/bin/example_c_pubsub
 ```
 
 CMakeLists.txt 使用 `LANGUAGES C` 和 `vlink::c_api` 链接。

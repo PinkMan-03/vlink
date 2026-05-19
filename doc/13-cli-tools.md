@@ -106,8 +106,8 @@ vlink-info -l
 `vlink-check` 是 VLink 的环境自检工具，分为三个子命令：
 
 - `diag`：自动运行一系列诊断项，以彩色状态栏输出 PASSED / WARNING / FAILED。
-- `env`：列出所有 VLink 相关环境变量的当前设置和说明。
-- `test`：在 `intra://` 上做一次最小的 Publisher / Subscriber 往返自检。
+- `env`：列出 `cli/check/check.cc` 内置清单中的常用 `VLINK_*` 环境变量子集，并按编译进产物的传输模块裁剪显示项。
+- `test`：先在 `intra://` 上做 Event / Method / Field 三模型最小自检，再按 `VLINK_SUPPORT_*` 宏遍历已编译传输后端做通信冒烟测试。
 
 ### 13.4.2 子命令
 
@@ -160,7 +160,7 @@ vlink-check diag [-a] [-s] [-f <substring>]
 | 进程             | Check proxy running                             | vlink-proxy 未运行                        | -                                        |
 | 进程             | Check bag / dump / eproto / efbs running        | -                                         | 对应工具正在运行                         |
 | 进程             | Check monitor / viewer / player running         | -                                         | 对应工具正在运行                         |
-| 进程             | Check analyzer / bench / webviz running         | -                                         | 对应工具正在运行                         |
+| 进程             | Check analyzer / bench / legacy webviz running  | -                                         | 对应工具正在运行；当前检查项使用历史进程名 `vlink-webviz` |
 | 进程             | Check others running                            | vlink-list 执行失败                       | 仍有 vlink 用户进程在运行                |
 
 **附加模式（-a）额外检查的编译选项：**
@@ -186,20 +186,11 @@ vlink-check env [-b] [-p <prefix>]
 
 | 分组           | 环境变量                                                   | 说明                                           |
 | -------------- | ---------------------------------------------------------- | ---------------------------------------------- |
-| 路径 / 插件    | `VLINK_PROTO_DIR`、`VLINK_FBS_DIR`、`VLINK_PLUGIN_DIR`     | Schema 与插件查找目录                          |
-| 路径 / 插件    | `VLINK_TMP_DIR`、`VLINK_LOCK_DIR`                          | 临时与锁目录                                   |
-| 路径 / 插件    | `VLINK_SCHEMA_PLUGIN`、`VLINK_URL_PLUGINS`、`VLINK_URL_REMAP` | Schema 插件 / URL 插件 / URL 重映射         |
-| 日志           | `VLINK_LOG_LEVEL`、`VLINK_LOG_CONSOLE_LEVEL`、`VLINK_LOG_FILE_LEVEL` | 分通道日志级别                        |
-| 日志           | `VLINK_LOG_CONSOLE_UNORDER`、`VLINK_LOG_CONSOLE_FMT`、`VLINK_LOG_ENABLE_UTC` | 控制台输出与时间戳格式       |
-| 日志           | `VLINK_LOG_DIR`、`VLINK_LOG_MAX_SIZE`、`VLINK_LOG_MAX_COUNT`、`VLINK_LOG_FLUSH_DELAY` | 日志存储与滚动        |
-| 日志           | `VLINK_LOG_PLUGIN`、`VLINK_LOG_STORE_STRATEGY`、`VLINK_LOG_OPEN_APPEND`、`VLINK_LOG_BLOCK_SYNC`、`VLINK_LOG_WRITE_DEPTH` | 日志插件与后端行为 |
-| Bag            | `VLINK_BAG_PATH`、`VLINK_BAG_TAG`                          | Bag 路径与录制标签                             |
-| 发现 / 分析    | `VLINK_DISCOVER_DISABLE`、`VLINK_DISCOVER_NATIVE`、`VLINK_PROFILER_ENABLE`、`VLINK_QOS_CONFIG` | 发现、性能、QoS 配置 |
-| Intra          | `VLINK_INTRA_BIND`                                         | URL 层 intra 后端重定向；ProxyServer 中变量存在时订阅 intra 话题 |
-| DDS (通用)     | `VLINK_DDS_BIND`、`VLINK_DDS_DOMAIN`、`VLINK_DDS_IP`、`VLINK_DDS_IP_FILTER`、`VLINK_DDS_MULTICAST_IP`、`VLINK_DDS_PEER` | DDS 网络配置 |
-| DDS (通用)     | `VLINK_DDS_BUF`、`VLINK_DDS_MTU`、`VLINK_DDS_UDP`、`VLINK_DDS_TCP`、`VLINK_DDS_SHM`、`VLINK_DDS_LESS_MEMORY` | DDS 传输与资源调优 |
+| 路径 / 插件 / 内存 | `VLINK_PROTO_DIR`、`VLINK_FBS_DIR`、`VLINK_SCHEMA_PLUGIN`、`VLINK_TMP_DIR`、`VLINK_LOCK_DIR`、`VLINK_MEMORY_LEVEL`、`VLINK_MEMORY_PREALLOC`、`VLINK_PLUGIN_DIR`、`VLINK_URL_PLUGINS`、`VLINK_URL_REMAP` | 通用运行时路径、插件、URL 重映射和内存池配置 |
+| 日志           | `VLINK_LOG_LEVEL`、`VLINK_LOG_CONSOLE_LEVEL`、`VLINK_LOG_FILE_LEVEL`、`VLINK_LOG_CONSOLE_UNORDER`、`VLINK_LOG_CONSOLE_FMT`、`VLINK_LOG_DIR`、`VLINK_LOG_ENABLE_UTC`、`VLINK_LOG_MAX_SIZE`、`VLINK_LOG_MAX_COUNT`、`VLINK_LOG_FLUSH_DELAY`、`VLINK_LOG_PLUGIN`、`VLINK_LOG_STORE_STRATEGY`、`VLINK_LOG_OPEN_APPEND`、`VLINK_LOG_BLOCK_SYNC`、`VLINK_LOG_WRITE_DEPTH` | 日志级别、输出格式、文件滚动和异步后端行为 |
+| Bag / 发现 / 分析 | `VLINK_BAG_PATH`、`VLINK_BAG_TAG`、`VLINK_DISCOVER_DISABLE`、`VLINK_DISCOVER_NATIVE`、`VLINK_PROFILER_ENABLE`、`VLINK_QOS_CONFIG` | 录制、发现、性能采样和 QoS 配置 |
 | Intra          | `VLINK_INTRA_BIND`                                         | 仅启用 `VLINK_SUPPORT_INTRA` 时显示            |
-| DDS (通用)     | `VLINK_DDS_BIND`、`VLINK_DDS_DEBUG`、`VLINK_DDS_EVENT_QOS`、`VLINK_DDS_METHOD_QOS`、`VLINK_DDS_FIELD_QOS`、`VLINK_DDS_DOMAIN`、`VLINK_DDS_IP`、`VLINK_DDS_IP_FILTER`、`VLINK_DDS_MULTICAST_IP`、`VLINK_DDS_PEER`、`VLINK_DDS_BUF`、`VLINK_DDS_MTU`、`VLINK_DDS_UDP`、`VLINK_DDS_TCP`、`VLINK_DDS_SHM`、`VLINK_DDS_LESS_MEMORY` | 任一 DDS 后端编入即显示  |
+| DDS (通用)     | `VLINK_DDS_BIND`、`VLINK_DDS_DEBUG`、`VLINK_DDS_EVENT_QOS`、`VLINK_DDS_METHOD_QOS`、`VLINK_DDS_FIELD_QOS`、`VLINK_DDS_DOMAIN`、`VLINK_DDS_IP`、`VLINK_DDS_IP_FILTER`、`VLINK_DDS_MULTICAST_IP`、`VLINK_DDS_PEER`、`VLINK_DDS_BUF`、`VLINK_DDS_MTU`、`VLINK_DDS_UDP`、`VLINK_DDS_TCP`、`VLINK_DDS_SHM`、`VLINK_DDS_LESS_MEMORY` | 任一 DDS 后端编入即显示 |
 | DDS (后端)     | `VLINK_FASTDDS_QOS_FILE`（`VLINK_SUPPORT_DDS`）、`VLINK_CYCLONEDDS_URI`（`VLINK_SUPPORT_DDSC`）、`VLINK_TRAVODDS_QOS_FILE`（`VLINK_SUPPORT_DDST`） | 各 DDS 后端专用，按对应宏过滤 |
 | SHM            | `VLINK_SHM_DEBUG`、`VLINK_SHM_DEPTH`                       | `VLINK_SUPPORT_SHM`                            |
 | SHM2           | `VLINK_SHM2_DEBUG`、`VLINK_SHM2_DEPTH`、`VLINK_SHM2_CONFIG`、`VLINK_SHM2_NOTIFY_EVERY` | `VLINK_SUPPORT_SHM2`             |
@@ -207,9 +198,8 @@ vlink-check env [-b] [-p <prefix>]
 | MQTT           | `VLINK_MQTT_BROKER`、`VLINK_MQTT_CLIENT_ID`、`VLINK_MQTT_DOMAIN`、`VLINK_MQTT_KEEPALIVE`、`VLINK_MQTT_QOS` | `VLINK_SUPPORT_MQTT` |
 | SOME/IP        | `VLINK_SOMEIP_CFG`                                         | `VLINK_SUPPORT_SOMEIP`                         |
 | TLS / 安全     | `VLINK_SSL_VERIFY`、`VLINK_SSL_CA`、`VLINK_SSL_CERT`、`VLINK_SSL_KEY`、`VLINK_SSL_KEY_PASS`、`VLINK_SSL_CIPHERS`、`VLINK_SSL_SNI` | 通用，无条件显示 |
-| Bench          | `VLINK_BENCH_READY_TIMEOUT_MS`、`VLINK_BENCH_START_TIMEOUT_MS`、`VLINK_BENCH_MEASURE_BUFFER_MS`、`VLINK_BENCH_CLEANUP_TIMEOUT_MS` | `VLINK_ENABLE_CLI_BENCH` |
 
-> `vlink-check env` 的清单按编译时模块开关动态裁剪。未启用 `VLINK_SUPPORT_<NAME>` 宏时，对应模块的私有 env 不会展示；未启用 `VLINK_ENABLE_CLI_BENCH` 时 `VLINK_BENCH_*` 不展示。源码是否读取以 `Utils::get_env("<NAME>")` 为准。
+> `vlink-check env` 的清单按编译时传输模块开关动态裁剪。未启用 `VLINK_SUPPORT_<NAME>` 宏时，对应模块的私有 env 不会展示。`VLINK_BENCH_*` 由 `vlink-bench` 读取，但不在 `vlink-check env` 的内置清单中；源码是否读取以 `Utils::get_env("<NAME>")` 为准。
 
 已设置的变量以绿色显示，未设置的以红色显示（`-b` 模式下只显示已设置项）。命令末尾会输出一行汇总：已设置变量数 / 总数，以及 `-p` 命中的显示项数量。
 
@@ -229,24 +219,24 @@ vlink-check test
 | METHOD    | `Client<std::string,std::string>` + `Server`         | `invoke("ping")` 同步得到 `echo:ping`     |
 | FIELD     | `Setter<int>` + `Getter<int>`                         | `Getter::wait_for_value()` 读到 `42`      |
 
-**Part 2 — Per-transport Event 冒烟（按 `VLINK_SUPPORT_*` 宏门控）**
+**Part 2 — Per-transport 三模型冒烟（按 `VLINK_SUPPORT_*` 宏门控）**
 
-对每一个**编译进产物**的传输后端，都会各跑一次最小 Publisher/Subscriber 往返。未编译进的传输自动隐藏（不出现在输出中）；某些传输还带运行时前置条件，不满足时整项被标为 WARNING 直接跳过，绝不会触发后端的 `std::terminate`：
+对每一个**编译进产物**的传输后端，都会跑最小通信往返；多数后端覆盖 Event、Method、Field 三种模型，个别受后端能力或运行时条件限制。未编译进的传输自动隐藏（不出现在输出中）；某些传输还带运行时前置条件，不满足时整项被标为 WARNING 直接跳过，绝不会触发后端的 `std::terminate`：
 
-| 传输       | 编译宏                | 运行时前置条件（跳过原因）                                 | 结果说明                                     |
+| 传输       | 编译宏                | 运行时前置条件（跳过原因）                                 | 覆盖模型                                     |
 | ---------- | --------------------- | ---------------------------------------------------------- | -------------------------------------------- |
-| `intra://` | `VLINK_SUPPORT_INTRA` | 无                                                         | 始终 PASSED，相当于 Part 1 的再验一次        |
-| `shm://`   | `VLINK_SUPPORT_SHM`   | 必须存在 `iox-roudi` 或 `RouDi` 进程                       | PASSED / 跳过                                |
-| `shm2://`  | `VLINK_SUPPORT_SHM2`  | `/dev/shm` 可用且剩余 ≥ 64MB                               | PASSED / 跳过                                |
-| `dds://`   | `VLINK_SUPPORT_DDS`   | 无（同进程双节点，通过 DDS 发现自环）                      | PASSED（本机环境异常时 WARNING）             |
-| `ddsc://`  | `VLINK_SUPPORT_DDSC`  | 同 `dds://`                                                | PASSED / WARNING                             |
-| `ddsr://`  | `VLINK_SUPPORT_DDSR`  | RTI 许可可用                                               | PASSED / WARNING                             |
-| `ddst://`  | `VLINK_SUPPORT_DDST`  | TravoDDS 环境可用                                          | PASSED / WARNING                             |
-| `zenoh://` | `VLINK_SUPPORT_ZENOH` | 无                                                         | PASSED（受 zenoh 默认 scout 影响可能 WARNING）|
-| `someip://`| `VLINK_SUPPORT_SOMEIP`| 设置了 `VLINK_SOMEIP_CFG` 且文件存在                       | PASSED / 跳过                                |
-| `mqtt://`  | `VLINK_SUPPORT_MQTT`  | 设置了 `VLINK_MQTT_BROKER`                                 | PASSED / 跳过                                |
-| `fdbus://` | `VLINK_SUPPORT_FDBUS` | 无（后端自决）                                             | PASSED / WARNING                             |
-| `qnx://`   | `VLINK_SUPPORT_QNX`   | 仅 QNX 平台编得出                                          | PASSED / WARNING                             |
+| `intra://` | `VLINK_SUPPORT_INTRA` | 无                                                         | Event / Method / Field                       |
+| `shm://`   | `VLINK_SUPPORT_SHM`   | 通过 `ShmConf::auto_init_roudi(true)` 探测或尝试启动 RouDi  | Event / Method / Field                       |
+| `shm2://`  | `VLINK_SUPPORT_SHM2`  | `/dev/shm` 可用且剩余 ≥ 64MB                               | Event / Method / Field                       |
+| `dds://`   | `VLINK_SUPPORT_DDS`   | 无                                                         | Event / Method / Field                       |
+| `ddsc://`  | `VLINK_SUPPORT_DDSC`  | 无                                                         | Event / Method / Field                       |
+| `ddsr://`  | `VLINK_SUPPORT_DDSR`  | 无                                                         | Event / Method / Field                       |
+| `ddst://`  | `VLINK_SUPPORT_DDST`  | 无                                                         | Event / Method / Field                       |
+| `zenoh://` | `VLINK_SUPPORT_ZENOH` | 无                                                         | Event / Method / Field                       |
+| `someip://`| `VLINK_SUPPORT_SOMEIP`| 当前不检查 `VLINK_SOMEIP_CFG`                              | Event                                        |
+| `mqtt://`  | `VLINK_SUPPORT_MQTT`  | 设置了 `VLINK_MQTT_BROKER`                                 | Event                                        |
+| `fdbus://` | `VLINK_SUPPORT_FDBUS` | `FdbusConf::has_name_server()` 返回 true                   | Event / Method / Field                       |
+| `qnx://`   | `VLINK_SUPPORT_QNX`   | 无                                                         | Event / Method / Field                       |
 
 **外部依赖型传输的通用规则：** `shm / shm2 / dds / ddsc / ddsr / ddst / zenoh / someip / mqtt / fdbus / qnx` 发现超时被计为 WARNING 而非 FAILED，只有构造抛异常或收到错乱载荷才算 FAILED。`intra://` 是唯一严格评估的 scheme。
 
@@ -1278,7 +1268,8 @@ HTML 报告面向“先看结论、再定位问题、最后看细节”的阅读
 ### 13.11.7 使用示例
 
 ```bash
-# 默认直接跑 showcase 矩阵：重点覆盖 throughput + latency、当前可用 process transport，payload 覆盖 64B 到 4MiB，输出 html + terminal
+# 默认直接跑 showcase 矩阵：重点覆盖 throughput + latency、当前可用 process transport；
+# throughput payload 为 16KiB/256KiB/1MiB，latency payload 为 128B/4KiB/64KiB/512KiB/2MiB，输出 html + terminal
 vlink-bench run
 
 # 指定 URL、QoS、大小和速率，只在终端查看交互表格

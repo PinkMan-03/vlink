@@ -64,7 +64,9 @@ bool IntraPublisherImpl::detach() {
   return false;
 }
 
-bool IntraPublisherImpl::has_subscribers() const { return !object_->msg_map_is_empty(); }
+bool IntraPublisherImpl::has_subscribers() const {
+  return !object_->msg_map_is_empty() || !object_->intra_msg_map_is_empty();
+}
 
 bool IntraPublisherImpl::write(const Bytes& msg_data) { return object_->publish(type_, conf_.hash_code, msg_data); }
 

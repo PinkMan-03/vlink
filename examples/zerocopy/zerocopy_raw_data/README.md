@@ -77,9 +77,9 @@ moved.move_copy(source);       // 转移所有权，source 变为空
 ## 4. 编译与运行
 
 ```bash
-cd build
-cmake .. && make example_zerocopy_raw_data
-./output/bin/example_zerocopy_raw_data
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_zerocopy_raw_data
+./build/output/bin/example_zerocopy_raw_data
 ```
 
 ## 5. 二进制线格式

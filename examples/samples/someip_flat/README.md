@@ -79,12 +79,11 @@ someip://服务ID/实例ID?groups=事件组ID&event=事件ID&field=1   -- 字段
 
 ```bash
 # 构建
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径>
-cmake --build .
+cmake -B build -S . -DCMAKE_PREFIX_PATH=<vlink安装路径>
+cmake --build build
 
 # 运行（单进程内完成，但需要 vsomeip 守护进程）
-./sample_someip_flat
+./build/output/bin/sample_someip_flat
 ```
 
 ## 8. 注意事项

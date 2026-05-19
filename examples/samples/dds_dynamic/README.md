@@ -66,10 +66,9 @@ sub.listen([](const DynamicData& msg) {
 
 ```bash
 # 构建
-mkdir build && cd build
-cmake .. -DCMAKE_PREFIX_PATH=<vlink安装路径>
-cmake --build .
+cmake -B build -S . -DCMAKE_PREFIX_PATH=<vlink安装路径>
+cmake --build build
 
 # 运行（单进程内完成）
-./sample_dds_dynamic
+./build/output/bin/sample_dds_dynamic
 ```

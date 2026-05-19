@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_message_loop_advanced
-./examples/base/message_loop_advanced/example_message_loop_advanced
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_message_loop_advanced
+./build/output/bin/example_message_loop_advanced
 ```
 
 ## 4. 核心功能详解

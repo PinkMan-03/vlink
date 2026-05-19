@@ -27,8 +27,10 @@
  *
  * @details
  * @c IntraConf configures the in-process message queue transport, which delivers
- * messages between publishers and subscribers running in the same OS process
- * without any serialisation or inter-process overhead.
+ * messages between publishers and subscribers running in the same OS process.
+ * Regular message types still use the normal @c Serializer path; the intra
+ * @c IntraDataType shared-pointer special case can bypass serialization and
+ * forward the pointer zero-copy.
  *
  * @par Supported Node Types
  * @c intra:// supports all six node types: @c kPublisher, @c kSubscriber,
@@ -36,14 +38,14 @@
  *
  * @par URL Format
  * @code
- *   intra://<address>[?event=<event_name>[&pipeline=<N>]][#<type>]
+ *   intra://<address>[?event=<event_name>[&pipeline=<id>]][#<type>]
  * @endcode
  *
  * | Component          | Description                                            |
  * | ------------------ | ------------------------------------------------------ |
  * | @c address         | Topic name; formed from @c host + @c "/" + @c path     |
  * | @c event           | Optional secondary filter string (@c ?event=)          |
- * | @c pipeline        | Queue pipeline depth (@c ?pipeline=N, default 0)       |
+ * | @c pipeline        | Queue-mode pipeline ID (@c ?pipeline=id, default 0)    |
  * | @c type            | Delivery mode: @c "queue" or @c "direct" (fragment)    |
  *
  * @par Example
@@ -55,12 +57,13 @@
  *   // Direct delivery (bypasses queue):
  *   vlink::Publisher<MyMsg> pub("intra://my_topic#direct");
  *
- *   // With secondary event filter and pipeline depth:
+ *   // With secondary event filter and queue-mode pipeline ID:
  *   vlink::Publisher<MyMsg> pub("intra://my_service?event=my_event&pipeline=4");
  * @endcode
  *
  * @note This header is compiled only when @c VLINK_SUPPORT_INTRA is defined.
  * @note The @c address string must not be empty.
+ * @note @c is_valid() also requires @c type to be either @c "queue" or @c "direct".
  */
 
 #pragma once
@@ -87,7 +90,7 @@ namespace vlink {
 struct VLINK_EXPORT IntraConf final : public Conf {
   std::string address;        ///< Topic address (host + "/" + path from URL); must not be empty.
   std::string event;          ///< Optional secondary event filter string.
-  int32_t pipeline{0};        ///< Pipeline queue depth; 0 means no pipelining.
+  int32_t pipeline{0};        ///< Queue-mode pipeline ID; 0 selects the default pipeline.
   std::string type{"queue"};  ///< Delivery mode: @c "queue" (buffered) or @c "direct" (bypass queue).
 
   /**
@@ -95,7 +98,7 @@ struct VLINK_EXPORT IntraConf final : public Conf {
    *
    * @param _address   Topic address string; must not be empty.
    * @param _event     Optional secondary event filter; empty by default.
-   * @param _pipeline  Pipeline queue depth; default 0 (disabled).
+   * @param _pipeline  Queue-mode pipeline ID; default 0.
    * @param _type      Delivery mode: @c "queue" or @c "direct"; default @c "queue".
    */
   explicit IntraConf(const std::string& _address, const std::string& _event = "", int _pipeline = 0,

@@ -75,9 +75,9 @@ Bytes::deep_copy(sample.data(), sample.size());              // 深拷贝
 ## 4. 构建与运行
 
 ```bash
-cd build
-cmake .. && make example_bytes_type
-./output/bin/example_bytes_type
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_bytes_type
+./build/output/bin/example_bytes_type
 ```
 
 ## 5. 要点总结

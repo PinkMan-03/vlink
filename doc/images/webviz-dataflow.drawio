@@ -8,7 +8,7 @@
         <mxCell id="title" value="VLink WebViz Data Flow" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="22" width="1120" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Application nodes to visualizers via C++ bridge processes" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="proxy_api path shown; proxy_server mode embeds DiscoveryViewer + pub/sub in the bridge process" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="56" width="1120" height="22" as="geometry" />
         </mxCell>
 
@@ -17,11 +17,11 @@
           <mxGeometry x="40" y="100" width="230" height="80" as="geometry" />
         </mxCell>
 
-        <mxCell id="s2" value="2. ProxyServer (vlink-proxy)&#10;Aggregate transport data&#10;Broadcast Info / Data / Time" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#616161;strokeWidth=1.5;fontSize=12;fontStyle=1;fontColor=#37474f;shadow=1;arcSize=6;" vertex="1" parent="1">
+        <mxCell id="s2" value="2. ProxyBridge backend&#10;proxy_api: external ProxyServer&#10;proxy_server: in-process discovery" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#616161;strokeWidth=1.5;fontSize=12;fontStyle=1;fontColor=#37474f;shadow=1;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="310" y="100" width="250" height="80" as="geometry" />
         </mxCell>
 
-        <mxCell id="s3" value="3. ProxyAPI (Controller)&#10;Subscribe selected URLs&#10;Used by bridges below" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=12;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
+        <mxCell id="s3" value="3. Bridge control path&#10;ProxyAPI or local subscription&#10;feeds converters below" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=12;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="600" y="100" width="240" height="80" as="geometry" />
         </mxCell>
 

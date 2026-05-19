@@ -37,7 +37,9 @@
  *
  * @par URL Format
  * @code
- *   zenoh://<address>[?event=<name>&domain=<N>&qos=<name>&depth=<N>&shm=<0|1>&shm_size=<N>][#<fragment>]
+ *   zenoh://<address>[?event=<name>&domain=<N>&qos=<name>&depth=<N>&shm=<bool>
+ *                    &shm_mode=<lazy|init>&shm_size=<N>&shm_threshold=<N>
+ *                    &shm_loan_threshold=<N>&shm_blocking=<bool>][#<fragment>]
  * @endcode
  *
  * | Component    | Description                                                               |
@@ -46,9 +48,13 @@
  * | @c event     | Optional secondary event filter (@c ?event=)                              |
  * | @c domain    | Zenoh domain/session identifier (@c ?domain=, default from factory)       |
  * | @c qos       | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
- * | @c depth     | Optional Zenoh session-level TX queue size (data and real_time)           |
- * | @c shm       | Optional Zenoh shared-memory transport optimization enable (@c ?shm=1)    |
+ * | @c depth     | Optional TX queue override; 0 uses selected QoS history depth             |
+ * | @c shm       | Optional Zenoh shared-memory transport optimization enable (@c ?shm=)     |
+ * | @c shm_mode  | Optional Zenoh SHM init mode: @c lazy or @c init                          |
  * | @c shm_size  | Optional SHM pool size; accepts bytes, K, M, or G suffixes                |
+ * | @c shm_threshold | Optional SHM optimization message-size threshold                      |
+ * | @c shm_loan_threshold | Optional minimum size for VLink SHM loan buffers                 |
+ * | @c shm_blocking | Optional blocking allocation mode for @c loan()                       |
  * | @c fragment  | Optional transport hint or config fragment passed to the Zenoh session    |
  *
  * @par QoS Registration
@@ -61,6 +67,7 @@
  * @endcode
  *
  * @note This header is compiled only when @c VLINK_SUPPORT_ZENOH is defined.
+ * @note @c is_valid() returns @c false if @c address is empty or @c domain is negative.
  */
 
 #pragma once
@@ -89,7 +96,7 @@ struct VLINK_EXPORT ZenohConf final : public Conf {
   std::string address;             ///< Zenoh key expression (host + "/" + path from URL).
   std::string event;               ///< Optional secondary event filter string.
   int32_t domain{0};               ///< Zenoh session/domain identifier (non-negative).
-  int32_t depth{0};                ///< Optional TX queue size override; 0 means use selected QoS history depth.
+  int32_t depth{0};                ///< Optional TX queue override; 0 means use selected QoS history depth.
   std::string qos;                 ///< Named QoS profile key registered via @c register_qos().
   std::string fragment;            ///< Optional transport hint passed as the URL fragment.
   std::string shm;                 ///< Optional SHM enable override from @c ?shm=.

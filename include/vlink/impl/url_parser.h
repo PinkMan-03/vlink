@@ -183,12 +183,20 @@ class VLINK_EXPORT UrlParser final {
   /**
    * @brief Returns the full content portion of the URL (after the scheme separator).
    *
-   * @return Reference to the parsed content string; empty if not present.
+   * @details
+   * Valid only for @c Category::kNonHierarchical; calling this on a
+   * hierarchical URL throws @c Exception::RuntimeError.
+   *
+   * @return Reference to the parsed content string.
    */
   [[nodiscard]] const std::string& get_content() const;
 
   /**
    * @brief Returns the authentication username component.
+   *
+   * @details
+   * Valid only for @c Category::kHierarchical; calling this on a
+   * non-hierarchical URL throws @c Exception::RuntimeError.
    *
    * @return Reference to the parsed username; empty if not present.
    */
@@ -197,12 +205,20 @@ class VLINK_EXPORT UrlParser final {
   /**
    * @brief Returns the authentication password component.
    *
+   * @details
+   * Valid only for @c Category::kHierarchical; calling this on a
+   * non-hierarchical URL throws @c Exception::RuntimeError.
+   *
    * @return Reference to the parsed password; empty if not present.
    */
   [[nodiscard]] const std::string& get_password() const;
 
   /**
    * @brief Returns the host component (hostname or IP address).
+   *
+   * @details
+   * Valid only for @c Category::kHierarchical; calling this on a
+   * non-hierarchical URL throws @c Exception::RuntimeError.
    *
    * @return Reference to the parsed host string; empty if not present.
    */
@@ -211,12 +227,20 @@ class VLINK_EXPORT UrlParser final {
   /**
    * @brief Returns the port number, or @c 0 if no port was specified.
    *
+   * @details
+   * Valid only for @c Category::kHierarchical; calling this on a
+   * non-hierarchical URL throws @c Exception::RuntimeError.
+   *
    * @return Parsed port as @c int64_t; @c 0 if absent.
    */
   [[nodiscard]] int64_t get_port() const;
 
   /**
    * @brief Returns the path component of the URL.
+   *
+   * @details
+   * Valid only for @c Category::kHierarchical; calling this on a
+   * non-hierarchical URL throws @c Exception::RuntimeError.
    *
    * @return Reference to the parsed path string; empty if not present.
    */
@@ -249,14 +273,14 @@ class VLINK_EXPORT UrlParser final {
   [[nodiscard]] const std::string& get_fragment() const;
 
   /**
-   * @brief Reconstructs the URL as a canonical string from parsed components.
+   * @brief Reconstructs the URL string from parsed components.
    *
    * @details
-   * Re-assembles the parsed URI into a canonical string.  Hierarchical URLs are
-   * emitted as @c scheme://authority/path?query#fragment, while non-hierarchical
-   * URLs are emitted as @c scheme:content?query#fragment.  The output may differ
-   * slightly from the original input if the input had unusual whitespace or
-   * encoding.
+   * Re-assembles the parsed URI from stored components.  Hierarchical URLs are
+   * emitted as @c scheme://authority/path?query#fragment when authority content
+   * was present, while non-hierarchical URLs are emitted as
+   * @c scheme:content?query#fragment.  The output may differ from the original
+   * input if equivalent components were represented differently.
    *
    * @return Reconstructed URL string.
    */

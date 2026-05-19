@@ -19,7 +19,7 @@
 │                      │                    │                          │
 │  Setter<SensorConfig>│                    │  Getter<SensorConfig>    │
 │       │              │                    │    ├─ wait_for_value()   │
-│   set(cfg) ─────────>│ intra://sensor/... │<───├─ get() -> optional  │
+│   set(cfg) ─────────>│ dds://sensor/...   │<───├─ get() -> optional  │
 │                      │   (Transport)      │    └─ listen(callback)   │
 └──────────────────────┘                    └──────────────────────────┘
 ```
@@ -149,22 +149,24 @@ static const char* const kConfigUrl = "dds://sensor/config";
 
 ```bash
 # 编译两个目标
-cmake --build . --target example_config_setter
-cmake --build . --target example_config_getter
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_config_setter example_config_getter
 
 # 运行 Setter（先启动）
-./output/bin/example_config_setter
+VLINK_CONFIG_URL=dds://sensor/config ./build/output/bin/example_config_setter
 
-# 在另一个终端运行 Getter（需要 shm:// 或 dds:// 传输）
-./output/bin/example_config_getter
+# 在另一个终端运行 Getter
+VLINK_CONFIG_URL=dds://sensor/config ./build/output/bin/example_config_getter
 ```
+
+> **注意**：源码默认 URL 是 `intra://`，仅适合同一进程内联演示。两个独立可执行文件跨进程运行时，需要像上面一样用 `VLINK_CONFIG_URL` 切换到 `dds://`、`shm://` 等跨进程传输。
 
 ## 8. 预期输出
 
 ### 8.1 config_setter 输出
 ```
 [I] === VLink Config Setter ===
-[I] [Setter] Created on intra://sensor/config
+[I] [Setter] Created on dds://sensor/config
 [I] [Setter] Initial config: rate=100Hz filter=5 low=15 high=35
 [I] [Setter] Updated config: rate=200Hz filter=10 low=10 high=40
 [I] [Setter] Updated config: rate=100Hz filter=3 low=18 high=30
@@ -176,7 +178,7 @@ cmake --build . --target example_config_getter
 ### 8.2 config_getter 输出
 ```
 [I] === VLink Config Getter ===
-[I] [Getter] Created on intra://sensor/config
+[I] [Getter] Created on dds://sensor/config
 [I] [Getter] Waiting for initial value...
 [I] [Getter] Change #1:
 [I]   rate=100Hz filter=5 low=15 high=35 ts=...

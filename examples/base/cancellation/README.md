@@ -45,9 +45,9 @@
 ## 5. 构建与运行
 
 ```bash
-cmake -S . -B build
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
 cmake --build build --target example_cancellation
-./build/examples/base/cancellation/example_cancellation
+./build/output/bin/example_cancellation
 ```
 
 ## 6. 锁与语义要点

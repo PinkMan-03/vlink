@@ -2,6 +2,7 @@
 """Comprehensive test for ALL VLink Python bindings including newly added APIs."""
 
 import os
+import sys
 import threading
 import time
 import tempfile
@@ -164,11 +165,38 @@ def test_logger_extended():
     _vlink.Logger.register_console_handler(lambda lv, msg: captured.append((lv, msg)))
     _vlink.log_info("custom handler test")
     _vlink.Logger.flush()
-    time.sleep(0.05)
+    for _ in range(20):
+        if captured:
+            break
+        time.sleep(0.01)
+    assert captured
+    level, message = captured[-1]
+    assert level == _vlink.LogLevel.Info
+    assert type(level) is type(_vlink.LogLevel.Info)
+    assert "custom handler test" in message
     # Restore default by registering None-like handler
     _vlink.Logger.register_console_handler(lambda lv, msg: None)
 
     print("[PASS] Logger extended")
+
+
+def test_memory_resource_export():
+    if not getattr(_vlink, "_HAS_MEMORY_RESOURCE", False):
+        assert not sys.platform.startswith("linux"), "Linux nanobind build must export MemoryResource"
+        print("[SKIP] MemoryResource export")
+        return
+
+    assert hasattr(_vlink, "MemoryResource")
+    assert "MemoryResource" in _vlink.__all__
+    mr = _vlink.MemoryResource()
+    pool = mr.get_memory_pool()
+    assert pool.get_tier_count() >= 0
+    mr.trim()
+
+    global_mr = _vlink.MemoryResource.global_instance()
+    assert global_mr is not None
+    assert global_mr.get_memory_pool().get_tier_count() >= 0
+    print("[PASS] MemoryResource export")
 
 
 def test_elapsed_timer_extended():
@@ -631,11 +659,9 @@ def test_node_common_apis():
 
 
 def test_node_wire_meta_validation():
-    try:
-        _vlink.Publisher("intra://test/invalid_ser_only", ser_type="demo.proto.Invalid", auto_init=False)
-        assert False, "Expected ValueError for ser_type without schema_type"
-    except ValueError:
-        pass
+    raw_pub = _vlink.Publisher("intra://test/raw_ser_only", ser_type="raw", auto_init=False)
+    assert raw_pub.get_ser_type() == "raw"
+    assert raw_pub.get_schema_type() == _vlink.SchemaType.Raw
 
     try:
         _vlink.Publisher(
@@ -655,6 +681,12 @@ def test_node_wire_meta_validation():
     )
     assert pub.get_ser_type() == "demo.proto.Valid"
     assert pub.get_schema_type() == _vlink.SchemaType.Protobuf
+
+    cfg = _vlink.SecurityConfig()
+    cfg.key = "python-api-key"
+    sec_pub = _vlink.SecurityPublisher("shm://test/security_raw_ser_only", cfg, ser_type="raw", auto_init=False)
+    assert sec_pub.get_ser_type() == "raw"
+    assert sec_pub.get_schema_type() == _vlink.SchemaType.Raw
     print("[PASS] Node wire_meta validation")
 
 
@@ -756,24 +788,68 @@ def test_bag_extended():
 
     # Playback
     msgs = []
+    outputs = []
     done = threading.Event()
-    r.register_output_callback(lambda ts, url, at, d: msgs.append(d))
+
+    def on_output(ts, url, action_type, data):
+        outputs.append((ts, url, action_type, data))
+        msgs.append(data)
+
+    r.register_output_callback(on_output)
     r.register_finish_callback(lambda intr: done.set())
 
     cfg2 = _vlink.BagReader.Config()
     cfg2.rate = 100.0
+    cfg2.force_delay = 0
     cfg2.auto_quit = True
     r.play(cfg2)
     done.wait(10.0)
 
     assert len(msgs) >= 5
     assert b"m0" in msgs
+    assert all(type(action) is type(_vlink.ActionType.Publish) for _, _, action, _ in outputs)
 
     r.quit()
     r.wait_for_quit(5000)
 
     os.remove(bag_path)
     print("[PASS] Bag extended")
+
+
+def test_bag_writer_explicit_zero_timestamp():
+    bag_path = os.path.join(tempfile.mkdtemp(), "zero_ts.vdb")
+    w = _vlink.BagWriter.create(bag_path)
+    timestamp = w.push(
+        "intra://zero_ts",
+        "raw",
+        _vlink.SchemaType.Raw,
+        _vlink.ActionType.Publish,
+        b"zero-ts",
+        timestamp_us=0,
+        immediate=True,
+    )
+    assert timestamp == 0
+    del w
+
+    r = _vlink.BagReader.create(bag_path)
+    outputs = []
+    done = threading.Event()
+    r.register_output_callback(lambda ts, url, action, data: outputs.append((ts, url, action, data)))
+    r.register_finish_callback(lambda intr: done.set())
+    r.async_run()
+    cfg = _vlink.BagReader.Config()
+    cfg.force_delay = 0
+    cfg.auto_quit = True
+    r.play(cfg)
+    done.wait(5.0)
+
+    assert outputs == [(0, "intra://zero_ts", _vlink.ActionType.Publish, b"zero-ts")]
+    assert type(outputs[0][2]) is type(_vlink.ActionType.Publish)
+
+    r.quit()
+    r.wait_for_quit(5000)
+    os.remove(bag_path)
+    print("[PASS] BagWriter explicit timestamp_us=0")
 
 
 def test_register_terminate_signal():
@@ -869,6 +945,41 @@ def test_client_invoke_timeout_arg():
     finally:
         cli.deinit()
     print("[PASS] Client.invoke timeout_ms")
+
+
+def test_client_async_invoke_future():
+    srv = _make_node(_vlink.Server, "intra://test/client_async_invoke")
+    srv.listen(lambda data: b"async:" + bytes(data))
+
+    cli = _make_node(_vlink.Client, "intra://test/client_async_invoke")
+    assert cli.wait_for_connected(2000)
+
+    future = cli.async_invoke(b"request")
+    assert hasattr(future, "result")
+    assert future.result(timeout=2.0) == b"async:request"
+
+    cli.deinit()
+    srv.deinit()
+    print("[PASS] Client.async_invoke Future")
+
+
+def test_fire_forget_method_bindings():
+    received = []
+    ev = threading.Event()
+
+    srv = _make_node(_vlink.FireForgetServer, "intra://test/fire_forget_method")
+    srv.listen(lambda data: (received.append(bytes(data)), ev.set()))
+
+    cli = _make_node(_vlink.FireForgetClient, "intra://test/fire_forget_method")
+    assert cli.wait_for_connected(2000)
+    assert cli.send(b"fire-and-forget")
+
+    ev.wait(2.0)
+    assert received == [b"fire-and-forget"]
+
+    cli.deinit()
+    srv.deinit()
+    print("[PASS] FireForgetServer/FireForgetClient")
 
 
 def test_exec_task():
@@ -987,14 +1098,17 @@ def test_api_surface():
         "ThreadPool", "SpinLock", "CpuProfiler", "CpuProfilerGuard", "MemoryPool",
         "Process", "UrlRemap",
         "Qos", "SslOptions", "Security", "SecurityConfig", "SecurityConfigAdvanced",
-        "Publisher", "Subscriber", "Server", "Client", "Setter", "Getter",
+        "Publisher", "Subscriber", "Server", "Client", "FireForgetServer", "FireForgetClient", "Setter", "Getter",
         "SecurityPublisher", "SecuritySubscriber", "SecurityServer", "SecurityClient", "SecuritySetter",
-        "SecurityGetter",
+        "SecurityGetter", "SecurityFireForgetServer", "SecurityFireForgetClient",
         "DiscoveryViewer", "BagWriter", "BagReader",
         "utils", "helpers", "QosProfile", "Status",
         "log_trace", "log_debug", "log_info", "log_warn", "log_error", "log_fatal",
         "TIMER_INFINITE", "VERSION", "VERSION_MAJOR", "VERSION_MINOR", "VERSION_PATCH",
     ]
+    if getattr(_vlink, "_HAS_MEMORY_RESOURCE", False):
+        expected_exports.append("MemoryResource")
+
     for name in expected_exports:
         assert hasattr(_vlink, name), f"Missing module export: {name}"
         assert name in _vlink.__all__, f"Missing __all__ export: {name}"
@@ -1007,17 +1121,23 @@ def test_api_surface():
         "is_suspend", "is_support_loan", "loan", "return_loan", "set_manual_unloan", "is_manual_unloan",
         "attach", "detach", "get_message_loop", "get_abstract_node", "get_status", "register_status_handler",
     ]
-    for cls in (_vlink.Publisher, _vlink.Subscriber, _vlink.Server, _vlink.Client, _vlink.Setter, _vlink.Getter):
+    for cls in (
+        _vlink.Publisher, _vlink.Subscriber, _vlink.Server, _vlink.Client,
+        _vlink.FireForgetServer, _vlink.FireForgetClient, _vlink.Setter, _vlink.Getter,
+    ):
         for method in node_methods:
             assert hasattr(cls, method), f"{cls.__name__} missing method: {method}"
 
     class_methods = {
         _vlink.Publisher: ["detect_subscribers", "wait_for_subscribers", "has_subscribers", "publish",
-                           "mark_as_setter"],
+                           "publish_fbb", "mark_as_setter"],
         _vlink.Subscriber: ["listen", "set_latency_and_lost_enabled", "is_latency_and_lost_enabled",
                             "get_latency", "get_lost", "mark_as_getter"],
         _vlink.Server: ["listen", "listen_for_reply", "reply"],
-        _vlink.Client: ["detect_connected", "wait_for_connected", "is_connected", "invoke", "invoke_async"],
+        _vlink.Client: ["detect_connected", "wait_for_connected", "is_connected", "invoke", "invoke_async",
+                        "async_invoke"],
+        _vlink.FireForgetServer: ["listen"],
+        _vlink.FireForgetClient: ["detect_connected", "wait_for_connected", "is_connected", "send"],
         _vlink.Setter: ["set", "mark_as_publisher"],
         _vlink.Getter: ["listen", "get", "wait_for_value", "set_change_reporting", "get_change_reporting",
                         "set_latency_and_lost_enabled", "is_latency_and_lost_enabled", "get_latency", "get_lost",
@@ -1029,7 +1149,7 @@ def test_api_surface():
 
     for cls in (
         _vlink.SecurityPublisher, _vlink.SecuritySubscriber, _vlink.SecurityServer, _vlink.SecurityClient,
-        _vlink.SecuritySetter, _vlink.SecurityGetter,
+        _vlink.SecurityFireForgetServer, _vlink.SecurityFireForgetClient, _vlink.SecuritySetter, _vlink.SecurityGetter,
     ):
         for method in node_methods:
             assert hasattr(cls, method), f"{cls.__name__} missing method: {method}"
@@ -1105,7 +1225,7 @@ def test_security_node_bindings():
 
     for cls in (
         _vlink.SecurityPublisher, _vlink.SecuritySubscriber, _vlink.SecurityServer, _vlink.SecurityClient,
-        _vlink.SecuritySetter, _vlink.SecurityGetter,
+        _vlink.SecurityFireForgetServer, _vlink.SecurityFireForgetClient, _vlink.SecuritySetter, _vlink.SecurityGetter,
     ):
         cfg = _vlink.SecurityConfig()
         cfg.key = "python-api-key"
@@ -1121,6 +1241,10 @@ def test_security_node_bindings():
         assert node.get_transport_type() == _vlink.TransportType.Shm
         assert node.get_ser_type() == "demo.SecurityBinding"
         assert node.get_schema_type() == _vlink.SchemaType.Protobuf
+        if cls is _vlink.SecurityFireForgetServer:
+            assert hasattr(node, "listen")
+        if cls is _vlink.SecurityFireForgetClient:
+            assert hasattr(node, "send")
 
     assert _vlink.SecurityType.WithSecurity is not None
     assert _vlink.ActionType.Unknown is not None
@@ -1186,6 +1310,31 @@ def test_publish_after_buffer_release():
     print("[PASS] publish deep-copies caller's bytes (no UAF)")
 
 
+def test_publish_fbb_binding():
+    received = []
+    ev = threading.Event()
+
+    sub = _vlink.Subscriber("intra://test/publish_fbb", auto_init=False)
+    sub.set_discovery_enabled(False)
+    sub.init()
+    sub.listen(lambda data: (received.append(bytes(data)), ev.set()))
+
+    pub = _vlink.Publisher("intra://test/publish_fbb?type=queue", auto_init=False)
+    pub.set_discovery_enabled(False)
+    pub.init()
+    pub.wait_for_subscribers(timeout_ms=2000)
+
+    payload = b"\x08\x00\x00\x00FBB-DATA"
+    assert pub.publish_fbb(payload)
+
+    ev.wait(timeout=2.0)
+    assert received == [payload]
+
+    pub.deinit()
+    sub.deinit()
+    print("[PASS] Publisher.publish_fbb")
+
+
 if __name__ == "__main__":
     _vlink.Logger.init("full_test")
     print(f"VLink Full API Test - v{_vlink.VERSION}")
@@ -1193,6 +1342,7 @@ if __name__ == "__main__":
 
     test_bytes_extended()
     test_logger_extended()
+    test_memory_resource_export()
     test_elapsed_timer_extended()
     test_deadline_timer_extended()
     test_message_loop_extended()
@@ -1207,12 +1357,15 @@ if __name__ == "__main__":
     test_node_common_apis()
     test_getter_change_reporting()
     test_bag_extended()
+    test_bag_writer_explicit_zero_timestamp()
     test_register_terminate_signal()
     test_ssl_options()
     test_security()
     test_security_set_callbacks()
     test_server_async_reply()
     test_client_invoke_timeout_arg()
+    test_client_async_invoke_future()
+    test_fire_forget_method_bindings()
     test_exec_task()
     test_timer_constructors()
     test_discovery_viewer_fields()
@@ -1225,6 +1378,7 @@ if __name__ == "__main__":
     test_schema_data_and_version()
     test_log_fatal()
     test_publish_after_buffer_release()
+    test_publish_fbb_binding()
 
     print("=" * 60)
     print("ALL TESTS PASSED!")

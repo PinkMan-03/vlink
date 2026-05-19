@@ -46,9 +46,10 @@
  * | ----------------------- | -------------------------------------------------------------- |
  * | @c delay_ms             | Delay before the task is posted (via one-shot Timer)           |
  * | @c priority             | Task dispatch priority (for @c kPriorityType loop)             |
- * | @c schedule_timeout_ms  | Wait deadline.  Checked once when the task is dequeued: if the |
- * |                         | dispatcher latency exceeds this budget the task is **dropped** |
- * |                         | and @c on_schedule_timeout fires instead of the user callback. |
+ * | @c schedule_timeout_ms  | Queue wait budget after @c delay_ms.  Checked once when the    |
+ * |                         | task is dequeued: if elapsed time since scheduling exceeds      |
+ * |                         | @c delay_ms + this budget, the task is **dropped** and          |
+ * |                         | @c on_schedule_timeout fires instead of the user callback.      |
  * | @c execution_timeout_ms | Run-time budget.  Checked once **after** the user callback     |
  * |                         | returns: if it ran longer than the budget,                     |
  * |                         | @c on_execution_timeout fires.  This is a post-hoc notifier —  |
@@ -59,7 +60,8 @@
  *   via @c std::shared_ptr<Impl>, so it is safe to return by value.
  * - @c RetStatus adds @c on_then (fires when callback returns @c true) and @c on_else
  *   (fires when callback returns @c false).
- * - Callbacks are invoked from the @c MessageLoop thread.
+ * - Callbacks are invoked from the execution context that runs the wrapped task
+ *   (the @c MessageLoop thread for a normal loop, or a @c MultiLoop worker).
  *
  * @par Example
  * @code
@@ -112,7 +114,7 @@ struct VLINK_EXPORT Schedule final {
   using RetCallback = MoveFunction<bool()>;
 
   /**
-   * @brief Callback type invoked when an exception is caught inside the task.
+   * @brief Callback type invoked when a @c std::exception is caught inside the task.
    */
   using CatchCallback = MoveFunction<void(std::exception&)>;
 
@@ -134,7 +136,7 @@ struct VLINK_EXPORT Schedule final {
      *
      * @param _delay_ms              Delay before posting in milliseconds.  0 = immediate.
      * @param _priority              Task dispatch priority.  0 = default.
-     * @param _schedule_timeout_ms   Max wait before the task starts (0 = no timeout).
+     * @param _schedule_timeout_ms   Max queue wait after @c delay_ms before the task starts (0 = no timeout).
      * @param _execution_timeout_ms  Max execution time of the task (0 = no timeout).
      */
     explicit Config(uint32_t _delay_ms, uint16_t _priority = 0, uint32_t _schedule_timeout_ms = 0,
@@ -142,7 +144,7 @@ struct VLINK_EXPORT Schedule final {
 
     uint32_t delay_ms{0};              ///< Delay in ms before the task is posted.
     uint16_t priority{0};              ///< Dispatch priority (higher = sooner).
-    uint32_t schedule_timeout_ms{0};   ///< Max ms to wait before task starts.  0 = disabled.
+    uint32_t schedule_timeout_ms{0};   ///< Max queue wait after delay before task starts.  0 = disabled.
     uint32_t execution_timeout_ms{0};  ///< Max ms the task may execute.  0 = disabled.
   };
 
@@ -157,7 +159,7 @@ struct VLINK_EXPORT Schedule final {
   class VLINK_EXPORT Status {
    public:
     /**
-     * @brief Constructs an invalid @c Status (not yet associated with a task).
+     * @brief Constructs a valid @c Status with fresh internal task state.
      */
     Status();
 
@@ -216,11 +218,12 @@ struct VLINK_EXPORT Schedule final {
     Status& on_execution_timeout(Callback&& callback);
 
     /**
-     * @brief Registers a callback fired when the task throws an exception.
+     * @brief Registers a callback fired when the task throws a @c std::exception.
      *
      * @details
-     * The exception is caught inside the wrapper and passed to this callback.
-     * The task is considered failed after an exception.
+     * @c std::exception-derived failures are caught inside the wrapper and passed
+     * to this callback.  Non-standard exceptions are not caught here.  The task
+     * is considered failed after a caught exception.
      *
      * @param callback  Callback invoked with the caught exception.
      * @return Reference to @c *this for chaining.

@@ -57,7 +57,7 @@ config.wal_mode       = true;                  // SQLite WAL 模式
 config.tag_name       = "test_run_001";
 config.max_task_depth = 50000;                 // 默认 20000
 
-auto writer = vlink::BagWriter::create("/data/recording.vdb", config);
+auto writer = vlink::BagWriter::create("/data/recording.vdbx", config);
 
 // 启动录制线程
 writer->async_run();
@@ -111,7 +111,7 @@ writer->push("dds://debug", "raw", vlink::SchemaType::kRaw, vlink::ActionType::k
 - `compress_start_size`（默认 128 字节）：小于此大小的 payload 不压缩。
 - `compress_level`：SQLite 后端仅区分 `> 3`（LZAV 高压缩比模式）与 `<= 3`（普通模式）；
   MCAP 后端映射到 `mcap::CompressionLevel`（0=Default、1=Fastest、2=Fast、3=Default、4=Slow、5=Slowest）。
-- `ignore_compress_urls`：集合中的 URL 永不压缩，即使启用了压缩。
+- `ignore_compress_urls`：SQLite writer 中集合内 URL 不压缩；MCAP writer 使用 chunk 级压缩配置，不读取该集合。
 
 ### 12.3.5 文件分割
 
@@ -122,7 +122,7 @@ config.split_by_size = 1024LL * 1024 * 1024;
 // 按时间分割（每 5 分钟新建一个文件）
 config.split_by_time = 5LL * 60 * 1000; // 毫秒（每 5 分钟）
 
-// 文件名附加时间戳：recording_20260318_120000.vdb
+// 文件名附加时间戳：20260318_120000.vdb
 config.split_name_by_time = true;
 
 // 注册分割事件回调
@@ -134,10 +134,10 @@ writer->register_split_callback(
 );
 ```
 
-分割文件命名规则：
+SQLite 分割模式只对 `.vdbx` 入口启用；实际数据文件使用 `.vdb` 后缀。分割文件命名规则：
 - 主文件：`recording.vdb`
-- 分割 1：`recording_1.vdb`（或 `recording_1_20260318_120000.vdb`）
-- 分割 2：`recording_2.vdb`
+- 分割 1：`recording.1.vdb`（若 `split_name_by_time=true`，使用时间戳文件名）
+- 分割 2：`recording.2.vdb`
 
 ### 12.3.6 Schema 嵌入
 
@@ -169,8 +169,8 @@ writer->push_schema(schema);
 | `split_name_by_time`    | `false`      | 分割文件名附加时间戳               |
 | `sync_mode`             | `false`      | 同步写盘（更安全但更慢）           |
 | `optimize_on_exit`      | `false`      | 关闭时执行 VACUUM/优化             |
-| `max_row_count`         | 50 亿        | 上限，仅当 `enable_limit=true` 时生效；超出后停止录制（不是分割） |
-| `max_bytes_size`        | 512 GiB      | 上限，仅当 `enable_limit=true` 时生效；超出后停止录制（不是分割） |
+| `max_row_count`         | 50 亿        | 上限，仅当 `enable_limit=true` 时生效；超出后删除最旧数据并继续写入 |
+| `max_bytes_size`        | 512 GiB      | 上限，仅当 `enable_limit=true` 时生效；超出后删除最旧数据并继续写入 |
 | `split_by_size`         | 1 GiB        | 按大小分割阈值                     |
 | `split_by_time`         | 0（禁用）    | 按时间分割（毫秒）                 |
 | `cache_size`            | 4 MiB        | SQLite 页缓存大小                  |
@@ -490,7 +490,7 @@ MCAP 格式特点：
 1. 多个 BagReader 各自在独立线程中读取消息
 2. 每条消息通过 `push()` 进入 BagReaderProcessor 的内部队列（线程安全）
 3. 处理线程检查队列首尾时间差是否超过 `min_cache_time`
-4. 满足条件后，按原始推送时间间隔依次输出，还原录制时的时序节奏
+4. 满足条件后，按时间戳顺序立即依次输出；该组件只做多文件时序合并，不按原始消息间隔 sleep
 5. 当缓存大小达到 `max_cache_size` 上限时，`push()` 会阻塞等待消费
 
 ### 12.6.3 Config 配置

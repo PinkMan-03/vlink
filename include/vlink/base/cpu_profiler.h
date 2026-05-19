@@ -23,7 +23,7 @@
 
 /**
  * @file cpu_profiler.h
- * @brief Per-instance CPU utilisation profiler gated by a global environment variable.
+ * @brief Per-instance CPU utilisation profiler with a global environment toggle helper.
  *
  * @details
  * @c CpuProfiler measures the fraction of wall-clock time that the CPU was actively
@@ -39,9 +39,10 @@
  * @endcode
  *
  * @par Global enable gate
- * Profiling is gated by the environment variable @c VLINK_PROFILER_ENABLE.
- * Set it to @c "1" to enable; @c "0" (default) to disable.  The value is read once at
- * first call to @c is_global_enabled() and cached for the process lifetime.
+ * The environment variable @c VLINK_PROFILER_ENABLE is exposed through
+ * @c is_global_enabled() so callers can decide whether to sample.  Set it to
+ * @c "1" to enable; @c "0" (default) to disable.  The value is read once at
+ * first call and cached for the process lifetime.
  * @code
  * export VLINK_PROFILER_ENABLE=1
  * @endcode

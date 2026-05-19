@@ -48,10 +48,11 @@ struct CalcResponse {
 };
 
 /// RPC service URL shared by server and client.
-/// Change the transport to switch transport (e.g. "shm://", "dds://").
+/// The example programs allow overriding this with VLINK_CALCULATOR_URL.
 static const char* const kCalculatorUrl = "intra://hello/calculator";
 
 /// Fire-and-forget notification URL (no response expected).
+/// The example programs allow overriding this with VLINK_NOTIFY_URL.
 static const char* const kNotifyUrl = "intra://hello/notify";
 
 }  // namespace example

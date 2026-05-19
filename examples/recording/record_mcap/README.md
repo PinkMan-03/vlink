@@ -176,8 +176,9 @@ reader->stop();
 ## 9. 编译和运行
 
 ```bash
-cmake --build . --target example_record_mcap
-./output/bin/example_record_mcap
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_record_mcap
+./build/output/bin/example_record_mcap
 ```
 
 ## 10. 输出文件

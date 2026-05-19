@@ -204,7 +204,8 @@ class Getter : public Node<GetterImpl, SecT> {
    * a fatal error.
    *
    * @param callback  @c void(const ValueT&) invoked on each new value.
-   * @return          @c true always (registration is deferred to @c init()).
+   * @return          @c true if the callback was stored; @c false if a callback
+   *                  was already registered.
    */
   bool listen(MsgCallback&& callback);
 
@@ -271,7 +272,7 @@ class Getter : public Node<GetterImpl, SecT> {
    * callback that receives raw bytes, deserialises them into @c ValueT,
    * stores the result in @c value_, and fires the user @c listen() callback.
    *
-   * @return @c true on success; @c false if already initialised.
+   * @return @c true on first initialisation; @c false if already initialised.
    */
   bool init() override;
 
@@ -330,7 +331,7 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityGetter on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound updates).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new getter.
    */
@@ -343,7 +344,7 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityGetter on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound updates).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new getter.
    */
@@ -357,7 +358,7 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -370,12 +371,12 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    *
    * @details
    * Always builds the base @c Getter with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security is
-   * either populated or left empty.  Finally calls @c init() unless the
-   * caller requests deferred initialisation.
+   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
+   * @c NodeImpl::security was populated successfully; finally calls @c init()
+   * unless the caller requests deferred initialisation.
    *
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound updates).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

@@ -354,6 +354,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * @details
    * Allocates a buffer of size @c raw.size() + url.size() + ser.size() + hostname.size()
    * and copies each region in order.  Any previously owned buffer is freed first.
+   * If any region length or the total length exceeds @c UINT32_MAX, the object
+   * is cleared and no buffer is retained.
    *
    * @param raw       Raw serialised message payload.
    * @param url       Topic URL string (e.g., @c "dds://my/topic").

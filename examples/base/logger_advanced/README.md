@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_logger_advanced
-./examples/base/logger_advanced/example_logger_advanced
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_logger_advanced
+./build/output/bin/example_logger_advanced
 ```
 
 ## 4. 核心功能详解

@@ -14,8 +14,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_deadline_timer
-./examples/base/deadline_timer/example_deadline_timer
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_deadline_timer
+./build/output/bin/example_deadline_timer
 ```
 
 ## 4. 核心设计

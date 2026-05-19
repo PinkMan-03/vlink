@@ -210,8 +210,9 @@ struct Durability final {
 
 - DataWriter 在内存中缓存最近 History.depth 个样本。
 - 新 Subscriber 连接时，Writer 自动向其推送缓存的历史消息。
-- **Field 模型（Getter/Setter）必须使用此模式**，确保 Getter 在启动时能获取到
-  Setter 已经发布的值。
+- 对 DDS 类后端，Field 模型（Getter/Setter）在未显式指定 `qos` 时默认使用此模式，
+  用于提高 Getter 启动时获取 Setter 已发布值的概率；用户显式指定 `qos` 时以配置为准，
+  非 DDS 后端不强制使用该 Durability 语义。
 - 适合服务发现、配置参数、静态地图等场景。
 
 ### 8.5.3 kTransient / kPersistent
@@ -559,8 +560,9 @@ auto resp = client.invoke(Request{...});
 
 ### 8.17.3 Field 模型（Setter / Getter）
 
-Field 模型必须使用 TransientLocal 持久化策略，确保 Getter 在启动时能立即获取
-到最新值。推荐使用 `kField` 预定义配置。
+DDS 类后端的 Field 模型在未显式指定 `qos` 时会使用 Field 默认 QoS；显式配置时推荐使用
+`kField` 预定义配置（TransientLocal + KeepLast(1)），以便迟到 Getter 更容易获得 Setter 已发布的最新值。
+非 DDS 后端不强制使用该持久化策略。
 
 ```cpp
 #include <vlink/setter.h>

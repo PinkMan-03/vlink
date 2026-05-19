@@ -42,14 +42,15 @@
  * | ------------------------------- | ----------- | ----------- | --------------------------------- |
  * | @c Bytes::create()              | Yes         | Deep copy   | Fresh allocation                  |
  * | @c Bytes::shallow_copy()        | No          | Ptr alias   | Zero-copy wrapping of extern buf  |
- * | @c Bytes::deep_copy()           | Yes         | Deep copy   | Owned copy of extern buf          |
+ * | @c Bytes::deep_copy()           | Conditional | Deep copy   | Owned copy when source data exists|
  * | @c Bytes::loan_internal()       | No (loaned) | Ptr alias   | Iceoryx zero-copy loan            |
  * | @c Bytes::shallow_copy_ptr()    | No          | Ptr alias   | Wrap opaque pointer (size == 0)   |
  *
  * Compression support (LZAV):
- * - @c compress_data() appends a 4-byte header magic and a 4-byte footer magic around the LZAV
- *   compressed payload, enabling @c is_compress_data() to detect compressed buffers.
- * - @c uncompress_data() strips the header/footer and decompresses; optionally validates the
+ * - @c compress_data() appends a 4-byte header magic, a 4-byte original-size field and a
+ *   4-byte footer magic around the LZAV compressed payload, enabling @c is_compress_data()
+ *   to detect compressed buffers.
+ * - @c uncompress_data() strips the wrapper and decompresses; optionally validates the
  *   magic bytes first.
  *
  * Utility helpers:
@@ -58,7 +59,7 @@
  * - CRC-64 checksum (@c get_crc_64) -- ECMA-182 variant
  * - Byte-order reversal (@c reverse_order)
  * - Hex-string conversion (@c convert_to_hex_str)
- * - User-input parsing from hex/binary string literals (@c from_user_input)
+ * - User-input parsing from whitespace-separated or @c 0x-prefixed hex strings (@c from_user_input)
  *
  * @note
  * - The @c offset_ field reserves a prefix region inside the allocated buffer.  @c data()
@@ -203,7 +204,8 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    *
    * @details
    * Same as the mutable overload except the @p data pointer is @c const.
-   * Calling the non-const @c data() accessor on the result returns @c nullptr.
+   * The current implementation stores the pointer via @c const_cast, so the
+   * non-const @c data() accessor also returns that address.
    *
    * @param data  Pointer to the external read-only buffer.
    * @param size  Length of the buffer in bytes.
@@ -228,13 +230,16 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Creates an owned deep copy of an external mutable buffer.
    *
    * @details
-   * Allocates new memory, copies @p size bytes from @p data, and returns a fully
-   * owned @c Bytes object.  Safe even after the original buffer is freed.
+   * Allocates new memory, copies @p size bytes from @p data, and returns an
+   * owning @c Bytes object.  Safe even after the original buffer is freed.
+   * When @p data is @c nullptr or @p size is 0, no source bytes are copied:
+   * with zero offset the result is empty and non-owning; with a non-zero
+   * offset only the prefix area is allocated.
    *
    * @param data    Pointer to the source buffer.
    * @param size    Number of bytes to copy.
    * @param offset  Prefix-region size in the new buffer.  Default: 0.
-   * @return A new owned @c Bytes containing a copy of the source data.
+   * @return A new @c Bytes containing a copy of the source data when present.
    */
   [[nodiscard]] static Bytes deep_copy(uint8_t* data, size_t size, uint8_t offset = 0) noexcept;
 
@@ -242,12 +247,13 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Creates an owned deep copy of an external read-only buffer.
    *
    * @details
-   * Same as the mutable overload but accepts a @c const source pointer.
+   * Same as the mutable overload but accepts a @c const source pointer.  Empty
+   * or null sources follow the same ownership rules as the mutable overload.
    *
    * @param data    Pointer to the source read-only buffer.
    * @param size    Number of bytes to copy.
    * @param offset  Prefix-region size in the new buffer.  Default: 0.
-   * @return A new owned @c Bytes containing a copy of the source data.
+   * @return A new @c Bytes containing a copy of the source data when present.
    */
   [[nodiscard]] static Bytes deep_copy(const uint8_t* data, size_t size, uint8_t offset = 0) noexcept;
 
@@ -282,16 +288,18 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    *
    * @param str     Source string.
    * @param offset  Prefix-region reserved before the string data.  Default: 0.
-   * @return A new owned @c Bytes containing the UTF-8 bytes of @p str.
+   * @return A new @c Bytes containing the UTF-8 bytes of @p str; an empty
+   *         string with zero offset yields an empty non-owning object.
    */
   [[nodiscard]] static Bytes from_string(const std::string& str, uint8_t offset = 0) noexcept;
 
   /**
-   * @brief Parses a user-provided hex or binary string literal into a @c Bytes buffer.
+   * @brief Parses a user-provided hex string into a @c Bytes buffer.
    *
    * @details
-   * Accepts formats such as @c "0x1A2B3C" (hex) or raw binary strings.
-   * Sets @p ok to @c false if parsing fails.
+   * Accepts whitespace-separated byte tokens such as @c "1A 2B 3C", optional
+   * @c 0x / @c 0X prefixes, and contiguous even-length hex after such a prefix
+   * (for example @c "0x1A2B3C").  Sets @p ok to @c false if parsing fails.
    *
    * @param str  Input string to parse.
    * @param ok   Optional pointer set to @c true on success, @c false on failure.
@@ -303,8 +311,8 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Converts a raw byte array to an uppercase hex string with spaces.
    *
    * @details
-   * Each byte is rendered as two uppercase hex digits followed by a space, e.g.,
-   * @c {0x1A, 0xB2} -> @c "1A B2 ".  Useful for logging binary frames.
+   * Each byte is rendered as two uppercase hex digits separated by spaces, e.g.,
+   * @c {0x1A, 0xB2} -> @c "1A B2".  Useful for logging binary frames.
    *
    * @param value  Pointer to the byte array.
    * @param size   Number of bytes to convert.
@@ -362,11 +370,12 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   Bytes() noexcept;
 
   /**
-   * @brief Copy constructor — always produces an owned deep copy.
+   * @brief Copy constructor -- produces an owned deep copy when source data exists.
    *
    * @details
    * Allocates a fresh buffer through @c MemoryPool and @c memcpy s the source
-   * payload into it.  The result is always an owner (@c is_owner() returns
+   * payload into it when @p target has data.  Empty sources produce an empty
+   * non-owner result.  Non-empty results are owners (@c is_owner() returns
    * @c true, @c is_loaned() returns @c false), regardless of whether @p target
    * was an owner, a shallow alias, or a loaned object.
    *
@@ -417,13 +426,12 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   ~Bytes() noexcept;
 
   /**
-   * @brief Copy assignment operator — always produces an owned deep copy.
+   * @brief Copy assignment operator -- produces an owned deep copy when source data exists.
    *
    * @details
    * Releases the current buffer (if owned), then allocates a fresh buffer
-   * through @c MemoryPool and @c memcpy s @p target 's payload into it.  The
-   * result is always an owner regardless of @p target 's mode (same contract
-   * as the copy constructor).
+   * through @c MemoryPool and @c memcpy s @p target 's payload into it when
+   * @p target has data.  Empty sources produce an empty non-owner result.
    *
    * @note
    * To keep alias / loaned semantics, prefer @c shallow_copy(const Bytes&) or
@@ -743,7 +751,8 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @details
    * Inspects the first 4 bytes for the header magic @c {0x17, 0x49, 0xB2, 0x6F}
    * and the last 4 bytes for the footer magic @c {0xA7, 0x05, 0xED, 0x71}.
-   * Both must match for the function to return @c true.
+   * The buffer must also be non-null and at least 13 bytes long.  Both magic
+   * values must match for the function to return @c true.
    *
    * @param data  Pointer to the buffer to inspect.
    * @param size  Length of the buffer.
@@ -755,15 +764,16 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Compresses a raw byte buffer using the LZAV algorithm.
    *
    * @details
-   * Wraps the compressed payload with a 4-byte header magic and a 4-byte footer magic
-   * so that @c is_compress_data() can recognise it.  Buffers larger than
+   * Wraps the compressed payload with a 4-byte header magic, a 4-byte big-endian
+   * original-size field and a 4-byte footer magic so that @c is_compress_data()
+   * can recognise it.  Buffers larger than
    * @c kMaxCompressCacheSize (1 MiB) are rejected and an empty @c Bytes is returned.
    *
    * @param data       Pointer to the uncompressed data.
    * @param size       Number of bytes to compress.
    * @param high_ratio If @c true, uses LZAV high-compression mode (slower but better ratio).
    *                   Default: @c false (normal mode).
-   * @return Compressed @c Bytes with header/footer magic, or empty on failure.
+   * @return Compressed @c Bytes with header/size/footer wrapper, or empty on failure.
    */
   [[nodiscard]] static Bytes compress_data(const uint8_t* data, size_t size, bool high_ratio = false) noexcept;
 
@@ -771,9 +781,10 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Decompresses a LZAV-compressed @c Bytes buffer.
    *
    * @details
-   * Strips the 4-byte header and footer magic, then calls @c lzav_decompress().
-   * If @p check_valid is @c true the magic bytes are validated first; an invalid
-   * magic returns an empty @c Bytes.
+   * Strips the 4-byte header, 4-byte original-size field and footer magic, then
+   * calls @c lzav_decompress().  If @p check_valid is @c true the magic bytes
+   * are validated first; an invalid magic returns an empty @c Bytes.  Stored
+   * original sizes of 0 or greater than 256 MiB are rejected.
    *
    * @param data         Pointer to the compressed buffer (including header/footer).
    * @param size         Total size of the compressed buffer.
@@ -842,11 +853,12 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   Bytes& shallow_copy(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Replaces this object with a fully owned deep copy of @p bytes.
+   * @brief Replaces this object with a deep copy of @p bytes.
    *
    * @details
    * Releases the current buffer, allocates new memory, and copies all bytes from
-   * @p bytes.  After this call @c is_owner() is @c true.
+   * @p bytes when it has data.  Empty sources leave this object empty and
+   * non-owning.
    *
    * @param bytes  Source to copy.
    * @return Reference to @c *this.
@@ -854,12 +866,12 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   Bytes& deep_copy(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Converts this object from a non-owning alias to a fully owned deep copy of its own data.
+   * @brief Converts this object from a non-owning alias with data to an owned deep copy.
    *
    * @details
-   * If the object is already an owner, this is a no-op.
-   * Otherwise, new memory is allocated, the current data is copied, and
-   * @c is_owner_ is set to @c true.
+   * If the object is already an owner, this is a no-op.  If it has no data or
+   * zero size, the object is cleared.  Otherwise, new memory is allocated, the
+   * current data is copied, and @c is_owner_ is set to @c true.
    *
    * @return Reference to @c *this.
    */

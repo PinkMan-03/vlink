@@ -337,7 +337,7 @@ class SecurityClient : public Client<ReqT, RespT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityClient on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound traffic).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new client.
    */
@@ -350,7 +350,7 @@ class SecurityClient : public Client<ReqT, RespT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityClient on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound traffic).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new client.
    */
@@ -364,7 +364,7 @@ class SecurityClient : public Client<ReqT, RespT, SecurityType::kWithSecurity> {
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default).
+   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -377,12 +377,12 @@ class SecurityClient : public Client<ReqT, RespT, SecurityType::kWithSecurity> {
    *
    * @details
    * Always builds the base @c Client with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security is
-   * either populated or left empty.  Finally calls @c init() unless the
-   * caller requests deferred initialisation.
+   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
+   * @c NodeImpl::security was populated successfully; finally calls @c init()
+   * unless the caller requests deferred initialisation.
    *
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default → drops outbound traffic).
+   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

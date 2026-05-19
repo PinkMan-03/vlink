@@ -66,7 +66,7 @@
 | 运行时健康     | `Check iox-roudi running...`                     | RouDi 未运行，`shm://` 透明传输会失败 |
 | 进程           | `Check proxy/bag/dump/eproto/efbs running...`    | 相关 CLI 是否已运行；排查重复启动或互相抢资源 |
 | 进程           | `Check monitor/viewer/player/analyzer running...` | 同上 |
-| 进程           | `Check bench/webviz running...`                  | 基准与网页可视化工具是否已运行 |
+| 进程           | `Check bench/webviz running...`                  | 检查 `vlink-bench` 与 legacy `vlink-webviz` 进程；当前 WebViz 后端 `vlink-foxglove` / `vlink-rerun` 不在该诊断项内 |
 | 进程           | `Check others running...`                        | 通过 `vlink-list -nc` 统计当前是否还有 vlink 用户进程 |
 
 看到 `FAILED` 行的 `[DETAIL]` 列：直接给出了失败原因字串，参考下面各节处理。
@@ -77,11 +77,11 @@
 - `-f <substring>` / `--filter <substring>`：只跑标题包含子串的诊断项，例如 `-f dds` 只关心 DDS 相关检查；
 - `-a` / `--all`：附加打印所有 `VLINK_ENABLE_*` 编译选项状态。
 
-**`vlink-check env`** 会把 `cli/check/check.cc` 内显式列出的那组 `VLINK_*` 环境变量逐条打印出来（是否已设置、当前值），并在末尾输出汇总行。清单项按编译时模块开关动态裁剪：未启用 `VLINK_SUPPORT_ZENOH` / `VLINK_SUPPORT_SHM2` / `VLINK_SUPPORT_MQTT` / `VLINK_SUPPORT_DDS*` / `VLINK_SUPPORT_SOMEIP` / `VLINK_SUPPORT_INTRA` 等模块时，相关 env 段会自动隐藏；未启用 `VLINK_ENABLE_CLI_BENCH` 时 `VLINK_BENCH_*` 也会隐藏。完整清单仍以 [`doc/21-environment-vars.md`](21-environment-vars.md) 为准。可用 `-p <prefix>` 按前缀过滤，例如 `vlink-check env -p VLINK_ZENOH_` 只看 Zenoh 专属变量。`-b/--available` 只显示已设置项。
+**`vlink-check env`** 会把 `cli/check/check.cc` 内显式列出的那组 `VLINK_*` 环境变量逐条打印出来（是否已设置、当前值），并在末尾输出汇总行。清单项按编译时传输模块开关动态裁剪：未启用 `VLINK_SUPPORT_ZENOH` / `VLINK_SUPPORT_SHM2` / `VLINK_SUPPORT_MQTT` / `VLINK_SUPPORT_DDS*` / `VLINK_SUPPORT_SOMEIP` / `VLINK_SUPPORT_INTRA` 等模块时，相关 env 段会自动隐藏。`VLINK_BENCH_*` 由 `vlink-bench` 读取，不在 `vlink-check env` 的内置清单中。完整清单仍以 [`doc/21-environment-vars.md`](21-environment-vars.md) 为准。可用 `-p <prefix>` 按前缀过滤，例如 `vlink-check env -p VLINK_ZENOH_` 只看 Zenoh 专属变量。`-b/--available` 只显示已设置项。
 
 **`vlink-check test`** 分两段：
 - Part 1 在 `intra://` 上跑 Event / Method / Field 三种 paradigm 的最小往返（对应 `Publisher/Subscriber`、`Client/Server`、`Setter/Getter`）。
-- Part 2 按 `VLINK_SUPPORT_*` 宏遍历当前构建进产物的所有传输后端（`intra / shm / shm2 / dds / ddsc / ddsr / ddst / zenoh / someip / mqtt / fdbus / qnx`），每个后端跑一次同进程 Publisher/Subscriber 往返；需要外部依赖的后端（如 `shm://` 经由 `vlink::ShmConf::has_roudi_running()` 探测 RouDi、`someip://` 需要 `VLINK_SOMEIP_CFG`）在前置条件不满足时直接跳过（WARNING），**不会**真去调用可能 `std::terminate` 的底层栈。
+- Part 2 按 `VLINK_SUPPORT_*` 宏遍历当前构建进产物的所有传输后端（`intra / shm / shm2 / dds / ddsc / ddsr / ddst / zenoh / someip / mqtt / fdbus / qnx`），按后端能力运行 Event / Method / Field 子测试；SOME/IP 与 MQTT 当前只覆盖 Event。部分后端会先检查外部依赖，例如 `shm://` 通过 `vlink::ShmConf::auto_init_roudi(true)` 探测或尝试启动 RouDi，`mqtt://` 会检查 Broker URL 是否为空，`fdbus://` 会检查 name server。当前 SOME/IP 分支不检查 `VLINK_SOMEIP_CFG`，会直接尝试运行对应 Event 测试。
 
 退出码 = **FAILED** 的子测试数；WARNING 只告警、不计入。
 
@@ -192,7 +192,7 @@ ps aux | grep -E "iox-roudi|vlink-proxy"
 
 ### 91.3.3 `Failed to load plugin` / `Unsupported plugin module`
 
-**源码引用**：`src/impl/url.cc:295`、`src/base/plugin.cc:162-287`。
+**源码引用**：`src/impl/url.cc` 的 URL 插件加载路径，以及 `src/base/plugin.cc:267-394`（加载/创建）和 `src/base/plugin.cc:466-492`（插件 id / 版本校验）。
 
 **原因**：`VLINK_URL_PLUGINS` 或 `VLINK_PLUGIN_DIR` 指向的 `.so` 找不到 / ABI 不匹配 / 不是 VLink 插件。
 
@@ -861,7 +861,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 ### 91.16.4 Android
 
-- `shm://` (Iceoryx v1) **不可用**（Android 不支持 RouDi daemon） → 改 `shm2://`（Iceoryx2 无 daemon）、`intra://`、`dds://`、`fdbus://`
+- `shm://` (Iceoryx v1) **不可用**（Android 不支持 RouDi daemon）；当前 `shm2://` 模块在 Android 构建中也会跳过。优先改用 `intra://`、`dds://`、`fdbus://` 等可用后端。
 - 日志后端默认 `native`（logcat）
 - NDK >= r25
 
@@ -947,22 +947,22 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 ## 91.19 插件加载失败
 
-**源码**：`src/base/plugin.cc:272-456`。
+**源码**：`src/base/plugin.cc:267-492`。
 
 | 错误 | 行 | 说明 |
 |---|---|---|
-| `Plugin: Plugin id is empty.` | 272, 385 | `VLINK_PLUGIN_REGISTER_BY_ID` 没带 id |
-| `Plugin: Lib name is empty.` | 280 | `Plugin::load` 第一个参数空 |
-| `Plugin: Already loaded (...)` | 290 | 同一 lib 加载两次 |
-| `Plugin: Cannot find plugin (...)` | 322 | `dlopen`/`LoadLibrary` 失败；`ldd` 看依赖 |
-| `Plugin: Cannot find symbol function to create (...)` | 343 | 插件没导出 `create_*` 入口 |
-| `Plugin: Failed to create handle (...)` | 353 | 插件的 create 返回 nullptr |
-| `Plugin: Failed to load plugin (...): ...` | 375 | create 过程中抛异常 |
-| `Plugin: Not loaded (...)` | 393 | `destroy` 之前没 load 成功 |
-| `Plugin: Cannot find symbol function to destroy (...)` | 421 | 插件没导出 destroy |
-| `Plugin: Failed to destroy handle (...)` | 429 | destroy 抛异常 |
-| `Plugin: Plugin id mismatch: expected '...', got '...'` | 448 | lib 内部的 PLUGIN_ID 不对 |
-| `Plugin: Version mismatch: local X.Y, required X.Z.` | 456 | ABI 版本不兼容 |
+| `Plugin: Plugin id is empty.` | 273, 399 | `VLINK_PLUGIN_REGISTER_BY_ID` 没带 id，或卸载时传入空 id |
+| `Plugin: Lib name is empty.` | 281 | `Plugin::load` 第一个参数空 |
+| `Plugin: Already loaded (...)` | 294 | 同一 lib 加载两次 |
+| `Plugin: Cannot find plugin (...)` | 327 | `dlopen`/`LoadLibrary` 失败；`ldd` 看依赖 |
+| `Plugin: Cannot find symbol function to create (...)` | 348 | 插件没导出 `create_*` 入口 |
+| `Plugin: Failed to create handle (...)` | 358 | 插件的 create 返回 nullptr |
+| `Plugin: Failed to load plugin (...): ...` | 389 | create 过程中抛异常 |
+| `Plugin: Not loaded (...)` | 407 | `destroy` 之前没 load 成功 |
+| `Plugin: Cannot find symbol function to destroy (...)` | 436 | 插件没导出 destroy |
+| `Plugin: Failed to destroy handle (...)` | 444, 451, 457 | destroy 返回 false 或抛异常 |
+| `Plugin: Plugin id mismatch: expected '...', got '...'` | 476 | lib 内部的 PLUGIN_ID 不对 |
+| `Plugin: Version mismatch: local X.Y, required X.Z.` | 484 | ABI 版本不兼容 |
 
 **通用排查**：
 ```bash
@@ -1046,7 +1046,7 @@ vlink::Logger::dump_backtrace();           // 一次性输出全部
 ### 91.22.1 Plugin 版本
 
 - `Plugin: Version mismatch: local X.Y, required X.Z.` → plugin 要求的主/次版本不是当前 VLink 的版本
-- Major 必须严格相同；Minor 向下兼容（`plugin.cc:285-289`，条件 `target_major != local_major || target_minor > local_minor`）
+- Major 必须严格相同；Minor 向下兼容（`plugin.cc:482-489`，条件 `target_version_major != local_version_major || target_version_minor > local_version_minor`）
 - 修复：重新编译 plugin 对齐 VLink 版本
 
 ### 91.22.2 Bag 版本

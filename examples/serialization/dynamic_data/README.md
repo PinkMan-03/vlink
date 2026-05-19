@@ -92,9 +92,9 @@ dd_from_wire << wire_bytes;
 ## 4. 构建与运行
 
 ```bash
-cd build
-cmake .. && make example_dynamic_data
-./output/bin/example_dynamic_data
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_dynamic_data
+./build/output/bin/example_dynamic_data
 ```
 
 ## 5. 要点总结

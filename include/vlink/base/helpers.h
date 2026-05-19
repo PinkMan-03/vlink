@@ -32,8 +32,8 @@
  *
  * @note
  * - All functions are @c noexcept; errors are indicated by default-constructed return values.
- * - Encoding conversion functions (@c string_local_to_utf8, @c string_utf8_to_local) use
- *   @c iconv on POSIX and the Windows ANSI code page on Windows.
+ * - Encoding conversion functions (@c string_local_to_utf8, @c string_utf8_to_local)
+ *   use the Windows ANSI code page on Windows and return the input unchanged on POSIX.
  *
  * @par Example
  * @code
@@ -152,8 +152,8 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
  * @brief Converts a locally-encoded string to UTF-8.
  *
  * @details
- * On POSIX, uses the current locale's @c iconv to convert from the system encoding.
  * On Windows, reads the active ANSI code page and converts via Win32 APIs.
+ * On POSIX, returns the input unchanged.
  *
  * @param local_str  Locally-encoded (system locale) string.
  * @return UTF-8 encoded string, or the original string if conversion is not needed.
@@ -161,7 +161,11 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
 [[nodiscard]] VLINK_EXPORT std::string string_local_to_utf8(const std::string& local_str) noexcept;
 
 /**
- * @brief Converts a UTF-8 string to the locally-encoded system string.
+ * @brief Converts a UTF-8 string to the locally-encoded system string on Windows.
+ *
+ * @details
+ * On Windows, converts via Win32 APIs to the active ANSI code page.  On POSIX,
+ * returns the input unchanged.
  *
  * @param utf8_str  UTF-8 encoded string.
  * @return Locally-encoded (system locale) string.
@@ -185,7 +189,7 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
  *
  * @param str  Input string.
  * @param f    Delimiter character.
- * @return Vector of substrings (may include empty strings for consecutive delimiters).
+ * @return Vector of non-empty substrings; empty fields from consecutive delimiters are skipped.
  */
 [[nodiscard]] VLINK_EXPORT std::vector<std::string> get_split_string(const std::string& str, char f) noexcept;
 
@@ -198,7 +202,7 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
  *
  * @param str  Input string view.
  * @param f    Delimiter character.
- * @return Vector of @c string_view over the substrings.
+ * @return Vector of non-empty @c string_view elements over the substrings.
  */
 [[nodiscard]] VLINK_EXPORT std::vector<std::string_view> get_split_string_view(std::string_view str, char f) noexcept;
 
@@ -279,7 +283,7 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
 [[nodiscard]] VLINK_EXPORT std::string format_milliseconds(int64_t milliseconds, bool show_millis) noexcept;
 
 /**
- * @brief Formats a nanosecond-precision epoch timestamp as a date-time string.
+ * @brief Formats a nanosecond-precision epoch timestamp as a UTC date-time string.
  *
  * @details
  * Output format: @c "YYYY-MM-DD HH:MM:SS.mmm".

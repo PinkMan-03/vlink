@@ -35,8 +35,9 @@
  * - Writes are appended to a fixed-size internal buffer (default @c kDefaultBufferSize = 1 MiB).
  * - When the buffer is full (or @c flush() / a flushing manipulator is invoked), the
  *   accumulated bytes are written in one or more @c write() syscalls.
- * - A single write whose length is >= buffer size bypasses the buffer entirely
- *   (the existing buffer is flushed first, then the data is written directly).
+ * - A single write whose length is >= buffer size flushes the existing buffer first,
+ *   writes directly to stdout, and buffers any unwritten suffix if the direct write
+ *   only partially completes.
  *
  * @par Thread safety
  * Every public method takes the same internal @c std::mutex, so concurrent
@@ -250,8 +251,9 @@ class VLINK_EXPORT TerminalStream final {
    * Acquires the internal mutex and forwards to the unlocked flush path:
    * - Writes the buffered bytes to @c stdout using @c write() / @c _write()
    *   in a loop until either all bytes are written or @c write() returns
-   *   <= 0 (in which case the remaining bytes are dropped).
-   * - Resets the internal write cursor to 0.
+   *   <= 0.
+   * - Resets the internal write cursor to 0 on full success.  If only part of
+   *   the buffer was written, the unwritten bytes remain buffered.
    * - On non-Windows TTY outputs, additionally calls @c tcdrain() so that
    *   the kernel-level terminal output queue is drained before returning.
    *   This produces the strongest "user can see it now" guarantee on POSIX.
@@ -270,9 +272,10 @@ class VLINK_EXPORT TerminalStream final {
    * stripping).  The @p data bytes are appended verbatim and may contain
    * arbitrary binary values, including embedded NULs.
    *
-   * Internally, if @p len is >= the buffer size, the current buffer is
-   * flushed first and the data is written directly to @c stdout in one or
-   * more @c write() calls; otherwise the bytes are appended to the buffer.
+   * Internally, if @p len is >= the buffer size, the current buffer is flushed
+   * first and the data is written directly to @c stdout in one or more @c write()
+   * calls.  If the direct write only partially completes, the unwritten suffix is
+   * buffered for a later @c flush(); otherwise the bytes are appended to the buffer.
    *
    * @param data  Pointer to the bytes to write.  Must be valid for at least
    *              @p len bytes; not retained beyond the call.

@@ -15,8 +15,9 @@
 ## 3. 构建与运行
 
 ```bash
-cmake --build . --target example_object_pool
-./examples/base/object_pool/example_object_pool
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
+cmake --build build --target example_object_pool
+./build/output/bin/example_object_pool
 ```
 
 ## 4. 核心概念

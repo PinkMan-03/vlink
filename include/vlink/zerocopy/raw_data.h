@@ -295,7 +295,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    *
    * @param data  Source data pointer.  Must be non-null.
    * @param size  Number of bytes to copy.  Must be non-zero.
-   * @return      @c false on invalid arguments, otherwise @c true.
+   * @return      @c false if @p data is null, @p size is zero, this object
+   *              claims ownership but has no buffer, or @p data already equals
+   *              the current internal pointer; otherwise @c true.
    */
   bool deep_copy(uint8_t* data, size_t size) noexcept;
 

@@ -16,7 +16,7 @@
 ## 2. 编译运行
 
 ```bash
-cmake -S . -B build -DENABLE_SECURITY=ON -DENABLE_EXAMPLES=ON
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
 cmake --build build --target example_security_rsa
 ./build/output/bin/example_security_rsa
 ```
