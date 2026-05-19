@@ -52,6 +52,17 @@
 
 namespace vlink {
 
+namespace {
+
+std::string make_channel_key(const std::string& url, std::string_view action_name) {
+  std::string key = url;
+  key.push_back('\x1F');
+  key.append(action_name);
+  return key;
+}
+
+}  // namespace
+
 // McapWriter::Impl
 struct McapWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   // UrlMsgInfo
@@ -63,9 +74,11 @@ struct McapWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
     int64_t last_timestamp{-1};
     double freq{0};
     double loss{0};
+    std::string url;
     std::string url_type;
     std::string ser_type;
     SchemaType schema_type{SchemaType::kUnknown};
+    ActionType action_type{ActionType::kUnknownAction};
 
     bool operator<(const UrlMsgInfo& target) const noexcept { return index < target.index; }
   };
@@ -574,6 +587,7 @@ int64_t McapWriter::push(const std::string& url, const std::string& ser_type, Sc
     impl_->memory_size += queued_data.size();
 
     post_task([this, url_index, ser_index, schema_type, action_type, queued_data, target_timestamp]() {
+      std::lock_guard lock(impl_->write_mtx);
       std::string url;
       std::string ser_type;
 
@@ -684,13 +698,13 @@ void McapWriter::close() {
   {
     std::lock_guard lock(impl_->sample_mtx);
 
-    for (const auto& [url, msg_info] : impl_->url_map) {
-      const auto& loss = impl_->url_loss_map[url];
-
+    for (const auto& entry : impl_->url_map) {
+      const auto& msg_info = entry.second;
       msg_info_list.emplace_back(msg_info);
 
       auto& last = msg_info_list.back();
-      last.loss = loss;
+      auto loss_iter = impl_->url_loss_map.find(last.url);
+      last.loss = loss_iter == impl_->url_loss_map.end() ? 0 : loss_iter->second;
     }
   }
 
@@ -701,6 +715,7 @@ void McapWriter::close() {
     channel_meta_data.name = "VLinkChannel_" + std::to_string(msg_info.index + 1);
     channel_meta_data.metadata["index"] = std::to_string(msg_info.index);
     channel_meta_data.metadata["type"] = msg_info.url_type;
+    channel_meta_data.metadata["action"] = std::string(convert_action(msg_info.action_type));
     channel_meta_data.metadata["encoding"] = std::string(SchemaData::convert_type(msg_info.schema_type));
     channel_meta_data.metadata["ser"] = msg_info.ser_type;
     channel_meta_data.metadata["count"] = std::to_string(msg_info.count);
@@ -798,9 +813,9 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
   }
 
   // insert url
-  auto total_url_iter_ret = impl_->total_url_map.try_emplace(url, Impl::UrlMsgInfo());
-
-  auto url_iter_ret = impl_->url_map.try_emplace(url, Impl::UrlMsgInfo());
+  const std::string channel_key = make_channel_key(url, convert_action(action_type));
+  auto total_url_iter_ret = impl_->total_url_map.try_emplace(channel_key, Impl::UrlMsgInfo());
+  auto url_iter_ret = impl_->url_map.try_emplace(channel_key, Impl::UrlMsgInfo());
 
   Impl::UrlMsgInfo& total_url_msg_info = total_url_iter_ret.first->second;
 
@@ -897,7 +912,8 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
 
   if (total_url_iter_ret.second) {
     total_url_msg_info.index = impl_->total_url_map.size() - 1;
-    impl_->total_url_list.emplace_back(url);
+    total_url_msg_info.url = url;
+    impl_->total_url_list.emplace_back(channel_key);
   }
 
   if (!schema_ser_type.empty() &&
@@ -949,6 +965,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
     channel.id = url_msg_info.index + 1;
     channel.schemaId = schema_id;
     channel.topic = url;
+    channel.metadata["action"] = std::string(convert_action(action_type));
     if (impl_->write_url_type != "Method") {
       if (!schema_data.encoding.empty()) {
         channel.messageEncoding = schema_data.encoding;
@@ -960,6 +977,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
 
     impl_->writer->addChannel(channel);
 
+    url_msg_info.url = url;
     url_msg_info.url_type = impl_->write_url_type;
     total_url_msg_info.url_type = impl_->write_url_type;
 
@@ -969,6 +987,8 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
     }
     url_msg_info.schema_type = next_schema_type;
     total_url_msg_info.schema_type = next_schema_type;
+    url_msg_info.action_type = action_type;
+    total_url_msg_info.action_type = action_type;
   } else {
     total_url_msg_info.ser_type = next_ser_type;
     url_msg_info.ser_type = next_ser_type;
@@ -1086,12 +1106,13 @@ bool McapWriter::write_filex(bool complete) {
 
       for (const auto& url : impl_->total_url_list) {
         const auto& ext_info = impl_->total_url_map[url];
-        auto loss = impl_->total_url_loss_map[url];
+        auto loss = impl_->total_url_loss_map[ext_info.url];
 
         url_json.push_back({
             {"index", ext_info.index},
-            {"url", url},
+            {"url", ext_info.url},
             {"type", ext_info.url_type},
+            {"action", std::string(convert_action(ext_info.action_type))},
             {"ser", ext_info.ser_type},
             {"encoding", std::string(SchemaData::convert_type(ext_info.schema_type))},
             {"count", ext_info.count},

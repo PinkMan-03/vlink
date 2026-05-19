@@ -55,6 +55,10 @@ static void run_graph(const GraphTaskPtr& entry, int timeout_ms = 30) {
   std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
 }
 
+struct RejectGraphEngine {
+  bool post_task(GraphTask::Callback&&) { return false; }
+};
+
 // ---------------------------------------------------------------------------
 // Property tests (no threading) — safe to use TEST_CASE inside TEST_SUITE
 // ---------------------------------------------------------------------------
@@ -635,6 +639,66 @@ TEST_SUITE("base-GraphTask - execution") {
 
     CHECK(branch0_count->load() == 1);
     CHECK(after_branch0->load() == 1);
+  }
+
+  TEST_CASE("condition skipped branch still satisfies wait-all join") {
+    auto b0_count = std::make_shared<std::atomic<int>>(0);
+    auto b1_count = std::make_shared<std::atomic<int>>(0);
+    auto join_count = std::make_shared<std::atomic<int>>(0);
+
+    auto cond = GraphTask::create_condition("cond_join", [] { return 0; }, 2);
+    auto b0 = GraphTask::create("b0_join", [b0_count] { b0_count->fetch_add(1); });
+    auto b1 = GraphTask::create("b1_join", [b1_count] { b1_count->fetch_add(1); });
+    auto join = GraphTask::create("join", [join_count] { join_count->fetch_add(1); });
+
+    b1->set_condition_number(1);
+    join->set_policy(GraphTask::kPolicyWaitAll);
+
+    cond->precede(b0);
+    cond->precede(b1);
+    b0->precede(join);
+    b1->precede(join);
+
+    run_graph(cond, 100);
+
+    CHECK(b0_count->load() == 1);
+    CHECK(b1_count->load() == 0);
+    CHECK(join_count->load() == 1);
+  }
+
+  TEST_CASE("pending status callback may inspect successors") {
+    auto inspected = std::make_shared<std::atomic<bool>>(false);
+
+    auto root = GraphTask::create("pending_root", [] {});
+    auto child = GraphTask::create("pending_child", [] {});
+    root->precede(child);
+
+    std::weak_ptr<GraphTask> weak_root = root;
+    root->register_status_callback([weak_root, inspected](const std::string&, GraphTask::Status status) {
+      if (status == GraphTask::kStatusPending) {
+        auto root = weak_root.lock();
+
+        if VUNLIKELY (!root) {
+          return;
+        }
+
+        auto list = root->get_succeed_task_list();
+        inspected->store(!list.empty(), std::memory_order_release);
+      }
+    });
+
+    run_graph(root, 50);
+
+    CHECK(inspected->load(std::memory_order_acquire));
+  }
+
+  TEST_CASE("execute cancels task when engine rejects post") {
+    auto task = GraphTask::create("reject_post", [] {});
+    RejectGraphEngine engine;
+
+    task->execute(&engine);
+
+    CHECK(task->get_status() == GraphTask::kStatusInActive);
   }
 
   TEST_CASE("throwing callback is caught; task transitions to kStatusDone and downstream runs") {

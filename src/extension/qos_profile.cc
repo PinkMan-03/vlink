@@ -100,7 +100,17 @@ struct GlobalQosProfile final {
 
         Qos qos;
 
+        if VUNLIKELY (!obj.contains("name") || !obj["name"].is_string()) {
+          VLOG_E("QosProfile: Qos config file qos name missing or invalid.");
+          return;
+        }
+
         std::string qos_name = obj["name"];
+
+        if VUNLIKELY (qos_name.empty()) {
+          VLOG_E("QosProfile: Qos config file qos name is empty.");
+          return;
+        }
 
         if VUNLIKELY (qos_name.size() >= sizeof(qos.name)) {
           VLOG_E("QosProfile: Qos config file qos name length error.");

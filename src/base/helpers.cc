@@ -132,6 +132,10 @@ std::string trim_string(const std::string& str) noexcept {
     ++start;
   }
 
+  if VUNLIKELY (start == str.end()) {
+    return {};
+  }
+
   auto end = str.rbegin();
 
   while (end != str.rend() && std::isspace(static_cast<unsigned char>(*end)) != 0) {
@@ -368,6 +372,64 @@ std::pair<std::string_view, std::string_view> get_pair_string_view(std::string_v
   }
 
   return std::pair{str.substr(0, pos), str.substr(pos + 1)};
+}
+
+std::string escape_field(std::string_view value) noexcept {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+
+  std::string out;
+  out.reserve(value.size());
+
+  for (const unsigned char ch : value) {
+    if (ch == '%' || ch == ' ' || ch == ':' || ch == '\n' || ch == '\r') {
+      out.push_back('%');
+      out.push_back(kHex[(ch >> 4U) & 0x0FU]);
+      out.push_back(kHex[ch & 0x0FU]);
+    } else {
+      out.push_back(static_cast<char>(ch));
+    }
+  }
+
+  return out;
+}
+
+std::string unescape_field(std::string_view value) noexcept {
+  auto from_hex = [](char ch) noexcept -> int {
+    if (ch >= '0' && ch <= '9') {
+      return ch - '0';
+    }
+
+    if (ch >= 'A' && ch <= 'F') {
+      return ch - 'A' + 10;
+    }
+
+    if (ch >= 'a' && ch <= 'f') {
+      return ch - 'a' + 10;
+    }
+
+    return -1;
+  };
+
+  std::string out;
+  out.reserve(value.size());
+
+  for (size_t i = 0; i < value.size(); ++i) {
+    if (value[i] == '%' && i + 2U < value.size()) {
+      const int hi = from_hex(value[i + 1U]);
+      const int lo = from_hex(value[i + 2U]);
+
+      if VLIKELY (hi >= 0 && lo >= 0) {
+        out.push_back(static_cast<char>((hi << 4U) | lo));
+        i += 2U;
+
+        continue;
+      }
+    }
+
+    out.push_back(value[i]);
+  }
+
+  return out;
 }
 
 uint32_t get_hash_code(const std::string& str) noexcept {

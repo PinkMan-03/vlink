@@ -84,7 +84,10 @@ bool RerunServer::start() {
     rec_raw_.store(nullptr);
     reset_bridge_wall_time_state(last_sys_time_ns_, bridge_time_elapsed_);
     reset_bridge_session_time_anchor(session_start_sys_time_ns_);
-    bridge_control_signature_.clear();
+    {
+      std::lock_guard lock(bridge_control_mtx_);
+      bridge_control_signature_.clear();
+    }
     return false;
   }
 
@@ -136,7 +139,10 @@ void RerunServer::stop() {
   rec_raw_.store(nullptr);
   reset_bridge_wall_time_state(last_sys_time_ns_, bridge_time_elapsed_);
   reset_bridge_session_time_anchor(session_start_sys_time_ns_);
-  bridge_control_signature_.clear();
+  {
+    std::lock_guard lock(bridge_control_mtx_);
+    bridge_control_signature_.clear();
+  }
   probe_timer_.stop();
   probe_timer_.detach();
 
@@ -467,7 +473,10 @@ void RerunServer::on_bridge_connected(bool connected) {
 
     reset_bridge_wall_time_state(last_sys_time_ns_, bridge_time_elapsed_);
     reset_bridge_session_time_anchor(session_start_sys_time_ns_);
-    bridge_control_signature_.clear();
+    {
+      std::lock_guard lock(bridge_control_mtx_);
+      bridge_control_signature_.clear();
+    }
   }
 }
 
@@ -651,6 +660,8 @@ bool RerunServer::update_bridge_control() {
   if VUNLIKELY (!bridge_ || !bridge_->can_control()) {
     return false;
   }
+
+  std::lock_guard lock(bridge_control_mtx_);
 
   ProxyAPI::Control control;
   control.mode = ProxyAPI::kAutoAndObserveAll;

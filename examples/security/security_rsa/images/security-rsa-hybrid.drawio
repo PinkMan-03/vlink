@@ -73,7 +73,7 @@
           <mxGeometry x="600" y="100" width="500" height="26" as="geometry" />
         </mxCell>
 
-        <mxCell id="r1" value="parse envelope: header || key_id || lengths || wrapped_key || sig || cipher || tag" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="r1" value="parse envelope: header || lengths || wrapped_key || sig || cipher || tag" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#2e7d32;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="620" y="138" width="460" height="36" as="geometry" />
         </mxCell>
         <mxCell id="r2" value="if advanced.verify_key_pem set:&#10;RSA-PSS-SHA256 verify(peer_sign_pub, AAD || cipher || tag, sig)&#10;mismatch -&amp;gt; reject (drop msg)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#2e7d32;strokeWidth=1.5;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;dashed=1;" vertex="1" parent="1">
@@ -130,7 +130,7 @@
           <mxGeometry x="20" y="528" width="1080" height="24" as="geometry" />
         </mxCell>
 
-        <mxCell id="e1" value="header + key_id&#10;35B + K" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="e1" value="header&#10;34B" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="40" y="562" width="80" height="46" as="geometry" />
         </mxCell>
         <mxCell id="e2" value="wrap_len + sig_len&#10;2B LE each" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">

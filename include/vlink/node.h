@@ -376,7 +376,8 @@ class Node {
    * Enables recording of each published/received message to a bag file.
    * Not supported on @c intra:// or @c dds:// CDR nodes (triggers fatal log).
    *
-   * @param path  Path to the recording directory or file.
+   * @param path  Bag file path. Supported suffixes are @c .vdb, @c .vdbx,
+   *              @c .vcap and @c .vcapx; unsupported suffixes disable recording.
    */
   void set_record_path(const std::string& path);
 

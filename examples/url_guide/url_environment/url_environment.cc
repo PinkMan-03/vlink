@@ -80,11 +80,11 @@ int main() {
     show_env("VLINK_DDS_DOMAIN", "Default DDS domain ID");
     vlink::Utils::unset_env("VLINK_DDS_DOMAIN");
 
-    // VLINK_DDS_BIND: Bind DDS discovery and data to a specific network interface IP.
-    //   Essential in multi-NIC systems to prevent DDS traffic on the wrong network.
-    //   Default: (not set, DDS uses all available interfaces)
-    //   Shell: export VLINK_DDS_BIND=192.168.1.100
-    show_env("VLINK_DDS_BIND", "Bind DDS to specific NIC IP");
+    // VLINK_DDS_BIND: Redirect dds:// URLs to a concrete DDS backend scheme.
+    //   Accepted values include dds/ddsf, ddsc, ddsr, and ddst.
+    //   Default: (not set, no URL-level DDS backend rewrite)
+    //   Shell: export VLINK_DDS_BIND=ddsc
+    show_env("VLINK_DDS_BIND", "Redirect DDS URLs to a DDS backend scheme");
 
     // --- MQTT ---
     // VLINK_MQTT_BROKER: Default MQTT broker URI.
@@ -129,26 +129,17 @@ int main() {
     VLOG_I("==================================================");
 
     // VLINK_URL_REMAP: Path to the URL remap JSON configuration file.
-    //   When set along with VLINK_URL_USE_REMAP=1, every URL passed to
-    //   VLink node constructors is automatically remapped according to the file.
+    //   In builds with URL remap enabled, every URL passed to VLink node
+    //   constructors is automatically remapped according to the file.
     //   Default: (not set)
     //   Shell: export VLINK_URL_REMAP=/etc/vlink/remap.json
     show_env("VLINK_URL_REMAP", "Path to remap JSON file");
 
-    // VLINK_URL_USE_REMAP: Enable automatic URL remapping.
-    //   Set to "1" to activate. Requires VLINK_URL_REMAP to be set.
-    //   Default: (not set, disabled)
-    //   Shell: export VLINK_URL_USE_REMAP=1
-    show_env("VLINK_URL_USE_REMAP", "Enable URL remapping (1=on)");
-
-    // Demonstration: set both variables
+    // Demonstration: set the remap file path
     vlink::Utils::set_env("VLINK_URL_REMAP", "/etc/vlink/remap.json");
-    vlink::Utils::set_env("VLINK_URL_USE_REMAP", "1");
     VLOG_I("  -> Enabled URL remapping:");
     show_env("VLINK_URL_REMAP", "Path to remap JSON");
-    show_env("VLINK_URL_USE_REMAP", "Remapping enabled");
     vlink::Utils::unset_env("VLINK_URL_REMAP");
-    vlink::Utils::unset_env("VLINK_URL_USE_REMAP");
   }
 
   // ================================================================
@@ -184,11 +175,11 @@ int main() {
     VLOG_I("  Category 4: Recording (Bag Files)");
     VLOG_I("==================================================");
 
-    // VLINK_BAG_PATH: Enable global recording and set the output directory.
-    //   When set, all published messages are recorded to bag files at this path.
+    // VLINK_BAG_PATH: Enable global recording and set the output bag file path.
+    //   The suffix must be .vdb/.vdbx/.vcap/.vcapx.
     //   Default: (not set, recording disabled)
-    //   Shell: export VLINK_BAG_PATH=/data/recordings
-    show_env("VLINK_BAG_PATH", "Bag file output directory");
+    //   Shell: export VLINK_BAG_PATH=/data/recordings/session.vdb
+    show_env("VLINK_BAG_PATH", "Bag file output path");
 
     // VLINK_BAG_TAG: Tag string appended to recorded bag file names.
     //   Useful for identifying recording sessions.
@@ -197,7 +188,7 @@ int main() {
     show_env("VLINK_BAG_TAG", "Bag file name tag");
 
     // Demonstration
-    vlink::Utils::set_env("VLINK_BAG_PATH", "/data/recordings");
+    vlink::Utils::set_env("VLINK_BAG_PATH", "/data/recordings/session.vdb");
     vlink::Utils::set_env("VLINK_BAG_TAG", "highway_test_001");
     VLOG_I("  -> Enabled recording:");
     show_env("VLINK_BAG_PATH", "Recording path");
@@ -359,21 +350,20 @@ int main() {
 
     VLOG_I("  # Transport");
     VLOG_I("  export VLINK_DDS_DOMAIN=42");
-    VLOG_I("  export VLINK_DDS_BIND=192.168.1.100");
+    VLOG_I("  export VLINK_DDS_BIND=ddsc");
     VLOG_I("  export VLINK_MQTT_BROKER=tcp://broker:1883");
     VLOG_I("  export VLINK_MQTT_CLIENT_ID=my_app");
     VLOG_I("  export VLINK_MQTT_QOS=1");
     VLOG_I("");
     VLOG_I("  # URL Remapping");
     VLOG_I("  export VLINK_URL_REMAP=/etc/vlink/remap.json");
-    VLOG_I("  export VLINK_URL_USE_REMAP=1");
     VLOG_I("");
     VLOG_I("  # Logging");
     VLOG_I("  export VLINK_LOG_CONSOLE_LEVEL=0");
     VLOG_I("  export VLINK_LOG_DIR=/var/log/vlink");
     VLOG_I("");
     VLOG_I("  # Recording");
-    VLOG_I("  export VLINK_BAG_PATH=/data/recordings");
+    VLOG_I("  export VLINK_BAG_PATH=/data/recordings/session.vdb");
     VLOG_I("  export VLINK_BAG_TAG=test_001");
     VLOG_I("");
     VLOG_I("  # Security");

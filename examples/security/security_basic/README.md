@@ -56,7 +56,7 @@ RSA PEM 字段 / 自定义回调等。本示例只使用 `key`：
 
 ```cpp
 vlink::Security::Config cfg;
-cfg.key = "my-secret";   // 任意长度；SHA-256 截断为 AES-128 key
+cfg.key = "my-secret";   // 原始对称种子；SHA-256 截断为 AES-128 key
 
 vlink::SecurityPublisher<std::string> pub("shm://secure/topic", cfg);
 vlink::SecuritySubscriber<std::string> sub("shm://secure/topic", cfg);
@@ -70,9 +70,9 @@ vlink::SecuritySubscriber<std::string> sub("shm://secure/topic", cfg);
 
 ## 5. 工作原理
 
-1. **加密**：`SecurityPublisher::publish()` 在发送前对 payload 调用 OpenSSL `EVP_aes_128_gcm()` 加密，wire 上为 `[35B envelope header][K B key_id][N B ciphertext][16B tag]`；默认 `key_id == "default"` 在线上按空 id 编码。
+1. **加密**：`SecurityPublisher::publish()` 在发送前对 payload 调用 OpenSSL `EVP_aes_128_gcm()` 加密，wire 上为 `[34B envelope header][N B ciphertext][16B tag]`。
 2. **解密**：`SecuritySubscriber` 在分发回调前对收到的 payload 解密；**GCM tag 校验失败时回调不会被触发**（消息被静默丢弃，日志记录）。
-3. **密钥派生**：`Config::key` 经 SHA-256 截断为 16 字节 AES-128 key，因此可使用任意长度的种子字符串。
+3. **密钥派生**：`Config::key` 经 SHA-256 截断为 16 字节 AES-128 key。
 
 ## 6. 注意事项
 

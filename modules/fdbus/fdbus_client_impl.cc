@@ -79,6 +79,8 @@ bool FdbusClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::c
   }
 
   if (timeout.count() != 0) {
+    ack_manager_.reset_interrupted();
+
     ElapsedTimer timer;
     timer.start();
 

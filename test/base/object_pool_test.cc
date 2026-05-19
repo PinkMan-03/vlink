@@ -650,6 +650,56 @@ TEST_SUITE("base-ObjectPool - edge cases") {
     CHECK(pool->borrowed() == 0u);
     CHECK(pool->size() == 1u);
   }
+
+  TEST_CASE("non-std factory exception rolls counters back") {
+    int calls = 0;
+    auto pool = std::make_shared<ObjectPool<Widget>>(
+        [&calls] {
+          if (calls++ == 0) {
+            throw 1;
+          }
+          return std::make_unique<Widget>();
+        },
+        0u, 1u);
+
+    CHECK_THROWS((void)pool->get());
+    CHECK(pool->borrowed() == 0u);
+
+    auto obj = pool->get();
+    CHECK(obj != nullptr);
+    CHECK(pool->borrowed() == 1u);
+  }
+
+  TEST_CASE("non-std acquire reset exception rolls counters back") {
+    bool throw_now = true;
+    auto pool = std::make_shared<ObjectPool<Widget>>([] { return std::make_unique<Widget>(); }, 0u, 1u,
+                                                     [&throw_now](Widget&) {
+                                                       if (throw_now) {
+                                                         throw 1;
+                                                       }
+                                                     },
+                                                     ObjectPool<Widget>::kPolicyAcquire);
+
+    CHECK_THROWS((void)pool->get());
+    CHECK(pool->borrowed() == 0u);
+
+    throw_now = false;
+    auto obj = pool->get();
+    CHECK(obj != nullptr);
+    CHECK(pool->borrowed() == 1u);
+  }
+
+  TEST_CASE("non-std release reset exception discards object without terminating") {
+    auto pool = std::make_shared<ObjectPool<Widget>>([] { return std::make_unique<Widget>(); }, 0u, 1u,
+                                                     [](Widget&) { throw 1; }, ObjectPool<Widget>::kPolicyRelease);
+
+    auto obj = pool->get();
+    CHECK(pool->borrowed() == 1u);
+    obj.reset();
+
+    CHECK(pool->borrowed() == 0u);
+    CHECK(pool->size() == 0u);
+  }
 }
 
 // NOLINTEND

@@ -153,7 +153,8 @@ DiscoveryReporter::DiscoveryReporter() : impl_(std::make_unique<Impl>()) {
 
   impl_->runtime_version = Version{VLINK_VERSION_MAJOR, VLINK_VERSION_MINOR, VLINK_VERSION_PATCH}.to_string();
 
-  impl_->local_message = get_host_name() + ":" + Utils::get_pid_str() + ":" + get_app_name();
+  impl_->local_message =
+      Helpers::escape_field(get_host_name()) + ":" + Utils::get_pid_str() + ":" + Helpers::escape_field(get_app_name());
 
   impl_->is_profiler_enabled = CpuProfiler::is_global_enabled();
 
@@ -319,8 +320,11 @@ void DiscoveryReporter::rebuild_message() {
     } else {
       profiler_result.first = true;
 
-      message.append(trim_url).append(" ");
-      message.append(trim_ser_type.empty() ? "{}" : trim_ser_type).append(" ");
+      const std::string escaped_url = Helpers::escape_field(trim_url);
+      const std::string escaped_ser_type = trim_ser_type.empty() ? "{}" : Helpers::escape_field(trim_ser_type);
+
+      message.append(escaped_url).append(" ");
+      message.append(escaped_ser_type).append(" ");
       message.append(std::to_string(static_cast<uint32_t>(node->schema_type))).append(" ");
       message.append(impl_->local_message);
 
@@ -329,6 +333,11 @@ void DiscoveryReporter::rebuild_message() {
       }
 
       message.append("\n");
+    }
+
+    if VUNLIKELY (message.size() > kMaxMtuSize) {
+      VLOG_F("DiscoveryReporter: Discovery message is too long [", trim_url, "].");
+      return;
     }
 
     if VUNLIKELY (message_pack.size() + message.size() > kMaxMtuSize) {

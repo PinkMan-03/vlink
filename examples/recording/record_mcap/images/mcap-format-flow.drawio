@@ -8,7 +8,7 @@
         <mxCell id="title" value="MCAP Format Recording and Replay" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#4a148c;" vertex="1" parent="1">
           <mxGeometry x="20" y="24" width="1080" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="extension dispatch: .vdb -&gt; DatabaseWriter / DatabaseReader  vs  .vcap / .vcapx -&gt; McapWriter / McapReader" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#6a1b9a;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="extension dispatch: .vdb / .vdbx -&gt; DatabaseWriter / DatabaseReader  vs  .vcap / .vcapx -&gt; McapWriter / McapReader" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#6a1b9a;" vertex="1" parent="1">
           <mxGeometry x="20" y="58" width="1080" height="22" as="geometry" />
         </mxCell>
 
@@ -94,7 +94,7 @@
         <mxCell id="a_create_diam" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#8e24aa;rounded=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="fac_create" target="fac_diam">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="a_diam_db" value=".vdb / others" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#8e24aa;fontSize=11;fontStyle=1;fontColor=#4a148c;labelBackgroundColor=#ffffff;rounded=1;edgeStyle=orthogonalEdgeStyle;exitX=0;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="fac_diam" target="db_w">
+        <mxCell id="a_diam_db" value=".vdb / .vdbx" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#8e24aa;fontSize=11;fontStyle=1;fontColor=#4a148c;labelBackgroundColor=#ffffff;rounded=1;edgeStyle=orthogonalEdgeStyle;exitX=0;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="fac_diam" target="db_w">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="a_diam_mc" value=".vcap / .vcapx" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.5;strokeColor=#8e24aa;fontSize=11;fontStyle=1;fontColor=#4a148c;labelBackgroundColor=#ffffff;rounded=1;edgeStyle=orthogonalEdgeStyle;exitX=1;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="fac_diam" target="mc_w">

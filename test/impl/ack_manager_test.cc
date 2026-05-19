@@ -176,6 +176,35 @@ TEST_SUITE("impl-AckManager - clear") {
 
     CHECK(result == false);
   }
+
+  TEST_CASE("reset_interrupted allows new generation without reviving cleared requests") {
+    AckManager mgr;
+    auto old_req = mgr.create_request();
+    std::atomic<bool> old_result{true};
+
+    std::thread waiter([&mgr, &old_req, &old_result]() {
+      old_result.store(mgr.process(old_req, 5000, []() { return true; }), std::memory_order_release);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    mgr.clear();
+    mgr.reset_interrupted();
+
+    auto new_req = mgr.create_request();
+
+    std::thread notifier([&mgr, &new_req]() {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      mgr.notify(new_req);
+    });
+
+    bool new_result = mgr.process(new_req, 2000, []() { return true; });
+
+    waiter.join();
+    notifier.join();
+
+    CHECK(new_result == true);
+    CHECK(old_result.load(std::memory_order_acquire) == false);
+  }
 }
 
 // ---------------------------------------------------------------------------

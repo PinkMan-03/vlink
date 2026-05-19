@@ -309,7 +309,7 @@ cfg.key = "my-secret";                          // 对称：SHA-256 截断为 AE
 // 或 cfg.passphrase + cfg.pbkdf2_salt          // 对称：PBKDF2-HMAC-SHA256 派生
 // 或 cfg.public_key_pem / private_key_pem     // 非对称：RSA-OAEP + AES-128-GCM 会话
 // 可选 cfg.advanced.signing_key_pem / verify_key_pem  // RSA-PSS 发送方认证
-// 轮换/AAD/replay：cfg.advanced.key_id / previous_keys / aad_context / replay_window
+// AAD/replay：cfg.advanced.aad_context / replay_window
 // 或 cfg.encrypt_callback / decrypt_callback  // 自定义算法
 
 vlink::SecurityPublisher<Msg> pub("dds://topic", cfg);   // sec_cfg 作为构造函数第二个参数

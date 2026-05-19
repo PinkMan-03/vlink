@@ -50,6 +50,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -174,7 +176,10 @@ class SchemaPluginBase : public SchemaPluginInterface {
   std::unordered_map<std::string, ProtobufDescriptorPtr> protobuf_descriptor_map_;
   std::unordered_map<std::string, std::vector<SchemaData>> schema_map_;
   std::unordered_map<std::string, ProtobufMessagePtr> protobuf_message_map_;
-  std::unordered_map<std::string, FlatbuffersParserPtr> flatbuffers_parser_map_;
+  std::unordered_map<std::string, std::vector<FlatbuffersParserPtr>> flatbuffers_parser_map_;
+  std::vector<FlatbuffersParserPtr> retired_flatbuffers_parsers_;
+  std::unordered_map<std::string, std::unique_ptr<Bytes>> flatbuffers_schema_snapshots_;
+  std::vector<std::unique_ptr<Bytes>> retired_flatbuffers_schema_snapshots_;
   std::mutex mtx_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(SchemaPluginBase)
@@ -200,15 +205,26 @@ inline SchemaPluginBase::~SchemaPluginBase() {
   }
 #endif
 
-  for (auto& [name, ptr] : flatbuffers_parser_map_) {
+  for (auto& [name, ptr_list] : flatbuffers_parser_map_) {
     (void)name;
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
-    delete reinterpret_cast<flatbuffers::Parser*>(ptr);
+    for (auto* ptr : ptr_list) {
+      delete reinterpret_cast<flatbuffers::Parser*>(ptr);
+    }
 #endif
   }
 
+#ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
+  for (auto* ptr : retired_flatbuffers_parsers_) {
+    delete reinterpret_cast<flatbuffers::Parser*>(ptr);
+  }
+#endif
+
   protobuf_message_map_.clear();
   flatbuffers_parser_map_.clear();
+  retired_flatbuffers_parsers_.clear();
+  flatbuffers_schema_snapshots_.clear();
+  retired_flatbuffers_schema_snapshots_.clear();
 }
 
 inline SchemaData SchemaPluginBase::search_schema(const std::string& name, SchemaType schema_type) {
@@ -423,8 +439,34 @@ inline SchemaPluginInterface::FlatbuffersSchemaPtr SchemaPluginBase::search_flat
     return nullptr;
   }
 
-  return reinterpret_cast<FlatbuffersSchemaPtr>(
-      const_cast<reflection::Schema*>(reflection::GetSchema(schema->data.data())));
+  auto snapshot_iter = flatbuffers_schema_snapshots_.find(name);
+
+  if VLIKELY (snapshot_iter != flatbuffers_schema_snapshots_.end() && snapshot_iter->second &&
+              snapshot_iter->second->size() == schema->data.size() &&
+              std::memcmp(snapshot_iter->second->data(), schema->data.data(), schema->data.size()) == 0) {
+    return reinterpret_cast<FlatbuffersSchemaPtr>(
+        const_cast<reflection::Schema*>(reflection::GetSchema(snapshot_iter->second->data())));
+  }
+
+  auto snapshot = std::make_unique<Bytes>(Bytes::deep_copy(schema->data.data(), schema->data.size()));
+
+  if VUNLIKELY (snapshot->empty()) {
+    return nullptr;
+  }
+
+  const auto* snapshot_data = snapshot->data();
+
+  if (snapshot_iter != flatbuffers_schema_snapshots_.end()) {
+    if VLIKELY (snapshot_iter->second) {
+      retired_flatbuffers_schema_snapshots_.emplace_back(std::move(snapshot_iter->second));
+    }
+
+    snapshot_iter->second = std::move(snapshot);
+  } else {
+    flatbuffers_schema_snapshots_.emplace(name, std::move(snapshot));
+  }
+
+  return reinterpret_cast<FlatbuffersSchemaPtr>(const_cast<reflection::Schema*>(reflection::GetSchema(snapshot_data)));
 #else
   (void)name;
   return nullptr;
@@ -434,12 +476,6 @@ inline SchemaPluginInterface::FlatbuffersSchemaPtr SchemaPluginBase::search_flat
 inline SchemaPluginInterface::FlatbuffersParserPtr SchemaPluginBase::create_flatbuffers_parser(
     const std::string& name) {
   std::lock_guard lock(mtx_);
-
-  auto iter = flatbuffers_parser_map_.find(name);
-
-  if (iter != flatbuffers_parser_map_.end()) {
-    return iter->second;
-  }
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
   const auto* schema = find_cached_flatbuffers_schema_locked(name);
@@ -458,8 +494,9 @@ inline SchemaPluginInterface::FlatbuffersParserPtr SchemaPluginBase::create_flat
     return nullptr;
   }
 
-  auto* target_ptr = reinterpret_cast<FlatbuffersParserPtr>(parser.release());
-  flatbuffers_parser_map_.emplace(name, target_ptr);
+  auto* target_ptr = reinterpret_cast<FlatbuffersParserPtr>(parser.get());
+  flatbuffers_parser_map_[name].emplace_back(target_ptr);
+  (void)parser.release();
   return target_ptr;
 #else
   (void)name;
@@ -650,7 +687,7 @@ inline void SchemaPluginBase::clear_flatbuffers_parser_cache_locked(const std::s
     return;
   }
 
-  delete reinterpret_cast<flatbuffers::Parser*>(iter->second);
+  retired_flatbuffers_parsers_.insert(retired_flatbuffers_parsers_.end(), iter->second.begin(), iter->second.end());
   flatbuffers_parser_map_.erase(iter);
 }
 #endif

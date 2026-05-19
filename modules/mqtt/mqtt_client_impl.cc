@@ -99,6 +99,8 @@ bool MqttClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
   }
 
   if (timeout.count() != 0) {
+    ack_manager_.reset_interrupted();
+
     ElapsedTimer timer;
     timer.start();
 

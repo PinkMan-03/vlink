@@ -334,6 +334,11 @@ class GlobalUrlRemap final : public UrlRemap {
     return remap;
   }
 
+  std::string convert_thread_safe(const std::string& url) noexcept {
+    std::lock_guard lock(mtx_);
+    return convert(url);
+  }
+
  private:
   GlobalUrlRemap() {
     const auto& url_remap_env = Utils::get_env("VLINK_URL_REMAP", "");
@@ -349,6 +354,8 @@ class GlobalUrlRemap final : public UrlRemap {
 
   ~GlobalUrlRemap() = default;
 
+  std::mutex mtx_;
+
   VLINK_DISALLOW_COPY_AND_ASSIGN(GlobalUrlRemap)
 };
 
@@ -361,7 +368,7 @@ Protocol::Protocol(const std::string& address) {
   }
 
 #if VLINK_URL_USE_REMAP
-  std::string real_address = GlobalUrlRemap::get().convert(address);
+  std::string real_address = GlobalUrlRemap::get().convert_thread_safe(address);
 
   UrlParser parser(real_address);
   str = std::move(real_address);

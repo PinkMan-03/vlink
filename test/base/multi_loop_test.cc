@@ -163,6 +163,69 @@ TEST_SUITE("base-MultiLoop") {
     loop.wait_for_quit(2000);
   }
 
+  TEST_CASE("wait_for_idle waits for worker task completion through base pointer") {
+    MultiLoop loop(2);
+    MessageLoop* base = &loop;
+    loop.async_run();
+
+    std::atomic<bool> done{false};
+
+    loop.post_task([&done]() {
+      std::this_thread::sleep_for(100ms);
+      done.store(true, std::memory_order_release);
+    });
+
+    CHECK(base->wait_for_idle(3000));
+    CHECK(done.load(std::memory_order_acquire));
+
+    loop.quit();
+    loop.wait_for_quit(2000);
+  }
+
+  TEST_CASE("wait_for_idle waits for worker tasks reposted to dispatcher") {
+    MultiLoop loop(1);
+    MessageLoop* base = &loop;
+    loop.async_run();
+
+    std::atomic<bool> followup_started{false};
+    std::atomic<bool> allow_followup_finish{false};
+    std::atomic<bool> followup_done{false};
+    std::atomic<bool> stop_releaser{false};
+
+    loop.post_task([&loop, &followup_started, &allow_followup_finish, &followup_done]() {
+      loop.post_task([&followup_started, &allow_followup_finish, &followup_done]() {
+        followup_started.store(true, std::memory_order_release);
+
+        while (!allow_followup_finish.load(std::memory_order_acquire)) {
+          std::this_thread::sleep_for(1ms);
+        }
+
+        followup_done.store(true, std::memory_order_release);
+      });
+    });
+
+    std::thread releaser([&followup_started, &allow_followup_finish, &stop_releaser]() {
+      while (!followup_started.load(std::memory_order_acquire) && !stop_releaser.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(1ms);
+      }
+
+      if (followup_started.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(50ms);
+        allow_followup_finish.store(true, std::memory_order_release);
+      }
+    });
+
+    CHECK(base->wait_for_idle(3000));
+    CHECK(followup_done.load(std::memory_order_acquire));
+
+    stop_releaser.store(true, std::memory_order_release);
+    allow_followup_finish.store(true, std::memory_order_release);
+    releaser.join();
+
+    loop.quit();
+    loop.wait_for_quit(2000);
+  }
+
   TEST_CASE("quit stops the loop") {
     MultiLoop loop(2);
     loop.async_run();

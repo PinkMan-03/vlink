@@ -37,21 +37,18 @@ DdstClientImpl::WriterListener::WriterListener(NodeImpl* impl) : DdstWriterListe
 void DdstClientImpl::WriterListener::on_publication_matched(ddst::DataWriter* writer,
                                                             const ddst::PublicationMatchedStatus& status) {
   auto* instance = static_cast<DdstClientImpl*>(get_impl());
-  auto* message_loop = instance->get_message_loop();
 
   instance->write_session_count_ = status.current_count;
 
   // std::this_thread::sleep_for(std::chrono::microseconds(1));  //?
 
-  if (message_loop) {
-    message_loop->post_task([instance]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->update_connected();
-    });
-  } else {
+                  instance->update_connected();
+                })) {
     instance->update_connected();
   }
 
@@ -64,21 +61,18 @@ DdstClientImpl::ReaderListener::ReaderListener(NodeImpl* impl) : DdstReaderListe
 void DdstClientImpl::ReaderListener::on_subscription_matched(ddst::DataReader* reader,
                                                              const ddst::SubscriptionMatchedStatus& status) {
   auto* instance = static_cast<DdstClientImpl*>(get_impl());
-  auto* message_loop = instance->get_message_loop();
 
   instance->read_session_count_ = status.current_count;
 
   // std::this_thread::sleep_for(std::chrono::microseconds(1));  //?
 
-  if (message_loop) {
-    message_loop->post_task([instance]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->update_connected();
-    });
-  } else {
+                  instance->update_connected();
+                })) {
     instance->update_connected();
   }
 
@@ -87,17 +81,14 @@ void DdstClientImpl::ReaderListener::on_subscription_matched(ddst::DataReader* r
 
 void DdstClientImpl::ReaderListener::on_data_available(ddst::DataReader* reader) {
   auto* instance = static_cast<DdstClientImpl*>(get_impl());
-  auto* message_loop = instance->get_message_loop();
 
-  if (message_loop) {
-    message_loop->post_task([instance, reader]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance, reader]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->process_message(reader);
-    });
-  } else {
+                  instance->process_message(reader);
+                })) {
     instance->process_message(reader);
   }
 }
@@ -235,25 +226,23 @@ bool DdstClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
 
   uint64_t id = DdstFactory::get_guid(writer_->get_guid(), ++seq_);
 
-  auto ack_request = ack_manager_.create_request();
-
-  {
-    std::lock_guard param_lock(param_mtx_);
-    callbacks_[id] = [this, ack_request, callback = std::move(callback), timeout](const Bytes& resp_data) {
-      if (timeout.count() != 0) {
-        ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
-      } else {
-        callback(resp_data);
-      }
-    };
-  }
-
   auto cleanup_callback = [this, &id]() {
     std::lock_guard param_lock(param_mtx_);
     callbacks_.erase(id);
   };
 
   if (timeout.count() != 0) {
+    ack_manager_.reset_interrupted();
+
+    auto ack_request = ack_manager_.create_request();
+
+    {
+      std::lock_guard param_lock(param_mtx_);
+      callbacks_[id] = [this, ack_request, callback = std::move(callback)](const Bytes& resp_data) {
+        ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
+      };
+    }
+
     ElapsedTimer timer;
     timer.start();
 
@@ -280,7 +269,18 @@ bool DdstClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
     return result;
   }
 
-  return DdstFactory::write_data(writer_.get(), req_data, id);
+  {
+    std::lock_guard param_lock(param_mtx_);
+    callbacks_[id] = [callback = std::move(callback)](const Bytes& resp_data) { callback(resp_data); };
+  }
+
+  bool result = DdstFactory::write_data(writer_.get(), req_data, id);
+
+  if VUNLIKELY (!result) {
+    cleanup_callback();
+  }
+
+  return result;
 }
 
 }  // namespace vlink

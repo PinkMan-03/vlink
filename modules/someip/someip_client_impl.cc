@@ -78,6 +78,8 @@ bool SomeipClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::
   }
 
   if (timeout.count() != 0) {
+    ack_manager_.reset_interrupted();
+
     ElapsedTimer timer;
     timer.start();
 
@@ -93,17 +95,20 @@ bool SomeipClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::
 
     auto ack_request = ack_manager_.create_request();
     uint64_t seq = 0;
+    bool has_seq = false;
 
     auto ack_function = [this, ack_request, callback = std::move(callback)](const Bytes& resp_data) mutable {
       ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
     };
 
-    bool ret = ack_manager_.process(ack_request, timeout.count() - elapsed,
-                                    [this, &req_data, &seq, ack_function = std::move(ack_function)]() mutable {
-                                      return object_->call(conf_.method, req_data, std::move(ack_function), &seq);
-                                    });
+    bool ret =
+        ack_manager_.process(ack_request, timeout.count() - elapsed,
+                             [this, &req_data, &seq, &has_seq, ack_function = std::move(ack_function)]() mutable {
+                               has_seq = object_->call(conf_.method, req_data, std::move(ack_function), &seq);
+                               return has_seq;
+                             });
 
-    if VUNLIKELY (!ret && seq != 0) {
+    if VUNLIKELY (!ret && has_seq) {
       object_->remove_response_callback(seq);
     }
 

@@ -27,13 +27,15 @@
  *
  * @details
  * @c BagReaderProcessor accepts messages pushed from one or more @c BagReader instances
- * and delivers them to an @c OutputCallback in ascending timestamp order.  It uses a
- * time-windowed cache to absorb out-of-order messages that can arise when reading
- * consecutive split files concurrently.
+ * and delivers the oldest safe message from a bounded time-windowed cache.  This
+ * smooths out-of-order messages that can arise when reading consecutive split
+ * files concurrently without waiting forever for a late older timestamp.
  *
- * The processor maintains an internal sorted queue.  Messages are held for at least
- * @c Config::min_cache_time milliseconds before being flushed, allowing late-arriving
- * messages from the current split to be sorted before delivery.
+ * The processor maintains an internal sorted queue.  Once the buffered timestamp
+ * span reaches @c Config::min_cache_time milliseconds, the oldest message can be
+ * emitted.  If the tail never reaches that timestamp watermark, a wall-clock
+ * timeout flushes the remaining messages so playback can finish.  Messages that
+ * arrive after that bounded window can still be older than data already emitted.
  *
  * @par Typical usage
  * @code

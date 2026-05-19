@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <csignal>
 #include <cstdio>
 #include <filesystem>
@@ -1961,6 +1962,10 @@ double get_memory_usage() noexcept {
 }
 
 bool is_process_running(const std::string& process_name) noexcept {
+  if VUNLIKELY (process_name.empty()) {
+    return false;
+  }
+
 #ifdef _WIN32
   HANDLE hsnapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
   if VUNLIKELY (hsnapshot == INVALID_HANDLE_VALUE) {
@@ -1982,18 +1987,37 @@ bool is_process_running(const std::string& process_name) noexcept {
   ::CloseHandle(hsnapshot);
   return false;
 #else
+  const bool safe_name = std::all_of(process_name.begin(), process_name.end(), [](unsigned char c) {
+    return std::isalnum(c) != 0 || c == '_' || c == '-' || c == '.';
+  });
+
+  if VUNLIKELY (!safe_name) {
+    return false;
+  }
+
+  std::string process_pattern;
+  process_pattern.reserve(process_name.size() + 4U);
+
+  for (char c : process_name) {
+    if (c == '.') {
+      process_pattern.append("\\.");
+    } else {
+      process_pattern.push_back(c);
+    }
+  }
+
   std::ostringstream oss;
 
 #if defined(__QNX__)
-  oss << "pidin | grep " << process_name << " | grep -v grep > /dev/null";
+  oss << "pidin | grep -- '" << process_pattern << "' | grep -v grep > /dev/null";
 #elif defined(__ANDROID__)
-  oss << "ps -A | grep " << process_name << " | grep -v grep > /dev/null";
+  oss << "ps -A | grep -- '" << process_pattern << "' | grep -v grep > /dev/null";
 #elif defined(__APPLE__)
-  oss << "pgrep -x " << process_name << " > /dev/null 2>&1";
+  oss << "pgrep -x -- '" << process_pattern << "' > /dev/null 2>&1";
 #elif defined(__linux__)
-  oss << "pgrep -x " << process_name << " > /dev/null 2>&1";
+  oss << "pgrep -x -- '" << process_pattern << "' > /dev/null 2>&1";
 #else
-  oss << "ps aux | grep " << process_name << " | grep -v grep > /dev/null";
+  oss << "ps aux | grep -- '" << process_pattern << "' | grep -v grep > /dev/null";
 #endif
 
   std::string command = oss.str();

@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -73,6 +74,56 @@ struct DatabaseWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.
     SchemaType schema_type{SchemaType::kUnknown};
 
     bool operator<(const UrlMsgInfo& target) const noexcept { return index < target.index; }
+  };
+
+  struct WriteStateSnapshot final {
+    int64_t current_row{0};
+    int64_t current_size{0};
+    bool has_oversize{false};
+    int64_t last_timestamp{0};
+    std::vector<std::string> total_url_list;
+    int64_t total_current_row{0};
+    int64_t total_current_size{0};
+    int64_t total_timestamp{0};
+    std::unordered_map<std::string, UrlMsgInfo> url_map;
+    std::unordered_set<std::string> ser_map;
+    std::unordered_map<std::string, UrlMsgInfo> total_url_map;
+    std::unordered_map<std::string, SchemaData> total_schema_map;
+    std::unordered_map<std::string, int64_t> compress_ignore_map;
+    std::string write_url_type;
+
+    explicit WriteStateSnapshot(const DatabaseWriter::Impl& impl)
+        : current_row(impl.current_row),
+          current_size(impl.current_size),
+          has_oversize(impl.has_oversize),
+          last_timestamp(impl.last_timestamp),
+          total_url_list(impl.total_url_list),
+          total_current_row(impl.total_current_row),
+          total_current_size(impl.total_current_size),
+          total_timestamp(impl.total_timestamp),
+          url_map(impl.url_map),
+          ser_map(impl.ser_map),
+          total_url_map(impl.total_url_map),
+          total_schema_map(impl.total_schema_map),
+          compress_ignore_map(impl.compress_ignore_map),
+          write_url_type(impl.write_url_type) {}
+
+    void restore(DatabaseWriter::Impl& impl) const {
+      impl.current_row = current_row;
+      impl.current_size = current_size;
+      impl.has_oversize = has_oversize;
+      impl.last_timestamp = last_timestamp;
+      impl.total_url_list = total_url_list;
+      impl.total_current_row = total_current_row;
+      impl.total_current_size = total_current_size;
+      impl.total_timestamp = total_timestamp;
+      impl.url_map = url_map;
+      impl.ser_map = ser_map;
+      impl.total_url_map = total_url_map;
+      impl.total_schema_map = total_schema_map;
+      impl.compress_ignore_map = compress_ignore_map;
+      impl.write_url_type = write_url_type;
+    }
   };
 
   std::atomic_bool is_dumping{false};
@@ -134,6 +185,7 @@ struct DatabaseWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.
   ElapsedTimer sync_timer;
 
   std::unordered_map<std::string, int64_t> compress_ignore_map;
+  std::unique_ptr<WriteStateSnapshot> cache_snapshot;
 
   std::string write_url_type;
 
@@ -597,6 +649,7 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
       std::string url;
       std::string ser_type;
 
+      std::lock_guard lock(impl_->write_mtx);
       get_url_meta(url_index, ser_index, url, ser_type);
 
       write(url, ser_type, schema_type, action_type, queued_data, target_timestamp);
@@ -674,7 +727,7 @@ void DatabaseWriter::open(const std::string& path) {
   int ret = 0;
   char* err_msg = nullptr;
 
-  auto free_err_msg = [&]() noexcept {
+  auto free_err_msg = [&err_msg]() noexcept {
     if (err_msg) {
       ::sqlite3_free(err_msg);
       err_msg = nullptr;
@@ -688,7 +741,7 @@ void DatabaseWriter::open(const std::string& path) {
     }
   };
 
-  auto close_db = [&]() noexcept {
+  auto close_db = [this, &finalize_stmt]() noexcept {
     if (!impl_->db) {
       return;
     }
@@ -1240,6 +1293,7 @@ void DatabaseWriter::close() {
 
   impl_->in_cached = false;
   impl_->cached_size = 0;
+  impl_->cache_snapshot.reset();
 #endif
 
   impl_->last_timestamp = 0;
@@ -1860,6 +1914,7 @@ bool DatabaseWriter::begin_cache() {
     return false;
   }
 
+  impl_->cache_snapshot = std::make_unique<Impl::WriteStateSnapshot>(*impl_);
   impl_->in_cached = true;
   impl_->cached_size = 0;
 
@@ -1891,6 +1946,7 @@ bool DatabaseWriter::sync_cache() {
 
   impl_->in_cached = false;
   impl_->cached_size = 0;
+  impl_->cache_snapshot.reset();
 
   impl_->cache_timer.stop();
 
@@ -1908,6 +1964,11 @@ bool DatabaseWriter::rollback_cache() {
   }
 
   ::sqlite3_exec(impl_->db, "ROLLBACK;", nullptr, nullptr, nullptr);
+
+  if (impl_->cache_snapshot) {
+    impl_->cache_snapshot->restore(*impl_);
+    impl_->cache_snapshot.reset();
+  }
 
   impl_->in_cached = false;
   impl_->cached_size = 0;

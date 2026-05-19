@@ -59,7 +59,7 @@
         <mxCell id="rule4" value="MUST install in PAIRS  -  unpaired callback is ignored with a warning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ef9a9a;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=11;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="600" y="252" width="480" height="28" as="geometry" />
         </mxCell>
-        <mxCell id="rule5" value="empty input -&amp;gt; callback returns true (passthrough)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontStyle=2;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="rule5" value="empty input -&amp;gt; Security rejects before callback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontStyle=2;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="600" y="284" width="480" height="22" as="geometry" />
         </mxCell>
 

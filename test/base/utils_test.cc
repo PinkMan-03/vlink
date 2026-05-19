@@ -404,6 +404,20 @@ TEST_SUITE("base-Utils - process utilities") {
     CHECK_FALSE(running);
   }
 
+  TEST_CASE("is_process_running treats dot as a literal character") {
+    bool running = Utils::is_process_running("__vlink_fake_process_xyz_._");
+    CHECK_FALSE(running);
+  }
+
+  TEST_CASE("is_process_running rejects shell metacharacters") {
+    const auto marker = std::filesystem::temp_directory_path() / "vlink_is_process_running_shell_injection_marker";
+    std::filesystem::remove(marker);
+
+    const std::string payload = "__vlink_fake_process_xyz__; touch " + marker.string();
+    CHECK_FALSE(Utils::is_process_running(payload));
+    CHECK_FALSE(std::filesystem::exists(marker));
+  }
+
   TEST_CASE("is_process_running for the current executable does not crash") {
     // Just verify it does not crash; result depends on the environment
     std::string app_name = Utils::get_app_name();

@@ -38,17 +38,14 @@ Iceoryx fatal abort；独立 standalone 段始终可跑。
 
 ```c
 typedef struct {
-  const char* key_id;               // 当前发送密钥 id（线上 <=255 字节）
   const char* aad_context;          // AEAD 绑定上下文（<=65535 字节）
   uint32_t replay_window;           // init 默认 4096；设 0 可关闭 replay 检查
-  const vlink_security_previous_key_t* previous_keys;
-  size_t previous_keys_size;
   const char* signing_key_pem;      // 本端签名私钥
   const char* verify_key_pem;       // 对端验签公钥
 } vlink_security_advanced_config_t;
 
 typedef struct {
-  const char* key;                  // SHA-256 截断为 16B AES-128
+  const char* key;                  // 原始对称种子；SHA-256 截断为 16B AES-128
   const char* passphrase;           // PBKDF2 入参（与 pbkdf2_salt 搭配）
   const uint8_t* pbkdf2_salt;       // ≥ 16 字节
   size_t pbkdf2_salt_size;
@@ -115,6 +112,7 @@ vlink_destroy_publisher(&pub);
 - C API 的 `vlink_create_secure_*` 在 C wrapper 层对 `Bytes` payload 加解密；它不走 C++ `SecurityXxx` 的 `NodeImpl::enable_security()` 传输限制。跨 C API / C++ / Python 互通时，双方必须使用相同 URL、schema metadata 和 `Security::Config`。
 - 因为 `Security` 在 `vlink_create_secure_*` 内部于 `listen()` / `init()` 之前装配，所以不存在“前几条消息可能走明文”的窗口。
 - `vlink_security_config_t.encrypt_callback` 与 `decrypt_callback` 必须**成对**安装，单独一个会被忽略并打 warning。
+- 同一 `vlink_security_handle_t` 上的 encrypt/decrypt callback 会串行执行；多个 handle 共享回调状态时仍需业务自行同步。
 
 ## 5. 相关
 

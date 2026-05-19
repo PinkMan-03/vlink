@@ -28,6 +28,7 @@
 #include <cinttypes>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -76,6 +77,7 @@ struct McapReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
 
   std::string path;
   BagReader::Info info;
+  std::vector<BagReader::Info::UrlMeta> raw_url_metas;
   std::mutex mtx;
   ConditionVariable cv;
 
@@ -113,6 +115,7 @@ struct McapReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
     int64_t end{0};
     std::unordered_map<std::string, int> url_to_id_map;
     std::unordered_map<int, std::string> id_to_url_map;
+    std::unordered_map<int, ActionType> channel_action_map;
     bool has_idx_elapsed{false};
     bool has_idx_url{false};
     bool has_schema{false};
@@ -122,6 +125,7 @@ struct McapReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
     WrapperFile() {
       url_to_id_map.reserve(128);
       id_to_url_map.reserve(128);
+      channel_action_map.reserve(128);
     }
   };
 
@@ -158,6 +162,7 @@ McapReader::~McapReader() {
 
 void McapReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
   BagReader::bind_plugin_interface(plugin_interface);
+  impl_->info.url_metas = impl_->raw_url_metas;
   process_url_metas(impl_->info.url_metas);
   rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
 }
@@ -255,7 +260,7 @@ void McapReader::jump(int64_t begin_time, double rate, int times, bool force_to_
   if (begin_time < 0) {
     begin_time = 0;
   } else if (begin_time > impl_->info.total_duration) {
-    begin_time = impl_->info.total_duration - 100;
+    begin_time = std::max<int64_t>(0, impl_->info.total_duration - 100);
   }
 
   impl_->real_elapsed = begin_time * 1000U;
@@ -945,6 +950,7 @@ void McapReader::prepare_file(void* file) {
     impl_->url_to_ser_map.clear();
     impl_->url_to_schema_type_map.clear();
     impl_->info.url_metas.clear();
+    impl_->raw_url_metas.clear();
 
     impl_->info.total_raw_size = 0;
 
@@ -1024,6 +1030,7 @@ void McapReader::prepare_file(void* file) {
       auto& freq_str = channel_meta_data.metadata["freq"];
       auto ser_iter = channel_meta_data.metadata.find("ser");
       auto encoding_iter = channel_meta_data.metadata.find("encoding");
+      auto action_iter = channel_meta_data.metadata.find("action");
       const auto& schema_ptr = reader->schema(channel_ptr->schemaId);
 
       int pindex = -1;
@@ -1101,6 +1108,18 @@ void McapReader::prepare_file(void* file) {
 
       impl_->url_to_ser_map.emplace(url_meta.url, url_meta.ser_type);
       impl_->url_to_schema_type_map.emplace(url_meta.url, url_meta.schema_type);
+
+      if (action_iter != channel_meta_data.metadata.end()) {
+        url_meta.action_type = convert_action(action_iter->second);
+        wrapper_file->channel_action_map.emplace(channel, url_meta.action_type);
+      } else if (auto channel_action_iter = channel_ptr->metadata.find("action");
+                 channel_action_iter != channel_ptr->metadata.end()) {
+        url_meta.action_type = convert_action(channel_action_iter->second);
+        wrapper_file->channel_action_map.emplace(channel, url_meta.action_type);
+      } else {
+        wrapper_file->channel_action_map.emplace(channel, ActionType::kUnknownAction);
+      }
+
       impl_->info.url_metas.emplace_back(std::move(url_meta));
     }
 
@@ -1140,11 +1159,21 @@ void McapReader::prepare_file(void* file) {
 
         impl_->url_to_ser_map.emplace(url_meta.url, url_meta.ser_type);
         impl_->url_to_schema_type_map.emplace(url_meta.url, url_meta.schema_type);
+
+        if (auto action_iter = pchannel->metadata.find("action"); action_iter != pchannel->metadata.end()) {
+          url_meta.action_type = convert_action(action_iter->second);
+          wrapper_file->channel_action_map.emplace(id, url_meta.action_type);
+        } else {
+          wrapper_file->channel_action_map.emplace(id, ActionType::kUnknownAction);
+        }
+
         impl_->info.url_metas.emplace_back(std::move(url_meta));
       }
     }
 
     std::sort(impl_->info.url_metas.begin(), impl_->info.url_metas.end());
+    impl_->raw_url_metas = impl_->info.url_metas;
+    rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
   }
 
   impl_->info.has_idx_elapsed = false;
@@ -1393,6 +1422,7 @@ void McapReader::open(const std::string& path) {
         impl_->url_to_ser_map.clear();
         impl_->url_to_schema_type_map.clear();
         impl_->info.url_metas.clear();
+        impl_->raw_url_metas.clear();
 
         impl_->info.url_metas.reserve(urls_json.size());
 
@@ -1405,6 +1435,9 @@ void McapReader::open(const std::string& path) {
           url_meta.index = url_info["index"];
           url_meta.url = url_info["url"];
           url_meta.url_type = url_info["type"];
+          if (url_info.contains("action")) {
+            url_meta.action_type = convert_action(url_info["action"].get<std::string>());
+          }
           url_meta.ser_type = url_info["ser"];
 
           if (url_info.contains("encoding")) {
@@ -1433,6 +1466,8 @@ void McapReader::open(const std::string& path) {
         }
 
         std::sort(impl_->info.url_metas.begin(), impl_->info.url_metas.end());
+        impl_->raw_url_metas = impl_->info.url_metas;
+        rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
       } catch (nlohmann::json::exception& e) {
         VLOG_F("McapReader: JSON parse error, ", e.what(), ".");
         return;
@@ -1496,15 +1531,7 @@ int McapReader::get_reset_index(const Config& config) {
   };
 
   auto filter_function = [this](std::string_view url) -> bool {
-    if VUNLIKELY (!url.data()) {
-      return false;
-    }
-
-    if (impl_->config.filter_urls.empty()) {
-      return true;
-    }
-
-    return impl_->config.filter_urls.count(std::string(url)) != 0;
+    return match_playback_url_filter(url, impl_->config.filter_urls);
   };
 
   int start_index = -1;
@@ -1632,7 +1659,7 @@ void McapReader::read(const Config& config) {
     int64_t timestamp = 0;
     int64_t last_timestamp = 0;
     const uint8_t* data = nullptr;
-    int size = 0;
+    size_t size = 0;
 
     // process files
     for (int index = start_index; index < static_cast<int>(impl_->file_list.size()); ++index) {
@@ -1668,7 +1695,14 @@ void McapReader::read(const Config& config) {
         }
 
         data = reinterpret_cast<const uint8_t*>(iter->message.data);
-        size = iter->message.dataSize;
+
+        if VUNLIKELY (iter->message.dataSize > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+          CLOG_W("McapReader: Message data size is too large to address, size = %" PRIu64 ".",
+                 static_cast<uint64_t>(iter->message.dataSize));
+          continue;
+        }
+
+        size = static_cast<size_t>(iter->message.dataSize);
 
         elapsed = (timestamp / impl_->rate) - (impl_->elapsed_timer.get() - impl_->pause_elapsed) -
                   (impl_->begin_time * 1000U / impl_->rate);
@@ -1717,8 +1751,14 @@ void McapReader::read(const Config& config) {
           break;
         }
 
-        BagReader::process_output(timestamp, iter->channel->topic, ActionType::kUnknownAction,
-                                  Bytes::shallow_copy(data, size));
+        ActionType action_type = ActionType::kUnknownAction;
+
+        if (auto action_iter = wrapper_file.channel_action_map.find(iter->message.channelId);
+            action_iter != wrapper_file.channel_action_map.end()) {
+          action_type = action_iter->second;
+        }
+
+        BagReader::process_output(timestamp, iter->channel->topic, action_type, Bytes::shallow_copy(data, size));
       }
 
       if (is_interrupted || is_end) {

@@ -783,6 +783,38 @@ TEST_SUITE("base-Process") {
     proc.wait_for_finished(3000);
   }
 
+  TEST_CASE("lowering max buffer below cached output does not append more") {
+    Process proc;
+    proc.set_process_mode(Process::kSeparateMode);
+    proc.set_max_buffer_size(1024);
+
+    proc.start("/bin/sh", {"-c", "printf abcdef; sleep 0.5; printf ghij"});
+
+    REQUIRE(proc.wait_for_ready_read(2000));
+    const size_t first_size = proc.bytes_available_stdout();
+    REQUIRE(first_size > 1u);
+
+    proc.set_max_buffer_size(first_size - 1u);
+    CHECK(proc.wait_for_finished(3000));
+
+    CHECK(proc.bytes_available_stdout() == first_size);
+    CHECK(proc.get_error() == Process::kBufferOverflowError);
+  }
+
+  TEST_CASE("exact max buffer fill is not reported as truncated") {
+    Process proc;
+    proc.set_process_mode(Process::kSeparateMode);
+    proc.set_max_buffer_size(6);
+
+    proc.start("/bin/sh", {"-c", "printf abcdef"});
+    CHECK(proc.wait_for_finished(3000));
+
+    std::string output;
+    proc.read_all_output(output);
+    CHECK(output == "abcdef");
+    CHECK(proc.get_error() != Process::kBufferOverflowError);
+  }
+
   TEST_CASE("write-vector-overload") {
     Process proc;
     proc.start("/bin/cat", {});

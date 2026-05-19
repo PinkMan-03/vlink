@@ -892,26 +892,34 @@ bool ShmClient::release(const Bytes& bytes) {
   return true;
 }
 
-bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback) {
+bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback, uint64_t* seq_out) {
   if VUNLIKELY (!is_connected()) {
     return false;
   }
 
   std::lock_guard lock(mtx_);
+  uint64_t response_seq = 0;
+  bool has_response_callback = false;
 
   if (req_data.is_loaned()) {
     auto* write_header =
         shm::popo::RequestHeader::fromPayload(const_cast<uint8_t*>(req_data.data()) - ShmFactory::get_loaned_offset());
 
     if (callback) {
-      callbacks_[seq_] = [callback = std::move(callback), channel](uint64_t target_channel, const Bytes& bytes) {
+      response_seq = seq_.load(std::memory_order_relaxed);
+      has_response_callback = true;
+      callbacks_[response_seq] = [callback = std::move(callback), channel](uint64_t target_channel,
+                                                                           const Bytes& bytes) {
         if (channel != target_channel) {
           return;
         }
 
         callback(bytes);
       };
-      write_header->setSequenceId(seq_);
+      write_header->setSequenceId(response_seq);
+      if (seq_out) {
+        *seq_out = response_seq;
+      }
       ++seq_;
     }
 
@@ -919,6 +927,9 @@ bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallb
 
     if VUNLIKELY (send_result.has_error()) {
       VLOG_E("ShmFactory: Failed to send, error: ", send_result.get_error(), ".");
+      if (has_response_callback) {
+        callbacks_.erase(response_seq);
+      }
       return false;
     }
   } else {
@@ -936,14 +947,20 @@ bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallb
     auto* write_header = shm::popo::RequestHeader::fromPayload(write_req);
 
     if (callback) {
-      callbacks_[seq_] = [callback = std::move(callback), channel](uint64_t target_channel, const Bytes& bytes) {
+      response_seq = seq_.load(std::memory_order_relaxed);
+      has_response_callback = true;
+      callbacks_[response_seq] = [callback = std::move(callback), channel](uint64_t target_channel,
+                                                                           const Bytes& bytes) {
         if (channel != target_channel) {
           return;
         }
 
         callback(bytes);
       };
-      write_header->setSequenceId(seq_);
+      write_header->setSequenceId(response_seq);
+      if (seq_out) {
+        *seq_out = response_seq;
+      }
       ++seq_;
     }
 
@@ -953,13 +970,20 @@ bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallb
 
     if VUNLIKELY (send_result.has_error()) {
       VLOG_E("ShmFactory: Failed to send, error: ", send_result.get_error(), ".");
-      callbacks_.erase(seq_ - 1);
+      if (has_response_callback) {
+        callbacks_.erase(response_seq);
+      }
 
       return false;
     }
   }
 
   return true;
+}
+
+void ShmClient::remove_response_callback(uint64_t seq) {
+  std::lock_guard lock(mtx_);
+  callbacks_.erase(seq);
 }
 
 void ShmClient::detect_server() {
@@ -1269,7 +1293,7 @@ void ShmSubscriber::process_message() {
           Bytes msg_bytes;
           ShmFactory::read_data(read_msg, read_header->userPayloadSize(), channel, seq, msg_bytes);
 
-          if VUNLIKELY (is_latency_and_lost_enabled_) {
+          if VUNLIKELY (is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
             if (seq > 0) {
               calc_sample_.update(seq, static_cast<uint64_t>(read_header->originId()));
             } else {
@@ -1277,17 +1301,20 @@ void ShmSubscriber::process_message() {
             }
           }
 
-          traverse_msg_callback([channel, &msg_bytes](NodeImpl* impl, const auto& callback) {
+          bool called = false;
+
+          traverse_msg_callback([channel, &msg_bytes, &called](NodeImpl* impl, const auto& callback) {
             const auto* conf_ptr = impl->get_target_conf<ShmConf>();
 
             if (static_cast<uint64_t>(conf_ptr->hash_code) != channel) {
               return;
             }
 
+            called = true;
             callback(msg_bytes);
           });
 
-          if VLIKELY (!manual_unloan_) {
+          if VLIKELY (!manual_unloan_ || !called) {
             sub_->release(read_msg);
             if (sem_) {
               sem_->release();
@@ -1323,9 +1350,13 @@ bool ShmSubscriber::release(const Bytes& bytes) {
   return true;
 }
 
-void ShmSubscriber::set_latency_and_lost_enabled(bool enable) { is_latency_and_lost_enabled_ = enable; }
+void ShmSubscriber::set_latency_and_lost_enabled(bool enable) {
+  is_latency_and_lost_enabled_.store(enable, std::memory_order_release);
+}
 
-bool ShmSubscriber::is_latency_and_lost_enabled() const { return is_latency_and_lost_enabled_; }
+bool ShmSubscriber::is_latency_and_lost_enabled() const {
+  return is_latency_and_lost_enabled_.load(std::memory_order_acquire);
+}
 
 const CalculateSample& ShmSubscriber::get_calculate_sample() const { return calc_sample_; }
 

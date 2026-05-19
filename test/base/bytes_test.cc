@@ -753,6 +753,22 @@ TEST_SUITE("base-Bytes") {
   }
 
   // -------------------------------------------------------------------------
+  TEST_CASE("reserve within SBO preserves data without reallocating") {
+    Bytes b = Bytes::create(8u);
+    REQUIRE(b.data() != nullptr);
+    uint8_t* old_data = b.real_data();
+    fill_pattern(b);
+
+    bool ok = b.reserve(32u);
+
+    CHECK(ok);
+    CHECK(b.real_data() == old_data);
+    CHECK(b.size() == 8u);
+    CHECK(b[0] == 0x00u);
+    CHECK(b[7] == 0x07u);
+  }
+
+  // -------------------------------------------------------------------------
   TEST_CASE("reserve no-op when capacity already sufficient") {
     Bytes b = Bytes::create(64u);
     size_t cap_before = b.capacity();
@@ -811,6 +827,48 @@ TEST_SUITE("base-Bytes") {
     CHECK(copy.size() == original.size());
     CHECK(copy == original);
     CHECK(copy.data() != original.data());
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("copy assignment from offset alias of self stays valid") {
+    Bytes owner = Bytes::create(Bytes::stack_size() + 32u, 8u);
+    REQUIRE(owner.real_data() != nullptr);
+
+    for (size_t i = 0; i < owner.real_size(); ++i) {
+      owner.real_data()[i] = static_cast<uint8_t>(i & 0xFFu);
+    }
+
+    Bytes alias;
+    alias.shallow_copy(owner);
+    owner = alias;
+
+    CHECK(owner.is_owner());
+    CHECK(owner.size() == alias.size());
+    CHECK(owner.offset() == alias.offset());
+    for (size_t i = 0; i < owner.real_size(); ++i) {
+      CHECK(owner.real_data()[i] == static_cast<uint8_t>(i & 0xFFu));
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  TEST_CASE("instance deep_copy from offset alias of self stays valid") {
+    Bytes owner = Bytes::create(Bytes::stack_size() + 48u, 8u);
+    REQUIRE(owner.real_data() != nullptr);
+
+    for (size_t i = 0; i < owner.real_size(); ++i) {
+      owner.real_data()[i] = static_cast<uint8_t>((i + 3u) & 0xFFu);
+    }
+
+    Bytes alias;
+    alias.shallow_copy(owner);
+    owner.deep_copy(alias);
+
+    CHECK(owner.is_owner());
+    CHECK(owner.size() == alias.size());
+    CHECK(owner.offset() == alias.offset());
+    for (size_t i = 0; i < owner.real_size(); ++i) {
+      CHECK(owner.real_data()[i] == static_cast<uint8_t>((i + 3u) & 0xFFu));
+    }
   }
 
   // -------------------------------------------------------------------------

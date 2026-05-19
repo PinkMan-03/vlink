@@ -641,7 +641,8 @@ std::string make_run_result_line(const Bench::ScenarioResult& scenario_result, d
     line.append(kRunAnsiReset);
   }
 
-  auto append_metric = [&](std::string_view label, std::string_view value, int value_w, std::string_view unit) {
+  auto append_metric = [&line, &color](std::string_view label, std::string_view value, int value_w,
+                                       std::string_view unit) {
     line.append(kRunColSep);
 
     if (color) {

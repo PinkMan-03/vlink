@@ -256,34 +256,6 @@ class RerunConverter final {
                                          std::string system);
 
 #ifdef VLINK_HAS_FBS_PARSER
-  template <typename Resolver>
-  static bool resolve_thread_local_fbs_schema(const std::string& ser, Resolver&& resolver,
-                                              const reflection::Schema*& out_schema) {
-    struct ThreadLocalFbsSchemaCache final {
-      std::string ser;
-      std::string schema_data;
-      const reflection::Schema* schema{nullptr};
-    };
-
-    thread_local ThreadLocalFbsSchemaCache cache;
-
-    if VUNLIKELY (cache.schema == nullptr || cache.ser != ser) {
-      cache.schema_data.clear();
-
-      if VUNLIKELY (!resolver(ser, cache.schema_data)) {
-        cache.ser.clear();
-        cache.schema = nullptr;
-        return false;
-      }
-
-      cache.ser = ser;
-      cache.schema = reflection::GetSchema(reinterpret_cast<const uint8_t*>(cache.schema_data.data()));
-    }
-
-    out_schema = cache.schema;
-    return out_schema != nullptr;
-  }
-
   bool init_fbs_resolver();
 
   bool resolve_fbs_schema(const std::string& fbs_ser, std::string& schema_data);

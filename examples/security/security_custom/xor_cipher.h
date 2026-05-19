@@ -47,7 +47,7 @@ static constexpr size_t kDefaultKeyLen = sizeof(kDefaultKey);
 // Returns: true on success
 inline bool xor_transform(const vlink::Bytes& in, vlink::Bytes& out, const uint8_t* key, size_t key_len) {
   if (in.empty()) {
-    return true;  // Empty input is a no-op
+    return false;  // Security rejects empty payloads before invoking custom callbacks.
   }
 
   out = vlink::Bytes::create(in.size());

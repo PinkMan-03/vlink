@@ -84,7 +84,10 @@ int main() {
     const uint8_t rotation = 13;
 
     auto rot_encrypt = [rotation](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
-      if (in.empty()) return true;
+      if (in.empty()) {
+        return false;  // Security rejects empty payloads before invoking callbacks.
+      }
+
       out = vlink::Bytes::create(in.size());
       for (size_t i = 0; i < in.size(); ++i) {
         out[i] = in.data()[i] + rotation;
@@ -93,7 +96,10 @@ int main() {
     };
 
     auto rot_decrypt = [rotation](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
-      if (in.empty()) return true;
+      if (in.empty()) {
+        return false;  // Security rejects empty payloads before invoking callbacks.
+      }
+
       out = vlink::Bytes::create(in.size());
       for (size_t i = 0; i < in.size(); ++i) {
         out[i] = in.data()[i] - rotation;

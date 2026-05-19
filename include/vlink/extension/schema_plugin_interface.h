@@ -191,8 +191,8 @@ class SchemaPluginInterface {
    *
    * @details
    * The returned parser is backed by the plugin lifetime and already contains
-   * the BFBS schema plus the requested root type. For non-FlatBuffers types
-   * this returns @c nullptr.
+   * the BFBS schema plus the requested root type. Each successful call returns
+   * a distinct parser instance. For non-FlatBuffers types this returns @c nullptr.
    *
    * @param name  Fully-qualified FlatBuffers root type name.
    * @return Opaque runtime parser handle, or @c nullptr if not found.

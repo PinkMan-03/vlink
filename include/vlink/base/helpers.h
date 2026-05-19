@@ -233,6 +233,32 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
                                                                                               char f) noexcept;
 
 /**
+ * @brief Escapes one text-protocol field with percent encoding.
+ *
+ * @details
+ * Used by discovery-style colon/space delimited text frames.  The function
+ * escapes @c %, space, @c :, LF and CR as uppercase @c %XX sequences while
+ * leaving other bytes unchanged.
+ *
+ * @param value  Field value to encode.
+ * @return Encoded field value safe for delimiter-based text frames.
+ */
+[[nodiscard]] VLINK_EXPORT std::string escape_field(std::string_view value) noexcept;
+
+/**
+ * @brief Decodes fields produced by @c escape_field().
+ *
+ * @details
+ * Valid @c %XX sequences are decoded byte-for-byte.  Invalid or incomplete
+ * percent sequences are preserved literally so older or malformed text frames
+ * can still be parsed conservatively.
+ *
+ * @param value  Encoded field value.
+ * @return Decoded field value.
+ */
+[[nodiscard]] VLINK_EXPORT std::string unescape_field(std::string_view value) noexcept;
+
+/**
  * @brief Computes a 32-bit FNV-1a-style hash code for a string.
  *
  * @param str  Input string.

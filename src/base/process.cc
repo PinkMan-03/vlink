@@ -1766,6 +1766,29 @@ Process::ReadResult Process::read_from_pipes() {
   ReadResult result;
   size_t max_buffer_size = impl_->max_buffer_size.load(std::memory_order_acquire);
 
+  auto append_to_buffer = [&result, &max_buffer_size](std::vector<uint8_t>& target, const char* data, size_t bytes,
+                                                      bool& has_data) {
+    if VUNLIKELY (target.size() >= max_buffer_size) {
+      if (bytes > 0U) {
+        result.truncated = true;
+      }
+
+      return;
+    }
+
+    const size_t remaining = max_buffer_size - target.size();
+    const size_t bytes_to_store = std::min(remaining, bytes);
+
+    if (bytes_to_store > 0U) {
+      target.insert(target.end(), data, data + bytes_to_store);
+      has_data = true;
+    }
+
+    if VUNLIKELY (bytes_to_store < bytes) {
+      result.truncated = true;
+    }
+  };
+
   if (impl_->stdout_buffer.capacity() < max_buffer_size) {
     impl_->stdout_buffer.reserve(std::min(max_buffer_size, impl_->stdout_buffer.size() + 8192));
   }
@@ -1818,16 +1841,7 @@ Process::ReadResult Process::read_from_pipes() {
         break;
       }
 
-      const size_t remaining = max_buffer_size - target.size();
-      const size_t bytes_to_store = std::min<size_t>(remaining, bytes_read);
-      if (bytes_to_store > 0) {
-        target.insert(target.end(), buffer, buffer + bytes_to_store);
-        has_data = true;
-      }
-
-      if (bytes_to_store < bytes_read || target.size() >= max_buffer_size) {
-        result.truncated = true;
-      }
+      append_to_buffer(target, buffer, bytes_read, has_data);
     }
   };
 
@@ -1843,17 +1857,7 @@ Process::ReadResult Process::read_from_pipes() {
           ::read(impl_->stdout_pipe[0], buffer, sizeof(buffer));  // NOLINT(clang-analyzer-unix.BlockInCriticalSection)
 
       if VLIKELY (bytes_read > 0) {
-        const size_t remaining = max_buffer_size - impl_->stdout_buffer.size();
-        const size_t bytes_to_store = std::min<size_t>(remaining, static_cast<size_t>(bytes_read));
-        if (bytes_to_store > 0) {
-          impl_->stdout_buffer.insert(impl_->stdout_buffer.end(), buffer, buffer + bytes_to_store);
-          result.has_stdout_data = true;
-        }
-
-        if VUNLIKELY (bytes_to_store < static_cast<size_t>(bytes_read) ||
-                      impl_->stdout_buffer.size() >= max_buffer_size) {
-          result.truncated = true;
-        }
+        append_to_buffer(impl_->stdout_buffer, buffer, static_cast<size_t>(bytes_read), result.has_stdout_data);
       } else if (bytes_read == 0) {
         impl_->stdout_closed.store(true, std::memory_order_release);
         break;
@@ -1877,17 +1881,7 @@ Process::ReadResult Process::read_from_pipes() {
           ::read(impl_->stderr_pipe[0], buffer, sizeof(buffer));  // NOLINT(clang-analyzer-unix.BlockInCriticalSection)
 
       if VLIKELY (bytes_read > 0) {
-        const size_t remaining = max_buffer_size - impl_->stderr_buffer.size();
-        const size_t bytes_to_store = std::min<size_t>(remaining, static_cast<size_t>(bytes_read));
-        if (bytes_to_store > 0) {
-          impl_->stderr_buffer.insert(impl_->stderr_buffer.end(), buffer, buffer + bytes_to_store);
-          result.has_stderr_data = true;
-        }
-
-        if VUNLIKELY (bytes_to_store < static_cast<size_t>(bytes_read) ||
-                      impl_->stderr_buffer.size() >= max_buffer_size) {
-          result.truncated = true;
-        }
+        append_to_buffer(impl_->stderr_buffer, buffer, static_cast<size_t>(bytes_read), result.has_stderr_data);
       } else if (bytes_read == 0) {
         impl_->stderr_closed.store(true, std::memory_order_release);
         break;

@@ -238,6 +238,9 @@ TEST_SUITE("extension-SchemaPluginBase - linked schema registration") {
 
     auto* runtime_parser = static_cast<flatbuffers::Parser*>(plugin.create_flatbuffers_parser("fbs.Message"));
     REQUIRE(runtime_parser != nullptr);
+    auto* second_runtime_parser = static_cast<flatbuffers::Parser*>(plugin.create_flatbuffers_parser("fbs.Message"));
+    REQUIRE(second_runtime_parser != nullptr);
+    CHECK(second_runtime_parser != runtime_parser);
     REQUIRE(runtime_parser->root_struct_def_ != nullptr);
     CHECK(runtime_parser->root_struct_def_->defined_namespace != nullptr);
     CHECK(runtime_parser->root_struct_def_->defined_namespace->GetFullyQualifiedName(

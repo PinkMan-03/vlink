@@ -37,8 +37,10 @@
  *    version string, hostname, and wall-clock / boot-time.
  * -# Publishes per-topic statistics (@c freq, @c rate, @c loss, @c latency)
  *    once per second via a security-authenticated @c InfoList channel.
- * -# Relays raw message bytes from discovered publishers to connected
+ * -# Relays raw message bytes from discovered publishers/setters to connected
  *    @c ProxyAPI listeners when operating in observe, record, or play mode.
+ *    Setter endpoints are observed with getter semantics to preserve field
+ *    last-value delivery.
  * -# Optionally manages an embedded Iceoryx RouDi daemon when
  *    @c Config::use_iox is @c true.
  * -# Loads and manages @c RunablePluginInterface shared-library plugins

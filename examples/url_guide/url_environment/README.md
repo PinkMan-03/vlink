@@ -11,7 +11,7 @@
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_DDS_DOMAIN` | DDS 默认域 ID | 0 |
-| `VLINK_DDS_BIND` | 绑定 DDS 到指定网卡 IP | (所有接口) |
+| `VLINK_DDS_BIND` | 将 DDS URL 重定向到指定 DDS 后端 scheme（如 `ddsc`） | (不重定向) |
 | `VLINK_MQTT_BROKER` | MQTT Broker URI | `tcp://localhost:1883` |
 | `VLINK_MQTT_CLIENT_ID` | MQTT 客户端 ID 前缀 | `vlink_mqtt` |
 | `VLINK_MQTT_QOS` | MQTT 默认 QoS 级别 | 1 |
@@ -24,7 +24,6 @@
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_URL_REMAP` | 重映射 JSON 文件路径 | (不设置) |
-| `VLINK_URL_USE_REMAP` | 启用自动重映射（设为 `1`） | (禁用) |
 
 ### 2.3 类别 3: 日志
 
@@ -37,7 +36,7 @@
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `VLINK_BAG_PATH` | Bag 文件输出目录，设置即启用录制 | (禁用) |
+| `VLINK_BAG_PATH` | Bag 文件输出路径，后缀需为 `.vdb/.vdbx/.vcap/.vcapx` | (禁用) |
 | `VLINK_BAG_TAG` | Bag 文件名标签 | (空) |
 
 ### 2.5 类别 5: 安全 (SSL/TLS)
@@ -102,11 +101,11 @@ export VLINK_LOG_CONSOLE_LEVEL=6  # 关闭控制台日志
 ### 3.3 全局录制
 
 ```bash
-export VLINK_BAG_PATH=/data/recordings
+export VLINK_BAG_PATH=/data/recordings/session.vdb
 export VLINK_BAG_TAG=highway_test_001
 ```
 
-设置 `VLINK_BAG_PATH` 后，所有 Publisher 发布的消息自动录制到该目录下的 bag 文件中。
+设置 `VLINK_BAG_PATH` 后，所有 Publisher 发布的消息自动录制到该 bag 文件中。
 
 ### 3.4 TLS 安全配置
 
@@ -131,19 +130,18 @@ export VLINK_PROFILER_ENABLE=1
 ```bash
 # 传输配置
 export VLINK_DDS_DOMAIN=42
-export VLINK_DDS_BIND=192.168.1.100
+export VLINK_DDS_BIND=ddsc
 export VLINK_MQTT_BROKER=tcp://broker:1883
 
 # URL 重映射
 export VLINK_URL_REMAP=/etc/vlink/remap.json
-export VLINK_URL_USE_REMAP=1
 
 # 日志
 export VLINK_LOG_CONSOLE_LEVEL=0
 export VLINK_LOG_DIR=/var/log/vlink
 
 # 录制
-export VLINK_BAG_PATH=/data/recordings
+export VLINK_BAG_PATH=/data/recordings/session.vdb
 export VLINK_BAG_TAG=test_001
 
 # 安全
@@ -182,7 +180,7 @@ make example_url_environment
 [I]   VLINK_DDS_DOMAIN = (not set)  --  Default DDS domain ID
 [I]   -> Set VLINK_DDS_DOMAIN=42
 [I]   VLINK_DDS_DOMAIN = 42  --  Default DDS domain ID
-[I]   VLINK_DDS_BIND = (not set)  --  Bind DDS to specific NIC IP
+[I]   VLINK_DDS_BIND = (not set)  --  Redirect DDS URLs to a DDS backend scheme
 [I]   VLINK_MQTT_BROKER = (not set)  --  MQTT broker URI
 ...
 [I] ==================================================

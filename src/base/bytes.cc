@@ -30,6 +30,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "./base/logger.h"
@@ -473,11 +474,14 @@ Bytes& Bytes::operator=(const Bytes& target) noexcept {
   }
 
   if (target.offset_ > 0 && target.data_) {
-    process_type(kCreate, nullptr, target.size_, target.offset_, false);
+    Bytes tmp;
+    tmp.process_type(kCreate, nullptr, target.size_, target.offset_, false);
 
-    if VLIKELY (data_) {
-      std::memcpy(data_, target.data_, target.size_ + target.offset_);
+    if VLIKELY (tmp.data_) {
+      std::memcpy(tmp.data_, target.data_, target.size_ + target.offset_);
     }
+
+    *this = std::move(tmp);
   } else {
     process_type(kDeepCopy, target.data_, target.size_, target.offset_, false);
   }
@@ -770,7 +774,7 @@ bool Bytes::reserve(size_t new_capacity) noexcept {
     new_data = stack_data_;
   }
 
-  if (data_ && (size_ + offset_) > 0) {
+  if (new_data != data_ && data_ && (size_ + offset_) > 0) {
     std::memcpy(new_data, data_, size_ + offset_);
   }
 
@@ -826,10 +830,11 @@ Bytes& Bytes::shallow_copy(const Bytes& bytes) noexcept {
 
 Bytes& Bytes::deep_copy(const Bytes& bytes) noexcept {
   if (bytes.offset_ > 0 && bytes.data_) {
+    Bytes tmp = Bytes::deep_copy(bytes.data_, bytes.size_ + bytes.offset_);
     process_type(kCreate, nullptr, bytes.size_, bytes.offset_, false);
 
-    if VLIKELY (data_) {
-      std::memcpy(data_, bytes.data_, bytes.size_ + bytes.offset_);
+    if VLIKELY (data_ && tmp.data_) {
+      std::memcpy(data_, tmp.data_, bytes.size_ + bytes.offset_);
     }
   } else {
     process_type(kDeepCopy, const_cast<uint8_t*>(bytes.data()), bytes.size_, 0, false);

@@ -1944,20 +1944,9 @@ NB_MODULE(_vlink_nanobind, m) {
   status.def("is_for_writer", &vlink::Status::is_for_writer, "type"_a);
   status.def("is_for_reader", &vlink::Status::is_for_reader, "type"_a);
 
-  nb::class_<vlink::Security::Config::PreviousKey>(m, "SecurityConfigPreviousKey",
-                                                   "Decrypt-only old symmetric key accepted during key rotation")
-      .def(nb::init<>())
-      .def_rw("key_id", &vlink::Security::Config::PreviousKey::key_id)
-      .def_rw("key", &vlink::Security::Config::PreviousKey::key)
-      .def_rw("passphrase", &vlink::Security::Config::PreviousKey::passphrase)
-      .def_rw("pbkdf2_salt", &vlink::Security::Config::PreviousKey::pbkdf2_salt)
-      .def_rw("pbkdf2_iterations", &vlink::Security::Config::PreviousKey::pbkdf2_iterations);
-
   nb::class_<vlink::Security::Config::Advanced>(
-      m, "SecurityConfigAdvanced", "Low-frequency security options for AAD, replay protection, and rotation")
+      m, "SecurityConfigAdvanced", "Low-frequency security options for AAD, replay protection, and signing")
       .def(nb::init<>())
-      .def_rw("key_id", &vlink::Security::Config::Advanced::key_id)
-      .def_rw("previous_keys", &vlink::Security::Config::Advanced::previous_keys)
       .def_rw("aad_context", &vlink::Security::Config::Advanced::aad_context)
       .def_rw("replay_window", &vlink::Security::Config::Advanced::replay_window)
       .def_rw("signing_key_pem", &vlink::Security::Config::Advanced::signing_key_pem)
@@ -2248,6 +2237,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_ro("index", &vlink::BagReader::Info::UrlMeta::index)
       .def_ro("url", &vlink::BagReader::Info::UrlMeta::url)
       .def_ro("url_type", &vlink::BagReader::Info::UrlMeta::url_type)
+      .def_ro("action_type", &vlink::BagReader::Info::UrlMeta::action_type)
       .def_ro("ser_type", &vlink::BagReader::Info::UrlMeta::ser_type)
       .def_ro("schema_type", &vlink::BagReader::Info::UrlMeta::schema_type)
       .def_ro("count", &vlink::BagReader::Info::UrlMeta::count)

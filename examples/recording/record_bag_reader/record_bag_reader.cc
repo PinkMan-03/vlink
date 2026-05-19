@@ -94,6 +94,7 @@ int main() {
     VLOG_I("=== URL Metadata ===");
     for (const auto& url_meta : info.url_metas) {
       VLOG_I("  URL:", url_meta.url);
+      VLOG_I("    action:", static_cast<int>(url_meta.action_type));
       VLOG_I("    ser_type:", url_meta.ser_type);
       VLOG_I("    count:", url_meta.count);
       VLOG_I("    size:", url_meta.size, "bytes");

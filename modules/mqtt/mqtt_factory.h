@@ -212,7 +212,7 @@ class MqttSubscriber final : public AbstractObject<MqttID>, public std::enable_s
   std::string fragment_;
   Conf::PropertiesMap properties_;
   CalculateSample calc_sample_;
-  bool is_latency_and_lost_enabled_{false};
+  std::atomic_bool is_latency_and_lost_enabled_{false};
 };
 
 // MqttServer

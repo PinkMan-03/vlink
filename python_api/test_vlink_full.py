@@ -698,9 +698,9 @@ def test_bag_extended():
     w.register_schema_callback(schema_callback)
     w.async_run()
     for i in range(5):
-        seq = w.push("intra://t", "raw", _vlink.SchemaType.Raw, _vlink.ActionType.Publish, f"m{i}".encode())
-        assert isinstance(seq, int)
-    schema_seq = w.push(
+        timestamp = w.push("intra://t", "raw", _vlink.SchemaType.Raw, _vlink.ActionType.Publish, f"m{i}".encode())
+        assert isinstance(timestamp, int)
+    schema_timestamp = w.push(
         "intra://schema_cb",
         "demo.Callback",
         _vlink.SchemaType.Protobuf,
@@ -708,12 +708,12 @@ def test_bag_extended():
         b"schema-msg",
         immediate=True,
     )
-    assert isinstance(schema_seq, int)
+    assert isinstance(schema_timestamp, int)
     time.sleep(0.05)
-    seq_immediate = w.push(
+    timestamp_immediate = w.push(
         "intra://t", "raw", _vlink.SchemaType.Raw, _vlink.ActionType.Publish, b"sync", immediate=True
     )
-    assert isinstance(seq_immediate, int)
+    assert isinstance(timestamp_immediate, int)
     time.sleep(0.2)
     w.quit()
     w.wait_for_quit(5000)
@@ -724,6 +724,8 @@ def test_bag_extended():
     w2 = _vlink.BagWriter.filter_get(filter_path)
     assert w2 is not None
     del w2  # release before reader opens bag_path
+    assert _vlink.BagWriter.create(os.path.join(tempfile.mkdtemp(), "bad.unknown")) is None
+    assert _vlink.BagWriter.filter_get(os.path.join(tempfile.mkdtemp(), "bad.unknown")) is None
 
     # Reader with check/reindex
     r = _vlink.BagReader.create(bag_path)
@@ -801,11 +803,6 @@ def test_security():
     cfg.key = "my_secret_key_16"
     cfg.advanced.aad_context = "python/security"
     cfg.advanced.replay_window = 0
-    assert cfg.advanced.key_id == "default"
-    previous = _vlink.SecurityConfigPreviousKey()
-    previous.key_id = "old"
-    previous.key = "old_secret"
-    cfg.advanced.previous_keys = [previous]
     sec = _vlink.Security(cfg)
     plain = b"Hello VLink Security!"
     encrypted = sec.encrypt(plain)
@@ -814,16 +811,6 @@ def test_security():
     decrypted = sec.decrypt(encrypted)
     assert decrypted == plain
     assert sec.decrypt(encrypted) == plain
-
-    old_sender_cfg = _vlink.SecurityConfig()
-    old_sender_cfg.key = "old_secret"
-    old_sender_cfg.advanced.key_id = "old"
-    old_sender_cfg.advanced.aad_context = cfg.advanced.aad_context
-    old_sender_cfg.advanced.replay_window = 0
-    old_sender = _vlink.Security(old_sender_cfg)
-    old_cipher = old_sender.encrypt(plain)
-    assert old_cipher is not None
-    assert sec.decrypt(old_cipher) == plain
     print("[PASS] Security")
 
 
@@ -999,7 +986,7 @@ def test_api_surface():
         "Logger", "ElapsedTimer", "DeadlineTimer", "MessageLoop", "MultiLoop", "Timer", "WheelTimer",
         "ThreadPool", "SpinLock", "CpuProfiler", "CpuProfilerGuard", "MemoryPool",
         "Process", "UrlRemap",
-        "Qos", "SslOptions", "Security", "SecurityConfig", "SecurityConfigAdvanced", "SecurityConfigPreviousKey",
+        "Qos", "SslOptions", "Security", "SecurityConfig", "SecurityConfigAdvanced",
         "Publisher", "Subscriber", "Server", "Client", "Setter", "Getter",
         "SecurityPublisher", "SecuritySubscriber", "SecurityServer", "SecurityClient", "SecuritySetter",
         "SecurityGetter",

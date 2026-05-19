@@ -57,6 +57,8 @@ VLink 的节点发现（Discovery）是一种**自动、实时的拓扑感知机
 4. `send_report()` 对每段 `sendto()`。
 5. 析构时 `send_offline()`（仅当 `VLINK_DISCOVERY_OFFLINE=1` 编译时启用，默认不启用）。
 
+文本报文内部使用空格和冒号分隔字段。Reporter 写入 URL、`ser_type`、主机名和进程名之前会调用 `Helpers::escape_field()`，将 `%`、空格、冒号、换行和回车编码为 `%XX`；Viewer 侧用 `Helpers::unescape_field()` 解码。这样 URL scheme 中的 `:`、进程名里的空格等字符不会破坏 discovery 文本协议。
+
 ### 17.2.4 控制发现报告的开关
 
 通过 `NodeImpl::set_discovery_enabled(false)` 可以在 `init()` 之前关闭单个节点的发现上报。通常由 `NodeImpl` 子类或代理框架内部调用，用户代码不用关心。

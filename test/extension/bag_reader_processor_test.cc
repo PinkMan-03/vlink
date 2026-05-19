@@ -137,6 +137,69 @@ TEST_SUITE("extension-BagReaderProcessor - ordering") {
     CHECK(received[1].url == "intra://b");
     CHECK(received[2].url == "intra://c");
   }
+
+  TEST_CASE("worker keeps out-of-order input sorted by timestamp") {
+    std::vector<int64_t> received;
+    std::mutex mtx;
+    ConditionVariable cv;
+
+    BagReaderProcessor::Config cfg;
+    cfg.min_cache_time = 5000;
+    auto processor = std::make_unique<BagReaderProcessor>(cfg);
+
+    processor->register_output_callback([&](int64_t ts, const std::string&, ActionType, const Bytes&) {
+      std::lock_guard lock(mtx);
+      received.push_back(ts);
+      cv.notify_all();
+    });
+
+    Bytes payload = Bytes::create(4U);
+    processor->push(50000001, "intra://c", ActionType::kPublish, payload);
+    processor->push(1, "intra://a", ActionType::kPublish, payload);
+    processor->push(20000000, "intra://b", ActionType::kPublish, payload);
+    processor->push(100000000, "intra://d", ActionType::kPublish, payload);
+
+    {
+      std::unique_lock lock(mtx);
+      REQUIRE(cv.wait_for(lock, 2s, [&received]() { return received.size() == 3U; }));
+      CHECK(received[0] == 1);
+      CHECK(received[1] == 20000000);
+      CHECK(received[2] == 50000001);
+    }
+
+    processor.reset();
+  }
+
+  TEST_CASE("worker flushes cached tail after the cache timeout") {
+    std::vector<int64_t> received;
+    std::mutex mtx;
+    ConditionVariable cv;
+
+    BagReaderProcessor::Config cfg;
+    cfg.min_cache_time = 1;
+    auto processor = std::make_unique<BagReaderProcessor>(cfg);
+
+    processor->register_output_callback([&](int64_t ts, const std::string&, ActionType, const Bytes&) {
+      std::lock_guard lock(mtx);
+      received.push_back(ts);
+      cv.notify_all();
+    });
+
+    Bytes payload = Bytes::create(4U);
+    processor->push(1, "intra://a", ActionType::kPublish, payload);
+    processor->push(2000, "intra://b", ActionType::kPublish, payload);
+    processor->push(5001, "intra://c", ActionType::kPublish, payload);
+
+    {
+      std::unique_lock lock(mtx);
+      REQUIRE(cv.wait_for(lock, 2s, [&received]() { return received.size() == 3U; }));
+      CHECK(received[0] == 1);
+      CHECK(received[1] == 2000);
+      CHECK(received[2] == 5001);
+    }
+
+    processor.reset();
+  }
 }
 
 // NOLINTEND

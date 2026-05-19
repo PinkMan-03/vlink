@@ -44,6 +44,36 @@
 namespace vlink {
 namespace webviz {
 
+#ifdef VLINK_HAS_FBS_PARSER
+template <typename Resolver>
+bool resolve_thread_local_fbs_schema(const std::string& ser, Resolver&& resolver,
+                                     const reflection::Schema*& out_schema) {
+  struct ThreadLocalFbsSchemaCache final {
+    std::string ser;
+    std::string schema_data;
+    const reflection::Schema* schema{nullptr};
+  };
+
+  thread_local ThreadLocalFbsSchemaCache cache;
+
+  if VUNLIKELY (cache.schema == nullptr || cache.ser != ser) {
+    cache.schema_data.clear();
+
+    if VUNLIKELY (!resolver(ser, cache.schema_data)) {
+      cache.ser.clear();
+      cache.schema = nullptr;
+      return false;
+    }
+
+    cache.ser = ser;
+    cache.schema = get_verified_fbs_schema(ser, cache.schema_data);
+  }
+
+  out_schema = cache.schema;
+  return out_schema != nullptr;
+}
+#endif
+
 void RerunConverter::apply_message_timestamp(::rerun::RecordingStream& rec, int64_t timestamp_ns) const {
   if VUNLIKELY (timestamp_ns < 0) {
     return;
@@ -815,7 +845,8 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
                       return resolve_fbs_schema(type_name, schema_data);
                     },
                     schema) &&
-                schema != nullptr && schema->root_table() != nullptr && raw.size() >= sizeof(flatbuffers::uoffset_t)) {
+                schema != nullptr && schema->root_table() != nullptr &&
+                verify_fbs_payload(*schema, raw, ser, "Rerun send_time timestamp")) {
               const auto* root_table = flatbuffers::GetAnyRoot(raw.data());
 
               if (root_table) {
@@ -877,7 +908,8 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
                   return resolve_fbs_schema(type_name, schema_data);
                 },
                 schema) &&
-            schema != nullptr && schema->root_table() != nullptr && raw.size() >= sizeof(flatbuffers::uoffset_t)) {
+            schema != nullptr && schema->root_table() != nullptr &&
+            verify_fbs_payload(*schema, raw, ser, "Rerun message timestamp")) {
           const auto* root_table = flatbuffers::GetAnyRoot(raw.data());
 
           if (root_table) {
@@ -5122,15 +5154,7 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     return false;
   }
 
-  if VUNLIKELY (raw.size() < sizeof(flatbuffers::uoffset_t)) {
-    MLOG_W("FBS buffer too small for: {}", ser);
-    return false;
-  }
-
-  auto root_offset = flatbuffers::ReadScalar<flatbuffers::uoffset_t>(raw.data());
-
-  if VUNLIKELY (root_offset >= raw.size()) {
-    MLOG_W("FBS buffer root offset out of bounds for: {}", ser);
+  if VUNLIKELY (!verify_fbs_payload(*schema, raw, ser, "Rerun mapping")) {
     return false;
   }
 

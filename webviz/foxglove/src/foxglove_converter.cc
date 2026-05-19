@@ -182,7 +182,7 @@ bool resolve_thread_local_fbs_schema(const std::string& ser, Resolver&& resolver
     }
 
     cache.ser = ser;
-    cache.schema = reflection::GetSchema(reinterpret_cast<const uint8_t*>(cache.schema_data.data()));
+    cache.schema = get_verified_fbs_schema(ser, cache.schema_data);
   }
 
   out_schema = cache.schema;
@@ -576,16 +576,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
     return result;
   }
 
-  if VUNLIKELY (raw.size() < sizeof(flatbuffers::uoffset_t)) {
-    MLOG_W("FBS buffer too small for: {}", ser);
-    FoxgloveMessage result;
-    return result;
-  }
-
-  auto root_offset = flatbuffers::ReadScalar<flatbuffers::uoffset_t>(raw.data());
-
-  if VUNLIKELY (root_offset >= raw.size()) {
-    MLOG_W("FBS buffer root offset out of bounds for: {}", ser);
+  if VUNLIKELY (!verify_fbs_payload(*schema, raw, ser, "Foxglove mapping")) {
     FoxgloveMessage result;
     return result;
   }
@@ -5027,7 +5018,8 @@ FoxgloveMessage FoxgloveConverter::convert(std::string_view url, SchemaType sche
                     return resolve_custom_fbs_schema(type_name, schema_data);
                   },
                   schema) &&
-              schema != nullptr && schema->root_table() != nullptr && raw.size() >= sizeof(flatbuffers::uoffset_t)) {
+              schema != nullptr && schema->root_table() != nullptr &&
+              verify_fbs_payload(*schema, raw, ser, "Foxglove passthrough timestamp")) {
             const auto* root_table = flatbuffers::GetAnyRoot(raw.data());
 
             if (root_table) {
@@ -5075,7 +5067,8 @@ FoxgloveMessage FoxgloveConverter::convert(std::string_view url, SchemaType sche
                       return resolve_custom_fbs_schema(type_name, schema_data);
                     },
                     schema) &&
-                schema != nullptr && schema->root_table() != nullptr && raw.size() >= sizeof(flatbuffers::uoffset_t)) {
+                schema != nullptr && schema->root_table() != nullptr &&
+                verify_fbs_payload(*schema, raw, ser, "Foxglove send_time timestamp")) {
               const auto* root_table = flatbuffers::GetAnyRoot(raw.data());
 
               if (root_table) {

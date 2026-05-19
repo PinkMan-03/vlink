@@ -105,6 +105,7 @@ class DdsServerImpl final : public ServerImpl, public AbstractNode {
   std::shared_ptr<dds::DataWriter> writer_;
   std::shared_ptr<dds::DataReader> reader_;
   dds::TypeSupport type_support_req_;
+  alignas(64) std::atomic<uint64_t> cdr_seq_{0};
   std::unordered_map<uint64_t, rtps::WriteParams> cdr_id_map_;
   std::mutex param_mtx_;
   ReqRespCallback callback_;

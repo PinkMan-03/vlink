@@ -144,6 +144,7 @@ class RerunServer final : public MessageLoop {
   std::atomic<uint64_t> last_sys_time_ns_{0};
   std::atomic<uint64_t> session_start_sys_time_ns_{0};
   ElapsedTimer bridge_time_elapsed_{ElapsedTimer::kCpuTimestamp, ElapsedTimer::kNano};
+  mutable std::mutex bridge_control_mtx_;
   std::string bridge_control_signature_;
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(RerunServer)

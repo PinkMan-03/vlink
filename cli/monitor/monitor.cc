@@ -489,7 +489,7 @@ class SparklineRenderer final {
         size_t data_size = chart_width * 2;
 
         for (size_t col = 0; col < data_size; col += 2) {
-          auto get_level = [&](int c) -> int {
+          auto get_level = [&data, &data_size, &threshold_top, &threshold_bottom, &row, &min_val](int c) -> int {
             size_t idx;
 
             if (data.size() < data_size) {

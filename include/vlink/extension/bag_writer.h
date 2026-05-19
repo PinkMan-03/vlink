@@ -58,7 +58,7 @@
  *
  * @note
  * - @c create() selects the concrete implementation based on the file extension
- *   (@c .vcap / @c .vcapx -> McapWriter, otherwise -> DatabaseWriter).
+ *   (@c .vdb / @c .vdbx -> DatabaseWriter, @c .vcap / @c .vcapx -> McapWriter).
  * - @c push() is thread-safe and non-blocking; recording is done on the loop thread.
  * - The @c immediate flag bypasses the task queue and writes synchronously (use with care).
  */
@@ -174,8 +174,9 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    *
    * @details
    * Selects the implementation based on the file extension:
+   * - @c .vdb / @c .vdbx -- @c DatabaseWriter (SQLite)
    * - @c .vcap / @c .vcapx -- @c McapWriter (MCAP format)
-   * - All other extensions -- @c DatabaseWriter (SQLite)
+   * - unknown suffixes return @c nullptr
    * The returned writer has not yet started its event loop; call @c async_run().
    *
    * @param path    Output file path.
@@ -191,11 +192,13 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    * Searches the global writer registry.  If a writer matching @p path is alive,
    * returns a shared pointer to it.  Otherwise creates a new writer for @p path,
    * calls @c async_run() on it, registers it in the global registry, and returns it.
+   * The same suffix rules as @c create() apply; unsupported suffixes return
+   * @c nullptr and are not registered.
    * The writer is automatically removed from the registry when the last shared
    * pointer to it is released.
    *
    * @param path  Output file path.
-   * @return Shared pointer to the writer (never @c nullptr).
+   * @return Shared pointer to the writer, or @c nullptr for unsupported suffixes.
    */
   [[nodiscard]] static std::shared_ptr<BagWriter> filter_get(const std::string& path);
 
@@ -204,7 +207,8 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    *
    * @details
    * The global writer is created automatically on first access if @c VLINK_BAG_PATH is set.
-   * Returns @c nullptr if the environment variable is not set.
+   * Returns @c nullptr if the environment variable is not set or has an
+   * unsupported bag suffix.
    *
    * @return Raw pointer to the global writer, or @c nullptr.
    */
@@ -268,8 +272,7 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    * @param data                   Serialized payload bytes.
    * @param microseconds_timestamp Optional pointer to a custom timestamp (microseconds).
    * @param immediate              If @c true, writes synchronously bypassing the queue.
-   * @return Sequence number (monotonically increasing) of the recorded message,
-   *         or a negative value on error.
+   * @return Message timestamp in microseconds, or a negative value on error.
    */
   virtual int64_t push(const std::string& url, const std::string& ser_type, SchemaType schema_type,
                        ActionType action_type, const Bytes& data, int64_t* microseconds_timestamp = nullptr,

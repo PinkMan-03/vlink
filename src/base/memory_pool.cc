@@ -527,6 +527,10 @@ static MemoryPool::Config create_memory_config(int level, bool prealloc) {
 }
 
 struct MemoryPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+  alignas(64) size_t dispatch_max_sizes[kMaxTierCount]{};
+  MemoryTierState* dispatch_states[kMaxTierCount]{};
+  size_t dispatch_count{0};
+
   alignas(64) size_t tier_max_sizes[kMaxTierCount]{};
 
   MemoryTierState* tier_states[kMaxTierCount]{};
@@ -560,9 +564,18 @@ MemoryPool::MemoryPool(const Config& config) : impl_(std::make_unique<Impl>()) {
   impl_->owned_states.reserve(source.size());
 
   size_t live = 0;
+  size_t dispatch = 0;
 
   for (const auto& cfg : source) {
+    if VUNLIKELY (cfg.max_size == 0U) {
+      continue;
+    }
+
+    impl_->dispatch_max_sizes[dispatch] = cfg.max_size;
+
     if VUNLIKELY (cfg.blocks_per_chunk == 0U) {
+      impl_->dispatch_states[dispatch] = nullptr;
+      ++dispatch;
       continue;
     }
 
@@ -587,11 +600,14 @@ MemoryPool::MemoryPool(const Config& config) : impl_(std::make_unique<Impl>()) {
 
     impl_->tier_max_sizes[live] = cfg.max_size;
     impl_->tier_states[live] = state.get();
+    impl_->dispatch_states[dispatch] = state.get();
     impl_->owned_states.emplace_back(std::move(state));
 
     ++live;
+    ++dispatch;
   }
 
+  impl_->dispatch_count = dispatch;
   impl_->tier_count = live;
 
   if (config.prealloc) {
@@ -622,7 +638,7 @@ void* MemoryPool::allocate(size_t bytes, size_t alignment) noexcept {
 
   const size_t idx = find_tier(bytes);
 
-  if VUNLIKELY (idx == kMaxTierCount || alignment > kBlockAlignment) {
+  if VUNLIKELY (idx == kMaxTierCount || alignment > kBlockAlignment || impl_->dispatch_states[idx] == nullptr) {
     void* p = ::operator new(bytes, std::align_val_t{alignment}, std::nothrow);
 
     if VUNLIKELY (p == nullptr) {
@@ -635,7 +651,7 @@ void* MemoryPool::allocate(size_t bytes, size_t alignment) noexcept {
     return p;
   }
 
-  MemoryTierState& state = *impl_->tier_states[idx];
+  MemoryTierState& state = *impl_->dispatch_states[idx];
   void* block = tier_allocate(state);
 
   if VUNLIKELY (block == nullptr) {
@@ -659,14 +675,14 @@ void MemoryPool::deallocate(void* p, size_t bytes, size_t alignment) noexcept {
 
   const size_t idx = find_tier(bytes);
 
-  if VUNLIKELY (idx == kMaxTierCount || alignment > kBlockAlignment) {
+  if VUNLIKELY (idx == kMaxTierCount || alignment > kBlockAlignment || impl_->dispatch_states[idx] == nullptr) {
     ::operator delete(p, bytes, std::align_val_t{alignment});
     impl_->oversized_dealloc_count.fetch_add(1, std::memory_order_relaxed);
 
     return;
   }
 
-  MemoryTierState& state = *impl_->tier_states[idx];
+  MemoryTierState& state = *impl_->dispatch_states[idx];
   tier_deallocate(state, p);
   state.deallocate_count.fetch_add(1, std::memory_order_relaxed);
 }
@@ -777,7 +793,7 @@ void MemoryPool::clear() noexcept {
         return reinterpret_cast<std::uintptr_t>(a.ptr) < reinterpret_cast<std::uintptr_t>(b.ptr);
       });
 
-      const auto find_chunk_idx = [&](std::uintptr_t addr) noexcept -> size_t {
+      const auto find_chunk_idx = [&chunk_count, &state](std::uintptr_t addr) noexcept -> size_t {
         size_t lo = 0;
         size_t hi = chunk_count;
 
@@ -930,8 +946,8 @@ MemoryPool& MemoryPool::global_instance(bool use_env_level) {
 }
 
 size_t MemoryPool::find_tier(size_t bytes) const noexcept {
-  const size_t count = impl_->tier_count;
-  const size_t* const sizes = impl_->tier_max_sizes;
+  const size_t count = impl_->dispatch_count;
+  const size_t* const sizes = impl_->dispatch_max_sizes;
 
   for (size_t i = 0; i < count; ++i) {
     if (bytes <= sizes[i]) {

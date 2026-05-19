@@ -125,7 +125,7 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
 
   std::string name;
   MessageLoop::Type type{MessageLoop::kNormalType};
-  MessageLoop::Strategy strategy{MessageLoop::kOptimizationStrategy};
+  std::atomic<MessageLoop::Strategy> strategy{MessageLoop::kOptimizationStrategy};
 
   uint32_t task_seq{0};
   std::optional<NormalQueue> normal_queue;
@@ -239,9 +239,9 @@ void MessageLoop::set_name(const std::string& name) { impl_->name = name; }
 
 const std::string& MessageLoop::get_name() const { return impl_->name; }
 
-MessageLoop::Strategy MessageLoop::get_strategy() const { return impl_->strategy; }
+MessageLoop::Strategy MessageLoop::get_strategy() const { return impl_->strategy.load(std::memory_order_acquire); }
 
-void MessageLoop::set_strategy(Strategy strategy) { impl_->strategy = strategy; }
+void MessageLoop::set_strategy(Strategy strategy) { impl_->strategy.store(strategy, std::memory_order_release); }
 
 void MessageLoop::register_begin_handler(Callback&& callback) {
   if VUNLIKELY (impl_->is_running) {
@@ -389,48 +389,6 @@ bool MessageLoop::quit(bool force) {
   impl_->cv.notify_all();
 
   return true;
-}
-
-bool MessageLoop::wait_for_idle(int ms, bool check) {
-  std::unique_lock lock(impl_->mtx);
-
-#ifdef _WIN32
-  HANDLE thread_handle = impl_->thread_handle.load();
-  if (thread_handle != nullptr) {
-    DWORD thread_status = STILL_ACTIVE;
-    if (::GetExitCodeThread(thread_handle, &thread_status) && thread_status != STILL_ACTIVE) {
-      impl_->is_running = false;
-      impl_->is_busy = false;
-      return true;
-    }
-  }
-#endif
-
-  if VUNLIKELY (check && is_in_same_thread()) {
-    CLOG_E("MessageLoop wait_for_idle in work thread(%s).", impl_->name.c_str());
-    return false;
-  }
-
-  auto predicate = [this]() -> bool {
-    if (impl_->type == kNormalType) {
-      return !impl_->is_running ? impl_->normal_queue->empty() : !impl_->is_busy && impl_->normal_queue->empty();
-    } else if (impl_->type == kLockfreeType) {
-      const bool empty = impl_->lockfree_task_count.load(std::memory_order_acquire) == 0U;
-      return !impl_->is_running ? empty : !impl_->is_busy && empty;
-    } else if (impl_->type == kPriorityType) {
-      const bool empty = impl_->priority_droppable_queue->empty() && impl_->priority_protected_queue->empty();
-      return !impl_->is_running ? empty : !impl_->is_busy && empty;
-    }
-
-    return false;
-  };
-
-  if (ms == Timer::kInfinite) {
-    impl_->cv.wait(lock, std::move(predicate));
-    return true;
-  }
-
-  return impl_->cv.wait_for(lock, std::chrono::milliseconds(ms), std::move(predicate));
 }
 
 bool MessageLoop::wait_for_quit(int ms, bool check) {
@@ -589,6 +547,48 @@ size_t MessageLoop::get_task_count() const {
   }
 
   return 0;
+}
+
+bool MessageLoop::wait_for_idle(int ms, bool check) {
+  std::unique_lock lock(impl_->mtx);
+
+#ifdef _WIN32
+  HANDLE thread_handle = impl_->thread_handle.load();
+  if (thread_handle != nullptr) {
+    DWORD thread_status = STILL_ACTIVE;
+    if (::GetExitCodeThread(thread_handle, &thread_status) && thread_status != STILL_ACTIVE) {
+      impl_->is_running = false;
+      impl_->is_busy = false;
+      return true;
+    }
+  }
+#endif
+
+  if VUNLIKELY (check && is_in_same_thread()) {
+    CLOG_E("MessageLoop wait_for_idle in work thread(%s).", impl_->name.c_str());
+    return false;
+  }
+
+  auto predicate = [this]() -> bool {
+    if (impl_->type == kNormalType) {
+      return !impl_->is_running ? impl_->normal_queue->empty() : !impl_->is_busy && impl_->normal_queue->empty();
+    } else if (impl_->type == kLockfreeType) {
+      const bool empty = impl_->lockfree_task_count.load(std::memory_order_acquire) == 0U;
+      return !impl_->is_running ? empty : !impl_->is_busy && empty;
+    } else if (impl_->type == kPriorityType) {
+      const bool empty = impl_->priority_droppable_queue->empty() && impl_->priority_protected_queue->empty();
+      return !impl_->is_running ? empty : !impl_->is_busy && empty;
+    }
+
+    return false;
+  };
+
+  if (ms == Timer::kInfinite) {
+    impl_->cv.wait(lock, std::move(predicate));
+    return true;
+  }
+
+  return impl_->cv.wait_for(lock, std::chrono::milliseconds(ms), std::move(predicate));
 }
 
 size_t MessageLoop::get_max_task_count() const { return kMaxTaskSize; }
@@ -755,7 +755,8 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
           push_normal_task(std::move(callback), droppable);
         } else if (overflow_policy == TaskOverflowPolicy::kReject) {
           return reject();
-        } else if (impl_->strategy == kPopStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        } else if (impl_->strategy.load(std::memory_order_acquire) == kPopStrategy &&
+                   overflow_policy != TaskOverflowPolicy::kBlock) {
           if (!drop_one_normal_task()) {
             return reject();
           }
@@ -769,7 +770,8 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
       }
 
       if VUNLIKELY (is_full) {
-        if (impl_->strategy == kOptimizationStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        if (impl_->strategy.load(std::memory_order_acquire) == kOptimizationStrategy &&
+            overflow_policy != TaskOverflowPolicy::kBlock) {
           if (++retry_cnt > 10) {
             {
               std::lock_guard lock(impl_->mtx);
@@ -823,7 +825,7 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
       Impl& impl_ref;
     } producer_guard(*impl_);
 
-    auto push_reserved_lockfree_task = [&]() -> bool {
+    auto push_reserved_lockfree_task = [this, &is_cancelled, &reject, &callback]() -> bool {
       if VUNLIKELY (impl_->quit_flag) {
         release_lockfree_task();
         return reject();
@@ -865,7 +867,8 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
         return reject();
       }
 
-      if (impl_->strategy == kPopStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+      if (impl_->strategy.load(std::memory_order_acquire) == kPopStrategy &&
+          overflow_policy != TaskOverflowPolicy::kBlock) {
         if (!drop_one_lockfree_task(true)) {
           return reject();
         }
@@ -880,7 +883,8 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
       }
 
       if VUNLIKELY (is_full) {
-        if (impl_->strategy == kOptimizationStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        if (impl_->strategy.load(std::memory_order_acquire) == kOptimizationStrategy &&
+            overflow_policy != TaskOverflowPolicy::kBlock) {
           if (++retry_cnt > 10) {
             if VUNLIKELY (impl_->quit_flag) {
               return reject();
@@ -934,7 +938,8 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
           push_priority_task(std::move(callback), priority, droppable);
         } else if (overflow_policy == TaskOverflowPolicy::kReject) {
           return reject();
-        } else if (impl_->strategy == kPopStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        } else if (impl_->strategy.load(std::memory_order_acquire) == kPopStrategy &&
+                   overflow_policy != TaskOverflowPolicy::kBlock) {
           if (!drop_one_priority_task()) {
             return reject();
           }
@@ -948,7 +953,8 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
       }
 
       if VUNLIKELY (is_full) {
-        if (impl_->strategy == kOptimizationStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        if (impl_->strategy.load(std::memory_order_acquire) == kOptimizationStrategy &&
+            overflow_policy != TaskOverflowPolicy::kBlock) {
           if (++retry_cnt > 10) {
             {
               std::lock_guard lock(impl_->mtx);

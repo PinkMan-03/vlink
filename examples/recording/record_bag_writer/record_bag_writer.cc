@@ -41,8 +41,9 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 ///   4. Using filter_get() for shared writer access
 ///
 /// BagWriter::create() selects the concrete implementation based on file extension:
+///   - .vdb / .vdbx    -> DatabaseWriter (SQLite)
 ///   - .vcap / .vcapx  -> McapWriter
-///   - Everything else  -> DatabaseWriter (SQLite)
+///   - unknown suffixes return nullptr
 int main() {
   // ======== Basic BagWriter Creation ========
   // Create a BagWriter with default configuration (no compression, no splitting)

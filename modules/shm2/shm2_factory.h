@@ -275,7 +275,10 @@ class Shm2Client final : public AbstractObject<ShmID2>, public std::enable_share
 
   bool release(const Bytes& bytes);
 
-  bool call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback = nullptr);
+  bool call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback = nullptr,
+            uint64_t* seq_out = nullptr);
+
+  void remove_response_callback(uint64_t seq);
 
  private:
   void detect_server();
@@ -368,7 +371,7 @@ class Shm2Publisher final : public AbstractObject<ShmID2>, public std::enable_sh
   iox2_notifier_h notifier_{nullptr};
 
   uint32_t notify_every_{1};
-  uint32_t notify_counter_{0};
+  std::atomic<uint32_t> notify_counter_{0};
 
   std::optional<SysSemaphore> sem_;
 

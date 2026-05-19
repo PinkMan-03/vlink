@@ -113,9 +113,10 @@ class DdstFactory final {
   }
 
   using PartFilter = std::tuple<uint8_t, int32_t, std::string, Conf::PropertiesMap>;
-  using TopicFilter = std::tuple<uint8_t, int32_t, std::string>;
-  using PublisherFilter = std::tuple<uint8_t, int32_t, std::string, std::string, std::string>;
-  using SubscriberFilter = std::tuple<uint8_t, int32_t, std::string, std::string, std::string>;
+  using TopicFilter = std::tuple<uint8_t, int32_t, std::string, ddst::DomainParticipant*>;
+  using PublisherFilter = std::tuple<uint8_t, int32_t, std::string, std::string, std::string, ddst::DomainParticipant*>;
+  using SubscriberFilter =
+      std::tuple<uint8_t, int32_t, std::string, std::string, std::string, ddst::DomainParticipant*>;
 
   ddst::DomainParticipantFactory* dds_factory_{nullptr};
   std::map<PartFilter, std::weak_ptr<ddst::DomainParticipant>> part_map_;

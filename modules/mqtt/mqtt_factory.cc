@@ -86,10 +86,20 @@ void MqttFactory::deinit() {
     return;
   }
 
-  message_loop_.post_task([this]() { cleanup(); });
+  const bool in_loop = message_loop_.is_in_same_thread();
+
+  if (in_loop) {
+    cleanup();
+  } else if VLIKELY (message_loop_.post_task([this]() { cleanup(); })) {
+    message_loop_.wait_for_idle();
+  } else {
+    cleanup();
+  }
 
   message_loop_.quit();
-  message_loop_.wait_for_quit();
+  if VLIKELY (!in_loop) {
+    message_loop_.wait_for_quit();
+  }
 }
 
 void MqttFactory::cleanup() {
@@ -856,12 +866,16 @@ void MqttSubscriber::unsubscribe() {
   MqttFactory::get().unsubscribe_topic(this, domain_, fragment_, properties_, topic_);
 }
 
-void MqttSubscriber::set_latency_and_lost_enabled(bool enable) { is_latency_and_lost_enabled_ = enable; }
+void MqttSubscriber::set_latency_and_lost_enabled(bool enable) {
+  is_latency_and_lost_enabled_.store(enable, std::memory_order_release);
+}
 
-bool MqttSubscriber::is_latency_and_lost_enabled() const { return is_latency_and_lost_enabled_; }
+bool MqttSubscriber::is_latency_and_lost_enabled() const {
+  return is_latency_and_lost_enabled_.load(std::memory_order_acquire);
+}
 
 int64_t MqttSubscriber::get_latency() const {
-  if (!is_latency_and_lost_enabled_) {
+  if (!is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
     return 0;
   }
 
@@ -872,7 +886,7 @@ const CalculateSample& MqttSubscriber::get_calculate_sample() const { return cal
 
 void MqttSubscriber::process_message(uint64_t channel, uint64_t seq, uint64_t guid, uint64_t timestamp,
                                      const Bytes& bytes) {
-  if VUNLIKELY (is_latency_and_lost_enabled_) {
+  if VUNLIKELY (is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
     calc_sample_.update(seq, guid);
     last_latency_.store(ElapsedTimer::get_sys_timestamp(ElapsedTimer::kNano, false) - timestamp,
                         std::memory_order_relaxed);
@@ -1050,6 +1064,7 @@ void MqttServer::process_message(uint64_t channel, uint64_t seq, const Bytes& re
             const auto* conf_ptr = impl->get_target_conf<MqttConf>();
 
             if (static_cast<uint64_t>(conf_ptr->hash_code) != channel) {
+              self->ignore_called();
               return;
             }
 
@@ -1076,6 +1091,7 @@ void MqttServer::process_message(uint64_t channel, uint64_t seq, const Bytes& re
       const auto* conf_ptr = impl->get_target_conf<MqttConf>();
 
       if (static_cast<uint64_t>(conf_ptr->hash_code) != channel) {
+        ignore_called();
         return;
       }
 

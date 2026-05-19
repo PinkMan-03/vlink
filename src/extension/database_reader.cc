@@ -33,6 +33,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -58,6 +59,28 @@ namespace vlink {
 
 [[maybe_unused]] static constexpr size_t kMaxTaskSize = 50000U;
 
+#ifdef VLINK_ENABLE_SQLITE
+struct SqliteStmtFinalizer final {
+  void operator()(::sqlite3_stmt* stmt) const noexcept {
+    if (stmt) {
+      ::sqlite3_finalize(stmt);
+    }
+  }
+};
+
+using SqliteStmtPtr = std::unique_ptr<::sqlite3_stmt, SqliteStmtFinalizer>;
+
+static std::string sqlite_column_text_or_empty(::sqlite3_stmt* stmt, int column) {
+  const auto* text = ::sqlite3_column_text(stmt, column);
+
+  if (!text) {
+    return {};
+  }
+
+  return {reinterpret_cast<const char*>(text), static_cast<size_t>(::sqlite3_column_bytes(stmt, column))};
+}
+#endif
+
 // DatabaseReader::Impl
 struct DatabaseReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<BagReader::Status> status{BagReader::kStopped};
@@ -81,6 +104,7 @@ struct DatabaseReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.
 
   std::string path;
   BagReader::Info info;
+  std::vector<BagReader::Info::UrlMeta> raw_url_metas;
   std::mutex mtx;
   ConditionVariable cv;
 
@@ -172,6 +196,7 @@ DatabaseReader::~DatabaseReader() {
 
 void DatabaseReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
   BagReader::bind_plugin_interface(plugin_interface);
+  impl_->info.url_metas = impl_->raw_url_metas;
   process_url_metas(impl_->info.url_metas);
   rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
 }
@@ -280,7 +305,7 @@ void DatabaseReader::jump(int64_t begin_time, double rate, int times, bool force
   if (begin_time < 0) {
     begin_time = 0;
   } else if (begin_time > impl_->info.total_duration) {
-    begin_time = impl_->info.total_duration - 100;
+    begin_time = std::max<int64_t>(0, impl_->info.total_duration - 100);
   }
 
   impl_->real_elapsed = begin_time * 1000U;
@@ -342,7 +367,6 @@ std::future<bool> DatabaseReader::check() {
 
   return invoke_task([this]() {
     int ret = 0;
-    char* err_msg = nullptr;
 
     if (!impl_->total_has_completed) {
       VLOG_W("DatabaseReader: Incomplete data detected.");
@@ -359,52 +383,53 @@ std::future<bool> DatabaseReader::check() {
         wrapper_file.stmt = nullptr;
       }
 
-      ret = ::sqlite3_exec(wrapper_file.db, "PRAGMA integrity_check;", nullptr, nullptr, &err_msg);
+      ::sqlite3_stmt* integrity_stmt = nullptr;
+      ret = ::sqlite3_prepare_v2(wrapper_file.db, "PRAGMA integrity_check;", -1, &integrity_stmt, nullptr);
+      SqliteStmtPtr integrity_stmt_guard(integrity_stmt);
 
       if VUNLIKELY (is_ready_to_quit()) {
-        if (err_msg) {
-          ::sqlite3_free(err_msg);
-          err_msg = nullptr;
-        }
-
         return false;
       } else if VUNLIKELY (ret != SQLITE_OK) {
-        CLOG_W("Failed to check integrity: %s.", err_msg);
-
-        if (err_msg) {
-          ::sqlite3_free(err_msg);
-          err_msg = nullptr;
-        }
-
+        CLOG_W("Failed to prepare integrity check: %s.", ::sqlite3_errmsg(wrapper_file.db));
         return false;
       }
+
+      bool has_integrity_result = false;
+      int step_ret = SQLITE_OK;
+      for (;;) {
+        step_ret = ::sqlite3_step(integrity_stmt);
+
+        if (step_ret != SQLITE_ROW) {
+          break;
+        }
+
+        has_integrity_result = true;
+        const auto integrity_result = sqlite_column_text_or_empty(integrity_stmt, get_column(0));
+
+        if VUNLIKELY (integrity_result != "ok") {
+          CLOG_W("Failed integrity check: %s.", integrity_result.c_str());
+          return false;
+        }
+      }
+
+      if VUNLIKELY (step_ret != SQLITE_DONE || !has_integrity_result) {
+        CLOG_W("Failed to read integrity check: %s.", ::sqlite3_errmsg(wrapper_file.db));
+        return false;
+      }
+
+      integrity_stmt_guard.reset();
 
       ret = ::sqlite3_prepare_v2(wrapper_file.db, "SELECT * FROM VLinkDatas;", -1, &wrapper_file.stmt, nullptr);
 
       if VUNLIKELY (is_ready_to_quit()) {
-        if (err_msg) {
-          ::sqlite3_free(err_msg);
-          err_msg = nullptr;
-        }
-
         return false;
       } else if VUNLIKELY (ret != SQLITE_OK) {
         CLOG_W("Failed to prepare datas table: %s.", ::sqlite3_errmsg(wrapper_file.db));
-
-        if (err_msg) {
-          ::sqlite3_free(err_msg);
-          err_msg = nullptr;
-        }
 
         return false;
       }
 
       ::sqlite3_step(wrapper_file.stmt);
-
-      if (err_msg) {
-        ::sqlite3_free(err_msg);
-        err_msg = nullptr;
-      }
     }
 
     bool is_ok = true;
@@ -916,7 +941,6 @@ void DatabaseReader::tag(const std::string& tag_name) {
 
   post_task([this, tag_name]() {
     int ret = 0;
-    char* err_msg = nullptr;
     std::string update_tag_sql;
 
     for (auto& wrapper_file : impl_->file_list) {
@@ -935,30 +959,29 @@ void DatabaseReader::tag(const std::string& tag_name) {
 
       (void)ret;
 
-      update_tag_sql = "UPDATE VLinkHeader SET tag='" + tag_name + "';";
+      ::sqlite3_stmt* update_tag_stmt = nullptr;
+      ret = ::sqlite3_prepare_v2(wrapper_file.db, "UPDATE VLinkHeader SET tag = ?;", -1, &update_tag_stmt, nullptr);
+      SqliteStmtPtr update_tag_stmt_guard(update_tag_stmt);
 
-      ret = ::sqlite3_exec(wrapper_file.db, update_tag_sql.c_str(), nullptr, nullptr, &err_msg);
+      if VLIKELY (ret == SQLITE_OK) {
+        ret = ::sqlite3_bind_text(update_tag_stmt, 1, tag_name.c_str(), static_cast<int>(tag_name.size()),
+                                  SQLITE_TRANSIENT);
+      }
 
-      if VUNLIKELY (ret != SQLITE_OK) {
-        CLOG_W("Failed to set tag: %s.", err_msg);
+      if VLIKELY (ret == SQLITE_OK) {
+        ret = ::sqlite3_step(update_tag_stmt);
+      }
 
-        if (err_msg) {
-          ::sqlite3_free(err_msg);
-          err_msg = nullptr;
-        }
-
+      if VUNLIKELY (ret != SQLITE_DONE) {
+        CLOG_W("Failed to set tag: %s.", ::sqlite3_errmsg(wrapper_file.db));
         return;
       }
+
+      update_tag_stmt_guard.reset();
 
       ret = ::sqlite3_prepare_v2(wrapper_file.db, "SELECT * FROM VLinkDatas;", -1, &wrapper_file.stmt, nullptr);
       if VUNLIKELY (ret != SQLITE_OK) {
         CLOG_W("Failed to prepare datas table: %s.", ::sqlite3_errmsg(wrapper_file.db));
-
-        if (err_msg) {
-          ::sqlite3_free(err_msg);
-          err_msg = nullptr;
-        }
-
         return;
       }
 
@@ -1012,11 +1035,6 @@ void DatabaseReader::tag(const std::string& tag_name) {
     } catch (std::filesystem::filesystem_error& e) {
       VLOG_F("DatabaseReader: Filesystem error, ", e.what(), ".");
       return;
-    }
-
-    if (err_msg) {
-      ::sqlite3_free(err_msg);
-      err_msg = nullptr;
     }
   });
 #else
@@ -1085,8 +1103,8 @@ std::vector<SchemaData> DatabaseReader::detect_schema() {
 
     while (::sqlite3_step(schema_stmt) == SQLITE_ROW) {
       SchemaData schema;
-      schema.name = reinterpret_cast<const char*>(::sqlite3_column_text(schema_stmt, get_column(0)));
-      schema.encoding = reinterpret_cast<const char*>(::sqlite3_column_text(schema_stmt, get_column(1)));
+      schema.name = sqlite_column_text_or_empty(schema_stmt, get_column(0));
+      schema.encoding = sqlite_column_text_or_empty(schema_stmt, get_column(1));
       schema.schema_type = SchemaData::resolve_type(SchemaType::kUnknown, schema.name, schema.encoding);
 
       data = static_cast<const uint8_t*>(::sqlite3_column_blob(schema_stmt, get_column(2)));
@@ -1697,6 +1715,7 @@ void DatabaseReader::prepare_file(void* file) {
     CLOG_F("Failed to prepare header table: %s.", ::sqlite3_errmsg(wrapper_file->db));
     return;
   }
+  SqliteStmtPtr header_stmt_guard(header_stmt);
 
   ret = ::sqlite3_step(header_stmt);
   if VUNLIKELY (ret != SQLITE_ROW) {
@@ -1719,10 +1738,10 @@ void DatabaseReader::prepare_file(void* file) {
   impl_->info.storage_type = "SQLite3";
   impl_->info.message_count = ::sqlite3_column_int64(header_stmt, get_column(3));
   impl_->info.total_duration = ::sqlite3_column_int64(header_stmt, get_column(4)) / 1000U;
-  impl_->info.time_accuracy = reinterpret_cast<const char*>(::sqlite3_column_text(header_stmt, get_column(5)));
-  impl_->info.compression_type = reinterpret_cast<const char*>(::sqlite3_column_text(header_stmt, get_column(6)));
-  impl_->info.process_name = reinterpret_cast<const char*>(::sqlite3_column_text(header_stmt, get_column(7)));
-  impl_->info.date_time = reinterpret_cast<const char*>(::sqlite3_column_text(header_stmt, get_column(8)));
+  impl_->info.time_accuracy = sqlite_column_text_or_empty(header_stmt, get_column(5));
+  impl_->info.compression_type = sqlite_column_text_or_empty(header_stmt, get_column(6));
+  impl_->info.process_name = sqlite_column_text_or_empty(header_stmt, get_column(7));
+  impl_->info.date_time = sqlite_column_text_or_empty(header_stmt, get_column(8));
 
   const char* tag_name_str = reinterpret_cast<const char*>(::sqlite3_column_text(header_stmt, get_column(9)));
   if (tag_name_str) {
@@ -1757,10 +1776,8 @@ void DatabaseReader::prepare_file(void* file) {
     return;
   }
 
-  if VLIKELY (header_stmt) {
-    ::sqlite3_finalize(header_stmt);
-    header_stmt = nullptr;
-  }
+  header_stmt_guard.reset();
+  header_stmt = nullptr;
 
   // prepare schema table
   ::sqlite3_stmt* schema_stmt = nullptr;
@@ -1812,6 +1829,7 @@ void DatabaseReader::prepare_file(void* file) {
   impl_->url_to_ser_map.clear();
   impl_->url_to_schema_type_map.clear();
   impl_->info.url_metas.clear();
+  impl_->raw_url_metas.clear();
 
   impl_->info.total_raw_size = 0;
 
@@ -1819,9 +1837,9 @@ void DatabaseReader::prepare_file(void* file) {
     Info::UrlMeta url_meta;
     url_meta.valid = true;
     url_meta.index = ::sqlite3_column_int(urls_stmt, get_column(0));
-    url_meta.url = reinterpret_cast<const char*>(::sqlite3_column_text(urls_stmt, get_column(1)));
-    url_meta.url_type = reinterpret_cast<const char*>(::sqlite3_column_text(urls_stmt, get_column(2)));
-    url_meta.ser_type = reinterpret_cast<const char*>(::sqlite3_column_text(urls_stmt, get_column(3)));
+    url_meta.url = sqlite_column_text_or_empty(urls_stmt, get_column(1));
+    url_meta.url_type = sqlite_column_text_or_empty(urls_stmt, get_column(2));
+    url_meta.ser_type = sqlite_column_text_or_empty(urls_stmt, get_column(3));
     const auto* encoding_label = reinterpret_cast<const char*>(::sqlite3_column_text(urls_stmt, get_column(4)));
     url_meta.schema_type =
         SchemaData::resolve_type(SchemaData::convert_encoding(encoding_label ? encoding_label : ""), url_meta.ser_type);
@@ -1842,6 +1860,8 @@ void DatabaseReader::prepare_file(void* file) {
   }
 
   std::sort(impl_->info.url_metas.begin(), impl_->info.url_metas.end());
+  impl_->raw_url_metas = impl_->info.url_metas;
+  rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
 
   if VLIKELY (urls_stmt) {
     ::sqlite3_finalize(urls_stmt);
@@ -2185,6 +2205,7 @@ void DatabaseReader::open(const std::string& path) {
         impl_->url_to_ser_map.clear();
         impl_->url_to_schema_type_map.clear();
         impl_->info.url_metas.clear();
+        impl_->raw_url_metas.clear();
 
         impl_->info.url_metas.reserve(urls_json.size());
 
@@ -2225,6 +2246,8 @@ void DatabaseReader::open(const std::string& path) {
         }
 
         std::sort(impl_->info.url_metas.begin(), impl_->info.url_metas.end());
+        impl_->raw_url_metas = impl_->info.url_metas;
+        rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
       } catch (nlohmann::json::exception& e) {
         VLOG_F("DatabaseReader: JSON parse error, ", e.what(), ".");
         return;
@@ -2317,14 +2340,12 @@ int DatabaseReader::get_reset_index(const Config& config) {
         std::string id_list_str = " url IN (";
         bool id_appended = false;
 
-        for (const auto& url : config.filter_urls) {
-          auto iter = wrapper_file.url_to_id_map.find(url);
-
-          if (iter == wrapper_file.url_to_id_map.end()) {
+        for (const auto& [url, id] : wrapper_file.url_to_id_map) {
+          if (!match_playback_url_filter(url, config.filter_urls)) {
             continue;
           }
 
-          id_list_str.append(std::to_string(iter->second));
+          id_list_str.append(std::to_string(id));
           id_list_str.append(",");
           id_appended = true;
         }
@@ -2517,6 +2538,10 @@ void DatabaseReader::read(const Config& config) {
         const auto& url = iter->second;
 
         if VUNLIKELY (url.empty()) {
+          continue;
+        }
+
+        if VUNLIKELY (!match_playback_url_filter(url, config.filter_urls)) {
           continue;
         }
 

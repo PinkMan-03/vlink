@@ -55,8 +55,8 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 ///   Results are cached internally for O(1) repeated lookups.
 ///
 /// Environment variables:
-///   - VLINK_URL_REMAP:      path to the remap JSON file
-///   - VLINK_URL_USE_REMAP:  set to "1" to enable automatic URL remapping
+///   - VLINK_URL_REMAP: path to the remap JSON file. In builds with URL remap enabled,
+///     this is read once when the global remapper is first used.
 
 /// Helper: write a JSON remap file for demonstration
 static void write_json_file(const std::string& path, const std::string& content) {
@@ -212,21 +212,18 @@ int main() {
     VLOG_I("  [", env, "] app://sensor/lidar -> ", url);
   }
 
-  // ======== Example 6: VLINK_URL_REMAP and VLINK_URL_USE_REMAP env vars ========
-  // These environment variables enable automatic URL remapping at the framework level.
-  // When set, every URL passed to VLink node constructors is automatically remapped.
+  // ======== Example 6: VLINK_URL_REMAP env var ========
+  // In builds with URL remap enabled, this environment variable enables
+  // automatic URL remapping at the framework level.
   {
     VLOG_I("=== Example 6: VLINK_URL_REMAP env vars ===");
 
-    // Enable automatic remapping by setting both env vars:
+    // Enable automatic remapping by setting the remap file before constructing nodes:
     //   export VLINK_URL_REMAP=/path/to/remap.json
-    //   export VLINK_URL_USE_REMAP=1
 
     vlink::Utils::set_env("VLINK_URL_REMAP", dev_json);
-    vlink::Utils::set_env("VLINK_URL_USE_REMAP", "1");
 
     VLOG_I("  VLINK_URL_REMAP=", vlink::Utils::get_env("VLINK_URL_REMAP"));
-    VLOG_I("  VLINK_URL_USE_REMAP=", vlink::Utils::get_env("VLINK_URL_USE_REMAP"));
 
     // Now every VLink node constructor automatically remaps:
     //   Publisher<Msg> pub("intra://sensor/lidar");
@@ -234,7 +231,6 @@ int main() {
 
     // Clean up
     vlink::Utils::unset_env("VLINK_URL_REMAP");
-    vlink::Utils::unset_env("VLINK_URL_USE_REMAP");
   }
 
   // ======== Example 7: Substring matching behavior ========

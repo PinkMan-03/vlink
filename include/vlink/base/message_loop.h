@@ -341,26 +341,6 @@ class VLINK_EXPORT MessageLoop {
   bool quit(bool force = false);
 
   /**
-   * @brief Waits until the task queue is drained.
-   *
-   * @details
-   * "Idle" means: the loop is not currently executing a task and the task
-   * queue is empty.  If the loop has not yet been started — i.e. neither
-   * @c run() nor @c async_run() has been called (or the loop has already
-   * exited) — only the empty-queue condition is required; tasks queued
-   * before the first start still keep the loop non-idle and cause this
-   * function to wait (or time out).
-   *
-   * @param ms     Maximum wait time in milliseconds.  @c Timer::kInfinite for unlimited.  Default: @c kInfinite.
-   * @param check  If @c true, also reject calls made from the loop's own
-   *               thread (which would deadlock).  Default: @c true.
-   * @return @c true if the loop reached the idle state within @p ms;
-   *         @c false on timeout or if @p check is @c true and the call was
-   *         made from the loop thread.
-   */
-  bool wait_for_idle(int ms = Timer::kInfinite, bool check = true);
-
-  /**
    * @brief Waits until the loop has fully exited (after @c quit() was called).
    *
    * @param ms     Maximum wait time in milliseconds.  @c Timer::kInfinite for unlimited.  Default: @c kInfinite.
@@ -544,6 +524,26 @@ class VLINK_EXPORT MessageLoop {
   [[nodiscard]] size_t get_task_count() const;
 
   /**
+   * @brief Waits until the task queue is drained.
+   *
+   * @details
+   * "Idle" means: the loop is not currently executing a task and the task
+   * queue is empty.  If the loop has not yet been started — i.e. neither
+   * @c run() nor @c async_run() has been called (or the loop has already
+   * exited) — only the empty-queue condition is required; tasks queued
+   * before the first start still keep the loop non-idle and cause this
+   * function to wait (or time out).
+   *
+   * @param ms     Maximum wait time in milliseconds.  @c Timer::kInfinite for unlimited.  Default: @c kInfinite.
+   * @param check  If @c true, also reject calls made from the loop's own
+   *               thread (which would deadlock).  Default: @c true.
+   * @return @c true if the loop reached the idle state within @p ms;
+   *         @c false on timeout or if @p check is @c true and the call was
+   *         made from the loop thread.
+   */
+  virtual bool wait_for_idle(int ms = Timer::kInfinite, bool check = true);
+
+  /**
    * @brief Returns the maximum queue depth.
    *
    * @return @c kMaxTaskSize (10000) by default.
@@ -573,7 +573,7 @@ class VLINK_EXPORT MessageLoop {
    *
    * @details
    * Used internally to detect if a task is calling back into the loop synchronously.
-   * For @c MultiLoop, returns @c true if the caller is any of the worker threads.
+   * For @c MultiLoop, returns @c true for the dispatcher thread and worker threads.
    *
    * @return @c true if called from the loop's own thread.
    */

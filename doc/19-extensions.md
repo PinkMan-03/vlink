@@ -222,9 +222,10 @@ if (instance) {
 | `get_all_schemas(schema_type)`     | 返回当前缓存/导入的全部 schema，可按 family 过滤       |
 | `create_protobuf_message(name)`    | 用 `DynamicMessageFactory` 创建指定类型的消息原型        |
 | `search_flatbuffers_schema(name)`   | 返回 BFBS 对应的 `reflection::Schema` 句柄             |
-| `create_flatbuffers_parser(name)`   | 返回已装载 root type 的 FlatBuffers `Parser`           |
+| `create_flatbuffers_parser(name)`   | 创建一个已装载 root type 的 FlatBuffers `Parser`       |
 
-所有方法均通过内部 `mutex` 保证线程安全，查询结果在内部缓存以避免重复查找。
+所有方法均通过内部 `mutex` 保证线程安全，查询结果在内部缓存以避免重复查找；
+`create_flatbuffers_parser()` 每次成功调用返回独立 parser，生命周期由插件持有。
 
 ### 19.4.2 SchemaPluginBase — 内置实现
 

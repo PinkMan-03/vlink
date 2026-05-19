@@ -33,6 +33,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <shared_mutex>
 #include <string>
@@ -328,6 +329,7 @@ class FoxgloveServer final : public MessageLoop {
   std::atomic<uint64_t> last_sys_time_ns_{0};
   std::atomic<uint64_t> session_start_sys_time_ns_{0};
   ElapsedTimer bridge_time_elapsed_{ElapsedTimer::kCpuTimestamp, ElapsedTimer::kNano};
+  mutable std::mutex bridge_control_mtx_;
   std::string bridge_control_signature_;
   std::string session_id_;
 

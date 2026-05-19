@@ -422,7 +422,8 @@ double score_latency_us(const AggregatedCase& item) {
   if (item.scenario.suite == Bench::kLatencySuite) {
     double weighted_sum = 0.0;
     double weight_sum = 0.0;
-    auto add_latency = [&](const MetricSummary& metric, double weight) {
+
+    auto add_latency = [&weighted_sum, &weight_sum](const MetricSummary& metric, double weight) {
       if (metric.count == 0) {
         return;
       }
@@ -450,7 +451,7 @@ double score_latency_quality(const AggregatedCase& item) {
   double weighted_sum = 0.0;
   double weight_sum = 0.0;
 
-  auto add_latency_score = [&](const MetricSummary& metric, double weight) {
+  auto add_latency_score = [&weighted_sum, &weight_sum, &item](const MetricSummary& metric, double weight) {
     if (metric.count == 0) {
       return;
     }

@@ -68,7 +68,7 @@ class SchemaPluginInterface {
 | `get_all_schemas(schema_type)` | 可选的 schema family 过滤条件 | `std::vector<SchemaData>` | 返回插件当前缓存/导入的全部 schema |
 | `create_protobuf_message(name)` | 完全限定消息类型名 | `Message*`（类型擦除） | 创建动态 protobuf 消息原型 |
 | `search_flatbuffers_schema(name)` | 完全限定消息类型名 | `reflection::Schema*`（类型擦除） | 查找 BFBS 反射句柄 |
-| `create_flatbuffers_parser(name)` | 完全限定消息类型名 | `flatbuffers::Parser*`（类型擦除） | 创建已设置 root type 的运行时 parser |
+| `create_flatbuffers_parser(name)` | 完全限定消息类型名 | `flatbuffers::Parser*`（类型擦除） | 创建已设置 root type 的独立运行时 parser |
 
 ### 3.3 VersionInfo 结构
 
@@ -394,5 +394,5 @@ auto* msg = static_cast<google::protobuf::Message*>(msg_ptr);
 - 实际的 SchemaPlugin 实现需要链接 Protobuf 库
 - `SchemaPluginManager::get()` 是进程级单例，首次调用后插件名参数被忽略
 - `search_schema(name, schema_type)` 会按 schema family 分开缓存结果
-- `create_protobuf_message()` 和 `create_flatbuffers_parser()` 返回的运行时句柄都由插件拥有，生命周期与插件相同
+- `create_protobuf_message()` 和 `create_flatbuffers_parser()` 返回的运行时句柄都由插件拥有，生命周期与插件相同；FlatBuffers parser 每次调用返回独立实例
 - `VLINK_SCHEMA_PLUGIN` 环境变量在 `SchemaPluginManager` 首次调用时读取

@@ -39,7 +39,7 @@
  *
  * Cryptographic primitives:
  * - AEAD: AES-128-GCM with a 12-byte nonce, authenticated envelope header, and 16-byte tag.
- * - Envelope binding: version, mode, key id, sender id, sequence, nonce, and @c aad_context
+ * - Envelope binding: version, mode, flags, sender id, sequence, nonce, and @c aad_context
  *   are authenticated as AAD; receivers reject replayed sequence numbers within @c replay_window.
  * - Asymmetric key wrap: RSA-OAEP-SHA256 wrapping a fresh 16-byte AES session key per message.
  * - Optional sender authentication: RSA-PSS-SHA256 over the AAD-bound envelope and ciphertext/tag.
@@ -83,7 +83,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "../base/bytes.h"
 #include "../base/functional.h"
@@ -131,29 +130,17 @@ class VLINK_EXPORT Security final {
    * @par Symmetric key sources
    * Provide either @c key (raw seed, hashed via SHA-256 truncation) or @c passphrase
    * (low-entropy, normalised via PBKDF2-HMAC-SHA256 with @c pbkdf2_salt and
-   * @c pbkdf2_iterations).  @c advanced.key_id labels the current outbound key on the wire. During
-   * rotation, put decrypt-only old keys into @c advanced.previous_keys; outbound traffic always uses
-   * the top-level current key.  When both are empty no symmetric key is installed.
+   * @c pbkdf2_iterations).  When both are empty no symmetric key is installed.
    *
    * @par RSA constraints
    * All four PEM fields require RSA keys of at least 2048 bits.
    */
   struct Config final {
-    struct PreviousKey final {
-      std::string key_id;                   ///< Stable identifier carried on the wire for this key.
-      std::string key;                      ///< Raw symmetric seed; SHA-256 truncated to 16 bytes.
-      std::string passphrase;               ///< Low-entropy passphrase fed into PBKDF2-HMAC-SHA256.
-      Bytes pbkdf2_salt;                    ///< Per-deployment salt (>=16 bytes), shared out-of-band.
-      uint32_t pbkdf2_iterations{200000U};  ///< PBKDF2 iteration count.
-    };
-
     struct Advanced final {
-      std::string key_id{"default"};           ///< Current key id (<=255 wire bytes); "default" is compact.
-      std::vector<PreviousKey> previous_keys;  ///< Decrypt-only old symmetric keys accepted during rotation.
-      std::string aad_context;                 ///< Application/channel context (<=65535 bytes) bound into AEAD.
-      uint32_t replay_window{4096U};           ///< Sliding replay window size in messages; 0 disables checks.
-      std::string signing_key_pem;             ///< Local RSA private key (PEM) for RSA-PSS signing.
-      std::string verify_key_pem;              ///< Peer's RSA public key (PEM) for RSA-PSS verification.
+      std::string aad_context;        ///< Application/channel context (<=65535 bytes) bound into AEAD.
+      uint32_t replay_window{4096U};  ///< Sliding replay window size in messages; 0 disables checks.
+      std::string signing_key_pem;    ///< Local RSA private key (PEM) for RSA-PSS signing.
+      std::string verify_key_pem;     ///< Peer's RSA public key (PEM) for RSA-PSS verification.
     };
 
     std::string key;                      ///< Raw symmetric seed; SHA-256 truncated to 16 bytes.
@@ -164,7 +151,7 @@ class VLINK_EXPORT Security final {
     std::string private_key_pem;          ///< Local RSA private key (PEM) for inbound decryption.
     Callback encrypt_callback;            ///< Custom encrypt; bypasses AEAD.
     Callback decrypt_callback;            ///< Custom decrypt; paired with @c encrypt_callback.
-    Advanced advanced;                    ///< Low-frequency knobs: AAD, replay, rotation, and signing.
+    Advanced advanced;                    ///< Low-frequency knobs: AAD, replay, and signing.
 
     Config() = default;
   };
@@ -197,7 +184,7 @@ class VLINK_EXPORT Security final {
    * @details
    * This overload avoids copying callback targets and PEM / key strings when the
    * caller no longer needs the configuration.  The stored config is normalised
-   * during construction (for example key id and replay-window bounds).
+   * during construction (for example AAD context validation and replay-window bounds).
    *
    * @param cfg  Configuration aggregate to consume.
    */

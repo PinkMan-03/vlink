@@ -98,6 +98,8 @@ bool Shm2ClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
   }
 
   if (timeout.count() != 0) {
+    ack_manager_.reset_interrupted();
+
     ElapsedTimer timer;
     timer.start();
 
@@ -117,10 +119,22 @@ bool Shm2ClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
       ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
     };
 
-    return ack_manager_.process(
-        ack_request, timeout.count() - elapsed, [this, &req_data, ack_function = std::move(ack_function)]() mutable {
-          return object_->call(static_cast<uint64_t>(conf_.hash_code), req_data, std::move(ack_function));
+    uint64_t response_seq = 0;
+    bool has_response_seq = false;
+
+    bool ret = ack_manager_.process(
+        ack_request, timeout.count() - elapsed,
+        [this, &req_data, &response_seq, &has_response_seq, ack_function = std::move(ack_function)]() mutable {
+          has_response_seq =
+              object_->call(static_cast<uint64_t>(conf_.hash_code), req_data, std::move(ack_function), &response_seq);
+          return has_response_seq;
         });
+
+    if VUNLIKELY (!ret && has_response_seq) {
+      object_->remove_response_callback(response_seq);
+    }
+
+    return ret;
   }
 
   return object_->call(static_cast<uint64_t>(conf_.hash_code), req_data, std::move(callback));

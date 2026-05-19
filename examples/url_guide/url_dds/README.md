@@ -24,7 +24,7 @@ ddsc://topic[?domain=N&depth=N&qos=profile_name]
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `VLINK_DDS_DOMAIN` | 所有 `dds://` URL 的默认 domain ID | 0 |
-| `VLINK_DDS_BIND` | 绑定 DDS 到指定网卡 IP | (所有接口) |
+| `VLINK_DDS_BIND` | 将 `dds://` / `ddsf://` URL 重定向到指定 DDS 后端 scheme（如 `ddsc`） | (不重定向) |
 
 ## 4. 关键代码分析
 
@@ -44,10 +44,10 @@ Publisher<int> pub("dds://vehicle/speed");  // 使用 domain=42
 ### 4.2 网卡绑定
 
 ```cpp
-Utils::set_env("VLINK_DDS_BIND", "192.168.1.100");
+Utils::set_env("VLINK_DDS_BIND", "ddsc");
 ```
 
-在多网卡系统中，`VLINK_DDS_BIND` 将 DDS 发现和数据流量限制在指定 IP 的网络接口上，防止跨网段流量泄漏。
+`VLINK_DDS_BIND` 是 URL 层的 DDS 后端选择开关，值是 `dds` / `ddsf` / `ddsc` / `ddsr` / `ddst` 这类 scheme 名。网卡/IP 绑定请使用 `VLINK_DDS_IP` 或具体后端的网络配置。
 
 ### 4.3 QoS 配置文件
 
@@ -110,6 +110,6 @@ make example_url_dds
 ## 7. 扩展思考
 
 - DDS 不需要 Broker 或中央服务器，参与者通过多播自动发现。
-- 对于大规模系统，使用 `VLINK_DDS_BIND` 是必须的，否则 DDS 发现报文会泛洪到所有网络接口。
+- 对于大规模系统，网卡/IP 选择请使用 `VLINK_DDS_IP` 或后端专用网络配置；`VLINK_DDS_BIND` 只负责选择 DDS 后端 scheme。
 - `?depth=` 影响 QoS 历史缓冲大小：较大的 depth 有利于迟到订阅者接收历史数据，但增加内存占用。
 - Fast-DDS 支持 `DdsConf::load_global_qos_file()` 加载 XML 配置，必须在创建任何 `dds://` 节点之前调用。

@@ -41,6 +41,7 @@ AckManager::RequestPtr AckManager::create_request() noexcept {
   auto request = MemoryResource::make_shared<Request>();
 
   request->seq = request_seq_++;
+  request->generation = generation_;
 
   return request;
 }
@@ -49,7 +50,7 @@ bool AckManager::process(RequestPtr request, int ms, ProcessCallback&& process_c
   {
     std::lock_guard manager_lock(mtx_);
 
-    if VUNLIKELY (is_interrupted_) {
+    if VUNLIKELY (is_interrupted_ || request->generation != generation_) {
       return false;
     }
 
@@ -73,7 +74,7 @@ bool AckManager::process(RequestPtr request, int ms, ProcessCallback&& process_c
 
     auto predicate = [this, &request]() -> bool {
       std::lock_guard manager_lock(mtx_);
-      return is_interrupted_ || request_set_.count(request) == 0;
+      return is_interrupted_ || request->generation != generation_ || request_set_.count(request) == 0;
     };
 
     if (ms < 0) {
@@ -87,7 +88,7 @@ bool AckManager::process(RequestPtr request, int ms, ProcessCallback&& process_c
     std::lock_guard manager_lock(mtx_);
     request_set_.erase(request);
 
-    if VUNLIKELY (is_interrupted_) {
+    if VUNLIKELY (is_interrupted_ || request->generation != generation_) {
       return false;
     }
   }
@@ -128,6 +129,7 @@ void AckManager::clear() noexcept {
     std::lock_guard manager_lock(mtx_);
 
     is_interrupted_ = true;
+    ++generation_;
 
     temp_set.swap(request_set_);
   }
@@ -136,6 +138,12 @@ void AckManager::clear() noexcept {
     std::lock_guard lock(request->mtx);
     request->cv.notify_all();
   }
+}
+
+void AckManager::reset_interrupted() noexcept {
+  std::lock_guard manager_lock(mtx_);
+
+  is_interrupted_ = false;
 }
 
 }  // namespace vlink

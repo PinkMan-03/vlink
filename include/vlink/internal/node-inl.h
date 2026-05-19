@@ -37,6 +37,12 @@ namespace vlink {
 
 template <typename ImplT, SecurityType SecT>
 inline bool Node<ImplT, SecT>::init() {
+  if constexpr (SecT == SecurityType::kWithSecurity) {
+    if VUNLIKELY (!impl_->security) {
+      VLOG_F("Node::init(): security node has no usable Security; check Security::Config. url: ", impl_->url);
+    }
+  }
+
   bool expected = false;
 
   if VUNLIKELY (!has_inited_.compare_exchange_strong(expected, true)) {

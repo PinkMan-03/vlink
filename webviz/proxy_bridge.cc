@@ -464,7 +464,7 @@ class ProxyServerBridge final : public ProxyBridge {
       return false;
     }
 
-    discovery_viewer_->post_task([this, control]() {
+    return discovery_viewer_->post_task([this, control]() {
       if VUNLIKELY (!started_.load()) {
         return;
       }
@@ -472,8 +472,6 @@ class ProxyServerBridge final : public ProxyBridge {
       apply_control(control);
       dispatch_time();
     });
-
-    return true;
   }
 
   bool send_data(const ProxyAPI::Data& data) override {

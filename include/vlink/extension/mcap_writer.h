@@ -112,7 +112,7 @@ class VLINK_EXPORT McapWriter final : public BagWriter {
    * @param microseconds_timestamp Optional custom timestamp in microseconds.
    *                               @c nullptr means use the current system time.
    * @param immediate              If @c true, writes synchronously bypassing the queue.
-   * @return Sequence number of the recorded message, or a negative value on error.
+   * @return Message timestamp in microseconds, or a negative value on error.
    */
   int64_t push(const std::string& url, const std::string& ser_type, SchemaType schema_type, ActionType action_type,
                const Bytes& data, int64_t* microseconds_timestamp = nullptr, bool immediate = false) override;

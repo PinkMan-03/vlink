@@ -1239,7 +1239,7 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
       }
     }
 
-    const auto print_line = [&](const std::string& line, const char* color = nullptr) {
+    const auto print_line = [&line_width, &colorize](const std::string& line, const char* color = nullptr) {
       const auto fitted = fit_text(line, line_width);
 
       std::string out;
@@ -1262,8 +1262,9 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
                    std::to_string(warning_cases) + "  fail " + std::to_string(failed_cases) +
                    "  \xE2\x94\x82  html report has full charts",
                colorize ? kStyleHeaderBar : nullptr);
-    auto print_table = [&](std::string_view title, const TerminalLayout& layout,
-                           const std::vector<const AggregatedCase*>& table_items) {
+
+    auto print_table = [&print_line, &separator, &colorize](std::string_view title, const TerminalLayout& layout,
+                                                            const std::vector<const AggregatedCase*>& table_items) {
       if (table_items.empty()) {
         return;
       }
@@ -1344,7 +1345,9 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
   MessageLoop terminal_loop;
   terminal_loop.set_name("vlink-bench-terminal");
 
-  auto recalc_page = [&](bool rebuild_view) {
+  auto recalc_page = [&terminal_size, &suite_filter, &items, &mode_filter, &transport_filter, &failures_only,
+                      &sort_mode, &view, &search_query, &reverse_sort, &rows_per_page, &selected_index, &page_index,
+                      &detail_offset](bool rebuild_view) {
     terminal_size = normalize_terminal_size(Utils::get_terminal_size());
     const bool serialization_only = suite_filter == static_cast<int>(Bench::kSerializationSuite);
     const auto layout = serialization_only
@@ -1415,7 +1418,10 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
     detail_offset = std::min(detail_offset, max_detail_offset);
   };
 
-  auto print_function = [&]() {
+  auto print_function = [&recalc_page, &view_dirty, &redraw, &show_help, &terminal_size, &items, &view, &selected_index,
+                         &rows_per_page, &result, &suite_filter, &mode_filter, &transport_filter, &failures_only,
+                         &sort_mode, &page_index, &detail_offset, &search_mode, &search_buffer, &footer_flash_ttl,
+                         &footer_flash_message]() {
     recalc_page(view_dirty);
     view_dirty = false;
     redraw = false;
@@ -1449,7 +1455,7 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
     }
   };
 
-  auto quit_function = [&]() {
+  auto quit_function = [&has_quit, &terminal_loop]() {
     if VUNLIKELY (has_quit.exchange(true, std::memory_order_relaxed)) {
       return;
     }
@@ -1477,7 +1483,12 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
   });
   terminal_timer.start();
 
-  auto detect_keyboard_function = [&](const std::string& key) {
+  auto detect_keyboard_function = [&has_quit, &quit_function, &help_visible, &search_visible, &terminal_loop,
+                                   &search_mode, &search_query, &selected_index, &detail_offset, &view_dirty, &redraw,
+                                   &footer_flash_message, &footer_flash_ttl, &print_function, &search_buffer,
+                                   &show_help, &suite_filter, &mode_filter, &transport_filter, &failures_only, &items,
+                                   &sort_mode, &view, &rows_per_page, &terminal_size, &reverse_sort,
+                                   &page_index](const std::string& key) {
     if VUNLIKELY (has_quit.load(std::memory_order_relaxed) || Bench::stop_requested()) {
       quit_function();
       return;

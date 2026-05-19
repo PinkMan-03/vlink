@@ -61,6 +61,8 @@ bool BagReader::Info::UrlMeta::operator<(const BagReader::Info::UrlMeta& target)
 struct BagReader::Impl final {
   BagReader::OutputCallback output_callback;
   std::shared_ptr<BagReaderPluginInterface> plugin_interface;
+  std::unordered_map<std::string, std::string> playback_url_remap;
+  std::unordered_set<std::string> excluded_playback_urls;
   // Protects output_callback against concurrent register vs invoke.
   mutable std::shared_mutex output_callback_mtx;
 };
@@ -97,15 +99,25 @@ BagReader::~BagReader() {
 }
 
 void BagReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
+  if (impl_->plugin_interface && impl_->plugin_interface != plugin_interface) {
+    impl_->plugin_interface->register_output_callback({});
+  }
+
   impl_->plugin_interface = plugin_interface;
 
   if VLIKELY (impl_->plugin_interface) {
     impl_->plugin_interface->register_output_callback(
         [this](int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data) {
+          std::string output_url;
+
+          if (!convert_playback_url(url, output_url)) {
+            return;
+          }
+
           std::shared_lock callback_lock(impl_->output_callback_mtx);
 
           if (impl_->output_callback) {
-            impl_->output_callback(timestamp, url, action_type, data);
+            impl_->output_callback(timestamp, output_url, action_type, data);
           }
         });
   }
@@ -125,25 +137,77 @@ void BagReader::register_output_callback(OutputCallback&& output_callback) {
 
 void BagReader::process_output(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data) {
   if (impl_->plugin_interface) {
+    if (impl_->excluded_playback_urls.count(url) != 0U) {
+      return;
+    }
+
     impl_->plugin_interface->push(timestamp, url, action_type, data);
   } else {
+    std::string output_url;
+
+    if (!convert_playback_url(url, output_url)) {
+      return;
+    }
+
     std::shared_lock callback_lock(impl_->output_callback_mtx);
 
     if (impl_->output_callback) {
-      impl_->output_callback(timestamp, url, action_type, data);
+      impl_->output_callback(timestamp, output_url, action_type, data);
     }
   }
 }
 
 void BagReader::process_url_metas(std::vector<Info::UrlMeta>& url_metas) {
+  impl_->playback_url_remap.clear();
+  impl_->excluded_playback_urls.clear();
+
   if (impl_->plugin_interface) {
-    url_metas.erase(std::remove_if(url_metas.begin(), url_metas.end(),
-                                   [this](Info::UrlMeta& meta) {
-                                     return !impl_->plugin_interface->convert_url_meta(meta.url, meta.ser_type,
-                                                                                       meta.schema_type);
-                                   }),
-                    url_metas.end());
+    url_metas.erase(
+        std::remove_if(url_metas.begin(), url_metas.end(),
+                       [this](Info::UrlMeta& meta) {
+                         const std::string input_url = meta.url;
+                         if (!impl_->plugin_interface->convert_url_meta(meta.url, meta.ser_type, meta.schema_type)) {
+                           impl_->excluded_playback_urls.emplace(input_url);
+                           return true;
+                         }
+
+                         if (meta.url != input_url) {
+                           impl_->playback_url_remap[input_url] = meta.url;
+                         }
+
+                         return false;
+                       }),
+        url_metas.end());
   }
+}
+
+bool BagReader::convert_playback_url(const std::string& input_url, std::string& output_url) const {
+  if (impl_->excluded_playback_urls.count(input_url) != 0U) {
+    return false;
+  }
+
+  auto iter = impl_->playback_url_remap.find(input_url);
+  if (iter != impl_->playback_url_remap.end()) {
+    output_url = iter->second;
+  } else {
+    output_url = input_url;
+  }
+
+  return true;
+}
+
+bool BagReader::match_playback_url_filter(std::string_view input_url,
+                                          const std::unordered_set<std::string>& filter_urls) const {
+  if VUNLIKELY (!input_url.data()) {
+    return false;
+  }
+
+  std::string output_url;
+  if (!convert_playback_url(std::string(input_url), output_url)) {
+    return false;
+  }
+
+  return filter_urls.empty() || filter_urls.count(output_url) != 0U;
 }
 
 void BagReader::rebuild_url_meta_maps(const std::vector<Info::UrlMeta>& url_metas,

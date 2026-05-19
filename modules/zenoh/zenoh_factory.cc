@@ -620,10 +620,20 @@ void ZenohFactory::deinit() {
     return;
   }
 
-  message_loop_.post_task([this]() { cleanup(); });
+  const bool in_loop = message_loop_.is_in_same_thread();
+
+  if (in_loop) {
+    cleanup();
+  } else if VLIKELY (message_loop_.post_task([this]() { cleanup(); })) {
+    message_loop_.wait_for_idle();
+  } else {
+    cleanup();
+  }
 
   message_loop_.quit();
-  message_loop_.wait_for_quit();
+  if VLIKELY (!in_loop) {
+    message_loop_.wait_for_quit();
+  }
 }
 
 void ZenohFactory::cleanup() {

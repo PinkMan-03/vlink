@@ -451,7 +451,7 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
 
   bool is_leaf = (depth == path_parts.size() - 1);
 
-  auto extract_scalar = [&](auto get_fn) -> bool {
+  auto extract_scalar = [&field, &result](auto get_fn) -> bool {
     if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       return false;
     }

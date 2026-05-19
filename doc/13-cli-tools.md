@@ -195,7 +195,7 @@ vlink-check env [-b] [-p <prefix>]
 | 日志           | `VLINK_LOG_PLUGIN`、`VLINK_LOG_STORE_STRATEGY`、`VLINK_LOG_OPEN_APPEND`、`VLINK_LOG_BLOCK_SYNC`、`VLINK_LOG_WRITE_DEPTH` | 日志插件与后端行为 |
 | Bag            | `VLINK_BAG_PATH`、`VLINK_BAG_TAG`                          | Bag 路径与录制标签                             |
 | 发现 / 分析    | `VLINK_DISCOVER_DISABLE`、`VLINK_DISCOVER_NATIVE`、`VLINK_PROFILER_ENABLE`、`VLINK_QOS_CONFIG` | 发现、性能、QoS 配置 |
-| Intra          | `VLINK_INTRA_BIND`                                         | Intra 通信绑定地址                             |
+| Intra          | `VLINK_INTRA_BIND`                                         | URL 层 intra 后端重定向；ProxyServer 中变量存在时订阅 intra 话题 |
 | DDS (通用)     | `VLINK_DDS_BIND`、`VLINK_DDS_DOMAIN`、`VLINK_DDS_IP`、`VLINK_DDS_IP_FILTER`、`VLINK_DDS_MULTICAST_IP`、`VLINK_DDS_PEER` | DDS 网络配置 |
 | DDS (通用)     | `VLINK_DDS_BUF`、`VLINK_DDS_MTU`、`VLINK_DDS_UDP`、`VLINK_DDS_TCP`、`VLINK_DDS_SHM`、`VLINK_DDS_LESS_MEMORY` | DDS 传输与资源调优 |
 | Intra          | `VLINK_INTRA_BIND`                                         | 仅启用 `VLINK_SUPPORT_INTRA` 时显示            |

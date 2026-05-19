@@ -187,7 +187,7 @@ ps aux | grep -E "iox-roudi|vlink-proxy"
 
 **修复**：
 - **首选**：起 `vlink-proxy -c`（内嵌 iox-roudi + 针对 VLink 载荷分级的 chunk 内存池：默认 `-l 2` Middle = 7 档 / `-l 3` High = 8 档 / `-l 1` Low = 6 档；自带远程监控能力）—— 详见 [§91.6.1](#9161-shm-endpoint-报错启动不了)
-- 多播网卡：用 `VLINK_DDS_BIND=<ip>`（DDS 家族）或 `VLINK_ZENOH_MULTICAST_IF=<iface>`（zenoh）显式指定网卡；`VLINK_INTRA_BIND=<scheme>` 是把 `intra://` 重定向到其它后端（值是 scheme 名，如 `shm`/`dds`，不是网卡名），见 [21-environment-vars.md](21-environment-vars.md)
+- 多播网卡：用 `VLINK_DDS_IP=<ip>`（DDS 家族）或 `VLINK_ZENOH_MULTICAST_IF=<iface>`（zenoh）显式指定网卡；`VLINK_DDS_BIND=<scheme>` 只是在 URL 层选择 DDS 后端（如 `ddsc`/`ddst`），`VLINK_INTRA_BIND=<scheme>` 是把 `intra://` 重定向到其它后端（值是 scheme 名，如 `shm`/`dds`，不是网卡名），见 [21-environment-vars.md](21-environment-vars.md)
 - 改用 `InitType::kWithoutInit` + 显式 `init()` + 超时控制
 
 ### 91.3.3 `Failed to load plugin` / `Unsupported plugin module`

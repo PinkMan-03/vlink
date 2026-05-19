@@ -50,7 +50,7 @@ sub.listen([](const std::string& msg) { ... });
 ### 3.3 Wire format（非对称）
 
 ```
-[35B envelope header][K B key_id][2B wrap_len_le][2B sig_len_le]
+[34B envelope header][2B wrap_len_le][2B sig_len_le]
 [wrap_len B RSA-OAEP wrapped key][sig_len B RSA-PSS sig][N B ciphertext][16B GCM tag]
 ```
 

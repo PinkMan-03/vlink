@@ -141,46 +141,11 @@ static vlink::Security::Config build_security_config(const vlink_security_config
     out.pbkdf2_iterations = cfg->pbkdf2_iterations;
   }
 
-  if (cfg->advanced.key_id && cfg->advanced.key_id[0] != '\0') {
-    out.advanced.key_id.assign(cfg->advanced.key_id);
-  }
-
   if (cfg->advanced.aad_context && cfg->advanced.aad_context[0] != '\0') {
     out.advanced.aad_context.assign(cfg->advanced.aad_context);
   }
 
   out.advanced.replay_window = cfg->advanced.replay_window;
-
-  if (cfg->advanced.previous_keys && cfg->advanced.previous_keys_size > 0U) {
-    out.advanced.previous_keys.reserve(cfg->advanced.previous_keys_size);
-
-    for (size_t i = 0; i < cfg->advanced.previous_keys_size; ++i) {
-      const auto& in_slot = cfg->advanced.previous_keys[i];
-      vlink::Security::Config::PreviousKey slot;
-
-      if (in_slot.key_id && in_slot.key_id[0] != '\0') {
-        slot.key_id.assign(in_slot.key_id);
-      }
-
-      if (in_slot.key && in_slot.key[0] != '\0') {
-        slot.key.assign(in_slot.key);
-      }
-
-      if (in_slot.passphrase && in_slot.passphrase[0] != '\0') {
-        slot.passphrase.assign(in_slot.passphrase);
-      }
-
-      if (in_slot.pbkdf2_salt && in_slot.pbkdf2_salt_size > 0U) {
-        slot.pbkdf2_salt = vlink::Bytes::deep_copy(in_slot.pbkdf2_salt, in_slot.pbkdf2_salt_size);
-      }
-
-      if (in_slot.pbkdf2_iterations != 0U) {
-        slot.pbkdf2_iterations = in_slot.pbkdf2_iterations;
-      }
-
-      out.advanced.previous_keys.push_back(std::move(slot));
-    }
-  }
 
   if (cfg->public_key_pem && cfg->public_key_pem[0] != '\0') {
     out.public_key_pem.assign(cfg->public_key_pem);
@@ -263,8 +228,7 @@ static vlink::Security::Config build_security_config(const vlink_security_config
 
   if VUNLIKELY (out.key.empty() && out.passphrase.empty() && out.public_key_pem.empty() &&
                 out.private_key_pem.empty() && out.advanced.signing_key_pem.empty() &&
-                out.advanced.verify_key_pem.empty() && out.advanced.previous_keys.empty() && !out.encrypt_callback &&
-                !out.decrypt_callback) {
+                out.advanced.verify_key_pem.empty() && !out.encrypt_callback && !out.decrypt_callback) {
     VLOG_W("vlink security config is empty: encrypt/decrypt will silently fail until a real key is provided.");
   }
 

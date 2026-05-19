@@ -234,7 +234,8 @@ Schedule::RetStatus Schedule::internal_process_with_ret(const Config& config, Re
       }
     }
 
-    auto run_with_timeout = [&](Schedule::RetCallback& exe_callback) -> std::optional<bool> {
+    auto run_with_timeout = [&catch_cb, &config,
+                             &execution_timeout_cb](Schedule::RetCallback& exe_callback) -> std::optional<bool> {
       if VUNLIKELY (!exe_callback) {
         return std::nullopt;
       }

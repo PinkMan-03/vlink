@@ -587,7 +587,11 @@ ctrl.filter_str = "sensor_node";
 // filter_type = 0: 全部
 // filter_type = 1: 仅显示同时有 Publisher 和 Subscriber 的话题
 // filter_type = 2: 仅显示同时有 Server 和 Client 的话题
+// filter_type = 3: 仅显示同时有 Setter 和 Getter 的话题
 // filter_type = 4: 显示所有 Event 类话题（有 Publisher 或 Subscriber）
+// filter_type = 5: 显示所有 Method 类话题（有 Server 或 Client）
+// filter_type = 6: 显示所有 Field 类话题（有 Setter 或 Getter）
+// filter_type = 7..12: 分别仅显示 Publisher / Subscriber / Server / Client / Setter / Getter
 ctrl.filter_type = 1;
 
 api.send_control(ctrl);

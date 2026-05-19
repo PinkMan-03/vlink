@@ -52,7 +52,7 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | FastStream        | `base/fast_stream.h`            | 高性能输出流（Logger 内部引擎）                |
 | Format            | `base/format.h`                 | 轻量无堆分配的 `{}` 占位符格式化器             |
 | Utils             | `base/utils.h`                  | 平台无关的进程、线程、信号工具函数             |
-| Helpers           | `base/helpers.h`                | 字符串/数字/哈希/格式化等无状态工具函数        |
+| Helpers           | `base/helpers.h`                | 字符串/数字/哈希/格式化、文本字段转义等无状态工具函数 |
 | Plugin            | `base/plugin.h`                 | 类型安全的动态插件加载器，含版本校验与生命周期 |
 | Exception         | `base/exception.h`              | VLink 异常类型（封装标准异常层级）             |
 | Uint128           | `base/uint128.h`                | 可移植 128 位无符号整数及完整运算符           |
@@ -2401,6 +2401,7 @@ int main() {
 - N 个工作线程共享同一个任务队列
 - 任务不保证执行顺序
 - `is_in_same_thread()` 对任何工作线程返回 `true`
+- `wait_for_idle()` 会等待 dispatcher 队列与已转发到 worker 的任务都空闲；worker 在完成前再次投递到 dispatcher 的任务也会被继续等待
 - `on_begin()` 和 `on_end()` 在 dispatcher 线程上各调用一次，用于创建和销毁内部 `ThreadPool`
 - 定时器回调在某个工作线程上触发（非确定性）
 - `MultiLoop` 析构函数是默认实现；销毁前应先调用 `quit()` 和 `wait_for_quit()`，或只在循环已经自行退出后销毁对象
@@ -3634,9 +3635,9 @@ loop.exec_task(vlink::Schedule::Config{},
 > `X->succeed(Y)` 等价 "Y 先跑，X 后跑"（Y 进入 X 的 precede_task_list）。两者描述的是同一条边，
 > 仅书写视角不同。`execute()` 必须从图的根（无前驱节点）发起。
 
-**环路检测**：每次 `precede()` / `succeed()` 添加边后会自动在受影响子图上检测环；
-若新边会导致环路则被静默回滚并记录错误日志。并发构图时这是 best-effort，
-图构建应当作单写入阶段处理。
+**环路检测**：每次 `precede()` / `succeed()` 添加边前会先做可达性预检；
+若新边会导致环路则拒绝本次修改并记录错误日志，已有拓扑不变。拓扑写入由全局
+mutex 串行化，执行阶段读取可达子图快照。
 
 #### 11.14.2.4 执行策略
 

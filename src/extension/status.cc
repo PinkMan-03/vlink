@@ -31,6 +31,16 @@ namespace vlink {
 
 namespace Status {
 
+template <typename T>
+static void write_if_type(std::ostream& ostream, const Base& status) noexcept {
+  if (const auto* target = dynamic_cast<const T*>(&status)) {
+    ostream << *target;
+    return;
+  }
+
+  ostream << "Unknown";
+}
+
 // Base
 Base::Base() = default;
 
@@ -43,34 +53,34 @@ std::ostream& operator<<(std::ostream& ostream, const Base& status) noexcept {
         ostream << "Unknown";
         break;
       case kPublicationMatched:
-        ostream << *status.as<PublicationMatched>();
+        write_if_type<PublicationMatched>(ostream, status);
         break;
       case kOfferedDeadlineMissed:
-        ostream << *status.as<OfferedDeadlineMissed>();
+        write_if_type<OfferedDeadlineMissed>(ostream, status);
         break;
       case kOfferedIncompatibleQos:
-        ostream << *status.as<OfferedIncompatibleQos>();
+        write_if_type<OfferedIncompatibleQos>(ostream, status);
         break;
       case kLivelinessLost:
-        ostream << *status.as<LivelinessLost>();
+        write_if_type<LivelinessLost>(ostream, status);
         break;
       case kSubscriptionMatched:
-        ostream << *status.as<SubscriptionMatched>();
+        write_if_type<SubscriptionMatched>(ostream, status);
         break;
       case kRequestedDeadlineMissed:
-        ostream << *status.as<RequestedDeadlineMissed>();
+        write_if_type<RequestedDeadlineMissed>(ostream, status);
         break;
       case kLivelinessChanged:
-        ostream << *status.as<LivelinessChanged>();
+        write_if_type<LivelinessChanged>(ostream, status);
         break;
       case kSampleRejected:
-        ostream << *status.as<SampleRejected>();
+        write_if_type<SampleRejected>(ostream, status);
         break;
       case kRequestedIncompatibleQos:
-        ostream << *status.as<RequestedIncompatibleQos>();
+        write_if_type<RequestedIncompatibleQos>(ostream, status);
         break;
       case kSampleLost:
-        ostream << *status.as<SampleLost>();
+        write_if_type<SampleLost>(ostream, status);
         break;
       default:
         ostream << "Unknown";

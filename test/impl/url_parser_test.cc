@@ -494,6 +494,10 @@ TEST_SUITE("impl-UrlParser - replacement constructor") {
 
     UrlParser modified(original, repl);
     CHECK(modified.get_query() == "new=data");
+
+    const auto& dict = modified.get_query_dictionary();
+    REQUIRE(dict.count("new") == 1);
+    CHECK(dict.at("new") == "data");
   }
 
   TEST_CASE("replace fragment") {
@@ -521,6 +525,10 @@ TEST_SUITE("impl-UrlParser - component-map additional") {
     UrlParser p(comps, kH, false);
     CHECK(p.get_transport() == "intra");
     CHECK(p.get_query() == "key=value");
+
+    const auto& dict = p.get_query_dictionary();
+    REQUIRE(dict.count("key") == 1);
+    CHECK(dict.at("key") == "value");
   }
 
   TEST_CASE("construct with port component") {

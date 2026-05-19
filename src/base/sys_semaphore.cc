@@ -154,7 +154,7 @@ bool SysSemaphore::detach(bool force) {
 
   impl_->handle = SEM_FAILED;
 
-  if ((impl_->is_create || force) && !impl_->name.empty()) {
+  if (force && !impl_->name.empty()) {
     if VUNLIKELY (::sem_unlink(impl_->name.c_str()) == -1 && errno != ENOENT) {
       VLOG_E("SysSemaphore: sem_unlink failed.");
       ok = false;
@@ -263,7 +263,12 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
     }
 
     for (; n > 0; --n) {
-      if (::sem_timedwait(impl_->handle, &ts) == -1) {
+      int rc = -1;
+      do {
+        rc = ::sem_timedwait(impl_->handle, &ts);
+      } while (rc == -1 && errno == EINTR);
+
+      if (rc == -1) {
         // if (is_attached()) {
         //   if (errno == ETIMEDOUT) {
         //     VLOG_E("Sys semaphore sem_timedwait timed out.");

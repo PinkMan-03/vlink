@@ -232,12 +232,12 @@ TEST_SUITE("base-SysSemaphore") {
       // sem goes out of scope here — destructor must detach cleanly
     }
 
-    // Re-create with the same name to confirm it was removed from the namespace
+    // Destructor calls detach(false), so the named semaphore remains until explicit cleanup.
     SysSemaphore sem2(1);
     bool ok = sem2.attach(name);
-    // attach should succeed (creates a fresh semaphore) and count == 1
+    CHECK(ok);
     if (ok) {
-      CHECK(sem2.get_count() == 1);
+      CHECK(sem2.get_count() == 0);
       sem2.detach(true);
     }
   }
@@ -333,6 +333,7 @@ TEST_SUITE("base-SysSemaphore") {
     CHECK(ok);
 
     if (ok) {
+      CHECK(sem2.get_count() == 1);
       sem2.detach(true);  // Cleanup
     }
   }

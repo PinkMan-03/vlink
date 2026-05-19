@@ -50,7 +50,11 @@ struct GlobalWriter final {
 
       instance = BagWriter::create(bag_path);
 
-      instance->async_run();
+      if VLIKELY (instance) {
+        instance->async_run();
+      } else {
+        CLOG_E("BagWriter: Global recorder is disabled because VLINK_BAG_PATH has an unsupported suffix.");
+      }
     }
   }
 
@@ -98,7 +102,7 @@ std::shared_ptr<BagWriter> BagWriter::create(const std::string& path, const Conf
   } else if (Helpers::has_endwith(suffix_check, ".vcap") || Helpers::has_endwith(suffix_check, ".vcapx")) {
     return std::make_shared<McapWriter>(path, config);
   } else {
-    CLOG_F("BagWriter: Unknown bag suffix, path=%s", path.c_str());
+    CLOG_E("BagWriter: Unknown bag suffix, path=%s", path.c_str());
     return nullptr;
   }
 }
@@ -110,13 +114,30 @@ std::shared_ptr<BagWriter> BagWriter::filter_get(const std::string& path) {
   std::transform(suffix_check.begin(), suffix_check.end(), suffix_check.begin(),
                  [](unsigned char c) { return std::tolower(c); });
 
+  const bool is_database = Helpers::has_endwith(suffix_check, ".vdb") || Helpers::has_endwith(suffix_check, ".vdbx");
+  const bool is_mcap = Helpers::has_endwith(suffix_check, ".vcap") || Helpers::has_endwith(suffix_check, ".vcapx");
+
+  if VUNLIKELY (!is_database && !is_mcap) {
+    CLOG_E("BagWriter: Unknown bag suffix, path=%s", path.c_str());
+    return nullptr;
+  }
+
   std::lock_guard lock(instance.mtx);
 
   auto iter = instance.writer_map.find(path);
-  if (iter == instance.writer_map.end()) {
+
+  if (iter != instance.writer_map.end()) {
+    if (auto target = iter->second.lock()) {
+      return target;
+    }
+
+    instance.writer_map.erase(iter);
+  }
+
+  {
     std::shared_ptr<BagWriter> target;
 
-    if (Helpers::has_endwith(suffix_check, ".vcap") || Helpers::has_endwith(suffix_check, ".vcapx")) {
+    if (is_mcap) {
       auto* ptr = new McapWriter(path);
 
       target = std::shared_ptr<McapWriter>(ptr, [path](McapWriter* ptr) {
@@ -143,8 +164,6 @@ std::shared_ptr<BagWriter> BagWriter::filter_get(const std::string& path) {
     instance.writer_map.emplace(path, target);
 
     return target;
-  } else {
-    return iter->second.lock();
   }
 }
 

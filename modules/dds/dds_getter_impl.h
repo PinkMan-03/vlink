@@ -93,7 +93,7 @@ class DdsGetterImpl final : public GetterImpl, public AbstractNode {
   dds::TypeSupport type_support_;
   MsgCallback callback_;
   CalculateSample calc_sample_;
-  bool is_latency_and_lost_enabled_{false};
+  std::atomic_bool is_latency_and_lost_enabled_{false};
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(DdsGetterImpl)
 };

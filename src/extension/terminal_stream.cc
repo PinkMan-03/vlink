@@ -23,6 +23,7 @@
 
 #include "./extension/terminal_stream.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -230,16 +231,37 @@ void TerminalStream::flush_unlocked() noexcept {
 
   const char* data = buffer_.data();
   size_t remaining = write_pos_;
+  size_t flushed = 0;
 
   while (remaining > 0) {
     auto written = VLINK_TERM_WRITE(fd_, data, static_cast<unsigned int>(remaining));
 
-    if (written <= 0) {
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+
       break;
     }
 
-    data += written;
-    remaining -= static_cast<size_t>(written);
+    if (written == 0) {
+      break;
+    }
+
+    const auto written_size = static_cast<size_t>(written);
+    data += written_size;
+    remaining -= written_size;
+    flushed += written_size;
+  }
+
+  if (remaining > 0) {
+    if (flushed > 0) {
+      std::memmove(buffer_.data(), buffer_.data() + flushed, remaining);
+    }
+
+    write_pos_ = remaining;
+
+    return;
   }
 
   write_pos_ = 0;
@@ -259,16 +281,57 @@ void TerminalStream::write_to_buffer(const char* data, size_t len) noexcept {
   if (len >= buffer_.size()) {
     flush_unlocked();
 
+    if (write_pos_ != 0) {
+      // if VUNLIKELY (len > std::numeric_limits<size_t>::max() - write_pos_) {
+      //   return;
+      // }
+      //
+      // const size_t target_size = write_pos_ + len;
+      // if (target_size > buffer_.size()) {
+      //   try {
+      //     buffer_.resize(target_size);
+      //   } catch (...) {
+      //     return;
+      //   }
+      // }
+      //
+      // std::memcpy(buffer_.data() + write_pos_, data, len);
+      // write_pos_ = target_size;
+      return;
+    }
+
     size_t remaining = len;
     while (remaining > 0) {
       auto written = VLINK_TERM_WRITE(fd_, data, static_cast<unsigned int>(remaining));
 
-      if (written <= 0) {
+      if (written < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+
         break;
       }
 
-      data += written;
-      remaining -= static_cast<size_t>(written);
+      if (written == 0) {
+        break;
+      }
+
+      const auto written_size = static_cast<size_t>(written);
+      data += written_size;
+      remaining -= written_size;
+    }
+
+    if (remaining > 0) {
+      if (remaining > buffer_.size()) {
+        try {
+          buffer_.resize(remaining);
+        } catch (...) {
+          return;
+        }
+      }
+
+      std::memcpy(buffer_.data(), data, remaining);
+      write_pos_ = remaining;
     }
 
     return;
@@ -276,6 +339,14 @@ void TerminalStream::write_to_buffer(const char* data, size_t len) noexcept {
 
   if (write_pos_ + len > buffer_.size()) {
     flush_unlocked();
+  }
+
+  if (write_pos_ + len > buffer_.size()) {
+    try {
+      buffer_.resize(write_pos_ + len);
+    } catch (...) {
+      return;
+    }
   }
 
   std::memcpy(buffer_.data() + write_pos_, data, len);

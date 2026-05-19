@@ -119,9 +119,10 @@ class DdsrFactory final {
   }
 
   using PartFilter = std::tuple<uint8_t, int32_t, std::string, Conf::PropertiesMap>;
-  using TopicFilter = std::tuple<uint8_t, int32_t, std::string>;
-  using PublisherFilter = std::tuple<uint8_t, int32_t, std::string, std::string, std::string>;
-  using SubscriberFilter = std::tuple<uint8_t, int32_t, std::string, std::string, std::string>;
+  using TopicFilter = std::tuple<uint8_t, int32_t, std::string, ddsr::DomainParticipant*>;
+  using PublisherFilter = std::tuple<uint8_t, int32_t, std::string, std::string, std::string, ddsr::DomainParticipant*>;
+  using SubscriberFilter =
+      std::tuple<uint8_t, int32_t, std::string, std::string, std::string, ddsr::DomainParticipant*>;
 
   std::map<PartFilter, std::weak_ptr<ddsr::DomainParticipant>> part_map_;
   std::map<TopicFilter, std::weak_ptr<ddsr::Topic>> topic_map_;

@@ -332,7 +332,10 @@ void FoxgloveServer::stop() {
   client_count_.store(0);
   reset_bridge_wall_time_state(last_sys_time_ns_, bridge_time_elapsed_);
   reset_bridge_session_time_anchor(session_start_sys_time_ns_);
-  bridge_control_signature_.clear();
+  {
+    std::lock_guard lock(bridge_control_mtx_);
+    bridge_control_signature_.clear();
+  }
 
   if (bridge_) {
     bridge_->stop();
@@ -2393,7 +2396,10 @@ void FoxgloveServer::on_bridge_connected(bool connected) {
 
     reset_bridge_wall_time_state(last_sys_time_ns_, bridge_time_elapsed_);
     reset_bridge_session_time_anchor(session_start_sys_time_ns_);
-    bridge_control_signature_.clear();
+    {
+      std::lock_guard lock(bridge_control_mtx_);
+      bridge_control_signature_.clear();
+    }
   }
 }
 
@@ -3239,6 +3245,8 @@ bool FoxgloveServer::update_bridge_control() {
   if VUNLIKELY (!bridge_ || !bridge_->can_control()) {
     return false;
   }
+
+  std::lock_guard lock(bridge_control_mtx_);
 
   auto ctrl = build_bridge_control();
 

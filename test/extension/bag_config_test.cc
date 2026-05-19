@@ -351,6 +351,7 @@ TEST_SUITE("extension-BagReader::Info::UrlMeta - default construction") {
     CHECK(meta.index == 0);
     CHECK(meta.url.empty());
     CHECK(meta.url_type.empty());
+    CHECK(meta.action_type == ActionType::kUnknownAction);
     CHECK(meta.ser_type.empty());
     CHECK(meta.count == 0);
     CHECK(meta.size == 0);
@@ -375,6 +376,7 @@ TEST_SUITE("extension-BagReader::Info::UrlMeta - default construction") {
     meta.index = 5;
     meta.url = "dds://sensor/lidar";
     meta.url_type = "pub";
+    meta.action_type = ActionType::kPublish;
     meta.ser_type = "protobuf";
     meta.count = 1000;
     meta.size = 1024 * 1024;

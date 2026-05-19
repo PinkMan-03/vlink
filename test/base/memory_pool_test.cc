@@ -290,6 +290,28 @@ TEST_SUITE("base-MemoryPool - tier dispatch") {
     CHECK(pool.get_oversized_stats().dealloc_count == 1u);
   }
 
+  TEST_CASE("sentinel tier keeps its size range on oversized path") {
+    MemoryPool pool(make_config({{64, 0}, {128, 4}}));
+
+    void* sentinel = pool.allocate(64);
+    REQUIRE(sentinel != nullptr);
+
+    auto stats = pool.get_stats();
+    REQUIRE(stats.size() == 1u);
+    CHECK(stats[0].max_size == 128u);
+    CHECK(stats[0].hit_count == 0u);
+    CHECK(pool.get_oversized_stats().alloc_count == 1u);
+
+    void* pooled = pool.allocate(65);
+    REQUIRE(pooled != nullptr);
+
+    stats = pool.get_stats();
+    CHECK(stats[0].hit_count == 1u);
+
+    pool.deallocate(sentinel, 64);
+    pool.deallocate(pooled, 65);
+  }
+
   TEST_CASE("alignment > max_align_t falls back to oversized path") {
     MemoryPool pool(simple_tiers());
 

@@ -33,6 +33,8 @@
 #include "./base/message_loop.h"
 #include "./extension/bag_writer.h"
 #include "./extension/discovery_reporter.h"
+#include "./impl/client_impl.h"
+#include "./impl/server_impl.h"
 #include "./private/license_check.h"
 #include "./version.h"
 
@@ -57,6 +59,7 @@ struct NodeImplHelper final {
   std::mutex post_mtx;
   NodeImpl::StatusCallback status_callback;
   std::atomic<MessageLoop*> message_loop{nullptr};
+  bool has_detached{false};
 
   std::shared_ptr<BagWriter> data_recorder;
 };
@@ -131,9 +134,16 @@ bool NodeImpl::check_version(const Version& version) {
 }
 
 bool NodeImpl::attach(class MessageLoop* message_loop) {
+  std::lock_guard lock(helper_->post_mtx);
+
   MessageLoop* expected = nullptr;
-  return helper_->message_loop.compare_exchange_strong(expected, message_loop, std::memory_order_release,
-                                                       std::memory_order_relaxed);
+  if VUNLIKELY (!helper_->message_loop.compare_exchange_strong(expected, message_loop, std::memory_order_release,
+                                                               std::memory_order_relaxed)) {
+    return false;
+  }
+
+  helper_->has_detached = false;
+  return true;
 }
 
 bool NodeImpl::detach() {
@@ -141,6 +151,9 @@ bool NodeImpl::detach() {
   {
     std::lock_guard lock(helper_->post_mtx);
     message_loop = helper_->message_loop.exchange(nullptr, std::memory_order_acq_rel);
+    if (message_loop) {
+      helper_->has_detached = true;
+    }
   }
 
   if (!message_loop) {
@@ -155,6 +168,18 @@ bool NodeImpl::detach() {
 }
 
 class MessageLoop* NodeImpl::get_message_loop() const { return helper_->message_loop.load(std::memory_order_acquire); }
+
+bool NodeImpl::post_task(PostCallback&& callback) {
+  std::lock_guard lock(helper_->post_mtx);
+
+  auto* message_loop = helper_->message_loop.load(std::memory_order_acquire);
+  if (message_loop) {
+    (void)message_loop->post_task(std::move(callback));
+    return true;
+  }
+
+  return helper_->has_detached;
+}
 
 void NodeImpl::register_status_handler(StatusCallback&& callback) {
   if VUNLIKELY (transport_type != TransportType::kDds && transport_type != TransportType::kDdsc &&
@@ -279,11 +304,18 @@ bool NodeImpl::enable_security(Security::Config&& cfg) {
     return false;
   }
 
-  bool needs_encrypt =
-      (impl_type == kPublisher || impl_type == kSetter || impl_type == kClient || impl_type == kServer);
+  bool needs_encrypt = (impl_type == kPublisher || impl_type == kSetter);
+  bool needs_decrypt = (impl_type == kSubscriber || impl_type == kGetter);
 
-  bool needs_decrypt =
-      (impl_type == kSubscriber || impl_type == kGetter || impl_type == kClient || impl_type == kServer);
+  if (impl_type == kClient) {
+    needs_encrypt = true;
+    const auto* client_impl = dynamic_cast<const ClientImpl*>(this);
+    needs_decrypt = client_impl != nullptr && client_impl->is_resp_type;
+  } else if (impl_type == kServer) {
+    needs_decrypt = true;
+    const auto* server_impl = dynamic_cast<const ServerImpl*>(this);
+    needs_encrypt = server_impl != nullptr && server_impl->is_resp_type;
+  }
 
   if VUNLIKELY (needs_encrypt && !candidate->can_encrypt()) {
     VLOG_W("Security::Config cannot encrypt for this sender role.");

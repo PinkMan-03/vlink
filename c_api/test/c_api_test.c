@@ -677,7 +677,7 @@ int test_security_tamper(void) {
   uint8_t* cipher = NULL;
   size_t cipher_size = 0;
   int rc = vlink_security_encrypt(sec, plain, sizeof(plain), &cipher, &cipher_size);
-  if (rc != VLINK_RET_NO_ERROR || cipher == NULL || cipher_size < sizeof(plain) + 51u) {
+  if (rc != VLINK_RET_NO_ERROR || cipher == NULL || cipher_size < sizeof(plain) + 50u) {
     printf("FAIL: encrypt rc=%d size=%zu\n", rc, cipher_size);
     vlink_security_free_buffer(cipher);
     vlink_security_destroy(sec);

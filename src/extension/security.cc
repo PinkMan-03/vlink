@@ -60,7 +60,7 @@ namespace vlink {
 [[maybe_unused]] static constexpr uint8_t kEnvelopeVersion = 2U;
 [[maybe_unused]] static constexpr uint8_t kEnvelopeModeSymmetric = 1U;
 [[maybe_unused]] static constexpr uint8_t kEnvelopeModeAsymmetric = 2U;
-[[maybe_unused]] static constexpr size_t kEnvelopeFixedHeaderSize = 35U;
+[[maybe_unused]] static constexpr size_t kEnvelopeFixedHeaderSize = 34U;
 [[maybe_unused]] static constexpr uint32_t kReplayWindowMax = 65536U;
 [[maybe_unused]] static constexpr char kAadDomain[] = "vlink-security-v2";
 [[maybe_unused]] static constexpr size_t kAadDomainSize = sizeof(kAadDomain) - 1U;
@@ -82,17 +82,13 @@ struct PeerReplay final {
 };
 
 struct SymmetricKeySlot final {
-  std::string key_id;
   Bytes key;
-  bool can_encrypt{false};
-  bool can_decrypt{true};
   std::vector<PeerReplay> peers;
 };
 
 struct EnvelopeHeader final {
   uint8_t mode{0};
   uint16_t flags{0};
-  std::string_view key_id;
   uint64_t sender_id{0};
   uint64_t seq{0};
   const uint8_t* nonce{nullptr};
@@ -178,28 +174,6 @@ static inline void copy_string_bytes(uint8_t* dst, std::string_view value) noexc
   std::copy_n(reinterpret_cast<const uint8_t*>(value.data()), value.size(), dst);
 }
 
-static std::string normalize_key_id(const std::string& key_id) {
-  return key_id.empty() ? std::string{"default"} : key_id;
-}
-
-static std::string normalize_key_id(std::string_view key_id) {
-  return key_id.empty() ? std::string{"default"} : std::string{key_id};
-}
-
-static bool is_default_key_id(const std::string& key_id) noexcept { return key_id == "default"; }
-
-static bool key_id_equal(const std::string& lhs, std::string_view rhs) noexcept {
-  if (rhs.empty()) {
-    return is_default_key_id(lhs);
-  }
-
-  return lhs.size() == rhs.size() && std::memcmp(lhs.data(), rhs.data(), rhs.size()) == 0;
-}
-
-static size_t wire_key_id_size(const std::string& key_id) noexcept {
-  return is_default_key_id(key_id) ? 0U : key_id.size();
-}
-
 static uint32_t normalize_replay_window(uint32_t window) noexcept {
   return (window > kReplayWindowMax) ? kReplayWindowMax : window;
 }
@@ -280,17 +254,13 @@ static bool accept_replay(ReplayWindow& replay, uint64_t seq, uint32_t window_bi
   return true;
 }
 
-static bool write_envelope_header(uint8_t mode, const std::string& key_id, uint64_t sender_id, uint64_t seq,
-                                  const uint8_t* nonce, uint8_t* dst, size_t dst_size, size_t& header_size) {
-  const size_t key_id_size = wire_key_id_size(key_id);
-
-  if VUNLIKELY (key_id_size > 0xFFU || nonce == nullptr || dst == nullptr) {
+static bool write_envelope_header(uint8_t mode, uint64_t sender_id, uint64_t seq, const uint8_t* nonce, uint8_t* dst,
+                                  size_t dst_size) {
+  if VUNLIKELY (nonce == nullptr || dst == nullptr) {
     return false;
   }
 
-  header_size = kEnvelopeFixedHeaderSize + key_id_size;
-
-  if VUNLIKELY (dst_size < header_size) {
+  if VUNLIKELY (dst_size < kEnvelopeFixedHeaderSize) {
     return false;
   }
 
@@ -299,37 +269,21 @@ static bool write_envelope_header(uint8_t mode, const std::string& key_id, uint6
   dst[2] = kEnvelopeVersion;
   dst[3] = mode;
   write_u16_le(dst + 4U, 0U);
-  dst[6] = static_cast<uint8_t>(key_id_size);
-  write_u64_le(dst + 7U, sender_id);
-  write_u64_le(dst + 15U, seq);
-
-  std::memcpy(dst + 23U, nonce, kAesNonceSize);
-
-  if VUNLIKELY (key_id_size > 0U) {
-    copy_string_bytes(dst + kEnvelopeFixedHeaderSize, std::string_view{key_id.data(), key_id_size});
-  }
+  write_u64_le(dst + 6U, sender_id);
+  write_u64_le(dst + 14U, seq);
+  std::memcpy(dst + 22U, nonce, kAesNonceSize);
 
   return true;
 }
 
-static bool build_envelope_header(uint8_t mode, const std::string& key_id, uint64_t sender_id, uint64_t seq,
-                                  const uint8_t* nonce, Bytes& out) {
-  const size_t key_id_size = wire_key_id_size(key_id);
-
-  if VUNLIKELY (key_id_size > 0xFFU) {
-    return false;
-  }
-
-  const size_t header_size = kEnvelopeFixedHeaderSize + key_id_size;
-  out = Bytes::create(header_size);
+static bool build_envelope_header(uint8_t mode, uint64_t sender_id, uint64_t seq, const uint8_t* nonce, Bytes& out) {
+  out = Bytes::create(kEnvelopeFixedHeaderSize);
 
   if VUNLIKELY (out.data() == nullptr) {
     return false;
   }
 
-  size_t written = 0U;
-
-  return write_envelope_header(mode, key_id, sender_id, seq, nonce, out.data(), out.size(), written);
+  return write_envelope_header(mode, sender_id, seq, nonce, out.data(), out.size());
 }
 
 static bool parse_envelope_header(const Bytes& in, EnvelopeHeader& header) {
@@ -343,20 +297,12 @@ static bool parse_envelope_header(const Bytes& in, EnvelopeHeader& header) {
     return false;
   }
 
-  const size_t key_id_len = src[6];
-  const size_t header_size = kEnvelopeFixedHeaderSize + key_id_len;
-
-  if VUNLIKELY (in.size() < header_size) {
-    return false;
-  }
-
   header.mode = src[3];
   header.flags = read_u16_le(src + 4U);
-  header.sender_id = read_u64_le(src + 7U);
-  header.seq = read_u64_le(src + 15U);
-  header.nonce = src + 23U;
-  header.size = header_size;
-  header.key_id = std::string_view{reinterpret_cast<const char*>(src + kEnvelopeFixedHeaderSize), key_id_len};
+  header.sender_id = read_u64_le(src + 6U);
+  header.seq = read_u64_le(src + 14U);
+  header.nonce = src + 22U;
+  header.size = kEnvelopeFixedHeaderSize;
 
   return true;
 }
@@ -1023,72 +969,22 @@ static bool derive_symmetric_slot_key(const std::string& key, const std::string&
   return false;
 }
 
-static bool install_symmetric_key(std::vector<SymmetricKeySlot>& keys, const std::string& key_id,
-                                  const std::string& key, const std::string& passphrase, const Bytes& salt,
-                                  uint32_t iterations, bool can_encrypt, bool can_decrypt) {
-  const auto id = normalize_key_id(key_id);
-
-  if VUNLIKELY (wire_key_id_size(id) > 0xFFU) {
-    VLOG_W("Security: rejected symmetric key: key_id exceeds 255 wire bytes");
-    return false;
-  }
-
+static bool install_symmetric_key(SymmetricKeySlot& slot, const std::string& key, const std::string& passphrase,
+                                  const Bytes& salt, uint32_t iterations) {
   Bytes derived;
 
   if (!derive_symmetric_slot_key(key, passphrase, salt, iterations, derived)) {
     return false;
   }
 
-  for (auto& slot : keys) {
-    if VLIKELY (slot.key_id != id) {
-      continue;
-    }
-
-    VLOG_W("Security: symmetric key with key_id=", id, " overwrites earlier slot");
-
-    if (!slot.key.empty()) {
-      OPENSSL_cleanse(slot.key.data(), slot.key.size());
-    }
-
-    slot.key = std::move(derived);
-    slot.can_encrypt = can_encrypt;
-    slot.can_decrypt = can_decrypt;
-    slot.peers.clear();
-
-    return true;
+  if VUNLIKELY (!slot.key.empty()) {
+    OPENSSL_cleanse(slot.key.data(), slot.key.size());
   }
 
-  SymmetricKeySlot slot;
-  slot.key_id = id;
   slot.key = std::move(derived);
-  slot.can_encrypt = can_encrypt;
-  slot.can_decrypt = can_decrypt;
-  keys.push_back(std::move(slot));
+  slot.peers.clear();
 
   return true;
-}
-
-static SymmetricKeySlot* find_encrypt_key(std::vector<SymmetricKeySlot>& keys,
-                                          const std::string& active_key_id) noexcept {
-  for (auto& slot : keys) {
-    if VLIKELY (slot.key_id == active_key_id && slot.can_encrypt && slot.key.size() >= kAesKeySize &&
-                slot.key.data() != nullptr) {
-      return &slot;
-    }
-  }
-
-  return nullptr;
-}
-
-static SymmetricKeySlot* find_decrypt_key(std::vector<SymmetricKeySlot>& keys, std::string_view key_id) noexcept {
-  for (auto& slot : keys) {
-    if VLIKELY (key_id_equal(slot.key_id, key_id) && slot.can_decrypt && slot.key.size() >= kAesKeySize &&
-                slot.key.data() != nullptr) {
-      return &slot;
-    }
-  }
-
-  return nullptr;
 }
 
 static bool next_nonce(uint64_t& send_seq, uint64_t& sender_id, std::array<uint8_t, kAesNonceSize>& nonce_base,
@@ -1128,14 +1024,13 @@ static bool next_nonce(uint64_t& send_seq, uint64_t& sender_id, std::array<uint8
   return true;
 }
 
-static void cleanse_symmetric_keys(std::vector<SymmetricKeySlot>& keys) noexcept {
-  for (auto& slot : keys) {
-    if VLIKELY (!slot.key.empty() && slot.key.data() != nullptr) {
-      OPENSSL_cleanse(slot.key.data(), slot.key.size());
-    }
+static void cleanse_symmetric_key(SymmetricKeySlot& slot) noexcept {
+  if VLIKELY (!slot.key.empty() && slot.key.data() != nullptr) {
+    OPENSSL_cleanse(slot.key.data(), slot.key.size());
   }
 
-  keys.clear();
+  slot.key.clear();
+  slot.peers.clear();
 }
 
 static void cleanse_string(std::string& value) noexcept {
@@ -1161,13 +1056,6 @@ static void cleanse_config(Security::Config& config) noexcept {
   cleanse_string(config.advanced.signing_key_pem);
   cleanse_string(config.advanced.verify_key_pem);
 
-  for (auto& slot : config.advanced.previous_keys) {
-    cleanse_string(slot.key);
-    cleanse_string(slot.passphrase);
-    cleanse_bytes(slot.pbkdf2_salt);
-  }
-
-  config.advanced.previous_keys.clear();
   config.encrypt_callback = nullptr;
   config.decrypt_callback = nullptr;
 }
@@ -1183,9 +1071,7 @@ struct Security::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
   bool aad_context_valid{true};
 
 #ifdef VLINK_ENABLE_SECURITY
-  std::vector<SymmetricKeySlot> keys;
-  bool active_key_id_valid{true};
-  SymmetricKeySlot* encrypt_key{nullptr};
+  SymmetricKeySlot symmetric_key;
   uint64_t send_seq{0};
   uint64_t sender_id{0};
   std::array<uint8_t, kAesNonceSize> nonce_base{};
@@ -1216,35 +1102,15 @@ Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
   }
 
 #ifdef VLINK_ENABLE_SECURITY
-  impl_->config.advanced.key_id = normalize_key_id(impl_->config.advanced.key_id);
   impl_->config.advanced.replay_window = normalize_replay_window(impl_->config.advanced.replay_window);
   impl_->aad_context_valid = impl_->config.advanced.aad_context.size() <= 0xFFFFU;
-  impl_->active_key_id_valid = wire_key_id_size(impl_->config.advanced.key_id) <= 0xFFU;
 
   if VUNLIKELY (!impl_->aad_context_valid) {
     VLOG_W("Security: rejected aad_context: context exceeds 65535 bytes");
   }
 
-  if VUNLIKELY (!impl_->active_key_id_valid) {
-    VLOG_W("Security: rejected active key_id: key_id exceeds 255 wire bytes");
-  } else {
-    (void)install_symmetric_key(impl_->keys, impl_->config.advanced.key_id, impl_->config.key, impl_->config.passphrase,
-                                impl_->config.pbkdf2_salt, impl_->config.pbkdf2_iterations, true, true);
-  }
-
-  for (const auto& slot : impl_->config.advanced.previous_keys) {
-    const auto previous_key_id = normalize_key_id(slot.key_id);
-
-    if VUNLIKELY (previous_key_id == impl_->config.advanced.key_id) {
-      VLOG_W("Security: rejected previous key: key_id duplicates the current outbound key_id");
-      continue;
-    }
-
-    (void)install_symmetric_key(impl_->keys, slot.key_id, slot.key, slot.passphrase, slot.pbkdf2_salt,
-                                slot.pbkdf2_iterations, false, true);
-  }
-
-  impl_->encrypt_key = find_encrypt_key(impl_->keys, impl_->config.advanced.key_id);
+  (void)install_symmetric_key(impl_->symmetric_key, impl_->config.key, impl_->config.passphrase,
+                              impl_->config.pbkdf2_salt, impl_->config.pbkdf2_iterations);
 
   if VUNLIKELY (!impl_->config.public_key_pem.empty()) {
     auto pkey = load_pubkey_from_pem(impl_->config.public_key_pem);
@@ -1303,7 +1169,7 @@ Security::~Security() {
 
 #ifdef VLINK_ENABLE_SECURITY
   std::lock_guard lock(impl_->mtx);
-  cleanse_symmetric_keys(impl_->keys);
+  cleanse_symmetric_key(impl_->symmetric_key);
   cleanse_config(impl_->config);
 #endif
 }
@@ -1320,7 +1186,7 @@ Security& Security::operator=(Security&& other) noexcept {
   if VLIKELY (impl_) {
 #ifdef VLINK_ENABLE_SECURITY
     std::lock_guard lock(impl_->mtx);
-    cleanse_symmetric_keys(impl_->keys);
+    cleanse_symmetric_key(impl_->symmetric_key);
     cleanse_config(impl_->config);
 #endif
   }
@@ -1336,14 +1202,11 @@ bool Security::is_configured() const noexcept {
 
 #ifdef VLINK_ENABLE_SECURITY
   if VLIKELY (impl_->aad_context_valid) {
-    for (const auto& slot : impl_->keys) {
-      if VLIKELY (slot.key.size() >= kAesKeySize && slot.key.data() != nullptr &&
-                  (slot.can_encrypt || slot.can_decrypt)) {
-        return true;
-      }
+    if VLIKELY (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
+      return true;
     }
 
-    if VUNLIKELY ((impl_->public_key && impl_->active_key_id_valid) || impl_->private_key) {
+    if VUNLIKELY (impl_->public_key || impl_->private_key) {
       return true;
     }
   }
@@ -1368,11 +1231,11 @@ bool Security::can_encrypt() const noexcept {
     return false;
   }
 
-  if VLIKELY (impl_->encrypt_key != nullptr) {
+  if VLIKELY (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
     return true;
   }
 
-  if VUNLIKELY (impl_->public_key && impl_->active_key_id_valid) {
+  if VUNLIKELY (impl_->public_key) {
     return true;
   }
 #endif
@@ -1392,10 +1255,8 @@ bool Security::can_decrypt() const noexcept {
     return false;
   }
 
-  for (const auto& slot : impl_->keys) {
-    if VLIKELY (slot.can_decrypt && slot.key.size() >= kAesKeySize && slot.key.data() != nullptr) {
-      return true;
-    }
+  if VLIKELY (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
+    return true;
   }
 
   if VUNLIKELY (impl_->private_key) {
@@ -1436,11 +1297,6 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
   }
 
   if VUNLIKELY (impl_->public_key) {
-    if VUNLIKELY (!impl_->active_key_id_valid) {
-      VLOG_W("Security::encrypt active key_id exceeds 255 wire bytes");
-      return false;
-    }
-
     uint8_t session_key[kAesKeySize] = {};
     DigestScrub session_scrub{session_key, sizeof session_key};
     uint8_t nonce[kAesNonceSize] = {};
@@ -1467,8 +1323,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
 
     Bytes header;
 
-    if VUNLIKELY (!build_envelope_header(kEnvelopeModeAsymmetric, impl_->config.advanced.key_id, impl_->sender_id, seq,
-                                         nonce, header)) {
+    if VUNLIKELY (!build_envelope_header(kEnvelopeModeAsymmetric, impl_->sender_id, seq, nonce, header)) {
       return false;
     }
 
@@ -1554,9 +1409,9 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
     return true;
   }
 
-  auto* key_slot = impl_->encrypt_key;
+  auto* key_slot = &impl_->symmetric_key;
 
-  if VUNLIKELY (key_slot == nullptr) {
+  if VUNLIKELY (key_slot->key.size() < kAesKeySize || key_slot->key.data() == nullptr) {
     VLOG_W("Security::encrypt no symmetric key installed; construct with a non-empty Config");
     return false;
   }
@@ -1568,8 +1423,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
     return false;
   }
 
-  const size_t header_size = kEnvelopeFixedHeaderSize + wire_key_id_size(key_slot->key_id);
-  const size_t total = header_size + in.size() + kAesTagSize;
+  const size_t total = kEnvelopeFixedHeaderSize + in.size() + kAesTagSize;
   out = Bytes::create(total);
 
   if VUNLIKELY (out.data() == nullptr) {
@@ -1577,18 +1431,14 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
     return false;
   }
 
-  size_t written_header_size = 0U;
-
-  if VUNLIKELY (!write_envelope_header(kEnvelopeModeSymmetric, key_slot->key_id, impl_->sender_id, seq, nonce,
-                                       out.data(), out.size(), written_header_size) ||
-                written_header_size != header_size) {
+  if VUNLIKELY (!write_envelope_header(kEnvelopeModeSymmetric, impl_->sender_id, seq, nonce, out.data(), out.size())) {
     out = Bytes{};
     return false;
   }
 
-  uint8_t* cipher_dst = out.data() + header_size;
+  uint8_t* cipher_dst = out.data() + kEnvelopeFixedHeaderSize;
   uint8_t* tag_dst = cipher_dst + in.size();
-  const AadParts aad{&impl_->config.advanced.aad_context, out.data(), header_size};
+  const AadParts aad{&impl_->config.advanced.aad_context, out.data(), kEnvelopeFixedHeaderSize};
 
   if VUNLIKELY (!aes_gcm_encrypt_parts(key_slot->key.data(), nonce, in.data(), in.size(), aad, cipher_dst, tag_dst)) {
     out = Bytes{};
@@ -1748,10 +1598,10 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
   }
 
   if VLIKELY (header.mode == kEnvelopeModeSymmetric) {
-    auto* key_slot = find_decrypt_key(impl_->keys, header.key_id);
+    auto* key_slot = &impl_->symmetric_key;
 
-    if VUNLIKELY (key_slot == nullptr) {
-      VLOG_W("Security::decrypt no symmetric key installed for key_id=", normalize_key_id(header.key_id));
+    if VUNLIKELY (key_slot->key.size() < kAesKeySize || key_slot->key.data() == nullptr) {
+      VLOG_W("Security::decrypt no symmetric key installed");
       return false;
     }
 

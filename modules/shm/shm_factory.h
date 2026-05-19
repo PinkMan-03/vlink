@@ -263,7 +263,10 @@ class ShmClient final : public AbstractObject<ShmID>, public std::enable_shared_
 
   bool release(const Bytes& bytes);
 
-  bool call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback = nullptr);
+  bool call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback = nullptr,
+            uint64_t* seq_out = nullptr);
+
+  void remove_response_callback(uint64_t seq);
 
  private:
   void detect_server();

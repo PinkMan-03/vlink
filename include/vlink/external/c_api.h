@@ -845,6 +845,9 @@ typedef struct vlink_security* vlink_security_handle_t;
  * write the byte count into @c *out_size.  The C API frees the buffer via
  * @c free() after copying its contents into the destination supplied by the
  * caller of @c vlink_security_encrypt() / @c vlink_security_decrypt().
+ * Custom encrypt/decrypt callbacks for the same security handle are serialized
+ * by VLink, but callbacks shared across different handles must protect their
+ * own shared state.
  *
  * @param in        Plaintext input pointer.
  * @param in_size   Number of bytes in @p in.
@@ -867,26 +870,11 @@ typedef int (*vlink_security_callback_t)(const uint8_t* in, size_t in_size, uint
                                          void* user);
 
 /**
- * @brief Decrypt-only old symmetric key accepted during key rotation.
+ * @brief Low-frequency security options for AAD, replay protection, and signing.
  */
 typedef struct {
-  const char* key_id;         /**< Stable wire key id; @c NULL / empty is normalised to @c "default". */
-  const char* key;            /**< Raw symmetric seed, or @c NULL. */
-  const char* passphrase;     /**< PBKDF2 passphrase, or @c NULL. */
-  const uint8_t* pbkdf2_salt; /**< PBKDF2 salt (>=16 bytes), or @c NULL. */
-  size_t pbkdf2_salt_size;    /**< Byte count of @c pbkdf2_salt. */
-  uint32_t pbkdf2_iterations; /**< PBKDF2 iteration count; @c 0 means default (200000). */
-} vlink_security_previous_key_t;
-
-/**
- * @brief Low-frequency security options for AAD, replay protection, and rotation.
- */
-typedef struct {
-  const char* key_id;                                 /**< Wire key id (<=255 bytes) for @c key / @c passphrase. */
-  const char* aad_context;                            /**< AEAD context binding (<=65535 bytes), or @c NULL. */
-  uint32_t replay_window;                             /**< Replay window size; @c 0 disables replay checks. */
-  const vlink_security_previous_key_t* previous_keys; /**< Decrypt-only old keys for rotation, or @c NULL. */
-  size_t previous_keys_size;                          /**< Number of elements in @c previous_keys. */
+  const char* aad_context;     /**< AEAD context binding (<=65535 bytes), or @c NULL. */
+  uint32_t replay_window;      /**< Replay window size; @c 0 disables replay checks. */
   const char* signing_key_pem; /**< Local RSA private key (PEM) for RSA-PSS signing, or @c NULL. */
   const char* verify_key_pem;  /**< Peer RSA public key (PEM) for RSA-PSS verification, or @c NULL. */
 } vlink_security_advanced_config_t;
@@ -910,12 +898,12 @@ typedef struct {
  * - Otherwise the symmetric path is used with the key derived from @c key or
  *   @c passphrase + @c pbkdf2_salt.
  *
- * @note @c key / @c passphrase are current outbound key sources. @c advanced holds low-frequency
- * options such as key ids, old decrypt-only keys, AAD, replay protection, and signing.
+ * @note @c key / @c passphrase are the symmetric key sources. @c advanced holds low-frequency
+ * options such as AAD, replay protection, and signing.
  */
 struct vlink_security_config_s {
   const char* key;                            /**< Raw symmetric seed (SHA-256 truncated), or @c NULL. */
-  const char* passphrase;                     /**< Low-entropy passphrase fed into PBKDF2, or @c NULL. */
+  const char* passphrase;                     /**< Low-entropy passphrase fed into PBKDF2-HMAC-SHA256, or @c NULL. */
   const uint8_t* pbkdf2_salt;                 /**< PBKDF2 salt (>=16 bytes), or @c NULL. */
   size_t pbkdf2_salt_size;                    /**< Byte count of @c pbkdf2_salt. */
   uint32_t pbkdf2_iterations;                 /**< PBKDF2 iteration count; @c 0 means default (200000). */

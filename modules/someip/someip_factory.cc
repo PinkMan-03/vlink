@@ -247,19 +247,18 @@ bool SomeipClient::call(vsomeip_v3::method_t method, const Bytes& req_data, Node
   auto payload = someip::runtime::get()->create_payload(req_data.data(), req_data.size());
   request->set_payload(payload);
 
-  uint64_t seq = request->get_request() + 1;
-
-  if VUNLIKELY (seq == 0) {
-    seq = 1;
-  }
-
-  if (seq_out) {
-    *seq_out = seq;
-  }
-
   if VLIKELY (callback) {
     std::lock_guard lock(mtx_);
+    app_->send(request);
+
+    uint64_t seq = request->get_request();
+
+    if (seq_out) {
+      *seq_out = seq;
+    }
+
     resp_callbacks_[seq] = std::move(callback);
+    return true;
   }
 
   app_->send(request);

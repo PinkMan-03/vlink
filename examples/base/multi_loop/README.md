@@ -71,7 +71,7 @@ loop.post_task(callback);                      // 投递任务
 loop.post_task_with_priority(callback, prio);  // 带优先级投递
 loop.exec_task(config, callback);              // 调度任务
 loop.invoke_task(function, args...);           // Future 模式
-loop.wait_for_idle();                          // 等待队列清空
+loop.wait_for_idle();                          // 等待 dispatcher 队列和 worker 任务都空闲
 loop.quit();                                   // 请求退出
 loop.wait_for_quit();                          // 等待完全退出
 ```
@@ -79,6 +79,7 @@ loop.wait_for_quit();                          // 等待完全退出
 ### 6.2 MultiLoop 特有行为
 
 - `is_in_same_thread()` 在任意工作线程上返回 `true`
+- `wait_for_idle()` 会同时等待 dispatcher 队列和 worker 任务，包含 worker 完成前再投递的新任务
 - `on_begin()` / `on_end()` 在 dispatcher 线程上各调用一次（用于初始化/关闭内部 ThreadPool）
 - 基类 `on_task_changed()` 在执行任务的工作线程上调用
 

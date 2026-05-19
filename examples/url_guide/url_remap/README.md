@@ -50,9 +50,8 @@
 | 变量 | 说明 |
 |------|------|
 | `VLINK_URL_REMAP` | 重映射 JSON 文件路径 |
-| `VLINK_URL_USE_REMAP` | 设为 `1` 启用自动重映射 |
 
-当两个变量都设置后，每个 VLink 节点构造器自动执行重映射。
+在启用 URL remap 的构建中，进程首次构造 `Url` 前设置 `VLINK_URL_REMAP` 后，每个 VLink 节点构造器都会自动执行重映射。
 
 ## 6. 关键代码分析
 
@@ -98,7 +97,6 @@ if (!remap.load("/nonexistent.json")) {
 
 ```bash
 export VLINK_URL_REMAP=/etc/vlink/remap.json
-export VLINK_URL_USE_REMAP=1
 ```
 
 设置后，所有 VLink 节点构造函数自动对传入的 URL 执行重映射。

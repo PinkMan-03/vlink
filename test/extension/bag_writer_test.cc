@@ -140,6 +140,22 @@ TEST_SUITE("extension-BagWriter - SchemaCallback") {
 }
 
 // ---------------------------------------------------------------------------
+// TEST SUITE: BagWriter - factory suffix handling
+// ---------------------------------------------------------------------------
+
+TEST_SUITE("extension-BagWriter - factory suffix handling") {
+  TEST_CASE("create rejects unknown suffix") {
+    auto writer = BagWriter::create((std::filesystem::temp_directory_path() / "bag_writer_unknown.tmp").string());
+    CHECK(writer == nullptr);
+  }
+
+  TEST_CASE("filter_get rejects unknown suffix") {
+    auto writer = BagWriter::filter_get((std::filesystem::temp_directory_path() / "bag_writer_unknown.tmp").string());
+    CHECK(writer == nullptr);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // TEST SUITE: BagWriter - convert_action
 // ---------------------------------------------------------------------------
 

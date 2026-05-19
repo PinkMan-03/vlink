@@ -37,6 +37,18 @@ namespace vlink {
 
 constexpr size_t kMaxTaskSize = 10000U;
 
+static void wake_channel(name_attach_t* fd) {
+  if VUNLIKELY (!fd) {
+    return;
+  }
+
+  int coid = ::ConnectAttach(0, 0, fd->chid, _NTO_SIDE_CHANNEL, 0);
+  if VLIKELY (coid >= 0) {
+    (void)::MsgSendPulse(coid, SIGEV_PULSE_PRIO_INHERIT, _PULSE_CODE_CUSTOM_HEARTBEAT, 0);
+    ::ConnectDetach(coid);
+  }
+}
+
 size_t QnxLoop::get_max_task_count() const { return kMaxTaskSize; }
 
 // QnxMsg
@@ -133,13 +145,16 @@ QnxServer::~QnxServer() {
     QnxFactory::get_message_loop().wait_for_idle();
   }
 
-  if VLIKELY (fd_) {
-    ::name_detach(fd_, 0);
-    fd_ = nullptr;
-  }
+  auto* fd = fd_.load();
+  wake_channel(fd);
 
   if VLIKELY (thread_.joinable()) {
     thread_.join();
+  }
+
+  fd = fd_.exchange(nullptr);
+  if VLIKELY (fd) {
+    ::name_detach(fd, 0);
   }
 
   std::lock_guard lock(mtx_);
@@ -236,7 +251,12 @@ void QnxServer::process_message() {
   int rcvid = -1;
 
   while (!quit_flag_) {
-    rcvid = ::MsgReceive(fd_.load()->chid, &header, sizeof(header), &info);
+    auto* fd = fd_.load();
+    if VUNLIKELY (!fd) {
+      break;
+    }
+
+    rcvid = ::MsgReceive(fd->chid, &header, sizeof(header), &info);
 
     if VUNLIKELY (rcvid < 0) {
       if VUNLIKELY (!quit_flag_) {
@@ -275,6 +295,7 @@ void QnxServer::process_message() {
 
         if VUNLIKELY (back_coid < 0 && !quit_flag_) {
           VLOG_E("QnxFactory: Server name_open failed.");
+          continue;
         }
 
         clients_.emplace(id, back_coid);
@@ -323,7 +344,9 @@ void QnxServer::process_message() {
         }
       }
 
-      traverse_req_resp_callback([this, &header, &req_data, &rcvid](NodeImpl* impl, const auto& callback) {
+      bool replied = false;
+
+      traverse_req_resp_callback([this, &header, &req_data, &rcvid, &replied](NodeImpl* impl, const auto& callback) {
         const auto* conf_ptr = impl->get_target_conf<QnxConf>();
 
         if (conf_ptr->hash_code != header.msg.channel || impl->has_suspend) {
@@ -338,6 +361,7 @@ void QnxServer::process_message() {
 
         if (header.msg.type == QnxMsg::kSend) {
           ::MsgReply(rcvid, 0, nullptr, 0);
+          replied = true;
 
           callback(0, req_data, nullptr);
         } else {
@@ -356,16 +380,22 @@ void QnxServer::process_message() {
             std::memcpy(msg.buffer, resp_data.data(), resp_data.size());
 
             ::MsgReply(rcvid, 0, &msg, sizeof(msg));
+            replied = true;
           } else {
             msg.other.token = resp_token;
             resp_cache_map_.emplace(resp_token, std::move(resp_data));
 
             ::MsgReply(rcvid, 0, &msg, sizeof(msg));
+            replied = true;
 
             ++resp_token;
           }
         }
       });
+
+      if VUNLIKELY (!replied) {
+        ::MsgReply(rcvid, 0, nullptr, 0);
+      }
     } else if (header.msg.type == QnxMsg::kGetResult) {
       auto iter = resp_cache_map_.find(header.msg.other.token);
 
@@ -424,6 +454,10 @@ QnxClient::~QnxClient() {
 std::any QnxClient::get_native_handle() const { return this; }
 
 bool QnxClient::call(uint32_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback) {
+  if VUNLIKELY (coid_ < 0 || !back_fd_) {
+    return false;
+  }
+
   is_busy_ = true;
 
   QnxFactory::get_message_loop().post_task(
@@ -582,7 +616,12 @@ bool QnxClient::listen() {
     int rcvid = -1;
 
     while (!quit_flag_ && coid_ >= 0) {
-      rcvid = ::MsgReceive(back_fd_.load()->chid, &header, sizeof(header), &info);
+      auto* back_fd = back_fd_.load();
+      if VUNLIKELY (!back_fd) {
+        break;
+      }
+
+      rcvid = ::MsgReceive(back_fd->chid, &header, sizeof(header), &info);
 
       if VUNLIKELY (rcvid < 0) {
         //          if (!quit_flag_ && coid_ >= 0) {
@@ -656,21 +695,23 @@ void QnxClient::start_timer() {
 
   std::weak_ptr<QnxClient> weak_self = weak_from_this();
 
-  timer_.start([this, weak_self] {
-    if VUNLIKELY (!weak_self.lock()) {
+  timer_.start([weak_self] {
+    auto self = weak_self.lock();
+
+    if VUNLIKELY (!self) {
       return;
     }
 
-    if VUNLIKELY (quit_flag_) {
+    if VUNLIKELY (self->quit_flag_) {
       return;
     }
 
-    if (coid_ < 0 || !back_fd_) {
-      timer_.set_interval(50);
-      try_connect();
+    if (self->coid_ < 0 || !self->back_fd_) {
+      self->timer_.set_interval(50);
+      self->try_connect();
     } else {
-      timer_.set_interval(100);
-      try_detect();
+      self->timer_.set_interval(100);
+      self->try_detect();
     }
   });
 }
@@ -689,6 +730,7 @@ void QnxClient::try_connect() {
 
   if (!back_fd_) {
     if VUNLIKELY (!listen()) {
+      disconnect();
       return;
     }
   }
@@ -752,20 +794,21 @@ void QnxClient::try_detect() {
 }
 
 void QnxClient::disconnect() {
-  if (coid_ > 0) {
-    ::name_close(coid_);
-
-    coid_ = -1;
+  int coid = coid_.exchange(-1);
+  if (coid > 0) {
+    ::name_close(coid);
   }
 
-  if (back_fd_) {
-    ::name_detach(back_fd_, 0);
+  auto* back_fd = back_fd_.load();
+  wake_channel(back_fd);
 
-    back_fd_ = nullptr;
+  if VLIKELY (thread_.joinable()) {
+    thread_.join();
+  }
 
-    if VLIKELY (thread_.joinable()) {
-      thread_.join();
-    }
+  back_fd = back_fd_.exchange(nullptr);
+  if (back_fd) {
+    ::name_detach(back_fd, 0);
   }
 }
 

@@ -91,6 +91,59 @@ inline std::string format_expression_string(double value) {
   return text;
 }
 
+#ifdef VLINK_HAS_FBS_PARSER
+inline const reflection::Schema* get_verified_fbs_schema(std::string_view ser, const std::string& schema_data) {
+  if VUNLIKELY (schema_data.size() < sizeof(flatbuffers::uoffset_t)) {
+    MLOG_W("FlatBuffers schema buffer too small for: {}", ser);
+    return nullptr;
+  }
+
+  flatbuffers::Verifier verifier(reinterpret_cast<const uint8_t*>(schema_data.data()), schema_data.size());
+
+  if VUNLIKELY (!reflection::VerifySchemaBuffer(verifier)) {
+    MLOG_W("Invalid FlatBuffers schema buffer for: {}", ser);
+    return nullptr;
+  }
+
+  const auto* schema = reflection::GetSchema(reinterpret_cast<const uint8_t*>(schema_data.data()));
+
+  if VUNLIKELY (!schema || !schema->root_table()) {
+    MLOG_W("FlatBuffers schema has no root table for: {}", ser);
+    return nullptr;
+  }
+
+  return schema;
+}
+
+inline bool verify_fbs_payload(const reflection::Schema& schema, const Bytes& raw, std::string_view ser,
+                               std::string_view context = {}) {
+  if VUNLIKELY (!schema.root_table()) {
+    MLOG_W("FlatBuffers schema has no root table for: {}", ser);
+    return false;
+  }
+
+  if VUNLIKELY (raw.size() < sizeof(flatbuffers::uoffset_t) || raw.data() == nullptr) {
+    if (context.empty()) {
+      MLOG_W("FlatBuffers buffer too small for: {}", ser);
+    } else {
+      MLOG_W("FlatBuffers buffer too small for {} during {}", ser, context);
+    }
+    return false;
+  }
+
+  if VUNLIKELY (!flatbuffers::Verify(schema, *schema.root_table(), raw.data(), raw.size())) {
+    if (context.empty()) {
+      MLOG_W("Invalid FlatBuffers buffer for: {}", ser);
+    } else {
+      MLOG_W("Invalid FlatBuffers buffer for {} during {}", ser, context);
+    }
+    return false;
+  }
+
+  return true;
+}
+#endif
+
 struct FieldPathToken final {
   bool is_index{false};
   std::string name;

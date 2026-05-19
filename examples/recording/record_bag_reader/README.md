@@ -14,10 +14,10 @@
 
 | 实现类 | 文件扩展名 | 存储后端 |
 |--------|-----------|----------|
-| `DatabaseReader` | `.vdb` 及其他 | SQLite |
+| `DatabaseReader` | `.vdb` / `.vdbx` | SQLite |
 | `McapReader` | `.vcap` / `.vcapx` | MCAP |
 
-`BagReader::create()` 根据文件扩展名自动选择实现。
+`BagReader::create()` 根据文件扩展名自动选择实现，未知扩展名返回空指针。
 
 ## 3. BagReader::create() API
 
@@ -63,6 +63,7 @@ struct Info final {
 struct UrlMeta final {
     std::string url;       // 完整 VLink URL
     std::string url_type;  // 通信模型类型（"Event"/"Method"/"Field"）
+    ActionType action_type; // 记录时的动作类型（可用时）
     std::string ser_type;  // 具体序列化类型名（"demo.proto.PointCloud"/"raw" 等）
     SchemaType schema_type; // 粗粒度 schema 家族（kProtobuf/kFlatbuffers/kRaw/kZeroCopy/kUnknown）
     size_t count;          // 该 URL 的消息总数
@@ -102,7 +103,7 @@ struct Config final {
 以毫秒为单位指定回放范围。`begin_time=0` 从头开始，`end_time=0` 到末尾结束。这两个值是相对于录制起始时间戳的偏移量。
 
 #### 5.1.4 filter_urls（URL 过滤）
-指定需要回放的 URL 集合。如果为空集则回放所有 URL。适用于只关注特定 topic 的调试场景。
+指定需要回放的输出 URL 集合。如果为空集则回放所有 URL。绑定 `BagReaderPluginInterface` 时，这里匹配 `convert_url_meta()` 转换后的回放 URL，适用于只关注特定 topic 的调试场景。
 
 #### 5.1.5 skip_blank（跳过静默）
 当消息之间存在较长的时间间隔时，启用此选项可以跳过等待时间，连续输出消息。

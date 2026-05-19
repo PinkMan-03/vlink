@@ -53,7 +53,7 @@
  * | ----------------- | ----------------------------------------------------------------- |
  * | @c kPolicyOnce    | Task runs exactly once per @c execute() call (default)            |
  * | @c kPolicyMultiple| Task may run multiple times in one @c execute() pass              |
- * | @c kPolicyWaitAll | Task waits for all predecessors before running (default DAG rule) |
+ * | @c kPolicyWaitAll | Task waits for all predecessors before running                    |
  *
  * Operator syntax for building graphs:
  * @code
@@ -95,6 +95,7 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -483,6 +484,10 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
 
   void notify(int condition_number);
 
+  void notify_skip();
+
+  bool mark_predecessor_satisfied(bool active, bool* has_active);
+
   void update_status(Status status);
 
   bool detect_cycle(const GraphTask* task, std::unordered_set<const GraphTask*>& visited,
@@ -514,6 +519,10 @@ inline void GraphTask::execute(GraphEngineT* graph_engine) {
     constexpr bool kHaspriority = VLINK_HAS_MEMBER(GraphEngineT, post_task_with_priority);
     [[maybe_unused]] constexpr uint8_t kPriorityType = 2;
 
+    if VUNLIKELY (task->get_status() == kStatusInActive) {
+      return;
+    }
+
     auto task_func = [self, task]() {
       if (task.get() != self.get()) {
         task->wait();
@@ -526,18 +535,47 @@ inline void GraphTask::execute(GraphEngineT* graph_engine) {
       }
     };
 
+    auto post_task = [graph_engine](auto&& func) -> bool {
+      using Ret = decltype(graph_engine->post_task(std::forward<decltype(func)>(func)));
+
+      if constexpr (std::is_same_v<Ret, bool>) {
+        return graph_engine->post_task(std::forward<decltype(func)>(func));
+      } else {
+        graph_engine->post_task(std::forward<decltype(func)>(func));
+        return true;
+      }
+    };
+
+    bool posted = false;
+
     if constexpr (kHaspriority) {
+      auto post_task_with_priority = [graph_engine, task](auto&& func) -> bool {
+        using Ret =
+            decltype(graph_engine->post_task_with_priority(std::forward<decltype(func)>(func), task->get_priority()));
+
+        if constexpr (std::is_same_v<Ret, bool>) {
+          return graph_engine->post_task_with_priority(std::forward<decltype(func)>(func), task->get_priority());
+        } else {
+          graph_engine->post_task_with_priority(std::forward<decltype(func)>(func), task->get_priority());
+          return true;
+        }
+      };
+
       if constexpr (VLINK_HAS_MEMBER(GraphEngineT, get_type)) {
         if (graph_engine->get_type() == kPriorityType) {
-          graph_engine->post_task_with_priority(std::move(task_func), task->get_priority());
+          posted = post_task_with_priority(std::move(task_func));
         } else {
-          graph_engine->post_task(std::move(task_func));
+          posted = post_task(std::move(task_func));
         }
       } else {
-        graph_engine->post_task(std::move(task_func));
+        posted = post_task(std::move(task_func));
       }
     } else {
-      graph_engine->post_task(std::move(task_func));
+      posted = post_task(std::move(task_func));
+    }
+
+    if VUNLIKELY (!posted) {
+      task->cancel();
     }
   });
 }

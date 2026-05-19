@@ -300,7 +300,7 @@ explicit SecurityPublisher(const std::string& url_str,
 - 在非 `kWithSecurity` 实例上调用 `enable_security()` 会编译失败（`static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.")`）；
 - `intra://` 与 `dds://` CDR 类型运行时不支持安全加密，构造时会打印 warning 并把 `sec_cfg` 忽略，`impl_->security` 保持空；
 - 验证失败（非法 PEM / 弱 RSA / 缺 salt 等）会打印 warning 并把对应槽位置空；如果整个 cfg 都失效，`impl_->security` 保持空，发送 / 接收路径会直接 drop 消息并打 log，不再触发未定义行为；
-- `Security::Config` 是一个 aggregate struct，常用入口包含 `key` / `passphrase` / `pbkdf2_salt` / `public_key_pem` / `private_key_pem` / `encrypt_callback` / `decrypt_callback`，低频项放在 `advanced`（如 `key_id` / `previous_keys` / `aad_context` / `replay_window` / `signing_key_pem` / `verify_key_pem`）；模式按字段自动选择（自定义回调 > RSA 非对称 > 对称）；
+- `Security::Config` 是一个 aggregate struct，常用入口包含 `key` / `passphrase` / `pbkdf2_salt` / `public_key_pem` / `private_key_pem` / `encrypt_callback` / `decrypt_callback`，低频项放在 `advanced`（如 `aad_context` / `replay_window` / `signing_key_pem` / `verify_key_pem`）；模式按字段自动选择（自定义回调 > RSA 非对称 > 对称）；
 - 自定义回调必须**成对**安装；只设 `encrypt_callback` 或只设 `decrypt_callback` 会被忽略并打印 warning；
 - 内置 AEAD / RSA 需以 `ENABLE_SECURITY=ON` 构建（依赖 OpenSSL）；未启用时只有自定义回调路径生效。
 
@@ -342,7 +342,7 @@ bool get_discovery_enabled() const;
 void set_record_path(const std::string& path);
 ```
 
-为节点启用单独的消息录制。传入非空路径时通过 `BagWriter::filter_get()` 获取（或共享）录包器实例；传入空字符串则释放该 recorder。
+为节点启用单独的消息录制。传入非空路径时通过 `BagWriter::filter_get()` 获取（或共享）录包器实例；路径后缀需为 `.vdb/.vdbx/.vcap/.vcapx`，不支持的后缀不会创建 recorder。传入空字符串则释放该 recorder。
 
 > **注意**：`intra://` 与 `dds://` CDR 类型不支持录制 —— 调用 `set_record_path(path)` 会先触发 `VLOG_F`；即使绕过此检查，`try_record()` 内部也会直接跳过这两种传输。
 

@@ -12,10 +12,10 @@
 
 | 实现类 | 文件扩展名 | 存储后端 |
 |--------|-----------|----------|
-| `DatabaseWriter` | `.vdb` 及其他 | SQLite 数据库 |
+| `DatabaseWriter` | `.vdb` / `.vdbx` | SQLite 数据库 |
 | `McapWriter` | `.vcap` / `.vcapx` | MCAP 二进制格式 |
 
-`BagWriter::create()` 工厂方法根据文件扩展名自动选择实现。
+`BagWriter::create()` 工厂方法根据文件扩展名自动选择实现，未知扩展名返回空指针。
 
 ## 3. BagWriter::create() API
 
@@ -110,7 +110,7 @@ virtual int64_t push(
 | `microseconds_timestamp` | `int64_t*` | 自定义时间戳（微秒），`nullptr` 表示使用当前时间 |
 | `immediate` | `bool` | `true` 表示同步写入（绕过队列），`false` 表示异步 |
 
-**返回值：** 消息的单调递增序列号，错误时返回负值。
+**返回值：** 消息时间戳（微秒），错误时返回负值。
 
 `schema_type` 与 `ser_type` 分离后，BagWriter 可以在 discovery、proxy、viewer、webviz 等运行时链路中直接选择 protobuf 或 flatbuffers 技术栈，而不需要再靠字符串猜测。
 
@@ -121,6 +121,8 @@ virtual int64_t push(
 ```
 
 在全局注册表中查找指定路径的 writer。若存在则返回已有实例的 `shared_ptr`；否则创建新 writer、调用 `async_run()` 启动，并注册到全局表。最后一个 `shared_ptr` 释放时自动从注册表中移除。
+
+后缀规则与 `BagWriter::create()` 相同；未知后缀返回空指针，不会注册 writer。
 
 这是 `set_record_path()` 内部使用的机制，确保多个节点共享同一路径时不会创建重复的 writer。
 

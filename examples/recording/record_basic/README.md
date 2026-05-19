@@ -78,11 +78,12 @@ void Node<ImplT, SecT>::set_record_path(const std::string& path);
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `path` | `const std::string&` | bag 文件的输出路径。文件扩展名决定格式：`.vcap`/`.vcapx` 使用 MCAP，其他使用 SQLite |
+| `path` | `const std::string&` | bag 文件的输出路径。`.vdb`/`.vdbx` 使用 SQLite，`.vcap`/`.vcapx` 使用 MCAP |
 
 **行为说明：**
 
 - 内部调用 `BagWriter::filter_get(path)` 获取或创建 `BagWriter` 实例
+- 路径后缀不支持时不会创建 writer；支持 `.vdb/.vdbx/.vcap/.vcapx`
 - 如果已有同路径的 writer 存在，则复用
 - `BagWriter` 的生命周期由 `shared_ptr` 管理，最后一个引用释放时自动关闭文件
 - 对 `intra://` 和 CDR DDS 消息不生效（静默忽略）

@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 //
@@ -174,6 +175,8 @@ TEST_SUITE("base-Helpers - trim_string") {
 
   TEST_CASE("empty string returns empty") { CHECK(Helpers::trim_string("") == ""); }
 
+  TEST_CASE("all whitespace returns empty") { CHECK(Helpers::trim_string(" \t\r\n ") == ""); }
+
   TEST_CASE("no whitespace returns original") { CHECK(Helpers::trim_string("hello") == "hello"); }
 }
 
@@ -263,6 +266,31 @@ TEST_SUITE("base-Helpers - get_pair_string") {
     auto p = Helpers::get_pair_string("a=b=c", '=');
     CHECK(p.first == "a");
     CHECK(p.second == "b=c");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TEST SUITE: field escaping
+// ---------------------------------------------------------------------------
+
+TEST_SUITE("base-Helpers - field escaping") {
+  TEST_CASE("plain field remains unchanged") { CHECK(Helpers::escape_field("plain_text-123") == "plain_text-123"); }
+
+  TEST_CASE("escapes discovery text delimiters and percent") {
+    CHECK(Helpers::escape_field("host name:app%\n\r") == "host%20name%3Aapp%25%0A%0D");
+  }
+
+  TEST_CASE("unescapes valid percent sequences") {
+    CHECK(Helpers::unescape_field("host%20name%3Aapp%25%0A%0D") == "host name:app%\n\r");
+  }
+
+  TEST_CASE("unescape keeps invalid percent sequences literal") {
+    CHECK(Helpers::unescape_field("a%ZZ%b%2") == "a%ZZ%b%2");
+  }
+
+  TEST_CASE("escape and unescape round trip") {
+    const std::string input = "dds://topic with spaces:field%name";
+    CHECK(Helpers::unescape_field(Helpers::escape_field(input)) == input);
   }
 }
 

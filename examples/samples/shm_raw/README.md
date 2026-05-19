@@ -33,7 +33,7 @@ SecurityPublisher  -->  SecuritySubscriber
 ```
 
 - 使用 `SecurityPublisher<Bytes>` 和 `SecuritySubscriber<Bytes>`
-- 构造一个 `Security::Config`（`cfg.key = "custom-key"`），作为 `SecurityPublisher` / `SecuritySubscriber` 构造函数的第二参数传入；任意长度的 key 内部用 SHA-256 截断为 AES-128-GCM key
+- 构造一个 `Security::Config`（`cfg.key = "custom-key"`），作为 `SecurityPublisher` / `SecuritySubscriber` 构造函数的第二参数传入；`key` 经 SHA-256 截断为 AES-128-GCM key
 - 发布者调用 `wait_for_subscribers()` 等待匹配后再发送
 
 ### 3.3 字段模型 (Field) -- 状态读写

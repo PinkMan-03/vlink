@@ -23,10 +23,14 @@
 
 #include "./base/multi_loop.h"
 
+#include <atomic>
+#include <chrono>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <utility>
 
+#include "./base/condition_variable.h"
 #include "./base/logger.h"
 #include "./base/thread_pool.h"
 
@@ -49,6 +53,9 @@ struct MultiLoopGlobal final {
 // MultiLoop::Impl
 struct MultiLoop::Impl final {
   mutable std::mutex pool_mtx;
+  mutable std::mutex idle_mtx;
+  ConditionVariable idle_cv;
+  std::atomic_size_t pending_tasks{0U};
   std::optional<ThreadPool> thread_pool;
   size_t thread_num{0};
 };
@@ -73,6 +80,10 @@ MultiLoop::MultiLoop(size_t thread_num, Type type) : MessageLoop(type), impl_(st
 MultiLoop::~MultiLoop() = default;
 
 bool MultiLoop::is_in_same_thread() const {
+  if (MessageLoop::is_in_same_thread()) {
+    return true;
+  }
+
   std::lock_guard lock(impl_->pool_mtx);
 
   if VUNLIKELY (!impl_->thread_pool) {
@@ -80,6 +91,56 @@ bool MultiLoop::is_in_same_thread() const {
   }
 
   return impl_->thread_pool->is_in_work_thread();
+}
+
+bool MultiLoop::wait_for_idle(int ms, bool check) {
+  const auto start_time = std::chrono::steady_clock::now();
+
+  auto idle_predicate = [this]() -> bool { return impl_->pending_tasks.load(std::memory_order_acquire) == 0U; };
+  auto remaining_ms = [ms, start_time]() -> int {
+    if (ms == Timer::kInfinite) {
+      return Timer::kInfinite;
+    }
+
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
+    if (elapsed >= ms) {
+      return 0;
+    }
+
+    return static_cast<int>(ms - elapsed);
+  };
+
+  bool first_check = check;
+
+  while (true) {
+    const int dispatcher_wait_ms = remaining_ms();
+    if (!MessageLoop::wait_for_idle(dispatcher_wait_ms, first_check)) {
+      return false;
+    }
+    first_check = false;
+
+    std::unique_lock lock(impl_->idle_mtx);
+
+    if (ms == Timer::kInfinite) {
+      impl_->idle_cv.wait(lock, idle_predicate);
+    } else {
+      const int worker_wait_ms = remaining_ms();
+      if (worker_wait_ms <= 0) {
+        return idle_predicate() && MessageLoop::wait_for_idle(0, false);
+      }
+
+      if (!impl_->idle_cv.wait_for(lock, std::chrono::milliseconds(worker_wait_ms), idle_predicate)) {
+        return false;
+      }
+    }
+
+    lock.unlock();
+
+    if (MessageLoop::wait_for_idle(0, false)) {
+      return true;
+    }
+  }
 }
 
 void MultiLoop::on_begin() {
@@ -112,15 +173,34 @@ void MultiLoop::on_end() {
 }
 
 void MultiLoop::on_task_changed(Callback&& callback, uint32_t start_time) {
-  std::lock_guard lock(impl_->pool_mtx);
+  auto task = std::make_shared<Callback>(std::move(callback));
+  bool posted = false;
 
-  if VUNLIKELY (!impl_->thread_pool) {
-    return;
+  {
+    std::lock_guard lock(impl_->pool_mtx);
+
+    if VLIKELY (impl_->thread_pool) {
+      impl_->pending_tasks.fetch_add(1U, std::memory_order_acq_rel);
+
+      posted = impl_->thread_pool->post_task([this, task, start_time]() mutable {
+        if VLIKELY (*task) {
+          MessageLoop::on_task_changed(std::move(*task), start_time);
+        }
+
+        if (impl_->pending_tasks.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
+          impl_->idle_cv.notify_all();
+        }
+      });
+
+      if VUNLIKELY (!posted && impl_->pending_tasks.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
+        impl_->idle_cv.notify_all();
+      }
+    }
   }
 
-  impl_->thread_pool->post_task([this, tmp_callback = std::move(callback), start_time]() mutable {
-    MessageLoop::on_task_changed(std::move(tmp_callback), start_time);
-  });
+  if VUNLIKELY (!posted && *task) {
+    MessageLoop::on_task_changed(std::move(*task), start_time);
+  }
 }
 
 }  // namespace vlink

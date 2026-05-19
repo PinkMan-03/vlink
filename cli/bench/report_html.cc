@@ -389,7 +389,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
   const double plot_width = kWidth - kLeft - kRight;
   const double plot_height = kHeight - kTop - kBottom;
 
-  auto map_y = [&](double value) {
+  auto map_y = [&plot_height, &y_use_log, &to_y_axis, &y_axis_min, &y_axis_span, &max_y, &kTop](double value) {
     if VUNLIKELY (!std::isfinite(value)) {
       return kTop + plot_height;
     }
@@ -477,7 +477,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
   const double axis_min = to_axis(min_x);
   const double axis_max = to_axis(max_x);
 
-  auto map_x = [&](double x_value) {
+  auto map_x = [&axis_max, &axis_min, &plot_width, &to_axis](double x_value) {
     if (axis_max <= axis_min) {
       return kLeft + plot_width / 2.0;
     }
@@ -2830,7 +2830,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
     ++endpoint_score_count[key.first];
   }
 
-  auto endpoint_avg_score = [&](const std::string& endpoint) {
+  auto endpoint_avg_score = [&endpoint_score_count, &endpoint_score_sum](const std::string& endpoint) {
     const auto count_iter = endpoint_score_count.find(endpoint);
     if (count_iter == endpoint_score_count.end() || count_iter->second == 0) {
       return -1.0;
@@ -2943,7 +2943,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
         const std::array<double, 3> rank_heat_arr =
             rank_it != latency_rank_heat.end() ? rank_it->second : std::array<double, 3>{-1.0, -1.0, -1.0};
 
-        auto bar_heat_pct = [&](double sc, double rank_h) {
+        auto bar_heat_pct = [](double sc, double rank_h) {
           const double abs_h = sc < 0.0 ? -1.0 : std::clamp(100.0 - sc, 0.0, 100.0);
           const double rel_h = rank_h < 0.0 ? -1.0 : std::clamp(rank_h, 0.0, 100.0);
 
@@ -2958,7 +2958,8 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
           }
           return 100;
         };
-        auto bar_fill = [&](double sc, double rank_h) {
+
+        auto bar_fill = [&bar_heat_pct](double sc, double rank_h) {
           if (rank_h < 0.0 && sc < 0.0) {
             return 100;
           }

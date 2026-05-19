@@ -193,7 +193,7 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes cipher;
     REQUIRE(sender.encrypt(plain, cipher));
-    CHECK(cipher.size() == plain.size() + 51U);
+    CHECK(cipher.size() == plain.size() + 50U);
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
@@ -210,7 +210,7 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes cipher;
     REQUIRE(sender.encrypt(plain, cipher));
-    CHECK(cipher.size() == 1U + 51U);
+    CHECK(cipher.size() == 1U + 50U);
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
@@ -258,49 +258,6 @@ TEST_SUITE("extension-Security - AES built-in") {
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
     CHECK_FALSE(receiver.decrypt(cipher, recovered));
-  }
-
-  TEST_CASE("key id rotation accepts old and new decrypt keys") {
-    Security::Config old_sender_cfg;
-    old_sender_cfg.key = "old_seed";
-    old_sender_cfg.advanced.key_id = "old";
-    Security old_sender(old_sender_cfg);
-
-    Security::Config new_sender_cfg;
-    new_sender_cfg.key = "new_seed";
-    new_sender_cfg.advanced.key_id = "new";
-    Security new_sender(new_sender_cfg);
-
-    Security::Config receiver_cfg;
-    receiver_cfg.key = "new_seed";
-    receiver_cfg.advanced.key_id = "new";
-    Security::Config::PreviousKey old_decrypt;
-    old_decrypt.key_id = "old";
-    old_decrypt.key = "old_seed";
-    receiver_cfg.advanced.previous_keys.push_back(old_decrypt);
-    Security receiver(receiver_cfg);
-
-    Bytes plain = Bytes::create(40);
-    std::memset(plain.data(), 0x4A, 40);
-
-    Bytes old_cipher;
-    REQUIRE(old_sender.encrypt(plain, old_cipher));
-    Bytes recovered;
-    REQUIRE(receiver.decrypt(old_cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
-
-    Bytes new_cipher;
-    REQUIRE(new_sender.encrypt(plain, new_cipher));
-    REQUIRE(receiver.decrypt(new_cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
-
-    Security::Config old_only_cfg;
-    old_only_cfg.key = "old_seed";
-    old_only_cfg.advanced.key_id = "old";
-    Security old_only_receiver(old_only_cfg);
-    CHECK_FALSE(old_only_receiver.decrypt(new_cipher, recovered));
   }
 
   TEST_CASE("AES-GCM ciphertext differs across calls (unique sequence nonce)") {
@@ -982,40 +939,6 @@ TEST_SUITE("extension-Security - Config edge cases") {
     CHECK_FALSE(sec.encrypt(plain, cipher));
   }
 
-  TEST_CASE("oversized key_id is rejected before capability checks") {
-    Security::Config cfg;
-    cfg.key = "oversized_key_id_seed";
-    cfg.advanced.key_id.assign(256U, 'x');
-    Security sec(cfg);
-
-    CHECK_FALSE(sec.is_configured());
-    CHECK_FALSE(sec.can_encrypt());
-    CHECK_FALSE(sec.can_decrypt());
-
-    Bytes plain = Bytes::create(16);
-    std::memset(plain.data(), 0x22, 16);
-    Bytes cipher;
-    CHECK_FALSE(sec.encrypt(plain, cipher));
-  }
-
-  TEST_CASE("oversized key_id disables RSA outbound capability") {
-    const auto kp = generate_rsa_keypair(2048);
-
-    Security::Config cfg;
-    cfg.public_key_pem = kp.public_pem;
-    cfg.advanced.key_id.assign(256U, 'x');
-    Security sec(cfg);
-
-    CHECK_FALSE(sec.is_configured());
-    CHECK_FALSE(sec.can_encrypt());
-    CHECK_FALSE(sec.can_decrypt());
-
-    Bytes plain = Bytes::create(16);
-    std::memset(plain.data(), 0x24, 16);
-    Bytes cipher;
-    CHECK_FALSE(sec.encrypt(plain, cipher));
-  }
-
   TEST_CASE("oversized aad_context is rejected before capability checks") {
     Security::Config cfg;
     cfg.key = "oversized_aad_seed";
@@ -1030,32 +953,6 @@ TEST_SUITE("extension-Security - Config edge cases") {
     std::memset(plain.data(), 0x25, 16);
     Bytes cipher;
     CHECK_FALSE(sec.encrypt(plain, cipher));
-  }
-
-  TEST_CASE("previous key with current key_id is ignored instead of replacing outbound key") {
-    Security::Config cfg;
-    cfg.key = "current_seed";
-    cfg.advanced.key_id = "active";
-
-    Security::Config::PreviousKey duplicate;
-    duplicate.key_id = "active";
-    duplicate.key = "old_seed";
-    cfg.advanced.previous_keys.push_back(duplicate);
-
-    Security sec(cfg);
-    CHECK(sec.is_configured());
-    CHECK(sec.can_encrypt());
-    CHECK(sec.can_decrypt());
-
-    Bytes plain = Bytes::create(24);
-    std::memset(plain.data(), 0x23, 24);
-    Bytes cipher;
-    REQUIRE(sec.encrypt(plain, cipher));
-
-    Bytes recovered;
-    REQUIRE(sec.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
   }
 
   TEST_CASE("lone encrypt_callback is ignored: callbacks must be installed as a pair") {

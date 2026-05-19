@@ -71,6 +71,7 @@
 
 #include <memory>
 #include <string_view>
+#include <utility>
 
 #include "../serializer.h"
 
@@ -90,6 +91,38 @@ class VLINK_EXPORT DynamicData final {
    * @brief Constructs an empty @c DynamicData with no payload.
    */
   DynamicData();
+
+  /**
+   * @brief Copy-constructs a @c DynamicData and rebinds the type view.
+   *
+   * The copied @c type_ view points into this object's copied buffer, not the
+   * source object's buffer.
+   */
+  DynamicData(const DynamicData& target);
+
+  /**
+   * @brief Move-constructs a @c DynamicData and rebinds the type view.
+   *
+   * The moved-to @c type_ view points into this object's buffer.  The moved-from
+   * object is left with an empty type view.
+   */
+  DynamicData(DynamicData&& target) noexcept;
+
+  /**
+   * @brief Copy-assigns a @c DynamicData and rebinds the type view.
+   *
+   * The assigned @c type_ view points into this object's copied buffer, not the
+   * source object's buffer.
+   */
+  DynamicData& operator=(const DynamicData& target);
+
+  /**
+   * @brief Move-assigns a @c DynamicData and rebinds the type view.
+   *
+   * The moved-to @c type_ view points into this object's buffer.  The moved-from
+   * object is left with an empty type view.
+   */
+  DynamicData& operator=(DynamicData&& target) noexcept;
 
   /**
    * @brief Serializes @p t with a type-name tag into the internal buffer.
@@ -214,6 +247,10 @@ class VLINK_EXPORT DynamicData final {
   bool operator>>(Bytes& bytes) const noexcept;
 
  private:
+  void refresh_type_view() noexcept;
+
+  void refresh_type_view(size_t type_size) noexcept;
+
   static constexpr uint8_t kOffset{20};
   Bytes data_;
   std::string_view type_;
@@ -229,13 +266,17 @@ inline DynamicData& DynamicData::load(const char (&type)[SizeT], const T& t) {
   static_assert(!std::is_same_v<DynamicData, T>, "DynamicData can not serialize self.");
   static_assert(!Serializer::is_cdr_type<T>(), "DynamicData can not serialize cdr data.");
 
-  bool ret = Serializer::serialize<Serializer::get_type_of<T>()>(t, data_, TransportType::kUnknown, get_offset());
+  Bytes next_data;
+  bool ret = Serializer::serialize<Serializer::get_type_of<T>()>(t, next_data, TransportType::kUnknown, get_offset());
 
-  if VUNLIKELY (!ret || data_.real_data() == nullptr) {
-    VLOG_F("DynamicData serialize failed.");
+  if VUNLIKELY (!ret || next_data.real_data() == nullptr) {
+    data_ = Bytes();
     type_ = std::string_view();
+    VLOG_F("DynamicData serialize failed.");
     return *this;
   }
+
+  data_ = std::move(next_data);
 
   if constexpr (SizeT > 0) {
     std::memcpy(data_.real_data(), type, SizeT);

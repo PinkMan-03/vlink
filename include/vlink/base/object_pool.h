@@ -324,7 +324,7 @@ inline std::unique_ptr<T, typename ObjectPool<T>::PoolDeleter> ObjectPool<T>::ge
     if (should_reset_on_acquire() && reset_callback_) {
       reset_callback_(*obj);
     }
-  } catch (std::exception&) {
+  } catch (...) {
     release(std::move(obj));
     throw;
   }
@@ -340,7 +340,7 @@ inline std::shared_ptr<T> ObjectPool<T>::get_shared() {
     if (should_reset_on_acquire() && reset_callback_) {
       reset_callback_(*obj);
     }
-  } catch (std::exception&) {
+  } catch (...) {
     release(std::move(obj));
     throw;
   }
@@ -356,7 +356,7 @@ inline T* ObjectPool<T>::borrow() {
     if (should_reset_on_acquire() && reset_callback_) {
       reset_callback_(*obj);
     }
-  } catch (std::exception&) {
+  } catch (...) {
     release(std::move(obj));
     throw;
   }
@@ -419,7 +419,7 @@ inline std::unique_ptr<T> ObjectPool<T>::acquire() {
     if VUNLIKELY (!new_obj) {
       throw_factory_null();
     }
-  } catch (std::exception&) {
+  } catch (...) {
     lock.lock();
     --borrowed_;
     --live_count_;
@@ -439,7 +439,7 @@ inline void ObjectPool<T>::release(std::unique_ptr<T> obj) noexcept {
   if (should_reset_on_release() && reset_callback_) {
     try {
       reset_callback_(*obj);
-    } catch (std::exception&) {
+    } catch (...) {
       safe_dec_borrowed_and_live();
       return;
     }

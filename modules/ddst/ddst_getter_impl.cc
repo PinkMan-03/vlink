@@ -49,21 +49,17 @@ void DdstGetterImpl::ReaderListener::on_data_available(ddst::DataReader* reader)
     return;
   }
 
-  auto* message_loop = instance->get_message_loop();
-
   if VUNLIKELY (!instance->callback_) {
     return;
   }
 
-  if (message_loop) {
-    message_loop->post_task([instance, reader]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance, reader]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->process_message(reader);
-    });
-  } else {
+                  instance->process_message(reader);
+                })) {
     instance->process_message(reader);
   }
 }
@@ -83,7 +79,7 @@ void DdstGetterImpl::process_message(ddst::DataReader* reader) {
       continue;
     }
 
-    if VUNLIKELY (is_latency_and_lost_enabled_) {
+    if VUNLIKELY (is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
       last_latency_.store(ElapsedTimer::get_sys_timestamp(ElapsedTimer::kNano, false) - msg.timestamp,
                           std::memory_order_relaxed);
 
@@ -168,12 +164,16 @@ bool DdstGetterImpl::listen(MsgCallback&& callback) {
   return true;
 }
 
-void DdstGetterImpl::set_latency_and_lost_enabled(bool enable) { is_latency_and_lost_enabled_ = enable; }
+void DdstGetterImpl::set_latency_and_lost_enabled(bool enable) {
+  is_latency_and_lost_enabled_.store(enable, std::memory_order_release);
+}
 
-bool DdstGetterImpl::is_latency_and_lost_enabled() const { return is_latency_and_lost_enabled_; }
+bool DdstGetterImpl::is_latency_and_lost_enabled() const {
+  return is_latency_and_lost_enabled_.load(std::memory_order_acquire);
+}
 
 int64_t DdstGetterImpl::get_latency() const {
-  if (!is_latency_and_lost_enabled_) {
+  if (!is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
     return 0;
   }
 
@@ -181,7 +181,7 @@ int64_t DdstGetterImpl::get_latency() const {
 }
 
 SampleLostInfo DdstGetterImpl::get_lost() const {
-  if (!is_latency_and_lost_enabled_) {
+  if (!is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
     return SampleLostInfo();
   }
 

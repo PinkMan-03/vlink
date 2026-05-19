@@ -74,21 +74,17 @@ void DdsServerImpl::ReaderListener::on_data_available(dds::DataReader* reader) {
     return;
   }
 
-  auto* message_loop = instance->get_message_loop();
-
   if VUNLIKELY (!instance->callback_) {
     return;
   }
 
-  if (message_loop) {
-    message_loop->post_task([instance, reader]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance, reader]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->process_message(reader);
-    });
-  } else {
+                  instance->process_message(reader);
+                })) {
     instance->process_message(reader);
   }
 }
@@ -120,8 +116,7 @@ void DdsServerImpl::process_message(dds::DataReader* reader) {
           std::lock_guard lock(param_mtx_);
           rtps::WriteParams param;
           param.related_sample_identity() = msg.info.sample_identity;
-          msg.id = (static_cast<uint64_t>(msg.info.sample_identity.writer_guid().entityId.to_uint32()) << 32) |
-                   msg.info.sample_identity.sequence_number().low;
+          msg.id = ++cdr_seq_;
           cdr_id_map_.emplace(msg.id, std::move(param));
         }
 

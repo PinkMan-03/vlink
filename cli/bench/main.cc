@@ -63,7 +63,7 @@ void print_output_summary(const vlink::bench::report::Summary& summary, const vl
   const bool colorize = terminal_size.first > 0 && terminal_size.second > 0;
   const size_t planned_case_count = result.planned_case_count == 0 ? summary.case_count : result.planned_case_count;
 
-  auto print_line = [&](const std::string& line, const char* color = nullptr) {
+  auto print_line = [colorize](const std::string& line, const char* color = nullptr) {
     if (colorize && color != nullptr) {
       std::cout << color << line << "\033[0m" << std::endl;
     } else {

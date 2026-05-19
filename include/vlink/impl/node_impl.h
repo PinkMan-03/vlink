@@ -186,6 +186,7 @@ class VLINK_EXPORT NodeImpl {
    * to the payload type, so no copy occurs.
    */
   using IntraMsgCallback = Function<void(const IntraData&)>;
+  using PostCallback = MoveFunction<void()>;
 
   /**
    * @brief Initialises the underlying transport channel.
@@ -374,6 +375,8 @@ class VLINK_EXPORT NodeImpl {
    */
   [[nodiscard]] class MessageLoop* get_message_loop() const;
 
+  bool post_task(PostCallback&& callback);
+
   /**
    * @brief Returns a typed pointer to the conf by downcasting to @c T.
    *
@@ -476,7 +479,7 @@ class VLINK_EXPORT NodeImpl {
    * nodes writing to the same path) and @c try_record() will capture messages.
    * Pass an empty string to disable per-node recording.
    *
-   * @param path  File path for the bag; empty disables recording.
+   * @param path  File path for the bag; empty or unsupported suffix disables recording.
    */
   void set_record_path(const std::string& path);
 

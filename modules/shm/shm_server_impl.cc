@@ -57,7 +57,13 @@ bool ShmServerImpl::is_suspend() const { return object_->is_suspend(); }
 
 bool ShmServerImpl::is_support_loan() const { return true; }
 
-Bytes ShmServerImpl::loan(int64_t size) { return object_->loan(static_cast<uint64_t>(conf_.hash_code), size); }
+Bytes ShmServerImpl::loan(int64_t size) {
+  if VUNLIKELY (is_resp_type && !is_sync_type) {
+    return Bytes();
+  }
+
+  return object_->loan(static_cast<uint64_t>(conf_.hash_code), size);
+}
 
 bool ShmServerImpl::return_loan(const Bytes& bytes) { return object_->release(bytes); }
 

@@ -651,7 +651,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
 
           uint32_t process_pid = 0;
 
-          auto hostname_view = process_list_view.at(0);
+          const std::string hostname = Helpers::unescape_field(process_list_view.at(0));
 
           auto process_pid_view = process_list_view.at(1);
 
@@ -662,9 +662,9 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
             process_pid = 0;
           }
 
-          auto process_name_view = process_list_view.at(2);
+          const std::string process_name = Helpers::unescape_field(process_list_view.at(2));
 
-          process_offline(hostname_view, process_pid, process_name_view);
+          process_offline(hostname, process_pid, process_name);
 
           return;
         }
@@ -720,16 +720,18 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
               continue;
             }
 
-            auto hostname_view = process_list_view.at(0);
+            std::string url = Helpers::unescape_field(url_view);
+            std::string ser_type = Helpers::unescape_field(ser_type_view);
+            std::string hostname = Helpers::unescape_field(process_list_view.at(0));
 
             if (impl_->filter_type == kFilterAvailable) {
-              if (hostname_view != impl_->native_hostname) {
-                if (Url::is_local_type(url_view)) {
+              if (hostname != impl_->native_hostname) {
+                if (Url::is_local_type(url)) {
                   continue;
                 }
               }
             } else if (impl_->filter_type == kFilterNative) {
-              if (hostname_view != impl_->native_hostname) {
+              if (hostname != impl_->native_hostname) {
                 continue;
               }
             }
@@ -745,7 +747,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
               }
             }
 
-            auto process_name_view = process_list_view.at(2);
+            std::string process_name = Helpers::unescape_field(process_list_view.at(2));
 
             if (process_list_view.size() >= 4) {
               auto profiler_view = process_list_view.at(3);
@@ -757,20 +759,15 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
               }
             }
 
-            if VUNLIKELY (type == kUnknownImplType || url_view.empty()) {
+            if VUNLIKELY (type == kUnknownImplType || url.empty()) {
               continue;
             }
 
-            int sort_index = Url::get_sort_index(url_view);
+            int sort_index = Url::get_sort_index(url);
 
             if VUNLIKELY (sort_index < 0) {
               continue;
             }
-
-            std::string url(url_view);
-            std::string ser_type(ser_type_view);
-            std::string hostname(hostname_view);
-            std::string process_name(process_name_view);
 
             if (ser_type == "{}") {
               ser_type.clear();
@@ -794,6 +791,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
               std::string merged_ser_type;
               SchemaType merged_schema_type = SchemaType::kUnknown;
               bool has_ser_conflict = false;
+              bool has_schema_conflict = false;
 
               for (const auto& [active_info, active_timer] : impl_->info_map) {
                 (void)active_timer;
@@ -810,7 +808,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
                   }
                 }
 
-                if (active_info.schema_type == SchemaType::kUnknown) {
+                if (has_schema_conflict || active_info.schema_type == SchemaType::kUnknown) {
                   continue;
                 }
 
@@ -818,6 +816,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
                   merged_schema_type = active_info.schema_type;
                 } else if (merged_schema_type != active_info.schema_type) {
                   merged_schema_type = SchemaType::kUnknown;
+                  has_schema_conflict = true;
                 }
               }
 
@@ -988,9 +987,11 @@ void DiscoveryViewer::sort_url() {
   std::unordered_map<std::string, std::string> next_ser_map;
   std::unordered_map<std::string, SchemaType> next_schema_type_map;
   std::unordered_set<std::string> ser_conflict_urls;
+  std::unordered_set<std::string> schema_conflict_urls;
   next_ser_map.reserve(impl_->info_map.size());
   next_schema_type_map.reserve(impl_->info_map.size());
   ser_conflict_urls.reserve(impl_->info_map.size());
+  schema_conflict_urls.reserve(impl_->info_map.size());
 
   for (const auto& [info, timer] : impl_->info_map) {
     if VLIKELY (!impl_->info_list.empty()) {
@@ -1009,11 +1010,12 @@ void DiscoveryViewer::sort_url() {
           }
         }
 
-        if (info.schema_type != SchemaType::kUnknown) {
+        if (info.schema_type != SchemaType::kUnknown && schema_conflict_urls.count(info.url) == 0) {
           if (merged.schema_type == SchemaType::kUnknown) {
             merged.schema_type = info.schema_type;
           } else if (merged.schema_type != info.schema_type) {
             merged.schema_type = SchemaType::kUnknown;
+            schema_conflict_urls.emplace(info.url);
           }
         }
 
@@ -1044,11 +1046,14 @@ void DiscoveryViewer::sort_url() {
       ser_type = info.ser_type;
     }
 
-    if (info.schema_type != SchemaType::kUnknown) {
+    if (schema_conflict_urls.count(info.url) != 0) {
+      schema_type = SchemaType::kUnknown;
+    } else if (info.schema_type != SchemaType::kUnknown) {
       if (schema_type == SchemaType::kUnknown) {
         schema_type = info.schema_type;
       } else if (schema_type != info.schema_type) {
         schema_type = SchemaType::kUnknown;
+        schema_conflict_urls.emplace(info.url);
       }
     }
   }

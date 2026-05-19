@@ -69,7 +69,7 @@ class Shm2GetterImpl final : public GetterImpl {
   Shm2Conf conf_;
   std::shared_ptr<Object> object_;
 
-  bool is_latency_and_lost_enabled_{false};
+  std::atomic_bool is_latency_and_lost_enabled_{false};
 
   VLINK_DISALLOW_COPY_AND_ASSIGN(Shm2GetterImpl)
 };

@@ -26,6 +26,7 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "../base/helpers.h"
@@ -364,7 +365,16 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
   if constexpr (TypeT == kBytesType) {
     des = Bytes::deep_copy(src.data(), src.size(), offset);
   } else if constexpr (TypeT == kDynamicType) {
-    deref(src) >> des;
+    using ReturnT = decltype(deref(src) >> des);
+
+    if constexpr (std::is_convertible_v<ReturnT, bool>) {
+      if VUNLIKELY (!(deref(src) >> des)) {
+        VLOG_T("Serializer: Dynamic serialize failed.");
+        return false;
+      }
+    } else {
+      deref(src) >> des;
+    }
   } else if constexpr (TypeT == kCdrType) {
     if (transport == TransportType::kDds) {
       des = Bytes::shallow_copy_ptr(&const_cast<RealType&>(deref(src)));
@@ -453,7 +463,16 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
   } else if constexpr (TypeT == kFlatPtrType) {
     static_assert(Traits::ExpectFalse<T>(), "Not support flat ptr type.");
   } else if constexpr (TypeT == kCustomType) {
-    const_cast<RealType&>(deref(src)) >> des;
+    using ReturnT = decltype(const_cast<RealType&>(deref(src)) >> des);
+
+    if constexpr (std::is_convertible_v<ReturnT, bool>) {
+      if VUNLIKELY (!(const_cast<RealType&>(deref(src)) >> des)) {
+        VLOG_T("Serializer: Custom serialize failed.");
+        return false;
+      }
+    } else {
+      const_cast<RealType&>(deref(src)) >> des;
+    }
 
     if (offset > 0) {
       des = Bytes::deep_copy(des.data(), des.size(), offset);
@@ -510,7 +529,16 @@ inline bool deserialize(const Bytes& src, T& des, [[maybe_unused]] TransportType
     return true;
   } else if constexpr (TypeT == kDynamicType) {
     try {
-      deref(des) << src;
+      using ReturnT = decltype(deref(des) << src);
+
+      if constexpr (std::is_convertible_v<ReturnT, bool>) {
+        if VUNLIKELY (!(deref(des) << src)) {
+          VLOG_T("Serializer: Dynamic deserialize failed.");
+          return false;
+        }
+      } else {
+        deref(des) << src;
+      }
     } catch (const std::exception& e) {
       VLOG_T("Serializer: Dynamic deserialize threw: ", e.what(), ".");
       return false;
@@ -586,7 +614,16 @@ inline bool deserialize(const Bytes& src, T& des, [[maybe_unused]] TransportType
     }
   } else if constexpr (TypeT == kCustomType) {
     try {
-      deref(des) << src;
+      using ReturnT = decltype(deref(des) << src);
+
+      if constexpr (std::is_convertible_v<ReturnT, bool>) {
+        if VUNLIKELY (!(deref(des) << src)) {
+          VLOG_T("Serializer: Custom deserialize failed.");
+          return false;
+        }
+      } else {
+        deref(des) << src;
+      }
     } catch (const std::exception& e) {
       VLOG_T("Serializer: Custom deserialize threw: ", e.what(), ".");
       return false;

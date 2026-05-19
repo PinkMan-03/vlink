@@ -26,6 +26,7 @@
 #include <deque>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>
@@ -285,12 +286,16 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
 
   std::string plugin_complex_id = lib_name + "@" + plugin_id;
 
-  if VUNLIKELY (has_loaded(plugin_complex_id)) {
-    if (impl_->log_level <= Logger::kError) {
-      VLOG_E("Plugin: Already loaded (", plugin_complex_id, ").");
-    }
+  {
+    std::unique_lock load_lock(impl_->mtx);
 
-    return nullptr;
+    if VUNLIKELY (impl_->plugin_map.count(plugin_complex_id) != 0U) {
+      if (impl_->log_level <= Logger::kError) {
+        VLOG_E("Plugin: Already loaded (", plugin_complex_id, ").");
+      }
+
+      return nullptr;
+    }
   }
 
   std::string plugin_path;
@@ -360,13 +365,22 @@ Plugin::Handle Plugin::load_and_create(const std::string& plugin_id, const std::
       VLOG_T("Plugin: Loaded successfully (", plugin_complex_id, ").");
     }
 
+    bool inserted = false;
+
     {
-      std::lock_guard lock(impl_->mtx);
-      impl_->plugin_map.emplace(plugin_complex_id, entry);
+      std::unique_lock load_lock(impl_->mtx);
+      auto [iter, emplaced] = impl_->plugin_map.emplace(plugin_complex_id, entry);
+      (void)iter;
+      inserted = emplaced;
+    }
+
+    if VUNLIKELY (!inserted) {
+      destroy(entry, handle);
+      return nullptr;
     }
 
     if (plugin_entry) {
-      *plugin_entry = std::move(entry);
+      *plugin_entry = entry;
     }
 
     return handle;
@@ -414,19 +428,33 @@ bool Plugin::destroy(std::shared_ptr<PluginEntry> plugin_entry, Handle handle, c
     return false;
   }
 
-  auto destroy_function = plugin_entry->loader->get_function<bool(Handle)>(function_name);
+  try {
+    auto destroy_function = plugin_entry->loader->get_function<bool(Handle)>(function_name);
 
-  if VUNLIKELY (!destroy_function) {
+    if VUNLIKELY (!destroy_function) {
+      if (plugin_entry->log_level <= Logger::kError) {
+        VLOG_E("Plugin: Cannot find symbol function to destroy (", plugin_entry->plugin_complex_id, ").");
+      }
+
+      return false;
+    }
+
+    if VUNLIKELY (!destroy_function(handle)) {
+      if (plugin_entry->log_level <= Logger::kError) {
+        VLOG_E("Plugin: Failed to destroy handle (", plugin_entry->plugin_complex_id, ").");
+      }
+
+      return false;
+    }
+  } catch (const std::exception& e) {
     if (plugin_entry->log_level <= Logger::kError) {
-      VLOG_E("Plugin: Cannot find symbol function to destroy (", plugin_entry->plugin_complex_id, ").");
+      VLOG_E("Plugin: Failed to destroy handle (", plugin_entry->plugin_complex_id, "): ", e.what(), ".");
     }
 
     return false;
-  }
-
-  if VUNLIKELY (!destroy_function(handle)) {
+  } catch (...) {
     if (plugin_entry->log_level <= Logger::kError) {
-      VLOG_E("Plugin: Failed to destroy handle (", plugin_entry->plugin_complex_id, ").");
+      VLOG_E("Plugin: Failed to destroy handle (", plugin_entry->plugin_complex_id, "): non-std exception.");
     }
 
     return false;

@@ -657,6 +657,13 @@ void Shm2Server::process_message() {
             handle_consumed = true;
             Bytes resp_bytes;
             callback(seq_, req_bytes, &resp_bytes);
+            {
+              std::lock_guard lock(mtx_);
+              if (active_req_ == active_req_handle) {
+                iox2_active_request_drop(active_req_);
+                active_req_ = nullptr;
+              }
+            }
           } else {
             callback(0, req_bytes, nullptr);
             iox2_active_request_drop(active_req_handle);
@@ -1191,7 +1198,7 @@ bool Shm2Client::release(const Bytes& bytes) {
   return true;
 }
 
-bool Shm2Client::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback) {
+bool Shm2Client::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallback&& callback, uint64_t* seq_out) {
   if VUNLIKELY (!is_connected()) {
     return false;
   }
@@ -1245,14 +1252,19 @@ bool Shm2Client::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCall
   int ret = 0;
 
   if (callback) {
-    callbacks_[seq_] = [cb = std::move(callback), channel](uint64_t target_channel, const Bytes& bytes) {
+    const auto response_seq = seq_.load(std::memory_order_relaxed);
+    callbacks_[response_seq] = [cb = std::move(callback), channel](uint64_t target_channel, const Bytes& bytes) {
       if (channel != target_channel) {
         return;
       }
       cb(bytes);
     };
 
-    auto& pr_storage = pending_storage_map_[seq_];
+    if (seq_out) {
+      *seq_out = response_seq;
+    }
+
+    auto& pr_storage = pending_storage_map_[response_seq];
     iox2_pending_response_h pr_handle{nullptr};
     ret = iox2_request_mut_send(req_handle, &pr_storage, &pr_handle);
 
@@ -1260,12 +1272,12 @@ bool Shm2Client::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCall
       VLOG_E("Shm2Factory: Failed to send client request, error: ", ret, ".");
 
       iox2_request_mut_drop(req_handle);
-      callbacks_.erase(seq_);
-      pending_storage_map_.erase(seq_);
+      callbacks_.erase(response_seq);
+      pending_storage_map_.erase(response_seq);
       return false;
     }
 
-    pending_map_[seq_] = pr_handle;
+    pending_map_[response_seq] = pr_handle;
   } else {
     iox2_pending_response_t pr_storage{};
     iox2_pending_response_h pr_handle;
@@ -1287,6 +1299,20 @@ bool Shm2Client::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCall
   }
 
   return true;
+}
+
+void Shm2Client::remove_response_callback(uint64_t seq) {
+  std::lock_guard lock(mtx_);
+
+  callbacks_.erase(seq);
+
+  auto pending_iter = pending_map_.find(seq);
+  if (pending_iter != pending_map_.end()) {
+    iox2_pending_response_drop(pending_iter->second);
+    pending_map_.erase(pending_iter);
+  }
+
+  pending_storage_map_.erase(seq);
 }
 
 void Shm2Client::detect_server() {
@@ -1562,9 +1588,12 @@ bool Shm2Publisher::publish(uint64_t channel, const Bytes& bytes) {
       return false;
     }
 
-    if (notifier_ && recipients > 0 && ++notify_counter_ >= notify_every_) {
-      notify_counter_ = 0;
-      iox2_notifier_notify(&notifier_, nullptr);
+    if (notifier_ && recipients > 0) {
+      auto notify_count = notify_counter_.fetch_add(1, std::memory_order_relaxed) + 1;
+      if (notify_count >= notify_every_) {
+        notify_counter_.store(0, std::memory_order_relaxed);
+        iox2_notifier_notify(&notifier_, nullptr);
+      }
     }
 
     if VUNLIKELY (wait_ > 0) {
@@ -1593,9 +1622,12 @@ bool Shm2Publisher::publish(uint64_t channel, const Bytes& bytes) {
     return false;
   }
 
-  if (notifier_ && recipients > 0 && ++notify_counter_ >= notify_every_) {
-    notify_counter_ = 0;
-    iox2_notifier_notify(&notifier_, nullptr);
+  if (notifier_ && recipients > 0) {
+    auto notify_count = notify_counter_.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (notify_count >= notify_every_) {
+      notify_counter_.store(0, std::memory_order_relaxed);
+      iox2_notifier_notify(&notifier_, nullptr);
+    }
   }
 
   if VUNLIKELY (wait_ > 0) {
@@ -1800,7 +1832,7 @@ void Shm2Subscriber::process_message() {
     Bytes msg_bytes;
     Shm2Factory::read_data(read_msg, static_cast<uint64_t>(num_elements), channel, seq, msg_bytes);
 
-    if VUNLIKELY (is_latency_and_lost_enabled_ && seq > 0) {
+    if VUNLIKELY (is_latency_and_lost_enabled_.load(std::memory_order_acquire) && seq > 0) {
       calc_sample_.update(seq, 0);
     }
 
@@ -1809,17 +1841,40 @@ void Shm2Subscriber::process_message() {
       loan_map_.emplace(msg_bytes.data(), SubscriberLoanEntry{std::move(heap_storage), sample_handle});
     }
 
-    traverse_msg_callback([channel, &msg_bytes](NodeImpl* impl, const auto& callback) {
+    bool called = false;
+
+    traverse_msg_callback([channel, &msg_bytes, &called](NodeImpl* impl, const auto& callback) {
       const auto* conf_ptr = impl->get_target_conf<Shm2Conf>();
 
       if (static_cast<uint64_t>(conf_ptr->hash_code) != channel) {
         return;
       }
 
+      called = true;
       callback(msg_bytes);
     });
 
-    if VLIKELY (!manual_unloan_) {
+    if VUNLIKELY (manual_unloan_ && !called) {
+      SubscriberLoanEntry entry;
+
+      {
+        std::lock_guard lock(loan_mtx_);
+        auto it = loan_map_.find(msg_bytes.data());
+
+        if (it != loan_map_.end()) {
+          entry = std::move(it->second);
+          loan_map_.erase(it);
+        }
+      }
+
+      if (entry.handle) {
+        iox2_sample_drop(entry.handle);
+      }
+
+      if (sem_) {
+        sem_->release();
+      }
+    } else if VLIKELY (!manual_unloan_) {
       iox2_sample_drop(sample_handle);
 
       if (sem_) {
@@ -2017,9 +2072,13 @@ bool Shm2Subscriber::release(const Bytes& bytes) {
   return true;
 }
 
-void Shm2Subscriber::set_latency_and_lost_enabled(bool enable) { is_latency_and_lost_enabled_ = enable; }
+void Shm2Subscriber::set_latency_and_lost_enabled(bool enable) {
+  is_latency_and_lost_enabled_.store(enable, std::memory_order_release);
+}
 
-bool Shm2Subscriber::is_latency_and_lost_enabled() const { return is_latency_and_lost_enabled_; }
+bool Shm2Subscriber::is_latency_and_lost_enabled() const {
+  return is_latency_and_lost_enabled_.load(std::memory_order_acquire);
+}
 
 const CalculateSample& Shm2Subscriber::get_calculate_sample() const { return calc_sample_; }
 

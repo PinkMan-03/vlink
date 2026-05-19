@@ -49,9 +49,9 @@
  * @endcode
  *
  * @par Interruption
- * @c clear() marks the manager as interrupted and wakes all waiting @c process()
- * callers, causing them to return @c false.  This is used during shutdown to
- * unblock any in-flight RPC calls.
+ * @c clear() marks the current generation as interrupted and wakes all waiting
+ * @c process() callers, causing them to return @c false.  @c reset_interrupted()
+ * starts accepting requests again while old-generation requests still fail.
  *
  * @par Thread Safety
  * All public methods are thread-safe.  @c process() may be called from multiple
@@ -188,15 +188,26 @@ class VLINK_EXPORT AckManager final {
    *
    * @details
    * Sets the interrupted flag so that new @c process() calls return @c false
-   * immediately, swaps out the pending set, and @c notify_all() on every
-   * pending request's condition variable.  Called during node shutdown to
-   * avoid deadlocks.
+   * until @c reset_interrupted() is called, swaps out the pending set, and
+   * @c notify_all() on every pending request's condition variable.  Called
+   * during node shutdown to avoid deadlocks.
    */
   void clear() noexcept;
+
+  /**
+   * @brief Allows future @c process() calls after a previous @c clear().
+   *
+   * @details
+   * Does not make requests that were interrupted by @c clear() succeed; each
+   * request carries the generation it was created in, and interrupted generations
+   * remain cancelled.
+   */
+  void reset_interrupted() noexcept;
 
  private:
   struct Request final {
     int64_t seq{0};
+    int64_t generation{0};
     std::mutex mtx;
     ConditionVariable cv;
 
@@ -213,6 +224,7 @@ class VLINK_EXPORT AckManager final {
 
   bool is_interrupted_{false};
   int64_t request_seq_{0};
+  int64_t generation_{0};
   mutable std::mutex mtx_;
   std::set<RequestPtr, Request::Compare> request_set_;
 

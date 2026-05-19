@@ -1186,7 +1186,8 @@ void ProxyServer::update_all() {
       try {
         sub = std::make_shared<RawSub>(info.url, InitType::kWithoutInit);
 
-        if (info.type & kGetter) {
+        // A setter is the field data source; the proxy must observe it as a getter.
+        if (info.type & kSetter) {
           sub->mark_as_getter();
         }
 

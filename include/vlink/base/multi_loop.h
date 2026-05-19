@@ -113,11 +113,20 @@ class VLINK_EXPORT MultiLoop : public MessageLoop {
   ~MultiLoop() override;
 
   /**
-   * @brief Returns @c true if the calling thread is one of the worker threads.
+   * @brief Returns @c true if the calling thread belongs to this loop.
    *
-   * @return @c true if called from any thread owned by this @c MultiLoop.
+   * @return @c true if called from the dispatcher thread or any worker thread.
    */
   [[nodiscard]] bool is_in_same_thread() const override;
+
+  /**
+   * @brief Waits until both the dispatcher queue and worker pool forwarded tasks are idle.
+   *
+   * @param ms     Timeout in milliseconds, or @c Timer::kInfinite.
+   * @param check  When @c true, rejects calls from a thread owned by this loop.
+   * @return @c true if idle was reached before the timeout.
+   */
+  bool wait_for_idle(int ms = Timer::kInfinite, bool check = true) override;
 
  protected:
   /**

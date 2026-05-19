@@ -81,7 +81,7 @@ struct ThreadPool::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
   std::string name;
   size_t thread_count{0};
   ThreadPool::Type type{ThreadPool::kNormalType};
-  ThreadPool::Strategy strategy{ThreadPool::kOptimizationStrategy};
+  std::atomic<ThreadPool::Strategy> strategy{ThreadPool::kOptimizationStrategy};
   std::vector<std::thread> threads;
 
   std::optional<NormalQueue> normal_queue;
@@ -119,9 +119,9 @@ const std::string& ThreadPool::get_name() const { return impl_->name; }
 
 ThreadPool::Type ThreadPool::get_type() const { return impl_->type; }
 
-ThreadPool::Strategy ThreadPool::get_strategy() const { return impl_->strategy; }
+ThreadPool::Strategy ThreadPool::get_strategy() const { return impl_->strategy.load(std::memory_order_acquire); }
 
-void ThreadPool::set_strategy(Strategy strategy) { impl_->strategy = strategy; }
+void ThreadPool::set_strategy(Strategy strategy) { impl_->strategy.store(strategy, std::memory_order_release); }
 
 bool ThreadPool::post_task(Callback&& callback) {
   return push_task(std::move(callback), true, TaskOverflowPolicy::kUseDispatcherStrategy);
@@ -247,7 +247,8 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
           impl_->normal_queue->emplace_back(droppable, std::move(callback));
         } else if (overflow_policy == TaskOverflowPolicy::kReject) {
           return reject();
-        } else if (impl_->strategy == kPopStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        } else if (impl_->strategy.load(std::memory_order_acquire) == kPopStrategy &&
+                   overflow_policy != TaskOverflowPolicy::kBlock) {
           if (!drop_one_normal_task()) {
             return reject();
           }
@@ -259,7 +260,8 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
       }
 
       if VUNLIKELY (is_full) {
-        if (impl_->strategy == kOptimizationStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        if (impl_->strategy.load(std::memory_order_acquire) == kOptimizationStrategy &&
+            overflow_policy != TaskOverflowPolicy::kBlock) {
           if (++retry_cnt > 10) {
             {
               std::lock_guard lock(impl_->mtx);
@@ -309,7 +311,7 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
       Impl& impl_ref;
     } producer_guard(*impl_);
 
-    auto push_reserved_lockfree_task = [&]() -> bool {
+    auto push_reserved_lockfree_task = [this, &reject, &is_cancelled, &callback]() -> bool {
       if VUNLIKELY (impl_->quit_flag) {
         release_lockfree_task();
         return reject();
@@ -351,7 +353,8 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
         return reject();
       }
 
-      if (impl_->strategy == kPopStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+      if (impl_->strategy.load(std::memory_order_acquire) == kPopStrategy &&
+          overflow_policy != TaskOverflowPolicy::kBlock) {
         if (!drop_one_lockfree_task(true)) {
           return reject();
         }
@@ -365,7 +368,8 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
       }
 
       if VUNLIKELY (is_full) {
-        if (impl_->strategy == kOptimizationStrategy && overflow_policy != TaskOverflowPolicy::kBlock) {
+        if (impl_->strategy.load(std::memory_order_acquire) == kOptimizationStrategy &&
+            overflow_policy != TaskOverflowPolicy::kBlock) {
           if (++retry_cnt > 10) {
             if VUNLIKELY (impl_->quit_flag) {
               return reject();

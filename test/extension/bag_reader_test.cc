@@ -97,12 +97,39 @@ class TestBagReader : public BagReader {
 
   // Expose protected methods
   using BagReader::convert_action;
+  using BagReader::match_playback_url_filter;
   using BagReader::process_output;
   using BagReader::process_url_metas;
   using BagReader::rebuild_url_meta_maps;
 
  private:
   Info info_;
+};
+
+class RemapBagReaderPlugin final : public BagReaderPluginInterface {
+ public:
+  [[nodiscard]] VersionInfo get_version_info() const override { return {"Remap", "1.0.0", "", "", ""}; }
+
+  bool convert_url_meta(std::string& url, std::string& ser_type, SchemaType& schema_type) override {
+    (void)ser_type;
+    (void)schema_type;
+
+    if (url == "intra://drop") {
+      return false;
+    }
+
+    if (url == "intra://old") {
+      url = "intra://new";
+    }
+
+    return true;
+  }
+
+  void push(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data) override {
+    if (output_callback_) {
+      output_callback_(timestamp, url, action_type, data);
+    }
+  }
 };
 
 }  // namespace
@@ -184,6 +211,7 @@ TEST_SUITE("extension-BagReader - UrlMeta") {
     CHECK(meta.index == 0);
     CHECK(meta.url.empty());
     CHECK(meta.url_type.empty());
+    CHECK(meta.action_type == ActionType::kUnknownAction);
     CHECK(meta.ser_type.empty());
     CHECK(meta.count == 0);
     CHECK(meta.size == 0);
@@ -338,6 +366,63 @@ TEST_SUITE("extension-BagReader - construction") {
     metas.push_back(m);
     reader.process_url_metas(metas);
     CHECK(metas[0].url == "dds://test");
+  }
+
+  TEST_CASE("plugin URL remap and exclude affect playback output and filters") {
+    TestBagReader reader;
+    auto plugin = std::shared_ptr<RemapBagReaderPlugin>(new RemapBagReaderPlugin());
+    reader.bind_plugin_interface(plugin);
+
+    std::vector<BagReader::Info::UrlMeta> metas;
+    BagReader::Info::UrlMeta remap_meta;
+    remap_meta.url = "intra://old";
+    metas.push_back(remap_meta);
+
+    BagReader::Info::UrlMeta drop_meta;
+    drop_meta.url = "intra://drop";
+    metas.push_back(drop_meta);
+
+    reader.process_url_metas(metas);
+    REQUIRE(metas.size() == 1U);
+    CHECK(metas[0].url == "intra://new");
+
+    std::string observed_url;
+    int output_count = 0;
+    reader.register_output_callback([&](int64_t, const std::string& url, ActionType, const Bytes&) {
+      observed_url = url;
+      ++output_count;
+    });
+
+    Bytes data = Bytes::create(1U);
+    reader.process_output(1, "intra://old", ActionType::kPublish, data);
+    reader.process_output(2, "intra://drop", ActionType::kPublish, data);
+
+    CHECK(output_count == 1);
+    CHECK(observed_url == "intra://new");
+
+    BagReader::Config cfg;
+    cfg.filter_urls.emplace("intra://new");
+    CHECK(reader.match_playback_url_filter("intra://old", cfg.filter_urls));
+    CHECK_FALSE(reader.match_playback_url_filter("intra://drop", cfg.filter_urls));
+  }
+
+  TEST_CASE("rebinding plugin clears the previous output callback") {
+    TestBagReader reader;
+    auto old_plugin = std::shared_ptr<RemapBagReaderPlugin>(new RemapBagReaderPlugin());
+    auto new_plugin = std::shared_ptr<RemapBagReaderPlugin>(new RemapBagReaderPlugin());
+
+    int output_count = 0;
+    reader.register_output_callback([&](int64_t, const std::string&, ActionType, const Bytes&) { ++output_count; });
+
+    reader.bind_plugin_interface(old_plugin);
+    reader.bind_plugin_interface(new_plugin);
+
+    Bytes data = Bytes::create(1U);
+    old_plugin->push(1, "intra://old", ActionType::kPublish, data);
+    CHECK(output_count == 0);
+
+    new_plugin->push(2, "intra://old", ActionType::kPublish, data);
+    CHECK(output_count == 1);
   }
 
   TEST_CASE("detect_schema returns empty") {

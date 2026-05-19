@@ -269,7 +269,9 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @details
    * Used in @c Control::url_meta_list to instruct the server which topics to
-   * subscribe to or publish on.
+   * subscribe to or publish on.  @c type describes the proxy route direction;
+   * in direct field relays, discovered setter/getter peers may be mapped to the
+   * corresponding field reader/writer semantics internally.
    */
   struct UrlMeta final {
     std::string url;                          ///< Full topic URL.
@@ -475,8 +477,9 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * re-sent if the server reconnects after a dropout.
    *
    * When @c async is @c true (default) the DDS publish is posted to the
-   * MessageLoop thread; when @c false it is executed synchronously on the
-   * calling thread.
+   * MessageLoop thread and the return value only reports whether posting was
+   * accepted.  When @c async is @c false it is executed synchronously on the
+   * calling thread and the return value reports the actual publish result.
    *
    * Every entry in @c control.url_meta_list must provide both @c ser and a
    * known @c schema value.  Proxy no longer back-fills missing routing
@@ -487,12 +490,15 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * or destroyed to match publisher entries in @c url_meta_list.  Direct
    * subscribers are synchronised either from subscriber entries in
    * @c url_meta_list or, for @c kObserveAll / @c kAutoAndObserveAll, from the
-   * latest @c Info list reported by the server.
+   * latest @c Info list reported by the server.  Setter endpoints are observed
+   * through getter semantics so field updates keep their last-value behaviour.
    *
    * @param control  Control message to send.
    * @param async    @c true to post asynchronously (default); @c false to block.
-   * @return         @c true on success; @c false if role is @c kListener or
-   *                 the API is shutting down.
+   * @return         With @p async=false, @c true only if the control was
+   *                 published. With @p async=true, @c true means the publish
+   *                 task was accepted. Returns @c false if role is @c kListener,
+   *                 the API is shutting down, or enqueue/publish failed.
    */
   bool send_control(const Control& control, bool async = true);
 
@@ -606,11 +612,11 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Returns the measured round-trip latency on the data channel.
    *
    * @details
-   * In direct (SHM) mode this always returns 0 because latency measurement is
-   * not available on the SHM data channel.  In DDS mode it delegates to the
-   * underlying data subscriber's latency tracker.
+   * In direct (SHM) mode, or before the DDS data subscriber is initialised, this
+   * returns 0.  Otherwise it delegates to the underlying data subscriber's
+   * latency tracker.
    *
-   * @return Latency in microseconds, or 0 in direct mode.
+   * @return Latency in microseconds, or 0 when unavailable.
    */
   [[nodiscard]] int64_t get_latency() const;
 
@@ -618,8 +624,9 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Returns the sample loss statistics on the data channel.
    *
    * @details
-   * In direct (SHM) mode returns a default-constructed (zero) @c SampleLostInfo.
-   * In DDS mode it delegates to the underlying data subscriber.
+   * In direct (SHM) mode, or before the DDS data subscriber is initialised, this
+   * returns a default-constructed (zero) @c SampleLostInfo.  Otherwise it
+   * delegates to the underlying data subscriber.
    *
    * @return @c SampleLostInfo with total and lost sample counts.
    */

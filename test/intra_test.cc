@@ -241,6 +241,23 @@ TEST_SUITE("intra-method") {
     }
   }
 
+  TEST_CASE("intra-method-invoke-invalid-response-fails") {
+    Server<Bytes, Bytes> server(IntraConf("test_bad_resp", "null"));
+
+    server.listen([](const Bytes& /*req*/, Bytes& resp) { resp = Bytes{0x01}; });
+
+    Client<int, int> client("intra://test_bad_resp?event=null");
+
+    CHECK(client.wait_for_connected(5s));
+
+    int out = 1234;
+    CHECK_FALSE(client.invoke(7, out, 5s));
+    CHECK(out == 1234);
+
+    auto resp = client.invoke(7, 5s);
+    CHECK_FALSE(resp.has_value());
+  }
+
   TEST_CASE("intra-method-async-reply") {
     // IntraServerImpl does not implement deferred async reply via req_id.
     // The base ServerImpl::reply() returns false for non-sync mode.

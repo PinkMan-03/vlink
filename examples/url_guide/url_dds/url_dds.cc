@@ -56,7 +56,7 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 ///
 /// Environment variables:
 ///   - VLINK_DDS_DOMAIN:  default DDS domain ID for all dds:// URLs without ?domain=
-///   - VLINK_DDS_BIND:    bind DDS discovery to a specific network interface IP address
+///   - VLINK_DDS_BIND:    rewrite DDS URLs to a concrete DDS backend scheme
 int main() {
   // ======== Example 1: Basic DDS topic ========
   // The simplest DDS URL: just a topic name
@@ -125,16 +125,15 @@ int main() {
     }
   }
 
-  // ======== Example 4: Network binding via VLINK_DDS_BIND ========
-  // VLINK_DDS_BIND restricts DDS discovery and data traffic to a specific
-  // network interface, identified by its IP address.
-  // This is essential in multi-NIC systems to prevent DDS traffic on the wrong network.
+  // ======== Example 4: Backend binding via VLINK_DDS_BIND ========
+  // VLINK_DDS_BIND rewrites DDS URLs to a concrete DDS backend scheme.
+  // Use VLINK_DDS_IP or backend-specific network configuration for NIC/IP binding.
   {
     VLOG_I("=== Example 4: VLINK_DDS_BIND ===");
 
-    // Bind DDS to the 192.168.1.x network interface
-    // Utils::set_env("VLINK_DDS_BIND", "192.168.1.100");
-    VLOG_I("  Set VLINK_DDS_BIND=192.168.1.100 to bind DDS to a specific NIC");
+    // Route dds:// URLs to CycloneDDS
+    // Utils::set_env("VLINK_DDS_BIND", "ddsc");
+    VLOG_I("  Set VLINK_DDS_BIND=ddsc to route dds:// URLs to CycloneDDS");
 
     // Show available network interfaces for reference
     auto addrs = vlink::Utils::get_all_ipv4_address(true);

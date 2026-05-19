@@ -74,7 +74,7 @@ bool ShmGetterImpl::listen(MsgCallback&& callback) {
 }
 
 void ShmGetterImpl::set_latency_and_lost_enabled(bool enable) {
-  is_latency_and_lost_enabled_ = enable;
+  is_latency_and_lost_enabled_.store(enable, std::memory_order_release);
 
   if (object_) {
     object_->set_latency_and_lost_enabled(enable);
@@ -86,7 +86,7 @@ bool ShmGetterImpl::is_latency_and_lost_enabled() const {
     return object_->is_latency_and_lost_enabled();
   }
 
-  return is_latency_and_lost_enabled_;
+  return is_latency_and_lost_enabled_.load(std::memory_order_acquire);
 }
 
 SampleLostInfo ShmGetterImpl::get_lost() const {

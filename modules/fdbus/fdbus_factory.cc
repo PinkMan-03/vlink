@@ -238,20 +238,22 @@ void FdbusClient::start_timer() {
 
   std::weak_ptr<FdbusClient> weak_self = weak_from_this();
 
-  timer_.start([this, weak_self]() {
-    if VUNLIKELY (!weak_self.lock()) {
+  timer_.start([weak_self]() {
+    auto self = weak_self.lock();
+
+    if VUNLIKELY (!self) {
       return;
     }
 
-    if VUNLIKELY (quit_flag_) {
+    if VUNLIKELY (self->quit_flag_) {
       return;
     }
 
-    if (!connected(FDB_SEC_NO_CHECK)) {
-      timer_.set_interval(50);
-      connect(url_.c_str());
+    if (!self->connected(FDB_SEC_NO_CHECK)) {
+      self->timer_.set_interval(50);
+      self->connect(self->url_.c_str());
     } else {
-      timer_.set_interval(100);
+      self->timer_.set_interval(100);
     }
   });
 }

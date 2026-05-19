@@ -120,6 +120,8 @@ UrlParser::UrlParser(const std::map<Component, std::string>& components, Categor
   if (components.count(Component::kFragment) != 0) {
     fragment_ = components.at(Component::kFragment);
   }
+
+  init_query_dictionary();
 }
 
 UrlParser::UrlParser(const UrlParser& other, const std::map<Component, std::string>& replacements)
@@ -138,6 +140,8 @@ UrlParser::UrlParser(const UrlParser& other, const std::map<Component, std::stri
 
   query_ = (replacements.count(Component::kQuery)) ? replacements.at(Component::kQuery) : other.query_;
   fragment_ = (replacements.count(Component::kFragment)) ? replacements.at(Component::kFragment) : other.fragment_;
+
+  init_query_dictionary();
 }
 
 const std::string& UrlParser::get_transport() const { return transport_; }

@@ -51,21 +51,17 @@ void DdsrSubscriberImpl::ReaderListener::on_data_available(NodeImpl* impl, DDS_D
     return;
   }
 
-  auto* message_loop = instance->get_message_loop();
-
   if VUNLIKELY (!instance->callback_) {
     return;
   }
 
-  if (message_loop) {
-    message_loop->post_task([instance, reader]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance, reader]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->process_message(reader);
-    });
-  } else {
+                  instance->process_message(reader);
+                })) {
     instance->process_message(reader);
   }
 }
@@ -87,7 +83,7 @@ void DdsrSubscriberImpl::process_message(DDS_DataReader* reader) {
       continue;
     }
 
-    if VUNLIKELY (is_latency_and_lost_enabled_) {
+    if VUNLIKELY (is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
       last_latency_.store(ElapsedTimer::get_sys_timestamp(ElapsedTimer::kNano, false) - msg.timestamp,
                           std::memory_order_relaxed);
 
@@ -170,12 +166,16 @@ bool DdsrSubscriberImpl::listen(MsgCallback&& callback) {
   return true;
 }
 
-void DdsrSubscriberImpl::set_latency_and_lost_enabled(bool enable) { is_latency_and_lost_enabled_ = enable; }
+void DdsrSubscriberImpl::set_latency_and_lost_enabled(bool enable) {
+  is_latency_and_lost_enabled_.store(enable, std::memory_order_release);
+}
 
-bool DdsrSubscriberImpl::is_latency_and_lost_enabled() const { return is_latency_and_lost_enabled_; }
+bool DdsrSubscriberImpl::is_latency_and_lost_enabled() const {
+  return is_latency_and_lost_enabled_.load(std::memory_order_acquire);
+}
 
 int64_t DdsrSubscriberImpl::get_latency() const {
-  if (!is_latency_and_lost_enabled_) {
+  if (!is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
     return 0;
   }
 
@@ -183,7 +183,7 @@ int64_t DdsrSubscriberImpl::get_latency() const {
 }
 
 SampleLostInfo DdsrSubscriberImpl::get_lost() const {
-  if (!is_latency_and_lost_enabled_) {
+  if (!is_latency_and_lost_enabled_.load(std::memory_order_acquire)) {
     return SampleLostInfo();
   }
 

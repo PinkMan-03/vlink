@@ -183,14 +183,20 @@ inline bool Client<ReqT, RespT, SecT>::invoke(const ReqT& req, RespT& resp, std:
       return false;
     }
 
+    bool deserialize_success = false;
+
     ret = call_bytes(
         req_data,
-        [this, &resp](const Bytes& resp_data) {
-          if VUNLIKELY (!Serializer::deserialize<kRespType>(resp_data, resp, this->impl_->transport_type)) {
+        [this, &resp, &deserialize_success](const Bytes& resp_data) {
+          if VLIKELY (Serializer::deserialize<kRespType>(resp_data, resp, this->impl_->transport_type)) {
+            deserialize_success = true;
+          } else {
             VLOG_T("Client deserialize failed, url: ", this->impl_->url, ".");
           }
         },
         timeout);
+
+    ret = ret && deserialize_success;
   }
 
   return ret;
@@ -432,6 +438,10 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
       return false;
     }
 
+    if (!callback) {
+      return this->impl_->call(req_sec_data, nullptr, timeout);
+    }
+
     return this->impl_->call(
         req_sec_data,
         [this, callback = std::move(callback)](const Bytes& resp_data) {
@@ -442,22 +452,22 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
             return;
           }
 
-          if (callback) {
-            this->invoke_callback(callback, resp_sec_data);
-          }
+          this->invoke_callback(callback, resp_sec_data);
         },
         timeout);
   } else {
     this->impl_->try_record(ActionType::kClientRequest, req_data);
 
+    if (!callback) {
+      return this->impl_->call(req_data, nullptr, timeout);
+    }
+
     return this->impl_->call(
         req_data,
         [this, callback = std::move(callback)](const Bytes& resp_data) {
-          if (callback) {
-            this->impl_->try_record(ActionType::kClientResponse, resp_data);
+          this->impl_->try_record(ActionType::kClientResponse, resp_data);
 
-            this->invoke_callback(callback, resp_data);
-          }
+          this->invoke_callback(callback, resp_data);
         },
         timeout);
   }

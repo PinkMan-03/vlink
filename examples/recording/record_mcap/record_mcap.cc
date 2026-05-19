@@ -103,7 +103,7 @@ int main() {
     config.split_by_size = 1024 * 50;  // Split every 50 KB
     config.split_name_by_time = true;
 
-    auto writer = vlink::BagWriter::create("/tmp/mcap_split.vcap", config);
+    auto writer = vlink::BagWriter::create("/tmp/mcap_split.vcapx", config);
 
     writer->register_split_callback(
         [](int split_index, const std::string& filename) { VLOG_I("MCAP split:", split_index, "->", filename); },
@@ -138,7 +138,8 @@ int main() {
     VLOG_I("URLs recorded:", info.url_metas.size());
 
     for (const auto& meta : info.url_metas) {
-      VLOG_I("  URL:", meta.url, "count:", meta.count, "ser:", meta.ser_type);
+      VLOG_I("  URL:", meta.url, "count:", meta.count, "action:", static_cast<int>(meta.action_type),
+             "ser:", meta.ser_type);
     }
 
     // Detect embedded schemas

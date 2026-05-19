@@ -110,9 +110,9 @@ class DdscFactory final {
   }
 
   using PartFilter = std::tuple<uint8_t, int32_t, Conf::PropertiesMap>;
-  using TopicFilter = std::tuple<uint8_t, int32_t, std::string>;
-  using PublisherFilter = std::tuple<uint8_t, int32_t, std::string>;
-  using SubscriberFilter = std::tuple<uint8_t, int32_t, std::string>;
+  using TopicFilter = std::tuple<uint8_t, int32_t, std::string, ddsc::DomainParticipant*>;
+  using PublisherFilter = std::tuple<uint8_t, int32_t, std::string, ddsc::DomainParticipant*>;
+  using SubscriberFilter = std::tuple<uint8_t, int32_t, std::string, ddsc::DomainParticipant*>;
 
   struct DomainEntry final {
     dds_entity_t entity{0};

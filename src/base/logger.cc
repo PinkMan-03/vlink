@@ -23,6 +23,7 @@
 
 #include "./base/logger.h"
 
+#include <atomic>
 #include <charconv>
 #include <cstdio>
 #include <filesystem>
@@ -234,18 +235,18 @@ struct LoggerGlobal final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::string version_log;
   std::atomic<int> console_level{Logger::kDebug};
   std::atomic<int> file_level{Logger::kDebug};
-  bool console_in_order{true};
+  std::atomic_bool console_in_order{true};
   std::atomic_bool console_level_by_user{false};
   std::atomic_bool file_level_by_user{false};
-  bool console_format_enable{false};
-  bool utc_enable{false};
+  std::atomic_bool console_format_enable{false};
+  std::atomic_bool utc_enable{false};
   // Protected by callback_mtx (shared on read/invoke, exclusive on register).
   Logger::Callback console_callback;
   Logger::Callback file_callback;
   mutable std::shared_mutex callback_mtx;
-  std::ios_base::fmtflags stream_flags{std::ios_base::dec | std::ios_base::skipws};
-  int stream_precision{6};
-  int stream_width{0};
+  std::atomic<std::ios_base::fmtflags> stream_flags{std::ios_base::dec | std::ios_base::skipws};
+  std::atomic<int> stream_precision{6};
+  std::atomic<int> stream_width{0};
 
   static LoggerGlobal& get() {
     static LoggerGlobal instance;
@@ -368,7 +369,9 @@ void Logger::set_file_level(Level level) noexcept {
   LoggerGlobal::get().file_level_by_user.store(true, std::memory_order_release);
 }
 
-void Logger::set_console_fmt_enable(bool enable) noexcept { LoggerGlobal::get().console_format_enable = enable; }
+void Logger::set_console_fmt_enable(bool enable) noexcept {
+  LoggerGlobal::get().console_format_enable.store(enable, std::memory_order_release);
+}
 
 Logger::Level Logger::get_console_level() noexcept {
   return static_cast<Logger::Level>(LoggerGlobal::get().console_level.load(std::memory_order_acquire));
@@ -378,30 +381,36 @@ Logger::Level Logger::get_file_level() noexcept {
   return static_cast<Logger::Level>(LoggerGlobal::get().file_level.load(std::memory_order_acquire));
 }
 
-bool Logger::get_console_fmt_enable() noexcept { return LoggerGlobal::get().console_format_enable; }
+bool Logger::get_console_fmt_enable() noexcept {
+  return LoggerGlobal::get().console_format_enable.load(std::memory_order_acquire);
+}
 
-void Logger::set_stream_flag(std::ios_base::fmtflags flags) noexcept { LoggerGlobal::get().stream_flags = flags; }
+void Logger::set_stream_flag(std::ios_base::fmtflags flags) noexcept {
+  LoggerGlobal::get().stream_flags.store(flags, std::memory_order_release);
+}
 
-void Logger::set_stream_precision(int precision) noexcept { LoggerGlobal::get().stream_precision = precision; }
+void Logger::set_stream_precision(int precision) noexcept {
+  LoggerGlobal::get().stream_precision.store(precision, std::memory_order_release);
+}
 
-void Logger::set_stream_width(int width) noexcept { LoggerGlobal::get().stream_width = width; }
+void Logger::set_stream_width(int width) noexcept {
+  LoggerGlobal::get().stream_width.store(width, std::memory_order_release);
+}
 
-std::ios_base::fmtflags Logger::get_stream_flag() noexcept { return LoggerGlobal::get().stream_flags; }
+std::ios_base::fmtflags Logger::get_stream_flag() noexcept {
+  return LoggerGlobal::get().stream_flags.load(std::memory_order_acquire);
+}
 
-int Logger::get_stream_precision() noexcept { return LoggerGlobal::get().stream_precision; }
+int Logger::get_stream_precision() noexcept {
+  return LoggerGlobal::get().stream_precision.load(std::memory_order_acquire);
+}
 
-int Logger::get_stream_width() noexcept { return LoggerGlobal::get().stream_width; }
+int Logger::get_stream_width() noexcept { return LoggerGlobal::get().stream_width.load(std::memory_order_acquire); }
 
 void Logger::enable_backtrace(size_t size) noexcept {
   static Logger& instance = Logger::get();
 
   if VUNLIKELY (instance.impl_->disk_emergency.load(std::memory_order_acquire)) {
-    return;
-  }
-
-  bool expected = false;
-
-  if (!instance.impl_->is_enable_backtrace.compare_exchange_strong(expected, true)) {
     return;
   }
 
@@ -413,14 +422,21 @@ void Logger::enable_backtrace(size_t size) noexcept {
     return;
   }
 
+#if defined(VLINK_ENABLE_LOG_SPD) || defined(VLINK_ENABLE_LOG_QUI)
+  bool expected = false;
+
+  if (!instance.impl_->is_enable_backtrace.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
 #if defined(VLINK_ENABLE_LOG_SPD)
   instance.impl_->spd_console_sink->set_level(spdlog::level::trace);
   instance.impl_->spd->set_level(spdlog::level::warn);
   instance.impl_->spd->enable_backtrace(size);
 #elif defined(VLINK_ENABLE_LOG_QUI)
   instance.impl_->quill_log->init_backtrace(size, quill::LogLevel::TraceL3);
+#endif
 #else
-  (void)instance;
   (void)size;
 #endif
 }
@@ -526,10 +542,10 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
   if (global_instance.console_level.load(std::memory_order_acquire) < kOff ||
       global_instance.file_level.load(std::memory_order_acquire) < kOff) {
     std::string enable_console_unorder = Utils::get_env("VLINK_LOG_CONSOLE_UNORDER");
-    global_instance.console_in_order = (enable_console_unorder != "1");
+    global_instance.console_in_order.store(enable_console_unorder != "1", std::memory_order_release);
 
     std::string enable_utc_str = Utils::get_env("VLINK_LOG_ENABLE_UTC");
-    global_instance.utc_enable = (enable_utc_str == "1");
+    global_instance.utc_enable.store(enable_utc_str == "1", std::memory_order_release);
 
     if (global_instance.app_name.empty()) {
       global_instance.app_name = Utils::get_app_name();
@@ -541,7 +557,7 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
     }
 
     std::string console_format = Utils::get_env("VLINK_LOG_CONSOLE_FMT");
-    global_instance.console_format_enable = (console_format == "1");
+    global_instance.console_format_enable.store(console_format == "1", std::memory_order_release);
   }
 
   if (global_instance.file_level.load(std::memory_order_acquire) < kOff) {
@@ -556,7 +572,7 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
     global_instance.version_log.append(Utils::get_pid_str());
     global_instance.version_log.append("] ");
 
-    if (global_instance.utc_enable) {
+    if (global_instance.utc_enable.load(std::memory_order_acquire)) {
       global_instance.version_log.append("[DATE (UTC): ");
       global_instance.version_log.append(get_current_date(true));
       global_instance.version_log.append("] ");
@@ -582,14 +598,31 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
       impl_->interface = impl_->plugin.load<LoggerPluginInterface>(plugin_name, 1, 0);
 
       if (impl_->interface) {
-        std::cout << "Successfully loaded plugin for env 'VLOG_PLUGIN', libname: " << plugin_name << std::endl;
+        bool plugin_inited = false;
 
-        impl_->interface->init(global_instance.app_name);
+        try {
+          plugin_inited = impl_->interface->init(global_instance.app_name);
+        } catch (const std::exception& e) {
+          std::cerr << "Failed to init plugin for env 'VLINK_LOG_PLUGIN', libname: " << plugin_name << ": " << e.what()
+                    << std::endl;
+        } catch (...) {
+          std::cerr << "Failed to init plugin for env 'VLINK_LOG_PLUGIN', libname: " << plugin_name
+                    << ": non-std exception" << std::endl;
+        }
 
-        write_to_file(kInfo, global_instance.version_log);
+        if (plugin_inited) {
+          std::cout << "Successfully loaded plugin for env 'VLINK_LOG_PLUGIN', libname: " << plugin_name << std::endl;
+
+          write_to_file(kInfo, global_instance.version_log);
+        } else {
+          impl_->interface.reset();
+          impl_->plugin.clear();
+          impl_->is_enable_file_channel = false;
+          std::cerr << "Failed to load plugin for env 'VLINK_LOG_PLUGIN', libname: " << plugin_name << std::endl;
+        }
       } else {
         impl_->is_enable_file_channel = false;
-        std::cerr << "Failed to load plugin for env 'VLOG_PLUGIN', libname: " << plugin_name << std::endl;
+        std::cerr << "Failed to load plugin for env 'VLINK_LOG_PLUGIN', libname: " << plugin_name << std::endl;
       }
 
       global_instance.is_busy.store(false, std::memory_order_release);
@@ -675,8 +708,9 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
       }
 
     } else {
-      spdlog_custom_sink::TimeZone timezone = global_instance.utc_enable ? spdlog_custom_sink::TimeZone::kTimezoneUtc
-                                                                         : spdlog_custom_sink::TimeZone::kTimezoneLocal;
+      spdlog_custom_sink::TimeZone timezone = global_instance.utc_enable.load(std::memory_order_acquire)
+                                                  ? spdlog_custom_sink::TimeZone::kTimezoneUtc
+                                                  : spdlog_custom_sink::TimeZone::kTimezoneLocal;
 
       try {
         impl_->spd_file_sink = std::make_shared<spdlog_custom_sink::TimeRollingFile_mt>(
@@ -707,7 +741,7 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
 
     spdlog::set_default_logger(impl_->spd);
 
-    if (global_instance.utc_enable) {
+    if (global_instance.utc_enable.load(std::memory_order_acquire)) {
       impl_->spd->set_pattern("%m-%d %H:%M:%S.%e UTC @%t - %l - %v", spdlog::pattern_time_type::utc);
     } else {
       impl_->spd->set_pattern("%m-%d %H:%M:%S.%e @%t - %l - %v", spdlog::pattern_time_type::local);
@@ -772,7 +806,7 @@ Logger::Logger() noexcept : impl_(std::make_unique<Impl>()) {
 
     quill::PatternFormatterOptions format_options;
 
-    if (global_instance.utc_enable) {
+    if (global_instance.utc_enable.load(std::memory_order_acquire)) {
       sink_config.set_timezone(quill::Timezone::GmtTime);
       format_options = quill::PatternFormatterOptions("%(time) UTC @%(thread_id) - %(log_level:<5) - %(message)",
                                                       "%m-%d %H:%M:%S.%Qms", quill::Timezone::GmtTime);
@@ -893,9 +927,9 @@ FastStream& Logger::get_local_stream() noexcept {
   thread_local FastStream stream;
 
   stream.reset();
-  stream.flags(global_instance.stream_flags);
-  stream.precision(global_instance.stream_precision);
-  stream.width(global_instance.stream_width);
+  stream.flags(global_instance.stream_flags.load(std::memory_order_acquire));
+  stream.precision(global_instance.stream_precision.load(std::memory_order_acquire));
+  stream.width(global_instance.stream_width.load(std::memory_order_acquire));
 
   return stream;
 }
@@ -920,14 +954,16 @@ void Logger::write_to_console(Level level, std::string_view log) noexcept {
     return;
   }
 
-  if (global_instance.console_format_enable) {
+  const bool console_in_order = global_instance.console_in_order.load(std::memory_order_acquire);
+
+  if (global_instance.console_format_enable.load(std::memory_order_acquire)) {
     thread_local std::string fmt_log;
 
     fmt_log.clear();
 
     auto tid_str = get_thread_id_str();
 
-    if (global_instance.utc_enable) {
+    if (global_instance.utc_enable.load(std::memory_order_acquire)) {
       fmt_log.append(get_current_time(true));
       fmt_log.append(" UTC");
     } else {
@@ -944,22 +980,22 @@ void Logger::write_to_console(Level level, std::string_view log) noexcept {
 
     switch (level) {
       case kTrace:
-        print_with_color("", fmt_log, "\n", stdout, global_instance.console_in_order, false);
+        print_with_color("", fmt_log, "\n", stdout, console_in_order, false);
         return;
       case kDebug:
-        print_with_color("", fmt_log, "\n", stdout, global_instance.console_in_order, true);
+        print_with_color("", fmt_log, "\n", stdout, console_in_order, true);
         return;
       case kInfo:
-        print_with_color("\033[32m", fmt_log, "\033[0m\n", stdout, global_instance.console_in_order, true);
+        print_with_color("\033[32m", fmt_log, "\033[0m\n", stdout, console_in_order, true);
         return;
       case kWarn:
-        print_with_color("\033[33m", fmt_log, "\033[0m\n", stderr, global_instance.console_in_order, true);
+        print_with_color("\033[33m", fmt_log, "\033[0m\n", stderr, console_in_order, true);
         return;
       case kError:
-        print_with_color("\033[31m", fmt_log, "\033[0m\n", stderr, global_instance.console_in_order, true);
+        print_with_color("\033[31m", fmt_log, "\033[0m\n", stderr, console_in_order, true);
         return;
       case kFatal:
-        print_with_color("\033[41;37;1m", fmt_log, "\033[0m\n", stderr, global_instance.console_in_order, true);
+        print_with_color("\033[41;37;1m", fmt_log, "\033[0m\n", stderr, console_in_order, true);
         return;
       case kOff:
         return;
@@ -969,22 +1005,22 @@ void Logger::write_to_console(Level level, std::string_view log) noexcept {
   } else {
     switch (level) {
       case kTrace:
-        print_with_color("", log, "\n", stdout, global_instance.console_in_order, false);
+        print_with_color("", log, "\n", stdout, console_in_order, false);
         return;
       case kDebug:
-        print_with_color("", log, "\n", stdout, global_instance.console_in_order, true);
+        print_with_color("", log, "\n", stdout, console_in_order, true);
         return;
       case kInfo:
-        print_with_color("\033[32m", log, "\033[0m\n", stdout, global_instance.console_in_order, true);
+        print_with_color("\033[32m", log, "\033[0m\n", stdout, console_in_order, true);
         return;
       case kWarn:
-        print_with_color("\033[33m", log, "\033[0m\n", stderr, global_instance.console_in_order, true);
+        print_with_color("\033[33m", log, "\033[0m\n", stderr, console_in_order, true);
         return;
       case kError:
-        print_with_color("\033[31m", log, "\033[0m\n", stderr, global_instance.console_in_order, true);
+        print_with_color("\033[31m", log, "\033[0m\n", stderr, console_in_order, true);
         return;
       case kFatal:
-        print_with_color("\033[41;37;1m", log, "\033[0m\n", stderr, global_instance.console_in_order, true);
+        print_with_color("\033[41;37;1m", log, "\033[0m\n", stderr, console_in_order, true);
         return;
       case kOff:
         return;

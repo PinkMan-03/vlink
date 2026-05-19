@@ -620,31 +620,55 @@ inline std::shared_ptr<ObjectT> AbstractFactory<FilterT>::get_object(const Filte
     const auto& deleter = [this, filter](ObjectT* obj) {
       {
         std::lock_guard lock(mtx_);
+
         set_.erase(obj);
-        map_.erase(filter);
+
+        auto iter = map_.find(filter);
+
+        if (iter != map_.end() && iter->second.expired()) {
+          map_.erase(iter);
+        }
       }
 
       delete obj;
     };
 
     auto iter = map_.find(filter);
-    if (iter == map_.end()) {
+
+    if (iter != map_.end()) {
+      obj = std::static_pointer_cast<ObjectT>(iter->second.lock());
+
+      if VLIKELY (obj) {
+        return obj;
+      }
+
+      map_.erase(iter);
+    }
+
+    {
       lock.unlock();
       auto* obj_ptr = new ObjectT(filter);
       lock.lock();
 
       auto [it, inserted] = map_.try_emplace(filter, std::weak_ptr<Object>());
-      if (inserted) {
+
+      if (!inserted) {
+        obj = std::static_pointer_cast<ObjectT>(it->second.lock());
+      }
+
+      if (inserted || !obj) {
+        if (!inserted) {
+          map_.erase(it);
+          it = map_.try_emplace(filter, std::weak_ptr<Object>()).first;
+        }
+
         obj = std::shared_ptr<ObjectT>(obj_ptr, deleter);
         it->second = obj;
         set_.emplace(obj_ptr);
       } else {
         // Another thread inserted while we were unlocked; discard our object.
         delete obj_ptr;
-        obj = std::static_pointer_cast<ObjectT>(it->second.lock());
       }
-    } else {
-      obj = std::static_pointer_cast<ObjectT>(iter->second.lock());
     }
     return obj;
   }

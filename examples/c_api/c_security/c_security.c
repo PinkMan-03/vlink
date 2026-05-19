@@ -59,7 +59,6 @@ int main(void) {
     vlink_security_config_t cfg;
     vlink_security_config_init(&cfg);
     cfg.key = "my-secret-key-16";
-    cfg.advanced.key_id = "c-raw-v1";
     cfg.advanced.aad_context = "c_api/security/raw";
 
     vlink_security_handle_t sec = vlink_security_create(&cfg);

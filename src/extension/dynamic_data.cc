@@ -23,12 +23,43 @@
 
 #include "./extension/dynamic_data.h"
 
+#include <cstring>
 #include <string_view>
+#include <utility>
 
 namespace vlink {
 
 // DynamicData
 DynamicData::DynamicData() = default;
+
+DynamicData::DynamicData(const DynamicData& target) : data_(target.data_) { refresh_type_view(target.type_.size()); }
+
+DynamicData::DynamicData(DynamicData&& target) noexcept : data_(std::move(target.data_)) {
+  refresh_type_view(target.type_.size());
+  target.type_ = std::string_view();
+}
+
+DynamicData& DynamicData::operator=(const DynamicData& target) {
+  if (this == &target) {
+    return *this;
+  }
+
+  data_ = target.data_;
+  refresh_type_view(target.type_.size());
+  return *this;
+}
+
+DynamicData& DynamicData::operator=(DynamicData&& target) noexcept {
+  if (this == &target) {
+    return *this;
+  }
+
+  const auto type_size = target.type_.size();
+  data_ = std::move(target.data_);
+  refresh_type_view(type_size);
+  target.type_ = std::string_view();
+  return *this;
+}
 
 const Bytes& DynamicData::get_data() const { return data_; }
 
@@ -41,23 +72,27 @@ bool DynamicData::operator==(const DynamicData& target) const { return data_ == 
 bool DynamicData::operator!=(const DynamicData& target) const { return !(*this == target); }
 
 bool DynamicData::operator<<(const Bytes& bytes) noexcept {
-  if VUNLIKELY (bytes.size() < get_offset()) {
+  if VUNLIKELY (bytes.size() < get_offset() || bytes.data() == nullptr) {
     return false;
   }
 
-  data_ = Bytes::deep_copy(bytes.data() + get_offset(), bytes.size() - get_offset(), get_offset());
+  auto next_data = Bytes::deep_copy(bytes.data() + get_offset(), bytes.size() - get_offset(), get_offset());
 
-  std::memcpy(data_.real_data(), bytes.data(), get_offset());
+  if VUNLIKELY (next_data.real_data() == nullptr) {
+    return false;
+  }
 
-  const char* type_s = reinterpret_cast<const char*>(data_.real_data());
-
+  std::memcpy(next_data.real_data(), bytes.data(), get_offset());
+  const char* type_s = reinterpret_cast<const char*>(next_data.real_data());
   const auto* type_end = static_cast<const char*>(std::memchr(type_s, '\0', get_offset()));
 
   if VUNLIKELY (type_end == nullptr) {
     return false;
   }
 
-  type_ = std::string_view(type_s, static_cast<size_t>(type_end - type_s));
+  const auto type_size = static_cast<size_t>(type_end - type_s);
+  data_ = std::move(next_data);
+  refresh_type_view(type_size);
 
   return true;
 }
@@ -70,6 +105,33 @@ bool DynamicData::operator>>(Bytes& bytes) const noexcept {
   bytes = Bytes::shallow_copy(data_.real_data(), data_.real_size());
 
   return true;
+}
+
+void DynamicData::refresh_type_view() noexcept {
+  if VUNLIKELY (data_.real_data() == nullptr || data_.offset() < get_offset()) {
+    type_ = std::string_view();
+    return;
+  }
+
+  const char* type_s = reinterpret_cast<const char*>(data_.real_data());
+  const auto* type_end = static_cast<const char*>(std::memchr(type_s, '\0', get_offset()));
+
+  if VUNLIKELY (type_end == nullptr) {
+    type_ = std::string_view();
+    return;
+  }
+
+  type_ = std::string_view(type_s, static_cast<size_t>(type_end - type_s));
+}
+
+void DynamicData::refresh_type_view(size_t type_size) noexcept {
+  if VUNLIKELY (type_size == 0 || type_size >= get_offset() || data_.real_data() == nullptr ||
+                data_.offset() < get_offset()) {
+    type_ = std::string_view();
+    return;
+  }
+
+  type_ = std::string_view(reinterpret_cast<const char*>(data_.real_data()), type_size);
 }
 
 }  // namespace vlink

@@ -111,9 +111,12 @@ struct ProxyAPI::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
   std::shared_mutex control_mtx;
   std::shared_mutex connect_mtx;
   std::shared_mutex error_mtx;
+  // Guards top-level transport handle pointers while they are rebuilt.
+  std::shared_mutex handle_mtx;
   std::shared_mutex time_mtx;
   std::shared_mutex info_mtx;
   std::shared_mutex data_mtx;
+  // Guards proxy_version, hostname/machine_id, and their discovered value sets.
   std::shared_mutex version_mtx;
   std::shared_mutex direct_mtx;
 
@@ -192,6 +195,7 @@ ProxyAPI::~ProxyAPI() {
 
   this->wait_for_quit();
 
+  std::unique_lock handle_lock(impl_->handle_mtx);
   impl_->data_sub.reset();
   impl_->data_pub.reset();
   impl_->time_sub.reset();
@@ -276,17 +280,20 @@ bool ProxyAPI::send_control(const Control& control, bool async) {
 
   impl_->control_ret = false;
 
+  bool send_ok = false;
+
   if (async) {
-    post_task([this, control]() { impl_->control_ret = send_control_sync(control); });
+    send_ok = post_task([this, control]() { impl_->control_ret = send_control_sync(control); });
   } else {
     impl_->control_ret = send_control_sync(control);
+    send_ok = impl_->control_ret.load(std::memory_order_acquire);
   }
 
   if (impl_->config.direct) {
-    post_task([this, control]() { sync_direct_maps(control); });
+    send_ok = post_task([this, control]() { sync_direct_maps(control); }) && send_ok;
   }
 
-  return true;
+  return send_ok;
 }
 
 bool ProxyAPI::send_data(const Data& data) {
@@ -329,6 +336,8 @@ bool ProxyAPI::send_data(const Data& data) {
     return true;
   }
 
+  std::shared_lock handle_lock(impl_->handle_mtx);
+
   if VUNLIKELY (this->is_ready_to_quit() || !impl_->data_pub) {
     return false;
   }
@@ -369,9 +378,15 @@ ProxyAPI::Mode ProxyAPI::get_current_mode() const { return impl_->mode; }
 
 ProxyAPI::Error ProxyAPI::get_current_error() const { return impl_->error; }
 
-std::string ProxyAPI::get_current_hostname() const { return impl_->hostname; }
+std::string ProxyAPI::get_current_hostname() const {
+  std::shared_lock lock(impl_->version_mtx);
+  return impl_->hostname;
+}
 
-std::string ProxyAPI::get_current_machine_id() const { return impl_->machine_id; }
+std::string ProxyAPI::get_current_machine_id() const {
+  std::shared_lock lock(impl_->version_mtx);
+  return impl_->machine_id;
+}
 
 uint64_t ProxyAPI::get_current_sys_time() const {
   if VUNLIKELY (!impl_->sys_elapsed_timer.is_active()) {
@@ -398,11 +413,23 @@ int64_t ProxyAPI::get_latency() const {
     return 0;
   }
 
+  std::shared_lock handle_lock(impl_->handle_mtx);
+
+  if (!impl_->data_sub || !impl_->data_sub->has_inited()) {
+    return 0;
+  }
+
   return impl_->data_sub->get_latency();
 }
 
 SampleLostInfo ProxyAPI::get_lost() const {
   if (impl_->config.direct) {
+    return SampleLostInfo();
+  }
+
+  std::shared_lock handle_lock(impl_->handle_mtx);
+
+  if (!impl_->data_sub || !impl_->data_sub->has_inited()) {
     return SampleLostInfo();
   }
 
@@ -538,7 +565,8 @@ void ProxyAPI::sync_direct_maps(const Control& control) {
 
       desired_sub_meta_map[info.url] = UrlMeta{info.url, info.ser, info.schema, kSubscriber};
 
-      if ((info.type & kGetter) != 0U) {
+      // A setter is the field data source; observe it through getter semantics.
+      if ((info.type & kSetter) != 0U) {
         getter_url_set.emplace(info.url);
       }
     }
@@ -549,6 +577,16 @@ void ProxyAPI::sync_direct_maps(const Control& control) {
       }
 
       desired_sub_meta_map[meta.url] = meta;
+
+      auto info_iter =
+          std::find_if(impl_->direct_info_list.begin(), impl_->direct_info_list.end(), [&meta](const auto& info) {
+            return info.status != kInvalid && info.url == meta.url && info.ser == meta.ser &&
+                   info.schema == meta.schema;
+          });
+
+      if (info_iter != impl_->direct_info_list.end() && (info_iter->type & kSetter) != 0U) {
+        getter_url_set.emplace(meta.url);
+      }
     }
   }
 
@@ -667,6 +705,8 @@ void ProxyAPI::sync_direct_maps(const Control& control) {
 }
 
 bool ProxyAPI::send_control_sync(const Control& control) {
+  std::shared_lock handle_lock(impl_->handle_mtx);
+
   if VUNLIKELY (!impl_->control_pub) {
     return false;
   }
@@ -710,6 +750,8 @@ bool ProxyAPI::send_control_sync(const Control& control) {
 }
 
 void ProxyAPI::reset_handle() {
+  std::unique_lock handle_lock(impl_->handle_mtx);
+
   impl_->control_ret = false;
 
   std::string domain_id_str = std::to_string(impl_->config.domain_id);
@@ -847,8 +889,11 @@ void ProxyAPI::reset_handle() {
         return;
       }
 
-      if VUNLIKELY (!t_data.hostname().empty() && t_data.hostname() != impl_->hostname) {
-        return;
+      if VUNLIKELY (!t_data.hostname().empty()) {
+        std::shared_lock version_lock(impl_->version_mtx);
+        if (t_data.hostname() != impl_->hostname) {
+          return;
+        }
       }
 
       if (impl_->config.role == kController) {
@@ -891,8 +936,11 @@ void ProxyAPI::reset_handle() {
         return;
       }
 
-      if VUNLIKELY (!pbdata.hostname().empty() && pbdata.hostname() != impl_->hostname) {
-        return;
+      if VUNLIKELY (!pbdata.hostname().empty()) {
+        std::shared_lock version_lock(impl_->version_mtx);
+        if (pbdata.hostname() != impl_->hostname) {
+          return;
+        }
       }
 
       if (impl_->config.role == kController) {
@@ -1035,8 +1083,11 @@ void ProxyAPI::reset_handle() {
       return;
     }
 
-    if VUNLIKELY (!pb_info_list.hostname().empty() && pb_info_list.hostname() != impl_->hostname) {
-      return;
+    if VUNLIKELY (!pb_info_list.hostname().empty()) {
+      std::shared_lock version_lock(impl_->version_mtx);
+      if (pb_info_list.hostname() != impl_->hostname) {
+        return;
+      }
     }
 
     if (impl_->config.role == kController) {

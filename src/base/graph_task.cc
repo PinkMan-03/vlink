@@ -55,6 +55,7 @@ static std::recursive_mutex& topology_mutex() {
 // GraphTask::Impl
 struct GraphTask::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   alignas(64) std::atomic<size_t> pending_index{0};
+  alignas(64) std::atomic<size_t> active_index{0};
   alignas(64) std::atomic<bool> is_ready{false};
   alignas(64) std::atomic<bool> is_enable{false};
   alignas(64) std::atomic<GraphTask::Status> status{GraphTask::kStatusInActive};
@@ -505,8 +506,7 @@ void GraphTask::process_and_traverse(FindTaskCallback&& callback) {
       if (recursion_count == 0) {
         current_task->impl_->is_ready = true;
         current_task->impl_->is_enable = true;
-
-        current_task->update_status(kStatusPending);
+        current_task->impl_->active_index = 0U;
 
         auto& sub_pending_count = pending_count_map[current_task.get()];
         current_task->impl_->pending_index = ++sub_pending_count;
@@ -529,8 +529,7 @@ void GraphTask::process_and_traverse(FindTaskCallback&& callback) {
         if (first_seen) {
           task_ptr->impl_->is_ready = false;
           task_ptr->impl_->is_enable = false;
-
-          task_ptr->update_status(kStatusPending);
+          task_ptr->impl_->active_index = 0U;
 
           top_task_list.emplace_back(task_ptr);
           task_stack.emplace(task_ptr);
@@ -542,6 +541,10 @@ void GraphTask::process_and_traverse(FindTaskCallback&& callback) {
         }
       }
     }
+  }
+
+  for (const auto& top_task : top_task_list) {
+    top_task->update_status(kStatusPending);
   }
 
   for (const auto& top_task : top_task_list) {
@@ -784,6 +787,7 @@ void GraphTask::wait() {
 
 void GraphTask::notify(int condition_number) {
   std::vector<std::weak_ptr<GraphTask>> invoke_list;
+  std::vector<std::shared_ptr<GraphTask>> skip_list;
 
   {
     std::lock_guard lock(impl_->mtx);
@@ -797,39 +801,39 @@ void GraphTask::notify(int condition_number) {
 
       if (condition_number != task_ptr->impl_->condition_number) {
         if (impl_->is_condition_task) {
-          task_ptr->impl_->is_ready = true;
-          task_ptr->impl_->is_enable = false;
-          task_ptr->impl_->cv.notify_all();
+          bool has_active = false;
+          const bool ready = task_ptr->mark_predecessor_satisfied(false, &has_active);
+
+          if (ready && !has_active) {
+            task_ptr->impl_->is_ready = true;
+            task_ptr->impl_->is_enable = false;
+            task_ptr->impl_->cv.notify_all();
+            skip_list.emplace_back(task_ptr);
+          } else if (ready && task_ptr->impl_->policy == kPolicyWaitAll) {
+            task_ptr->impl_->is_ready = true;
+            task_ptr->impl_->is_enable = true;
+            task_ptr->impl_->cv.notify_all();
+          }
         }
 
         continue;
       }
 
       if (task_ptr->impl_->policy == kPolicyOnce) {
+        task_ptr->mark_predecessor_satisfied(true, nullptr);
         task_ptr->impl_->is_ready = true;
         task_ptr->impl_->is_enable = true;
         task_ptr->impl_->cv.notify_all();
       } else if (task_ptr->impl_->policy == kPolicyMultiple) {
+        task_ptr->mark_predecessor_satisfied(true, nullptr);
         task_ptr->impl_->is_ready = true;
         task_ptr->impl_->is_enable = false;
         task_ptr->impl_->cv.notify_all();
 
         invoke_list.emplace_back(task);
       } else if (task_ptr->impl_->policy == kPolicyWaitAll) {
-        size_t expected = task_ptr->impl_->pending_index.load(std::memory_order_acquire);
-        bool fired = false;
-
-        while (expected > 0) {
-          size_t desired = expected - 1;
-
-          if (task_ptr->impl_->pending_index.compare_exchange_weak(expected, desired, std::memory_order_acq_rel,
-                                                                   std::memory_order_acquire)) {
-            fired = (desired == 0);
-            break;
-          }
-        }
-
-        if (!fired) {
+        bool has_active = false;
+        if (!task_ptr->mark_predecessor_satisfied(true, &has_active) || !has_active) {
           continue;
         }
 
@@ -838,6 +842,11 @@ void GraphTask::notify(int condition_number) {
         task_ptr->impl_->cv.notify_all();
       }
     }
+  }
+
+  for (const auto& task_ptr : skip_list) {
+    task_ptr->update_status(kStatusInActive);
+    task_ptr->notify_skip();
   }
 
   for (const auto& task : invoke_list) {
@@ -849,6 +858,74 @@ void GraphTask::notify(int condition_number) {
 
     task_ptr->invoke(false);
   }
+}
+
+void GraphTask::notify_skip() {
+  std::vector<std::weak_ptr<GraphTask>> succ_snapshot;
+  std::vector<std::shared_ptr<GraphTask>> skip_list;
+
+  {
+    std::lock_guard lock(impl_->mtx);
+    succ_snapshot = impl_->succeed_task_list;
+  }
+
+  for (const auto& task : succ_snapshot) {
+    auto task_ptr = task.lock();
+
+    if VUNLIKELY (!task_ptr) {
+      continue;
+    }
+
+    bool has_active = false;
+    const bool ready = task_ptr->mark_predecessor_satisfied(false, &has_active);
+
+    if (!ready) {
+      continue;
+    }
+
+    if (!has_active) {
+      task_ptr->impl_->is_ready = true;
+      task_ptr->impl_->is_enable = false;
+      task_ptr->impl_->cv.notify_all();
+      skip_list.emplace_back(task_ptr);
+    } else if (task_ptr->impl_->policy == kPolicyWaitAll) {
+      task_ptr->impl_->is_ready = true;
+      task_ptr->impl_->is_enable = true;
+      task_ptr->impl_->cv.notify_all();
+    }
+  }
+
+  for (const auto& task_ptr : skip_list) {
+    task_ptr->update_status(kStatusInActive);
+    task_ptr->notify_skip();
+  }
+}
+
+bool GraphTask::mark_predecessor_satisfied(bool active, bool* has_active) {
+  if (active) {
+    impl_->active_index.fetch_add(1U, std::memory_order_acq_rel);
+  }
+
+  size_t expected = impl_->pending_index.load(std::memory_order_acquire);
+
+  while (expected > 0U) {
+    const size_t desired = expected - 1U;
+
+    if (impl_->pending_index.compare_exchange_weak(expected, desired, std::memory_order_acq_rel,
+                                                   std::memory_order_acquire)) {
+      if (has_active != nullptr) {
+        *has_active = impl_->active_index.load(std::memory_order_acquire) > 0U;
+      }
+
+      return desired == 0U;
+    }
+  }
+
+  if (has_active != nullptr) {
+    *has_active = impl_->active_index.load(std::memory_order_acquire) > 0U;
+  }
+
+  return false;
 }
 
 void GraphTask::update_status(Status status) {

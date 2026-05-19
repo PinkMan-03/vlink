@@ -59,7 +59,7 @@
  * - @c check(), @c reindex(), and @c fix() run on a background thread and return
  *   a @c std::future<bool> for result polling.
  * - The file format is auto-detected from the extension by @c create()
- *   (@c .vcap / @c .vcapx -> McapReader, otherwise -> DatabaseReader).
+ *   (@c .vdb / @c .vdbx -> DatabaseReader, @c .vcap / @c .vcapx -> McapReader).
  */
 
 #pragma once
@@ -129,6 +129,7 @@ class VLINK_EXPORT BagReader : public MessageLoop {
       int index{0};          ///< Numeric index of this URL in the bag's URL table.
       std::string url;       ///< Full VLink URL string.
       std::string url_type;  ///< Communication model type (e.g., "Event", "Method", "Field").
+      ActionType action_type{ActionType::kUnknownAction};  ///< Recorded action type when available.
       std::string ser_type;  ///< Serialisation type string (e.g., "demo.proto.PointCloud", "raw").
       SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse schema family associated with this URL.
       size_t count{0};                               ///< Total number of messages recorded for this URL.
@@ -187,7 +188,7 @@ class VLINK_EXPORT BagReader : public MessageLoop {
     int64_t force_delay{-1};                      ///< Override inter-message delay (ms).  -1 = use timestamps.
     bool auto_pause{false};                       ///< If @c true, pause automatically at each message.
     bool auto_quit{false};                        ///< If @c true, quit the loop thread when playback ends.
-    std::unordered_set<std::string> filter_urls;  ///< Whitelist of URLs to play.  Empty = all URLs.
+    std::unordered_set<std::string> filter_urls;  ///< Final playback URL whitelist.  Empty = all URLs.
   };
 
   /**
@@ -228,8 +229,9 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    * @brief Creates a concrete @c BagReader for @p path, selecting the implementation by extension.
    *
    * @details
+   * - @c .vdb / @c .vdbx -- @c DatabaseReader (SQLite)
    * - @c .vcap / @c .vcapx -- @c McapReader (MCAP format)
-   * - All other extensions -- @c DatabaseReader (SQLite)
+   * - unknown suffixes return @c nullptr
    *
    * @param path        Path to the bag file.
    * @param read_only   If @c true, open in read-only mode (no write operations).
@@ -448,9 +450,10 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    * @brief Rebuilds URL metadata lookup maps after plugin remapping.
    *
    * @details
-   * Reader implementations call this after @c process_url_metas() mutates the
-   * per-URL metadata list, ensuring @c get_ser_type() and @c get_schema_type()
-   * both observe the remapped metadata instead of stale pre-plugin entries.
+   * Reader implementations call this after copying the raw per-URL metadata
+   * and applying @c process_url_metas(), ensuring @c get_ser_type() and
+   * @c get_schema_type() both observe the current plugin view instead of stale
+   * pre-plugin entries.
    *
    * @param url_metas         Remapped URL metadata list.
    * @param ser_map           Output lookup map: URL -> serialisation type.
@@ -463,6 +466,22 @@ class VLINK_EXPORT BagReader : public MessageLoop {
   void process_output(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data);
 
   void process_url_metas(std::vector<Info::UrlMeta>& url_metas);
+
+  /**
+   * @brief Converts a stored URL into the final playback URL after plugin metadata remapping.
+   *
+   * @return @c false when the plugin excluded @p input_url from playback.
+   */
+  [[nodiscard]] bool convert_playback_url(const std::string& input_url, std::string& output_url) const;
+
+  /**
+   * @brief Returns whether a stored URL passes the final playback URL whitelist.
+   *
+   * If a @c BagReaderPluginInterface is bound, @p filter_urls matches URLs after
+   * @c convert_url_meta() remapping, not the stored bag URL.
+   */
+  [[nodiscard]] bool match_playback_url_filter(std::string_view input_url,
+                                               const std::unordered_set<std::string>& filter_urls) const;
 
   static ActionType convert_action(std::string_view str);
 

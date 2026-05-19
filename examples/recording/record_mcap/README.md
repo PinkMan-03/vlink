@@ -22,7 +22,7 @@ VLink 通过文件扩展名自动选择录制格式：
 |--------|------|------------|------------|
 | `.vcap` | MCAP | `McapWriter` | `McapReader` |
 | `.vcapx` | MCAP | `McapWriter` | `McapReader` |
-| `.vdb` 及其他 | SQLite | `DatabaseWriter` | `DatabaseReader` |
+| `.vdb` / `.vdbx` | SQLite | `DatabaseWriter` | `DatabaseReader` |
 
 ## 3. 创建 MCAP 文件
 
@@ -159,7 +159,7 @@ reader->stop();
 
 ## 7. .vcap 与 .vcapx 的区别
 
-两种扩展名在当前实现中均使用 `McapWriter`/`McapReader`。`.vcapx` 作为扩展格式保留，可能在未来版本中支持额外的索引或元数据。
+两种扩展名在当前实现中均使用 `McapWriter`/`McapReader`。`.vcap` 是单文件 MCAP；`.vcapx` 是 split 模式的 manifest 文件，内部引用实际写出的 `.vcap` 分片。需要按大小或时间切分时，输出路径必须使用 `.vcapx`。
 
 ## 8. MCAP 与 SQLite 格式对比
 
@@ -186,7 +186,7 @@ cmake --build . --target example_record_mcap
 |------|------|
 | `/tmp/mcap_auto.vcap` | 通过工厂方法创建的 MCAP 文件 |
 | `/tmp/mcap_explicit.vcap` | 显式构造 + Zstd 压缩 |
-| `/tmp/mcap_split.vcap` | 带分割模式的 MCAP 文件 |
+| `/tmp/mcap_split.vcapx` | split manifest，引用实际写出的 `.vcap` 分片 |
 
 ## 11. 最佳实践
 

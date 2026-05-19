@@ -39,19 +39,16 @@ DdsrClientImpl::WriterListener::WriterListener(NodeImpl* impl) : DdsrWriterListe
 void DdsrClientImpl::WriterListener::on_publication_matched(NodeImpl* impl,
                                                             const DDS_PublicationMatchedStatus& status) {
   auto* instance = static_cast<DdsrClientImpl*>(impl);
-  auto* message_loop = instance->get_message_loop();
 
   instance->write_session_count_ = status.current_count;
 
-  if (message_loop) {
-    message_loop->post_task([instance]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->update_connected();
-    });
-  } else {
+                  instance->update_connected();
+                })) {
     instance->update_connected();
   }
 
@@ -100,19 +97,16 @@ void DdsrClientImpl::process_message(DDS_DataReader* reader) {
 void DdsrClientImpl::ReaderListener::on_subscription_matched(NodeImpl* impl,
                                                              const DDS_SubscriptionMatchedStatus& status) {
   auto* instance = static_cast<DdsrClientImpl*>(impl);
-  auto* message_loop = instance->get_message_loop();
 
   instance->read_session_count_ = status.current_count;
 
-  if (message_loop) {
-    message_loop->post_task([instance]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->update_connected();
-    });
-  } else {
+                  instance->update_connected();
+                })) {
     instance->update_connected();
   }
 
@@ -121,17 +115,14 @@ void DdsrClientImpl::ReaderListener::on_subscription_matched(NodeImpl* impl,
 
 void DdsrClientImpl::ReaderListener::on_data_available(NodeImpl* impl, DDS_DataReader* reader) {
   auto* instance = static_cast<DdsrClientImpl*>(impl);
-  auto* message_loop = instance->get_message_loop();
 
-  if (message_loop) {
-    message_loop->post_task([instance, reader]() {
-      if VUNLIKELY (!instance->get_message_loop()) {
-        return;
-      }
+  if VUNLIKELY (!instance->post_task([instance, reader]() {
+                  if VUNLIKELY (!instance->get_message_loop()) {
+                    return;
+                  }
 
-      instance->process_message(reader);
-    });
-  } else {
+                  instance->process_message(reader);
+                })) {
     instance->process_message(reader);
   }
 }
@@ -237,25 +228,23 @@ bool DdsrClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
   DDS_Entity_get_guid(DDS_DataWriter_as_entity(writer_->entity), &guid);
   uint64_t id = DdsrFactory::get_guid(&guid, ++seq_);
 
-  auto ack_request = ack_manager_.create_request();
-
-  {
-    std::lock_guard param_lock(param_mtx_);
-    callbacks_[id] = [this, ack_request, callback = std::move(callback), timeout](const Bytes& resp_data) {
-      if (timeout.count() != 0) {
-        ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
-      } else {
-        callback(resp_data);
-      }
-    };
-  }
-
   auto cleanup_callback = [this, &id]() {
     std::lock_guard param_lock(param_mtx_);
     callbacks_.erase(id);
   };
 
   if (timeout.count() != 0) {
+    ack_manager_.reset_interrupted();
+
+    auto ack_request = ack_manager_.create_request();
+
+    {
+      std::lock_guard param_lock(param_mtx_);
+      callbacks_[id] = [this, ack_request, callback = std::move(callback)](const Bytes& resp_data) {
+        ack_manager_.notify(ack_request, [&callback, &resp_data]() { callback(resp_data); });
+      };
+    }
+
     ElapsedTimer timer;
     timer.start();
 
@@ -282,7 +271,18 @@ bool DdsrClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
     return result;
   }
 
-  return DdsrFactory::write_data(writer_->entity, req_data, id);
+  {
+    std::lock_guard param_lock(param_mtx_);
+    callbacks_[id] = [callback = std::move(callback)](const Bytes& resp_data) { callback(resp_data); };
+  }
+
+  bool result = DdsrFactory::write_data(writer_->entity, req_data, id);
+
+  if VUNLIKELY (!result) {
+    cleanup_callback();
+  }
+
+  return result;
 }
 
 }  // namespace vlink

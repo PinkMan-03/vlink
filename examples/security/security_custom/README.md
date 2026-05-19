@@ -78,7 +78,8 @@ vlink::SecuritySubscriber<std::string> sub("dds://demo/custom", cfg);
 ## 6. 注意事项
 
 - 回调在 `publish` / `listen` 的同一线程被调用，**禁止阻塞**热路径。
-- `in` 为空时回调应直接返回 `true`，与默认实现的"空输入直通"约定一致。
+- 同一 `Security` 实例上的 `encrypt_callback` / `decrypt_callback` 会串行执行；多个实例共享同一回调状态时仍需业务自行同步。
+- `in` 为空时 `Security::encrypt()` / `decrypt()` 会在调用回调前直接返回 `false`。
 - `encrypt_callback` 与 `decrypt_callback` 必须**成对**安装；只设其中之一会被忽略并打印 warning。
 - 在 `intra://` 与 `dds://` CDR 类型上，`SecurityXxx` 构造时会打印 warning 并把 `Security::Config` 忽略；在这两种传输上不要启用任何安全配置。
 - XOR 仅用于演示，**严禁**生产使用。

@@ -2210,7 +2210,7 @@ class SchemaPluginInterface {
   // 创建 protobuf 动态消息实例（用于反序列化）
   virtual ProtobufMessagePtr create_protobuf_message(const std::string& name) = 0;
 
-  // 获取 flatbuffers 反射 schema / parser
+  // 获取 flatbuffers 反射 schema / 创建独立 parser
   virtual FlatbuffersSchemaPtr search_flatbuffers_schema(const std::string& name) = 0;
   virtual FlatbuffersParserPtr create_flatbuffers_parser(const std::string& name) = 0;
 };

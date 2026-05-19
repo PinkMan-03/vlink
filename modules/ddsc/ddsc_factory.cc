@@ -110,6 +110,21 @@ std::shared_ptr<ddsc::DomainParticipant> DdscFactory::create_participant(uint8_t
 
     auto* ptr = new ddsc::DomainParticipant(conf.domain, dds_qos);
 
+    if VUNLIKELY (!ptr || ptr->entity <= 0) {
+      VLOG_E("DdscFactory: Failed to create participant.");
+      delete ptr;
+      dds_delete_qos(dds_qos);
+
+      if (has_domain_ref) {
+        auto iter = factory.domain_map_.find(conf.domain);
+        if VLIKELY (iter != factory.domain_map_.end() && iter->second.ref_count > 0) {
+          --iter->second.ref_count;
+        }
+      }
+
+      return nullptr;
+    }
+
     part = std::shared_ptr<ddsc::DomainParticipant>(
         ptr, [id, domain = conf.domain, has_domain_ref](ddsc::DomainParticipant* part) {
           {
@@ -153,18 +168,31 @@ std::shared_ptr<ddsc::Topic> DdscFactory::create_topic(uint8_t type, const DdscC
     topic = conf.topic;
   }
 
-  const auto& id = std::make_tuple(type, conf.domain, topic);
+  if VUNLIKELY (!part) {
+    VLOG_E("DdscFactory: Cannot create topic without participant.");
+    return nullptr;
+  }
+
+  const auto& id = std::make_tuple(type, conf.domain, topic, part);
   std::unique_lock lock(factory.mtx_);
   std::shared_ptr<ddsc::Topic> dds_topic = get_weak_ptr(factory.topic_map_, id).lock();
 
   if (!dds_topic) {
     lock.unlock();
     auto* ptr = new ddsc::Topic(part->entity, topic);
+    if VUNLIKELY (!ptr || ptr->entity <= 0) {
+      VLOG_E("DdscFactory: Failed to create topic: ", topic, ".");
+      delete ptr;
+      return nullptr;
+    }
 
     dds_topic = std::shared_ptr<ddsc::Topic>(ptr, [id](ddsc::Topic* topic) {
       {
         std::lock_guard lock(factory.mtx_);
-        factory.topic_map_.erase(id);
+        auto iter = factory.topic_map_.find(id);
+        if (iter != factory.topic_map_.end() && iter->second.expired()) {
+          factory.topic_map_.erase(iter);
+        }
       }
       delete topic;
     });
@@ -174,7 +202,13 @@ std::shared_ptr<ddsc::Topic> DdscFactory::create_topic(uint8_t type, const DdscC
     auto [iter, inserted] = factory.topic_map_.emplace(id, dds_topic);
 
     if (!inserted) {
-      dds_topic = iter->second.lock();
+      auto inserted_topic = iter->second.lock();
+      if VLIKELY (inserted_topic) {
+        lock.unlock();
+        dds_topic = std::move(inserted_topic);
+      } else {
+        iter->second = dds_topic;
+      }
     }
   }
 
@@ -200,7 +234,12 @@ std::shared_ptr<ddsc::Publisher> DdscFactory::create_publisher(uint8_t type, con
                                                                ddsc::DomainParticipant* part) {
   static auto& factory = DdscFactory::get();
 
-  const auto& id = std::make_tuple(type, conf.domain, conf.qos);
+  if VUNLIKELY (!part) {
+    VLOG_E("DdscFactory: Cannot create publisher without participant.");
+    return nullptr;
+  }
+
+  const auto& id = std::make_tuple(type, conf.domain, conf.qos, part);
   std::unique_lock lock(factory.mtx_);
   std::shared_ptr<ddsc::Publisher> publisher = get_weak_ptr(factory.publisher_map_, id).lock();
 
@@ -208,10 +247,19 @@ std::shared_ptr<ddsc::Publisher> DdscFactory::create_publisher(uint8_t type, con
     lock.unlock();
 
     auto* ptr = new ddsc::Publisher(part->entity);
+    if VUNLIKELY (!ptr || ptr->entity <= 0) {
+      VLOG_E("DdscFactory: Failed to create publisher.");
+      delete ptr;
+      return nullptr;
+    }
+
     publisher = std::shared_ptr<ddsc::Publisher>(ptr, [id](ddsc::Publisher* publisher) {
       {
         std::lock_guard lock(factory.mtx_);
-        factory.publisher_map_.erase(id);
+        auto iter = factory.publisher_map_.find(id);
+        if (iter != factory.publisher_map_.end() && iter->second.expired()) {
+          factory.publisher_map_.erase(iter);
+        }
       }
 
       delete publisher;
@@ -222,7 +270,13 @@ std::shared_ptr<ddsc::Publisher> DdscFactory::create_publisher(uint8_t type, con
     auto [iter, inserted] = factory.publisher_map_.emplace(id, publisher);
 
     if (!inserted) {
-      publisher = iter->second.lock();
+      auto inserted_publisher = iter->second.lock();
+      if VLIKELY (inserted_publisher) {
+        lock.unlock();
+        publisher = std::move(inserted_publisher);
+      } else {
+        iter->second = publisher;
+      }
     }
   }
 
@@ -233,7 +287,12 @@ std::shared_ptr<ddsc::Subscriber> DdscFactory::create_subscriber(uint8_t type, c
                                                                  ddsc::DomainParticipant* part) {
   static auto& factory = DdscFactory::get();
 
-  const auto& id = std::make_tuple(type, conf.domain, conf.qos);
+  if VUNLIKELY (!part) {
+    VLOG_E("DdscFactory: Cannot create subscriber without participant.");
+    return nullptr;
+  }
+
+  const auto& id = std::make_tuple(type, conf.domain, conf.qos, part);
   std::unique_lock lock(factory.mtx_);
   std::shared_ptr<ddsc::Subscriber> subscriber = get_weak_ptr(factory.subscriber_map_, id).lock();
 
@@ -241,10 +300,19 @@ std::shared_ptr<ddsc::Subscriber> DdscFactory::create_subscriber(uint8_t type, c
     lock.unlock();
 
     auto* ptr = new ddsc::Subscriber(part->entity);
+    if VUNLIKELY (!ptr || ptr->entity <= 0) {
+      VLOG_E("DdscFactory: Failed to create subscriber.");
+      delete ptr;
+      return nullptr;
+    }
+
     subscriber = std::shared_ptr<ddsc::Subscriber>(ptr, [id](ddsc::Subscriber* subscriber) {
       {
         std::lock_guard lock(factory.mtx_);
-        factory.subscriber_map_.erase(id);
+        auto iter = factory.subscriber_map_.find(id);
+        if (iter != factory.subscriber_map_.end() && iter->second.expired()) {
+          factory.subscriber_map_.erase(iter);
+        }
       }
 
       delete subscriber;
@@ -255,7 +323,13 @@ std::shared_ptr<ddsc::Subscriber> DdscFactory::create_subscriber(uint8_t type, c
     auto [iter, inserted] = factory.subscriber_map_.emplace(id, subscriber);
 
     if (!inserted) {
-      subscriber = iter->second.lock();
+      auto inserted_subscriber = iter->second.lock();
+      if VLIKELY (inserted_subscriber) {
+        lock.unlock();
+        subscriber = std::move(inserted_subscriber);
+      } else {
+        iter->second = subscriber;
+      }
     }
   }
 
@@ -266,6 +340,11 @@ std::shared_ptr<ddsc::DataWriter> DdscFactory::create_datawriter(uint8_t type, c
                                                                  ddsc::Publisher* publisher, ddsc::Topic* topic,
                                                                  dds_listener_t* listener) {
   static auto& factory = DdscFactory::get();
+
+  if VUNLIKELY (!publisher || !topic) {
+    VLOG_E("DdscFactory: Cannot create datawriter without publisher/topic.");
+    return nullptr;
+  }
 
   dds_qos_t* dds_qos = dds_create_qos();
 
@@ -284,6 +363,11 @@ std::shared_ptr<ddsc::DataWriter> DdscFactory::create_datawriter(uint8_t type, c
   auto writer = std::make_shared<ddsc::DataWriter>(publisher->entity, topic->entity, dds_qos, listener);
   dds_delete_qos(dds_qos);
 
+  if VUNLIKELY (!writer || writer->entity <= 0) {
+    VLOG_E("DdscFactory: Failed to create datawriter.");
+    return nullptr;
+  }
+
   return writer;
 }
 
@@ -291,6 +375,11 @@ std::shared_ptr<ddsc::DataReader> DdscFactory::create_datareader(uint8_t type, c
                                                                  ddsc::Subscriber* subscriber, ddsc::Topic* topic,
                                                                  dds_listener_t* listener) {
   static auto& factory = DdscFactory::get();
+
+  if VUNLIKELY (!subscriber || !topic) {
+    VLOG_E("DdscFactory: Cannot create datareader without subscriber/topic.");
+    return nullptr;
+  }
 
   dds_qos_t* dds_qos = dds_create_qos();
 
@@ -308,6 +397,11 @@ std::shared_ptr<ddsc::DataReader> DdscFactory::create_datareader(uint8_t type, c
 
   auto reader = std::make_shared<ddsc::DataReader>(subscriber->entity, topic->entity, dds_qos, listener);
   dds_delete_qos(dds_qos);
+
+  if VUNLIKELY (!reader || reader->entity <= 0) {
+    VLOG_E("DdscFactory: Failed to create datareader.");
+    return nullptr;
+  }
 
   return reader;
 }

@@ -8,7 +8,7 @@
         <mxCell id="title" value="C API Security  -  vlink_security_handle_t and vlink_create_secure_*" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#7f0000;" vertex="1" parent="1">
           <mxGeometry x="20" y="20" width="1080" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="sub" value="Pure C application-layer encryption  -  AES-128-GCM AEAD (raw key or PBKDF2) and atomic secure node creation" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#c62828;" vertex="1" parent="1">
+        <mxCell id="sub" value="Pure C application-layer encryption  -  AES-128-GCM AEAD (SHA-256 key or PBKDF2) and atomic secure node creation" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#c62828;" vertex="1" parent="1">
           <mxGeometry x="20" y="54" width="1080" height="22" as="geometry" />
         </mxCell>
 
