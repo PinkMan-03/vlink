@@ -27,6 +27,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -63,6 +64,7 @@ struct BagReader::Impl final {
   std::shared_ptr<BagReaderPluginInterface> plugin_interface;
   std::unordered_map<std::string, std::string> playback_url_remap;
   std::unordered_set<std::string> excluded_playback_urls;
+  mutable std::shared_mutex playback_state_mtx;
   // Protects output_callback against concurrent register vs invoke.
   mutable std::shared_mutex output_callback_mtx;
 };
@@ -93,20 +95,23 @@ BagReader::BagReader(const std::string& path, bool read_only, bool try_to_fix) :
 }
 
 BagReader::~BagReader() {
-  if (impl_ && impl_->plugin_interface) {
-    impl_->plugin_interface->register_output_callback({});
+  if (impl_) {
+    std::shared_ptr<BagReaderPluginInterface> plugin_interface;
+
+    {
+      std::shared_lock state_lock(impl_->playback_state_mtx);
+      plugin_interface = impl_->plugin_interface;
+    }
+
+    if (plugin_interface) {
+      plugin_interface->register_output_callback({});
+    }
   }
 }
 
 void BagReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
-  if (impl_->plugin_interface && impl_->plugin_interface != plugin_interface) {
-    impl_->plugin_interface->register_output_callback({});
-  }
-
-  impl_->plugin_interface = plugin_interface;
-
-  if VLIKELY (impl_->plugin_interface) {
-    impl_->plugin_interface->register_output_callback(
+  if VLIKELY (plugin_interface) {
+    plugin_interface->register_output_callback(
         [this](int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data) {
           std::string output_url;
 
@@ -120,6 +125,21 @@ void BagReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInter
             impl_->output_callback(timestamp, output_url, action_type, data);
           }
         });
+  }
+
+  std::shared_ptr<BagReaderPluginInterface> old_plugin_interface;
+
+  {
+    std::unique_lock state_lock(impl_->playback_state_mtx);
+
+    old_plugin_interface = impl_->plugin_interface;
+    impl_->plugin_interface = plugin_interface;
+    impl_->playback_url_remap.clear();
+    impl_->excluded_playback_urls.clear();
+  }
+
+  if (old_plugin_interface && old_plugin_interface != plugin_interface) {
+    old_plugin_interface->register_output_callback({});
   }
 }
 
@@ -136,12 +156,19 @@ void BagReader::register_output_callback(OutputCallback&& output_callback) {
 }
 
 void BagReader::process_output(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data) {
-  if (impl_->plugin_interface) {
-    if (impl_->excluded_playback_urls.count(url) != 0U) {
+  std::shared_ptr<BagReaderPluginInterface> plugin_interface;
+
+  {
+    std::shared_lock state_lock(impl_->playback_state_mtx);
+
+    plugin_interface = impl_->plugin_interface;
+    if (plugin_interface && impl_->excluded_playback_urls.count(url) != 0U) {
       return;
     }
+  }
 
-    impl_->plugin_interface->push(timestamp, url, action_type, data);
+  if (plugin_interface) {
+    plugin_interface->push(timestamp, url, action_type, data);
   } else {
     std::string output_url;
 
@@ -158,30 +185,48 @@ void BagReader::process_output(int64_t timestamp, const std::string& url, Action
 }
 
 void BagReader::process_url_metas(std::vector<Info::UrlMeta>& url_metas) {
-  impl_->playback_url_remap.clear();
-  impl_->excluded_playback_urls.clear();
+  std::shared_ptr<BagReaderPluginInterface> plugin_interface;
 
-  if (impl_->plugin_interface) {
+  {
+    std::shared_lock state_lock(impl_->playback_state_mtx);
+    plugin_interface = impl_->plugin_interface;
+  }
+
+  std::unordered_map<std::string, std::string> playback_url_remap;
+  std::unordered_set<std::string> excluded_playback_urls;
+
+  if (plugin_interface) {
     url_metas.erase(
         std::remove_if(url_metas.begin(), url_metas.end(),
-                       [this](Info::UrlMeta& meta) {
+                       [&plugin_interface, &playback_url_remap, &excluded_playback_urls](Info::UrlMeta& meta) {
                          const std::string input_url = meta.url;
-                         if (!impl_->plugin_interface->convert_url_meta(meta.url, meta.ser_type, meta.schema_type)) {
-                           impl_->excluded_playback_urls.emplace(input_url);
+                         if (!plugin_interface->convert_url_meta(meta.url, meta.ser_type, meta.schema_type)) {
+                           excluded_playback_urls.emplace(input_url);
                            return true;
                          }
 
                          if (meta.url != input_url) {
-                           impl_->playback_url_remap[input_url] = meta.url;
+                           playback_url_remap[input_url] = meta.url;
                          }
 
                          return false;
                        }),
         url_metas.end());
   }
+
+  {
+    std::unique_lock state_lock(impl_->playback_state_mtx);
+
+    if (impl_->plugin_interface == plugin_interface) {
+      impl_->playback_url_remap = std::move(playback_url_remap);
+      impl_->excluded_playback_urls = std::move(excluded_playback_urls);
+    }
+  }
 }
 
 bool BagReader::convert_playback_url(const std::string& input_url, std::string& output_url) const {
+  std::shared_lock state_lock(impl_->playback_state_mtx);
+
   if (impl_->excluded_playback_urls.count(input_url) != 0U) {
     return false;
   }

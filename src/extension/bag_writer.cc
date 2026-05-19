@@ -143,8 +143,13 @@ std::shared_ptr<BagWriter> BagWriter::filter_get(const std::string& path) {
       target = std::shared_ptr<McapWriter>(ptr, [path](McapWriter* ptr) {
         {
           std::lock_guard lock(instance.mtx);
-          instance.writer_map.erase(path);
+          auto iter = instance.writer_map.find(path);
+
+          if (iter != instance.writer_map.end() && iter->second.expired()) {
+            instance.writer_map.erase(iter);
+          }
         }
+
         delete ptr;
       });
     } else {
@@ -153,8 +158,13 @@ std::shared_ptr<BagWriter> BagWriter::filter_get(const std::string& path) {
       target = std::shared_ptr<DatabaseWriter>(ptr, [path](DatabaseWriter* ptr) {
         {
           std::lock_guard lock(instance.mtx);
-          instance.writer_map.erase(path);
+          auto iter = instance.writer_map.find(path);
+
+          if (iter != instance.writer_map.end() && iter->second.expired()) {
+            instance.writer_map.erase(iter);
+          }
         }
+
         delete ptr;
       });
     }

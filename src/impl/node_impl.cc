@@ -148,9 +148,12 @@ bool NodeImpl::attach(class MessageLoop* message_loop) {
 
 bool NodeImpl::detach() {
   MessageLoop* message_loop = nullptr;
+
   {
     std::lock_guard lock(helper_->post_mtx);
+
     message_loop = helper_->message_loop.exchange(nullptr, std::memory_order_acq_rel);
+
     if (message_loop) {
       helper_->has_detached = true;
     }
@@ -173,6 +176,7 @@ bool NodeImpl::post_task(PostCallback&& callback) {
   std::lock_guard lock(helper_->post_mtx);
 
   auto* message_loop = helper_->message_loop.load(std::memory_order_acquire);
+
   if (message_loop) {
     (void)message_loop->post_task(std::move(callback));
     return true;

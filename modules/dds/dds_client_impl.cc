@@ -279,11 +279,14 @@ bool DdsClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chr
 
   uint64_t id = DdsFactory::get_guid(writer_->guid(), ++seq_);
 
+  rtps::WriteParams write_params;
   rtps::SampleIdentity sample_identity;
 
   if (is_cdr_type) {
     std::lock_guard param_lock(param_mtx_);
-    auto& write_identity = reader_listener_->write_params_.sample_identity();
+    write_params = reader_listener_->write_params_;
+
+    auto& write_identity = write_params.sample_identity();
     write_identity.writer_guid() = writer_->guid();
     ++write_identity.sequence_number().low;
 
@@ -292,6 +295,7 @@ bool DdsClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chr
     }
 
     sample_identity = write_identity;
+    reader_listener_->write_params_.sample_identity(sample_identity);
   }
 
   auto cleanup_callback = [this, &id, &sample_identity]() {
@@ -335,10 +339,10 @@ bool DdsClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chr
       return false;
     }
 
-    bool result = ack_manager_.process(ack_request, timeout.count() - elapsed, [this, &req_data, &id]() {
+    bool result = ack_manager_.process(ack_request, timeout.count() - elapsed, [this, &req_data, &id, &write_params]() {
       if (is_cdr_type) {
         std::lock_guard param_lock(param_mtx_);
-        return DdsFactory::write_cdr_data(writer_.get(), req_data, &reader_listener_->write_params_);
+        return DdsFactory::write_cdr_data(writer_.get(), req_data, &write_params);
       } else {
         return DdsFactory::write_data(writer_.get(), req_data, id);
       }
@@ -356,10 +360,12 @@ bool DdsClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chr
   if (is_cdr_type) {
     {
       std::lock_guard param_lock(param_mtx_);
+
       cdr_callbacks_[sample_identity] = [callback = std::move(callback)](const Bytes& resp_data) {
         callback(resp_data);
       };
-      result = DdsFactory::write_cdr_data(writer_.get(), req_data, &reader_listener_->write_params_);
+
+      result = DdsFactory::write_cdr_data(writer_.get(), req_data, &write_params);
     }
   } else {
     {

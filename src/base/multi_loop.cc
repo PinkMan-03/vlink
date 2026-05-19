@@ -97,6 +97,7 @@ bool MultiLoop::wait_for_idle(int ms, bool check) {
   const auto start_time = std::chrono::steady_clock::now();
 
   auto idle_predicate = [this]() -> bool { return impl_->pending_tasks.load(std::memory_order_acquire) == 0U; };
+
   auto remaining_ms = [ms, start_time]() -> int {
     if (ms == Timer::kInfinite) {
       return Timer::kInfinite;
@@ -104,6 +105,7 @@ bool MultiLoop::wait_for_idle(int ms, bool check) {
 
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
+
     if (elapsed >= ms) {
       return 0;
     }
@@ -115,9 +117,11 @@ bool MultiLoop::wait_for_idle(int ms, bool check) {
 
   while (true) {
     const int dispatcher_wait_ms = remaining_ms();
+
     if (!MessageLoop::wait_for_idle(dispatcher_wait_ms, first_check)) {
       return false;
     }
+
     first_check = false;
 
     std::unique_lock lock(impl_->idle_mtx);
@@ -126,6 +130,7 @@ bool MultiLoop::wait_for_idle(int ms, bool check) {
       impl_->idle_cv.wait(lock, idle_predicate);
     } else {
       const int worker_wait_ms = remaining_ms();
+
       if (worker_wait_ms <= 0) {
         return idle_predicate() && MessageLoop::wait_for_idle(0, false);
       }
@@ -174,6 +179,7 @@ void MultiLoop::on_end() {
 
 void MultiLoop::on_task_changed(Callback&& callback, uint32_t start_time) {
   auto task = std::make_shared<Callback>(std::move(callback));
+
   bool posted = false;
 
   {
@@ -182,19 +188,27 @@ void MultiLoop::on_task_changed(Callback&& callback, uint32_t start_time) {
     if VLIKELY (impl_->thread_pool) {
       impl_->pending_tasks.fetch_add(1U, std::memory_order_acq_rel);
 
-      posted = impl_->thread_pool->post_task([this, task, start_time]() mutable {
-        if VLIKELY (*task) {
-          MessageLoop::on_task_changed(std::move(*task), start_time);
+      std::shared_ptr<Impl> pending_token(impl_.get(), [](Impl* impl) noexcept {
+        bool should_notify = false;
+
+        {
+          std::lock_guard<std::mutex> lock(impl->idle_mtx);
+          should_notify = impl->pending_tasks.fetch_sub(1U, std::memory_order_acq_rel) == 1U;
         }
 
-        if (impl_->pending_tasks.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
-          impl_->idle_cv.notify_all();
+        if (should_notify) {
+          impl->idle_cv.notify_all();
         }
       });
 
-      if VUNLIKELY (!posted && impl_->pending_tasks.fetch_sub(1U, std::memory_order_acq_rel) == 1U) {
-        impl_->idle_cv.notify_all();
-      }
+      posted =
+          impl_->thread_pool->post_task([this, task, pending_token = std::move(pending_token), start_time]() mutable {
+            if VLIKELY (*task) {
+              MessageLoop::on_task_changed(std::move(*task), start_time);
+            }
+
+            (void)pending_token;
+          });
     }
   }
 
