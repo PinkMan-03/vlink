@@ -368,8 +368,8 @@ NodeT* make_url_node(const std::string& url, const std::string& ser_type, vlink:
 }
 
 template <typename NodeT>
-NodeT* make_url_security_node(const std::string& url, const vlink::Security::Config& sec_cfg,
-                              const std::string& ser_type, vlink::SchemaType schema_type, bool auto_init) {
+NodeT* make_url_security_node(const std::string& url, vlink::Security::Config sec_cfg, const std::string& ser_type,
+                              vlink::SchemaType schema_type, bool auto_init) {
   const bool has_ser_type = !ser_type.empty();
   const bool has_schema_type = schema_type != vlink::SchemaType::kUnknown;
 
@@ -377,7 +377,16 @@ NodeT* make_url_security_node(const std::string& url, const vlink::Security::Con
     throw nb::value_error("ser_type and schema_type must be provided together");
   }
 
-  auto* node = new NodeT(url, sec_cfg, vlink::InitType::kWithoutInit);
+  // SecurityXxx installs Security in its constructor, before this helper can call set_ser_type().
+  if (has_ser_type && sec_cfg.advanced.aad_context.empty()) {
+    sec_cfg.advanced.aad_context = url;
+    sec_cfg.advanced.aad_context += "|";
+    sec_cfg.advanced.aad_context += ser_type;
+    sec_cfg.advanced.aad_context += "|";
+    sec_cfg.advanced.aad_context += std::to_string(static_cast<uint32_t>(schema_type));
+  }
+
+  auto* node = new NodeT(url, std::move(sec_cfg), vlink::InitType::kWithoutInit);
 
   if (has_ser_type) {
     node->set_ser_type(ser_type, schema_type);
@@ -458,9 +467,9 @@ void bind_node_common(Class& cls) {
 
 template <typename Class, typename NodeT>
 void bind_node_security_ctor(Class& cls) {
-  cls.def(nb::new_([](const std::string& url, const vlink::Security::Config& sec_cfg, const std::string& ser_type,
+  cls.def(nb::new_([](const std::string& url, vlink::Security::Config sec_cfg, const std::string& ser_type,
                       vlink::SchemaType schema_type, bool auto_init) {
-            return make_url_security_node<NodeT>(url, sec_cfg, ser_type, schema_type, auto_init);
+            return make_url_security_node<NodeT>(url, std::move(sec_cfg), ser_type, schema_type, auto_init);
           }),
           "url"_a, "sec_cfg"_a, "ser_type"_a = "", "schema_type"_a = vlink::SchemaType::kUnknown, "auto_init"_a = true);
 }
@@ -1935,6 +1944,25 @@ NB_MODULE(_vlink_nanobind, m) {
   status.def("is_for_writer", &vlink::Status::is_for_writer, "type"_a);
   status.def("is_for_reader", &vlink::Status::is_for_reader, "type"_a);
 
+  nb::class_<vlink::Security::Config::PreviousKey>(m, "SecurityConfigPreviousKey",
+                                                   "Decrypt-only old symmetric key accepted during key rotation")
+      .def(nb::init<>())
+      .def_rw("key_id", &vlink::Security::Config::PreviousKey::key_id)
+      .def_rw("key", &vlink::Security::Config::PreviousKey::key)
+      .def_rw("passphrase", &vlink::Security::Config::PreviousKey::passphrase)
+      .def_rw("pbkdf2_salt", &vlink::Security::Config::PreviousKey::pbkdf2_salt)
+      .def_rw("pbkdf2_iterations", &vlink::Security::Config::PreviousKey::pbkdf2_iterations);
+
+  nb::class_<vlink::Security::Config::Advanced>(
+      m, "SecurityConfigAdvanced", "Low-frequency security options for AAD, replay protection, and rotation")
+      .def(nb::init<>())
+      .def_rw("key_id", &vlink::Security::Config::Advanced::key_id)
+      .def_rw("previous_keys", &vlink::Security::Config::Advanced::previous_keys)
+      .def_rw("aad_context", &vlink::Security::Config::Advanced::aad_context)
+      .def_rw("replay_window", &vlink::Security::Config::Advanced::replay_window)
+      .def_rw("signing_key_pem", &vlink::Security::Config::Advanced::signing_key_pem)
+      .def_rw("verify_key_pem", &vlink::Security::Config::Advanced::verify_key_pem);
+
   nb::class_<vlink::Security::Config>(m, "SecurityConfig",
                                       "Aggregate of every parameter accepted by the Security constructor")
       .def(nb::init<>())
@@ -1944,8 +1972,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_rw("pbkdf2_iterations", &vlink::Security::Config::pbkdf2_iterations)
       .def_rw("public_key_pem", &vlink::Security::Config::public_key_pem)
       .def_rw("private_key_pem", &vlink::Security::Config::private_key_pem)
-      .def_rw("signing_key_pem", &vlink::Security::Config::signing_key_pem)
-      .def_rw("verify_key_pem", &vlink::Security::Config::verify_key_pem)
+      .def_rw("advanced", &vlink::Security::Config::advanced)
       .def_prop_rw(
           "encrypt_callback",
           [](const vlink::Security::Config& self) -> nb::object {
@@ -1967,7 +1994,8 @@ NB_MODULE(_vlink_nanobind, m) {
           });
 
   nb::class_<vlink::Security>(m, "Security", "Authenticated message-level encryption (AEAD)")
-      .def(nb::init<const vlink::Security::Config&>(), "cfg"_a = vlink::Security::Config{})
+      .def(nb::new_([](vlink::Security::Config cfg) { return new vlink::Security(std::move(cfg)); }),
+           "cfg"_a = vlink::Security::Config{})
       .def(
           "encrypt",
           [](vlink::Security& self, nb::handle data) -> nb::object {

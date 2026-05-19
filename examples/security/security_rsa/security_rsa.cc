@@ -25,15 +25,15 @@
 // Demonstrates the asymmetric path of vlink::Security::Config:
 //   - RSA-OAEP-SHA256 wraps a fresh 16-byte AES-128 session key per message
 //   - AES-128-GCM encrypts the payload with that session key
-//   - RSA-PSS-SHA256 (optional) signs the encrypted body for sender authentication
+//   - RSA-PSS-SHA256 (optional) signs AAD + ciphertext/tag for sender authentication
 //
 // Configuration on the sender:
 //   cfg.public_key_pem  = peer_recv_pub_pem;     // wrap session key for receiver
-//   cfg.signing_key_pem = own_sign_priv_pem;     // (optional) sign the ciphertext
+//   cfg.advanced.signing_key_pem = own_sign_priv_pem;     // (optional) sign AAD + ciphertext/tag
 //
 // Configuration on the receiver:
 //   cfg.private_key_pem = own_recv_priv_pem;     // unwrap session key
-//   cfg.verify_key_pem  = peer_sign_pub_pem;     // (optional) verify signature
+//   cfg.advanced.verify_key_pem  = peer_sign_pub_pem;     // (optional) verify signature
 //
 // Keys must be RSA >= 2048 bits.  This example generates ephemeral RSA-2048 key
 // pairs on startup via OpenSSL for self-contained demonstration.  In production,
@@ -171,7 +171,7 @@ int main() {
 
   // ======== Section 2: RSA-OAEP Hybrid + RSA-PSS Sender Authentication ========
   // Adds RSA-PSS-SHA256 signing/verification on top of the hybrid encryption.
-  // The sender signs the encrypted body with its own private key, and the
+  // The sender signs AAD + ciphertext/tag with its own private key, and the
   // receiver verifies with the matching public key before decrypting.
   {
     std::cout << "\n[2] RSA Hybrid + RSA-PSS Signed (sender authenticated)" << std::endl;
@@ -180,7 +180,7 @@ int main() {
 
     vlink::Security::Config sub_cfg;
     sub_cfg.private_key_pem = recv_kp.private_pem;
-    sub_cfg.verify_key_pem = sign_kp.public_pem;
+    sub_cfg.advanced.verify_key_pem = sign_kp.public_pem;
 
     vlink::SecuritySubscriber<std::string> sub("dds://security_rsa/signed", sub_cfg);
     sub.listen([&received](const std::string& msg) {
@@ -190,7 +190,7 @@ int main() {
 
     vlink::Security::Config pub_cfg;
     pub_cfg.public_key_pem = recv_kp.public_pem;
-    pub_cfg.signing_key_pem = sign_kp.private_pem;
+    pub_cfg.advanced.signing_key_pem = sign_kp.private_pem;
 
     vlink::SecurityPublisher<std::string> pub("dds://security_rsa/signed", pub_cfg);
 
@@ -216,7 +216,7 @@ int main() {
 
     vlink::Security::Config sub_cfg;
     sub_cfg.private_key_pem = recv_kp.private_pem;
-    sub_cfg.verify_key_pem = sign_kp.public_pem;  // Trust only sign_kp
+    sub_cfg.advanced.verify_key_pem = sign_kp.public_pem;  // Trust only sign_kp
 
     vlink::SecuritySubscriber<std::string> sub("dds://security_rsa/impostor", sub_cfg);
     sub.listen([&received](const std::string& msg) {
@@ -226,14 +226,14 @@ int main() {
 
     vlink::Security::Config pub_cfg;
     pub_cfg.public_key_pem = recv_kp.public_pem;
-    pub_cfg.signing_key_pem = impostor_kp.private_pem;  // Signs with the wrong key
+    pub_cfg.advanced.signing_key_pem = impostor_kp.private_pem;  // Signs with the wrong key
 
     vlink::SecurityPublisher<std::string> pub("dds://security_rsa/impostor", pub_cfg);
 
     pub.wait_for_subscribers();
 
     pub.publish("This message should be rejected on verification");
-    pub.publish("Impostor signing key does not match verify_key_pem");
+    pub.publish("Impostor signing key does not match advanced.verify_key_pem");
 
     std::this_thread::sleep_for(200ms);
     VLOG_I("Impostor: received", received.load(), "messages (expected 0 due to RSA-PSS failure)");
@@ -247,12 +247,12 @@ int main() {
 
     vlink::Security::Config sender_cfg;
     sender_cfg.public_key_pem = recv_kp.public_pem;
-    sender_cfg.signing_key_pem = sign_kp.private_pem;
+    sender_cfg.advanced.signing_key_pem = sign_kp.private_pem;
     vlink::Security sender(sender_cfg);
 
     vlink::Security::Config receiver_cfg;
     receiver_cfg.private_key_pem = recv_kp.private_pem;
-    receiver_cfg.verify_key_pem = sign_kp.public_pem;
+    receiver_cfg.advanced.verify_key_pem = sign_kp.public_pem;
     vlink::Security receiver(receiver_cfg);
 
     vlink::Bytes plaintext = vlink::Bytes::from_string("Standalone RSA hybrid payload");
@@ -276,11 +276,11 @@ int main() {
     std::cout << "\n[5] RSA Configuration Reference" << std::endl;
     std::cout << "   Sender Security::Config:" << std::endl;
     std::cout << "     public_key_pem  -- peer's RSA public key (PEM); wraps session key" << std::endl;
-    std::cout << "     signing_key_pem -- local RSA private key (PEM); optional RSA-PSS sign" << std::endl;
+    std::cout << "     advanced.signing_key_pem -- local RSA private key (PEM); optional RSA-PSS sign" << std::endl;
     std::cout << std::endl;
     std::cout << "   Receiver Security::Config:" << std::endl;
     std::cout << "     private_key_pem -- local RSA private key (PEM); unwraps session key" << std::endl;
-    std::cout << "     verify_key_pem  -- peer's RSA public key (PEM); optional RSA-PSS verify" << std::endl;
+    std::cout << "     advanced.verify_key_pem  -- peer's RSA public key (PEM); optional RSA-PSS verify" << std::endl;
     std::cout << std::endl;
     std::cout << "   Constraints:" << std::endl;
     std::cout << "     - RSA keys must be >= 2048 bits" << std::endl;
@@ -289,7 +289,7 @@ int main() {
     std::cout << std::endl;
     std::cout << "   Algorithms:" << std::endl;
     std::cout << "     Wrap:      RSA-OAEP-SHA256 (per-message 16-byte AES session key)" << std::endl;
-    std::cout << "     Payload:   AES-128-GCM (12-byte nonce, 16-byte tag)" << std::endl;
+    std::cout << "     Payload:   AES-128-GCM (envelope AAD, sequence nonce, 16-byte tag)" << std::endl;
     std::cout << "     Signature: RSA-PSS-SHA256 (salt length = digest length)" << std::endl;
   }
 

@@ -106,20 +106,37 @@ class Security final {
   using Callback = Function<bool(const Bytes& in, Bytes& out)>;
 
   struct Config final {
+    struct PreviousKey final {
+      std::string key_id;                 // 旧密钥 id，仅用于解密轮换期旧消息
+      std::string key;                    // 旧原始对称种子
+      std::string passphrase;             // 旧 PBKDF2 口令
+      Bytes pbkdf2_salt;                  // 旧 PBKDF2 salt
+      uint32_t pbkdf2_iterations{200000U};
+    };
+
+    struct Advanced final {
+      std::string key_id{"default"};      // 当前发送密钥 id（线上 <=255 字节）；默认 id 按空 id 编码
+      std::vector<PreviousKey> previous_keys;
+      std::string aad_context;            // AEAD 绑定上下文（<=65535 字节）
+      uint32_t replay_window{4096U};      // 0 表示关闭 replay 检查
+      std::string signing_key_pem;        // 本地 RSA 私钥（PEM），用于 RSA-PSS 签名
+      std::string verify_key_pem;         // 对端 RSA 公钥（PEM），用于 RSA-PSS 验签
+    };
+
     std::string key;                       // 原始对称种子；SHA-256 截断为 16 字节
     std::string passphrase;                // 低熵口令，通过 PBKDF2-HMAC-SHA256 派生
     Bytes pbkdf2_salt;                     // 每部署唯一 salt（>= 16 字节），双端共享
     uint32_t pbkdf2_iterations{200000U};   // PBKDF2 迭代次数
     std::string public_key_pem;            // 对端 RSA 公钥（PEM），用于发送方加密
     std::string private_key_pem;           // 本地 RSA 私钥（PEM），用于接收方解密
-    std::string signing_key_pem;           // 本地 RSA 私钥（PEM），用于 RSA-PSS 签名
-    std::string verify_key_pem;            // 对端 RSA 公钥（PEM），用于 RSA-PSS 验签
     Callback encrypt_callback;             // 自定义加密
     Callback decrypt_callback;             // 自定义解密
+    Advanced advanced;                     // 低频控制项
   };
 
   Security();
   explicit Security(const Config& cfg);
+  explicit Security(Config&& cfg);
   ~Security();
 
   bool encrypt(const Bytes& in, Bytes& out);
@@ -130,11 +147,13 @@ class Security final {
 `Security::Config` 通过 `SecurityXxx` 节点的**构造函数**一次性传入（不再有运行时 setter）：
 
 ```cpp
-explicit SecurityPublisher(const std::string& url_str, const Security::Config& sec_cfg = {},
+template <typename SecurityConfigT = Security::Config>
+explicit SecurityPublisher(const std::string& url_str, SecurityConfigT&& sec_cfg = {},
                            InitType type = InitType::kWithInit);
 
-template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
-explicit SecurityPublisher(const ConfT& conf, const Security::Config& sec_cfg = {},
+template <typename ConfT, typename SecurityConfigT = Security::Config,
+          typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+explicit SecurityPublisher(const ConfT& conf, SecurityConfigT&& sec_cfg = {},
                            InitType type = InitType::kWithInit);
 ```
 
@@ -142,7 +161,7 @@ explicit SecurityPublisher(const ConfT& conf, const Security::Config& sec_cfg = 
 
 要点：
 
-- 配置**一次性**：`Security::Config` 只在构造时传入。内部在 `init()` 之前用候选 `Security` 验证 `is_configured()`，通过才安装；否则 `security_` 保持为空，对应通道的 encrypt / decrypt 会返回 `false`。
+- 配置**一次性**：`Security::Config` 只在构造时传入。内部在 `init()` 之前用候选 `Security` 验证 `is_configured()`，通过才安装到 `NodeImpl::security`；否则该指针保持为空，对应通道的 encrypt / decrypt 会返回 `false`。
 - 模式选择**自动**：自定义回调 > RSA 非对称（存在 `public_key_pem` 或 `private_key_pem`）> 对称（`key` 或 `passphrase`）。
 - 不再暴露 `enable_security()` / `security()` 给用户代码（前者已移到 `Node` 的 protected 入口，仅供 `SecurityXxx` 子类内部调用）。需要再次更换配置的场景，请销毁并重新构造节点。
 - 验证失败（PEM 损坏、RSA 长度 < 2048、缺失 salt 等）会打印 warning 并把对应槽位置空；只要还有其他合法槽位即视为成功（`is_configured() == true`）。
@@ -201,26 +220,26 @@ vlink::SecuritySubscriber<MyMsg> sub("shm://secure/topic", cfg);
 | ---- | ---- | ---- |
 | `public_key_pem` | 发送端持有对端公钥 | RSA-OAEP-SHA256 包装会话密钥 |
 | `private_key_pem` | 接收端持有自身私钥 | RSA-OAEP-SHA256 解开会话密钥 |
-| `signing_key_pem` | 发送端持有自身私钥 | RSA-PSS-SHA256 对 `wrap_len_le ‖ wrapped_key ‖ nonce ‖ ciphertext ‖ tag` 签名（可选） |
-| `verify_key_pem` | 接收端持有对端公钥 | RSA-PSS-SHA256 验签；签名缺失或失败则拒绝消息 |
+| `advanced.signing_key_pem` | 发送端持有自身私钥 | RSA-PSS-SHA256 对 AAD（domain / context / envelope / `wrap_len_le` / wrapped key）与 `ciphertext ‖ tag` 签名（可选） |
+| `advanced.verify_key_pem` | 接收端持有对端公钥 | RSA-PSS-SHA256 验签；签名缺失或失败则拒绝消息 |
 
 示例（带发送方认证）：
 
 ```cpp
 vlink::Security::Config sender_cfg;
 sender_cfg.public_key_pem = peer_pub_pem;     // 对端公钥
-sender_cfg.signing_key_pem = own_priv_pem;    // 本地私钥用于签名
+sender_cfg.advanced.signing_key_pem = own_priv_pem;    // 本地私钥用于签名
 
 vlink::SecurityPublisher<MyMsg> pub("dds://secure/topic", sender_cfg);
 
 vlink::Security::Config receiver_cfg;
 receiver_cfg.private_key_pem = own_priv_pem;  // 本地私钥用于解密
-receiver_cfg.verify_key_pem = peer_pub_pem;   // 对端公钥用于验签
+receiver_cfg.advanced.verify_key_pem = peer_pub_pem;   // 对端公钥用于验签
 
 vlink::SecuritySubscriber<MyMsg> sub("dds://secure/topic", receiver_cfg);
 ```
 
-省略 `signing_key_pem` / `verify_key_pem` 时仍可正常加解密，只是不再校验发送方身份。
+省略 `advanced.signing_key_pem` / `advanced.verify_key_pem` 时仍可正常加解密，只是不再校验发送方身份。
 
 ---
 
@@ -273,39 +292,41 @@ sub.listen([](const vlink::Bytes& msg) { /* 已解密 */ });
 | -------- | ---------------------------------------------------- |
 | 算法     | AES-128-GCM（OpenSSL EVP API）                       |
 | 密钥     | SHA-256(`key`) 截断为 16 字节；或 PBKDF2(`passphrase`) |
-| Nonce    | 12 字节，每条消息独立 `RAND_bytes()` 生成           |
+| Nonce    | 12 字节，由随机 sender nonce base 与单调 sequence 派生 |
 | Tag      | 16 字节认证标签                                       |
 | 线程安全 | 是（内部互斥保护）                                    |
 
 Wire format：
 
 ```
-[12 B random nonce] [N B ciphertext] [16 B GCM tag]
+[35 B envelope header] [K B key_id] [N B ciphertext] [16 B GCM tag]
 ```
 
-`N` 等于明文长度（AES-GCM 不带 padding）。
+默认 `key_id == "default"` 在线上以 `K == 0` 编码，因此常规 `Config::key` 模式的额外开销为 51 字节。Envelope header 绑定 version / mode / sender_id / sequence / nonce；header 与 `aad_context` 一起作为 GCM AAD 认证。
+
+通过 `SecurityPublisher` / `SecuritySubscriber` 等节点构造时，如果 `advanced.aad_context` 为空，VLink 会自动绑定 `url|ser_type|schema_type`；直接使用独立 `Security` 实例时空字符串就是实际 AAD context。
 
 ### 9.8.2 非对称 RSA 混合
 
 每条消息：
 
-1. `RAND_bytes()` 生成 16 字节 AES-128-GCM 会话密钥与 12 字节 nonce。
+1. `RAND_bytes()` 生成 16 字节 AES-128-GCM 会话密钥；nonce 由 envelope sequence 派生。
 2. 用 `public_key_pem` 做 RSA-OAEP-SHA256 包装会话密钥。
 3. AES-128-GCM 加密 payload 得到 ciphertext + tag。
-4. 若设了 `signing_key_pem`，对 `wrap_len_le(2B) || wrapped_key || nonce || ciphertext || tag` 做 RSA-PSS-SHA256 签名。签名覆盖**包含** `wrap_len_le` 但**不包含** `sig_len_le`，避免签名长度自指涉。
+4. 若设了 `advanced.signing_key_pem`，对 AAD（domain / context / envelope / wrap_len / wrapped_key）与 `ciphertext || tag` 做 RSA-PSS-SHA256 签名。签名覆盖**包含** `wrap_len_le` 与 wrapped key，**不包含** `sig_len_le`，避免签名长度自指涉。
 
 Wire format（所有长度字段均小端）：
 
 ```
-[2 B wrap_len_le] [2 B sig_len_le] [wrap_len B wrapped session key] [sig_len B RSA-PSS signature] [12 B nonce] [N B ciphertext] [16 B GCM tag]
+[35 B envelope header] [K B key_id] [2 B wrap_len_le] [2 B sig_len_le] [wrap_len B wrapped session key] [sig_len B RSA-PSS signature] [N B ciphertext] [16 B GCM tag]
 ```
 
-`sig_len_le == 0` 表示未携带签名；接收端若设了 `verify_key_pem` 但消息缺少签名，会拒收。
+`sig_len_le == 0` 表示未携带签名；接收端若设了 `advanced.verify_key_pem` 但消息缺少签名，会拒收。
 
 ### 9.8.3 行为细节
 
-- **空输入**：`Bytes::empty()` 时 `encrypt()` / `decrypt()` 直接返回 `false` 并清空 `out`（AEAD 不能对零字节做认证，合法对称密文至少 29 字节 = 12B nonce + 16B tag + 1B 明文；RSA 混合信封还要再加 4B 头与 wrapped/signature 字段）。
-- **认证失败**：tag 校验失败、wrapped key 解开失败、RSA-PSS 验签失败均使 `decrypt()` 返回 `false`，回调不会被触发。
+- **空输入**：`Bytes::empty()` 时 `encrypt()` / `decrypt()` 直接返回 `false` 并清空 `out`（合法内置密文至少包含 envelope、1 字节密文与 16 字节 tag）。
+- **认证失败**：tag 校验失败、wrapped key 解开失败、RSA-PSS 验签失败、或 replay 检查失败均使 `decrypt()` 返回 `false`，回调不会被触发。
 - **未启用**：未定义 `VLINK_ENABLE_SECURITY` 且未安装自定义回调时，`encrypt()` / `decrypt()` 打印 `VLOG_W` 并返回 `false`。
 
 ---
@@ -317,7 +338,7 @@ Wire format（所有长度字段均小端）：
 - `intra://`：进程内直接传对象，不进入序列化/加密管道。
 - `dds://` 配合 CDR 类型（`is_cdr_type == true`）：CDR 直接交给 Fast-DDS 处理，不经过 VLink 的 Bytes 管道。
 
-这些组合下 `security_` 保持空 `optional`，发送 / 接收路径的加解密分支直接 drop 消息并打 log，不会 UB。其他传输后端（shm/shm2/ddsc/ddsr/ddst/zenoh/mqtt/fdbus/someip/qnx 以及 `dds://` 的非 CDR 类型）均支持消息级加密。
+这些组合下 `NodeImpl::security` 保持 `nullptr`，发送 / 接收路径的加解密分支直接 drop 消息并打 log，不会 UB。其他传输后端（shm/shm2/ddsc/ddsr/ddst/zenoh/mqtt/fdbus/someip/qnx 以及 `dds://` 的非 CDR 类型）均支持消息级加密。
 
 如需在 CDR 链路上保护消息，请使用 DDS Security 插件（FastDDS 官方方案）或传输层 TLS。
 
@@ -478,7 +499,7 @@ int main() {
 int main() {
     vlink::Security::Config cfg;
     cfg.public_key_pem = peer_pub_pem;
-    cfg.signing_key_pem = own_priv_pem;
+    cfg.advanced.signing_key_pem = own_priv_pem;
 
     vlink::SecurityPublisher<std::string> pub(
         "dds://secure/log",
@@ -572,7 +593,8 @@ vlink::SecuritySubscriber<Bytes> sub("dds://topic", cfg);
 
 - 元数据（topic 名称、发现消息、消息长度）
 - 传输层握手和发现协议
-- 重放攻击（没有内置序号校验，GCM nonce 仅防止重用而不绑定顺序）
+- 进程重启后的持久化 replay 状态；内置滑动窗口是内存态，不替代传输层会话防护
+- 传输层重发同一密文（例如可靠传输重试或 QoS redelivery）时，若 sequence 仍落在 replay window 内，接收端会按 replay 拒绝并丢弃该消息；排查“少一条消息”时请同时看 security 日志和传输重发行为
 
 纵深防御：传输层 TLS（MQTT）、DDS Security 插件加上 VLink 消息级加密。
 
@@ -599,6 +621,8 @@ assert(enc_ok && dec_ok);
 assert(plain == recovered);
 assert(plain != cipher);   // 加密后内容不同
 ```
+
+实际部署时通常使用独立的 sender / receiver `Security` 实例；上面的同实例自加解密只适合单次 roundtrip 验证。默认 replay window 开启时，同一份密文再次 `decrypt()` 会被按 replay 拒绝。
 
 ---
 

@@ -71,7 +71,9 @@
 #include <string>
 
 #include "../base/bytes.h"
+#include "../base/cpu_profiler.h"
 #include "../base/functional.h"
+#include "../extension/security.h"
 #include "../extension/status.h"
 #include "../impl/conf.h"
 #include "../impl/types.h"
@@ -479,6 +481,34 @@ class VLINK_EXPORT NodeImpl {
   void set_record_path(const std::string& path);
 
   /**
+   * @brief Installs application-layer security for this implementation node.
+   *
+   * @details
+   * Called before @c init() by the protected @c Node::enable_security() helper.
+   * Rejects unsupported transports, fills an empty AAD context from the node
+   * wire metadata, validates the resulting @c Security instance against the
+   * current node role, then stores it in @c security on success.
+   *
+   * @param cfg  Security configuration aggregate supplied by the public node wrapper.
+   * @return @c true when a usable @c Security instance was installed; otherwise @c false.
+   */
+  bool enable_security(const Security::Config& cfg);
+
+  /**
+   * @brief Installs application-layer security by consuming @p cfg.
+   *
+   * @details
+   * Same validation path as the const-reference overload, but avoids copying
+   * callback targets and key material when the caller owns the config.  The
+   * method may fill @c cfg.advanced.aad_context before moving it into
+   * @c Security.
+   *
+   * @param cfg  Security configuration aggregate to consume.
+   * @return @c true when a usable @c Security instance was installed; otherwise @c false.
+   */
+  bool enable_security(Security::Config&& cfg);
+
+  /**
    * @brief Merges SSL/TLS options into the node property map.
    *
    * @details
@@ -551,8 +581,6 @@ class VLINK_EXPORT NodeImpl {
    */
   static void global_init();
 
-  std::atomic_bool has_suspend{false};  ///< Atomic suspend state flag (currently unused by default impls).
-
   std::string url;                               ///< Full URL string of this node (e.g. @c "dds://my/topic").
   std::string ser_type;                          ///< Serialisation type string (e.g. @c "demo.proto.PointCloud").
   ImplType impl_type{kUnknownImplType};          ///< Role of this implementation node.
@@ -561,7 +589,9 @@ class VLINK_EXPORT NodeImpl {
   bool is_cdr_type{false};                                ///< @c true when using DDS native CDR serialisation.
   bool is_security_type{false};                           ///< @c true when security-authenticated transport is enabled.
   bool is_discovery_enabled{true};                        ///< Whether this node is reported to the discovery layer.
-  std::unique_ptr<class CpuProfiler> profiler;  ///< Optional per-node CPU profiler (only when global profiling is on).
+  std::atomic_bool has_suspend{false};    ///< Atomic suspend state flag (currently unused by default impls).
+  std::unique_ptr<CpuProfiler> profiler;  ///< Optional per-node CPU profiler (only when global profiling is on).
+  std::unique_ptr<Security> security;     ///< Installed per-node message security context, or @c nullptr.
 
  protected:
   explicit NodeImpl(ImplType type);

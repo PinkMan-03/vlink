@@ -497,6 +497,162 @@ int test_security_callback_pubsub(void) {
   return ret;
 }
 
+int test_security_getter_poll_reuses_cached_plaintext(void) {
+  printf("test_security_getter_poll_reuses_cached_plaintext...\n");
+  fflush(stdout);
+
+  int ret = 0;
+  const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
+
+  vlink_security_config_t cfg;
+  vlink_security_config_init(&cfg);
+  cfg.key = "secure_field_poll_key";
+
+  vlink_setter_handle_t setter = {0};
+  int rc = vlink_create_secure_setter("intra://c_interface/secure_field_poll", &schema, &setter, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create_secure_setter rc=%d\n", rc);
+    return 1;
+  }
+
+  vlink_getter_handle_t getter = {0};
+  rc = vlink_create_secure_getter("intra://c_interface/secure_field_poll", &schema, &getter, NULL, NULL, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create_secure_getter rc=%d\n", rc);
+    vlink_destroy_setter(&setter);
+    return 1;
+  }
+
+  const char* msg = "secure_field_poll";
+  rc = vlink_set(setter, (const uint8_t*)msg, strlen(msg));
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: secure vlink_set rc=%d\n", rc);
+    ret = 1;
+  }
+
+  custom_sleep(100);
+
+  for (int i = 0; i < 2; ++i) {
+    uint8_t buf[64];
+    size_t size = sizeof(buf);
+    rc = vlink_get(getter, buf, &size);
+    if (rc != VLINK_RET_NO_ERROR || size != strlen(msg) || memcmp(buf, msg, strlen(msg)) != 0) {
+      printf("FAIL: secure vlink_get #%d rc=%d size=%zu\n", i + 1, rc, size);
+      ret = 1;
+    }
+  }
+
+  if (ret == 0) {
+    printf("PASS: secure getter polling reuses cached plaintext without replay rejection\n");
+  }
+
+  vlink_destroy_getter(&getter);
+  vlink_destroy_setter(&setter);
+
+  return ret;
+}
+
+typedef struct {
+  vlink_server_handle_t* handle;
+  int reply_mode;
+  int saw_request;
+  int reply_rc;
+} secure_empty_reply_ctx_t;
+
+static void on_secure_empty_reply_req(const uint8_t* data, const size_t size, void* user_data) {
+  secure_empty_reply_ctx_t* ctx = (secure_empty_reply_ctx_t*)user_data;
+  const char* expected = "empty_reply_req";
+
+  if (ctx && data && size == strlen(expected) && memcmp(data, expected, size) == 0) {
+    ctx->saw_request = 1;
+  }
+
+  if (ctx && ctx->reply_mode != 0) {
+    ctx->reply_rc = vlink_reply(ctx->handle, NULL, 0);
+  }
+}
+
+static void on_secure_empty_reply_resp(const uint8_t* data, const size_t size, void* user_data) {
+  int* got_empty = (int*)user_data;
+
+  if (got_empty && data == NULL && size == 0) {
+    *got_empty = 0;
+  }
+}
+
+static int run_security_empty_reply_case(const char* url, int reply_mode) {
+  int ret = 0;
+  int got_empty = 1;
+  const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
+
+  vlink_security_config_t cfg;
+  vlink_security_config_init(&cfg);
+  cfg.key = "secure_rpc_empty_key";
+
+  vlink_server_handle_t server = {0};
+  secure_empty_reply_ctx_t ctx = {&server, reply_mode, 0, VLINK_RET_UNKNOWN_ERROR};
+  int rc = vlink_create_secure_server(url, &schema, &server, on_secure_empty_reply_req, &ctx, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create_secure_server rc=%d\n", rc);
+    return 1;
+  }
+
+  vlink_client_handle_t client = {0};
+  rc = vlink_create_secure_client(url, &schema, &client, &cfg);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: create_secure_client rc=%d\n", rc);
+    vlink_destroy_server(&server);
+    return 1;
+  }
+
+  vlink_wait_for_server(client, 2000);
+
+  const char* req = "empty_reply_req";
+  rc = vlink_invoke(client, (const uint8_t*)req, strlen(req), on_secure_empty_reply_resp, &got_empty);
+  if (rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: secure empty reply invoke rc=%d\n", rc);
+    ret = 1;
+  }
+
+  custom_sleep(100);
+
+  if (!ctx.saw_request) {
+    printf("FAIL: secure empty reply request callback not reached\n");
+    ret = 1;
+  }
+
+  if (reply_mode != 0 && ctx.reply_rc != VLINK_RET_NO_ERROR) {
+    printf("FAIL: vlink_reply(NULL, 0) rc=%d\n", ctx.reply_rc);
+    ret = 1;
+  }
+
+  if (got_empty != 0) {
+    printf("FAIL: secure empty reply response callback did not receive empty payload\n");
+    ret = 1;
+  }
+
+  vlink_destroy_client(&client);
+  vlink_destroy_server(&server);
+
+  return ret;
+}
+
+int test_security_empty_reply(void) {
+  printf("test_security_empty_reply...\n");
+  fflush(stdout);
+
+  int ret = 0;
+
+  ret += run_security_empty_reply_case("intra://c_interface/secure_empty_no_reply", 0);
+  ret += run_security_empty_reply_case("intra://c_interface/secure_empty_explicit_reply", 1);
+
+  if (ret == 0) {
+    printf("PASS: secure RPC preserves empty response protocol\n");
+  }
+
+  return ret;
+}
+
 int test_security_tamper(void) {
   printf("test_security_tamper...\n");
   fflush(stdout);
@@ -521,14 +677,14 @@ int test_security_tamper(void) {
   uint8_t* cipher = NULL;
   size_t cipher_size = 0;
   int rc = vlink_security_encrypt(sec, plain, sizeof(plain), &cipher, &cipher_size);
-  if (rc != VLINK_RET_NO_ERROR || cipher == NULL || cipher_size < sizeof(plain) + 12u + 16u) {
+  if (rc != VLINK_RET_NO_ERROR || cipher == NULL || cipher_size < sizeof(plain) + 51u) {
     printf("FAIL: encrypt rc=%d size=%zu\n", rc, cipher_size);
     vlink_security_free_buffer(cipher);
     vlink_security_destroy(sec);
     return 1;
   }
 
-  /* Flip exactly one bit at three structural positions: nonce start, ciphertext mid, tag tail. */
+  /* Flip exactly one bit at three structural positions: envelope start, ciphertext mid, tag tail. */
   const size_t positions[3] = {0u, cipher_size / 2u, cipher_size - 1u};
   for (size_t pi = 0; pi < 3u; ++pi) {
     uint8_t* tampered = (uint8_t*)malloc(cipher_size);
@@ -620,6 +776,8 @@ int main(int argc, char* argv[]) {
   ret += test_security_passphrase();
   ret += test_security_tamper();
   ret += test_security_callback_pubsub();
+  ret += test_security_getter_poll_reuses_cached_plaintext();
+  ret += test_security_empty_reply();
   ret += test_ssl_options_init();
 #endif
 

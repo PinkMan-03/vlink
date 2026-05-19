@@ -74,8 +74,6 @@
 #include <exception>
 #include <stdexcept>
 
-#include "./macros.h"
-
 namespace vlink {
 
 /**
@@ -91,11 +89,6 @@ namespace Exception {  // NOLINT(readability-identifier-naming)
 class RuntimeError final : public std::runtime_error {
  public:
   using std::runtime_error::runtime_error;
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -105,12 +98,6 @@ class RuntimeError final : public std::runtime_error {
 class OutOfRange final : public std::out_of_range {
  public:
   using std::out_of_range::out_of_range;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -120,12 +107,6 @@ class OutOfRange final : public std::out_of_range {
 class InvalidArgument final : public std::invalid_argument {
  public:
   using std::invalid_argument::invalid_argument;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -135,12 +116,6 @@ class InvalidArgument final : public std::invalid_argument {
 class LogicError final : public std::logic_error {
  public:
   using std::logic_error::logic_error;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -150,12 +125,6 @@ class LogicError final : public std::logic_error {
 class DomainError final : public std::domain_error {
  public:
   using std::domain_error::domain_error;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -165,12 +134,6 @@ class DomainError final : public std::domain_error {
 class LengthError final : public std::length_error {
  public:
   using std::length_error::length_error;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -180,12 +143,6 @@ class LengthError final : public std::length_error {
 class RangeError final : public std::range_error {
  public:
   using std::range_error::range_error;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -195,12 +152,6 @@ class RangeError final : public std::range_error {
 class OverflowError final : public std::overflow_error {
  public:
   using std::overflow_error::overflow_error;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -210,12 +161,6 @@ class OverflowError final : public std::overflow_error {
 class UnderflowError final : public std::underflow_error {
  public:
   using std::underflow_error::underflow_error;
-
-  /**
-   * @brief Returns the explanatory message associated with this exception.
-   * @return Null-terminated explanatory string.
-   */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
 };
 
 /**
@@ -230,7 +175,7 @@ class OperationCancelled final : public std::exception {
    * @brief Returns the explanatory cancellation message.
    * @return Null-terminated explanatory string.
    */
-  [[nodiscard]] VLINK_EXPORT const char* what() const noexcept override;
+  [[nodiscard]] const char* what() const noexcept override { return "vlink operation cancelled"; }
 };
 
 }  // namespace Exception

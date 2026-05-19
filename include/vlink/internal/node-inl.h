@@ -311,15 +311,16 @@ inline Node<ImplT, SecT>::~Node() {
 
 template <typename ImplT, SecurityType SecT>
 inline bool Node<ImplT, SecT>::enable_security(const Security::Config& cfg) {
+  auto sec_cfg = cfg;
+
+  return enable_security(std::move(sec_cfg));
+}
+
+template <typename ImplT, SecurityType SecT>
+inline bool Node<ImplT, SecT>::enable_security(Security::Config&& cfg) {
   static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.");
 
   if VUNLIKELY (!impl_) {
-    return false;
-  }
-
-  if VUNLIKELY (impl_->transport_type == TransportType::kIntra ||
-                (impl_->transport_type == TransportType::kDds && impl_->is_cdr_type)) {
-    VLOG_W("Node::enable_security(): intra/dds(cdr) transport ignores Security::Config.");
     return false;
   }
 
@@ -328,33 +329,7 @@ inline bool Node<ImplT, SecT>::enable_security(const Security::Config& cfg) {
     return false;
   }
 
-  std::optional<Security> candidate;
-  candidate.emplace(cfg);
-
-  if VUNLIKELY (!candidate->is_configured()) {
-    VLOG_W("Node::enable_security(): Security::Config has no usable slot.");
-    return false;
-  }
-
-  bool needs_encrypt = (impl_->impl_type == kPublisher || impl_->impl_type == kSetter || impl_->impl_type == kClient ||
-                        impl_->impl_type == kServer);
-
-  bool needs_decrypt = (impl_->impl_type == kSubscriber || impl_->impl_type == kGetter || impl_->impl_type == kClient ||
-                        impl_->impl_type == kServer);
-
-  if VUNLIKELY (needs_encrypt && !candidate->can_encrypt()) {
-    VLOG_W("Node::enable_security(): Security::Config cannot encrypt for this sender role.");
-    return false;
-  }
-
-  if VUNLIKELY (needs_decrypt && !candidate->can_decrypt()) {
-    VLOG_W("Node::enable_security(): Security::Config cannot decrypt for this receiver role.");
-    return false;
-  }
-
-  security_ = std::move(candidate);
-
-  return true;
+  return impl_->enable_security(std::move(cfg));
 }
 
 template <typename ImplT, SecurityType SecT>

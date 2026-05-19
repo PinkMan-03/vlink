@@ -295,7 +295,7 @@ inline bool Server<ReqT, RespT, SecT>::listen_bytes(NodeImpl::ReqRespCallback&& 
       [this, callback = std::move(callback)](uint64_t req_id, const Bytes& req_data, Bytes* resp_data) {
         if constexpr (SecT == SecurityType::kWithSecurity) {
           Bytes sec_req_data;
-          if VUNLIKELY (!this->security_ || !this->security_->decrypt(req_data, sec_req_data)) {
+          if VUNLIKELY (!this->impl_->security || !this->impl_->security->decrypt(req_data, sec_req_data)) {
             VLOG_T("Server decrypt failed, url: ", this->impl_->url, ".");
             return;
           }
@@ -324,7 +324,7 @@ inline bool Server<ReqT, RespT, SecT>::reply_bytes(uint64_t req_id, const Bytes&
   if constexpr (SecT == SecurityType::kWithSecurity) {
     Bytes sec_resp_data;
 
-    if VUNLIKELY (!this->security_ || !this->security_->encrypt(resp_data, sec_resp_data)) {
+    if VUNLIKELY (!this->impl_->security || !this->impl_->security->encrypt(resp_data, sec_resp_data)) {
       VLOG_T("Server encrypt failed, url: ", this->impl_->url, ".");
       return false;
     }
@@ -347,22 +347,33 @@ inline bool Server<ReqT, RespT, SecT>::reply_bytes(uint64_t req_id, const Bytes&
 
 // SecurityServer<ReqT, RespT>
 template <typename ReqT, typename RespT>
+template <typename SecurityConfigT>
 inline typename SecurityServer<ReqT, RespT>::UniquePtr SecurityServer<ReqT, RespT>::create_unique(
-    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
-  return std::make_unique<SecurityServer<ReqT, RespT>>(url_str, sec_cfg, type);
+    const std::string& url_str, SecurityConfigT&& sec_cfg, InitType type) {
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_unique<SecurityServer<ReqT, RespT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename ReqT, typename RespT>
+template <typename SecurityConfigT>
 inline typename SecurityServer<ReqT, RespT>::SharedPtr SecurityServer<ReqT, RespT>::create_shared(
-    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
-  return std::make_shared<SecurityServer<ReqT, RespT>>(url_str, sec_cfg, type);
+    const std::string& url_str, SecurityConfigT&& sec_cfg, InitType type) {
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_shared<SecurityServer<ReqT, RespT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename ReqT, typename RespT>
-template <typename ConfT, typename>
-inline SecurityServer<ReqT, RespT>::SecurityServer(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+template <typename ConfT, typename SecurityConfigT, typename>
+inline SecurityServer<ReqT, RespT>::SecurityServer(const ConfT& conf, SecurityConfigT&& sec_cfg, InitType type)
     : Server<ReqT, RespT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -370,10 +381,13 @@ inline SecurityServer<ReqT, RespT>::SecurityServer(const ConfT& conf, const Secu
 }
 
 template <typename ReqT, typename RespT>
-inline SecurityServer<ReqT, RespT>::SecurityServer(const std::string& url_str, const Security::Config& sec_cfg,
-                                                   InitType type)
+template <typename SecurityConfigT>
+inline SecurityServer<ReqT, RespT>::SecurityServer(const std::string& url_str, SecurityConfigT&& sec_cfg, InitType type)
     : Server<ReqT, RespT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)

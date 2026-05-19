@@ -174,7 +174,7 @@ inline bool Subscriber<MsgT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callbac
     if constexpr (SecT == SecurityType::kWithSecurity) {
       Bytes sec_data;
 
-      if VUNLIKELY (!this->security_ || !this->security_->decrypt(data, sec_data)) {
+      if VUNLIKELY (!this->impl_->security || !this->impl_->security->decrypt(data, sec_data)) {
         VLOG_T("Subscriber decrypt failed, url: ", this->impl_->url, ".");
         return;
       }
@@ -231,22 +231,35 @@ inline bool Subscriber<MsgT, SecT>::listen_intra(NodeImpl::IntraMsgCallback&& ca
 
 // SecuritySubscriber<MsgT>
 template <typename MsgT>
-inline typename SecuritySubscriber<MsgT>::UniquePtr SecuritySubscriber<MsgT>::create_unique(
-    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
-  return std::make_unique<SecuritySubscriber<MsgT>>(url_str, sec_cfg, type);
+template <typename SecurityConfigT>
+inline typename SecuritySubscriber<MsgT>::UniquePtr SecuritySubscriber<MsgT>::create_unique(const std::string& url_str,
+                                                                                            SecurityConfigT&& sec_cfg,
+                                                                                            InitType type) {
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_unique<SecuritySubscriber<MsgT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename MsgT>
-inline typename SecuritySubscriber<MsgT>::SharedPtr SecuritySubscriber<MsgT>::create_shared(
-    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
-  return std::make_shared<SecuritySubscriber<MsgT>>(url_str, sec_cfg, type);
+template <typename SecurityConfigT>
+inline typename SecuritySubscriber<MsgT>::SharedPtr SecuritySubscriber<MsgT>::create_shared(const std::string& url_str,
+                                                                                            SecurityConfigT&& sec_cfg,
+                                                                                            InitType type) {
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_shared<SecuritySubscriber<MsgT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename MsgT>
-template <typename ConfT, typename>
-inline SecuritySubscriber<MsgT>::SecuritySubscriber(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+template <typename ConfT, typename SecurityConfigT, typename>
+inline SecuritySubscriber<MsgT>::SecuritySubscriber(const ConfT& conf, SecurityConfigT&& sec_cfg, InitType type)
     : Subscriber<MsgT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -254,10 +267,14 @@ inline SecuritySubscriber<MsgT>::SecuritySubscriber(const ConfT& conf, const Sec
 }
 
 template <typename MsgT>
-inline SecuritySubscriber<MsgT>::SecuritySubscriber(const std::string& url_str, const Security::Config& sec_cfg,
+template <typename SecurityConfigT>
+inline SecuritySubscriber<MsgT>::SecuritySubscriber(const std::string& url_str, SecurityConfigT&& sec_cfg,
                                                     InitType type)
     : Subscriber<MsgT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)

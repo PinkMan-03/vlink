@@ -66,8 +66,8 @@
  * vlink_create_server(url, &schema, &handle, on_request, &handle);
  * @endcode
  * If @c vlink_reply() is not called, the request completes with an empty
- * response payload.  Calling @c vlink_reply() after the callback returns is
- * undefined behaviour; the internal mutex lock will no longer be held.
+ * response payload.  Calling @c vlink_reply() after the callback returns
+ * fails with @c VLINK_RET_RUNTIME_ERROR because no request is in progress.
  *
  * @par Usage -- publisher / subscriber
  * @code
@@ -299,7 +299,8 @@ typedef void (*vlink_msg_callback_t)(const uint8_t* data, const size_t size, voi
  * is held.  Call @c vlink_reply() from within this callback if you want to
  * provide a non-empty response before returning.  If it is not called, the
  * request completes with an empty payload.  Calling it after the callback
- * returns is undefined behaviour.
+ * returns fails with @c VLINK_RET_RUNTIME_ERROR because no request is in
+ * progress.
  *
  * @param data       Pointer to the request payload bytes.
  * @param size       Number of bytes in @p data.
@@ -532,8 +533,13 @@ VLINK_C_API_EXPORT int vlink_create_server(const char* url, const vlink_schema_i
  * Builds the @c vlink::Security from @p security_cfg @b before the internal
  * @c listen() registration completes.  Every inbound request goes through
  * @c Security::decrypt() and every reply written via @c vlink_reply() goes
- * through @c Security::encrypt().  Security configuration is one-shot at
- * creation; there is no separate runtime entry point.
+ * through @c Security::encrypt().  If @c vlink_reply() is not called, or is
+ * called with @c size == 0, the request completes with an empty response to
+ * preserve the C API reply protocol.  When @c security_cfg->advanced.aad_context
+ * is empty, the wrapper binds security to @c url|ser|schema; missing
+ * @p schema_info uses the C API @c Bytes default, @c url||VLINK_SCHEMA_RAW.
+ * Security configuration is one-shot at creation; there is no separate runtime
+ * entry point.
  *
  * @param url            VLink service URL.  Must not be @c NULL.
  * @param schema_info    Optional bundled @c ser + @c schema metadata.
@@ -571,13 +577,19 @@ VLINK_C_API_EXPORT int vlink_destroy_server(vlink_server_handle_t* handle);
  * mutex lock is still held.  Copies @p data into a heap buffer stored in
  * @c handle->reserved[1] and sets @c handle->reserved[2] to the size.
  * Sets @c handle->reserved[3] to @c NULL to signal that a reply is ready.
+ * For secure servers, @p size must be non-zero to produce an encrypted
+ * response payload; @p size == 0 is accepted and produces the protocol's empty
+ * response.
  *
  * @param handle  Server handle.  Must not be @c NULL.
  * @param data    Response payload bytes.
  * @param size    Number of bytes in @p data.
  * @return        @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
- *                on bad handle, or @c VLINK_RET_RUNTIME_ERROR if no pending
- *                request is in progress.
+ *                on bad handle, @c VLINK_RET_RUNTIME_ERROR if no pending
+ *                request is in progress, @c VLINK_RET_MEMORY_ERROR if the
+ *                internal response buffer allocation fails, or
+ *                @c VLINK_RET_TRANSFER_ERROR if secure response encryption
+ *                fails.
  */
 VLINK_C_API_EXPORT int vlink_reply(vlink_server_handle_t* handle, const uint8_t* data, const size_t size);
 
@@ -648,7 +660,9 @@ VLINK_C_API_EXPORT int vlink_detect_server(const vlink_client_handle_t handle,
  * wrapping @p data.  The @p resp_callback is invoked asynchronously on the
  * underlying @c vlink::Client callback context when the Server's response
  * arrives.
- * Pass @c NULL for @p resp_callback if the response is not needed.
+ * Pass @c NULL for @p resp_callback if the response is not needed.  Secure
+ * clients treat an empty transport response as the protocol's empty response
+ * and do not pass it through @c Security::decrypt().
  *
  * @param handle         Client handle.
  * @param data           Request payload.  Must remain valid until the call returns.
@@ -750,8 +764,12 @@ VLINK_C_API_EXPORT int vlink_create_getter(const char* url, const vlink_schema_i
  * Builds the @c vlink::Security from @p security_cfg @b before the internal
  * push-mode @c listen() registration completes.  Polling-mode Getters
  * (@p msg_callback == @c NULL) see the attached @c Security from the very
- * first @c vlink_get() call.  Security configuration is one-shot at creation;
- * there is no separate runtime entry point.
+ * first @c vlink_get() call.  A secure polling Getter caches the last
+ * authenticated ciphertext/plaintext pair internally, so repeated
+ * @c vlink_get() calls for the same latest field value return the cached
+ * plaintext instead of tripping replay protection.  New inbound frames still
+ * pass through @c Security::decrypt().  Security configuration is one-shot at
+ * creation; there is no separate runtime entry point.
  *
  * @param url            VLink field URL.  Must not be @c NULL.
  * @param schema_info    Optional bundled @c ser + @c schema metadata.
@@ -849,6 +867,31 @@ typedef int (*vlink_security_callback_t)(const uint8_t* in, size_t in_size, uint
                                          void* user);
 
 /**
+ * @brief Decrypt-only old symmetric key accepted during key rotation.
+ */
+typedef struct {
+  const char* key_id;         /**< Stable wire key id; @c NULL / empty is normalised to @c "default". */
+  const char* key;            /**< Raw symmetric seed, or @c NULL. */
+  const char* passphrase;     /**< PBKDF2 passphrase, or @c NULL. */
+  const uint8_t* pbkdf2_salt; /**< PBKDF2 salt (>=16 bytes), or @c NULL. */
+  size_t pbkdf2_salt_size;    /**< Byte count of @c pbkdf2_salt. */
+  uint32_t pbkdf2_iterations; /**< PBKDF2 iteration count; @c 0 means default (200000). */
+} vlink_security_previous_key_t;
+
+/**
+ * @brief Low-frequency security options for AAD, replay protection, and rotation.
+ */
+typedef struct {
+  const char* key_id;                                 /**< Wire key id (<=255 bytes) for @c key / @c passphrase. */
+  const char* aad_context;                            /**< AEAD context binding (<=65535 bytes), or @c NULL. */
+  uint32_t replay_window;                             /**< Replay window size; @c 0 disables replay checks. */
+  const vlink_security_previous_key_t* previous_keys; /**< Decrypt-only old keys for rotation, or @c NULL. */
+  size_t previous_keys_size;                          /**< Number of elements in @c previous_keys. */
+  const char* signing_key_pem; /**< Local RSA private key (PEM) for RSA-PSS signing, or @c NULL. */
+  const char* verify_key_pem;  /**< Peer RSA public key (PEM) for RSA-PSS verification, or @c NULL. */
+} vlink_security_advanced_config_t;
+
+/**
  * @brief Configuration aggregate for @c vlink_security_create() and the
  *        @c vlink_create_secure_*() node creation entry points.
  *
@@ -860,12 +903,15 @@ typedef int (*vlink_security_callback_t)(const uint8_t* in, size_t in_size, uint
  * @c pbkdf2_iterations to @c 0 selects the default (200000).
  *
  * @par Mode selection
- * - When both @c encrypt_callback and @c decrypt_callback are non-NULL the
- *   custom-callback path overrides every other slot.
+ * - When both @c encrypt_callback and @c decrypt_callback are non-NULL the custom-callback path
+ *   overrides every other slot.
  * - When @c public_key_pem / @c private_key_pem are installed the RSA hybrid
  *   path is used for outbound / inbound messages.
  * - Otherwise the symmetric path is used with the key derived from @c key or
  *   @c passphrase + @c pbkdf2_salt.
+ *
+ * @note @c key / @c passphrase are current outbound key sources. @c advanced holds low-frequency
+ * options such as key ids, old decrypt-only keys, AAD, replay protection, and signing.
  */
 struct vlink_security_config_s {
   const char* key;                            /**< Raw symmetric seed (SHA-256 truncated), or @c NULL. */
@@ -875,22 +921,22 @@ struct vlink_security_config_s {
   uint32_t pbkdf2_iterations;                 /**< PBKDF2 iteration count; @c 0 means default (200000). */
   const char* public_key_pem;                 /**< Peer RSA public key (PEM) for outbound encryption, or @c NULL. */
   const char* private_key_pem;                /**< Local RSA private key (PEM) for inbound decryption, or @c NULL. */
-  const char* signing_key_pem;                /**< Local RSA private key (PEM) for RSA-PSS signing, or @c NULL. */
-  const char* verify_key_pem;                 /**< Peer RSA public key (PEM) for RSA-PSS verification, or @c NULL. */
   vlink_security_callback_t encrypt_callback; /**< Custom encrypt callback, or @c NULL. */
   vlink_security_callback_t decrypt_callback; /**< Custom decrypt callback, or @c NULL. */
   void* callback_user_data;                   /**< Opaque pointer forwarded to both callbacks. */
+  vlink_security_advanced_config_t advanced;  /**< Low-frequency security options. */
 };
 
 /**
- * @brief Zero-initialises @p cfg and applies the default @c pbkdf2_iterations of 200000.
+ * @brief Zero-initialises @p cfg and applies default PBKDF2/replay settings.
  *
  * @details
  * Convenience initialiser to avoid relying on @c {0} aggregate initialisation in
  * client code.  After this call every string pointer is @c NULL, the salt buffer
- * is empty, both callbacks and @c callback_user_data are @c NULL, and
- * @c pbkdf2_iterations equals the canonical default.  Safe to call on a stack
- * variable before populating the fields you actually need.
+ * is empty, both callbacks and @c callback_user_data are @c NULL, @c pbkdf2_iterations is 200000,
+ * and @c advanced.replay_window is 4096. Set @c advanced.replay_window back to @c 0 to disable
+ * replay checks explicitly. Safe to call on a stack variable before populating the fields you
+ * actually need.
  *
  * @par Example
  * @code
@@ -918,7 +964,8 @@ VLINK_C_API_EXPORT void vlink_security_config_init(vlink_security_config_t* cfg)
  *
  * @par Example
  * @code
- * vlink_security_config_t cfg = {0};
+ * vlink_security_config_t cfg;
+ * vlink_security_config_init(&cfg);
  * cfg.passphrase = "correct horse battery staple";
  * cfg.pbkdf2_salt = my_salt_bytes;
  * cfg.pbkdf2_salt_size = my_salt_size;
@@ -957,9 +1004,9 @@ VLINK_C_API_EXPORT void vlink_security_destroy(vlink_security_handle_t sec);
  *
  * @details
  * The ciphertext is written into a freshly allocated buffer that the caller
- * owns; release it with @c vlink_security_free_buffer().  Empty inputs
- * (@c in == NULL or @c in_size == 0) are rejected with
- * @c VLINK_RET_INVALID_ERROR (AEAD cannot authenticate zero bytes).
+ * owns; release it with @c vlink_security_free_buffer().  The standalone
+ * helper follows @c Security::encrypt() and rejects empty inputs
+ * (@c in == NULL or @c in_size == 0) with @c VLINK_RET_INVALID_ERROR.
  *
  * @param sec       Security handle.
  * @param in        Plaintext input bytes.
@@ -981,9 +1028,9 @@ VLINK_C_API_EXPORT int vlink_security_encrypt(vlink_security_handle_t sec, const
  * @details
  * The plaintext is written into a freshly allocated buffer that the caller
  * owns; release it with @c vlink_security_free_buffer().  Empty inputs are
- * rejected with @c VLINK_RET_INVALID_ERROR (a valid AEAD ciphertext is at
- * least 28 bytes: 12B nonce + 16B tag).  Authentication failures (tampered
- * ciphertext, wrong key, invalid signature) are reported as
+ * rejected with @c VLINK_RET_INVALID_ERROR (a valid built-in ciphertext carries
+ * an envelope, tag, and at least one ciphertext byte). Authentication failures
+ * (tampered ciphertext, wrong key, invalid signature, or replay) are reported as
  * @c VLINK_RET_TRANSFER_ERROR.
  *
  * @param sec       Security handle.

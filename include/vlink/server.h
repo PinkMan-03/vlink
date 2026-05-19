@@ -89,6 +89,7 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
 
 #include "./base/functional.h"
 #include "./impl/server_impl.h"
@@ -276,7 +277,9 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new server.
    */
-  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, const Security::Config& sec_cfg = {},
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename SecurityConfigT = Security::Config>
+  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, SecurityConfigT&& sec_cfg = {},
                                                InitType type = InitType::kWithInit);
 
   /**
@@ -287,7 +290,9 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new server.
    */
-  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, const Security::Config& sec_cfg = {},
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename SecurityConfigT = Security::Config>
+  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, SecurityConfigT&& sec_cfg = {},
                                                InitType type = InitType::kWithInit);
 
   /**
@@ -299,15 +304,16 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
-  template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
-  explicit SecurityServer(const ConfT& conf, const Security::Config& sec_cfg = {}, InitType type = InitType::kWithInit);
+  template <typename ConfT, typename SecurityConfigT = Security::Config,
+            typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+  explicit SecurityServer(const ConfT& conf, SecurityConfigT&& sec_cfg = {}, InitType type = InitType::kWithInit);
 
   /**
    * @brief Constructs a @c SecurityServer and installs the security configuration in place.
    *
    * @details
    * Always builds the base @c Server with @c InitType::kWithoutInit, then
-   * calls the inherited @c enable_security(sec_cfg) so that @c security_ is
+   * forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security is
    * either populated or left empty.  Finally calls @c init() unless the
    * caller requests deferred initialisation.
    *
@@ -315,7 +321,9 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @param sec_cfg  Security configuration aggregate (empty by default → drops inbound requests).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
-  explicit SecurityServer(const std::string& url_str, const Security::Config& sec_cfg = {},
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename SecurityConfigT = Security::Config>
+  explicit SecurityServer(const std::string& url_str, SecurityConfigT&& sec_cfg = {},
                           InitType type = InitType::kWithInit);
 };
 

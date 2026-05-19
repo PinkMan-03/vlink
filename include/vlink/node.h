@@ -526,23 +526,30 @@ class Node {
   virtual ~Node();
 
   /**
-   * @brief Installs a @c Security configuration on this node.
+   * @brief Installs a @c Security configuration before transport initialisation.
    *
    * @details
-   * Internal helper invoked by the @c SecurityPublisher / @c SecuritySubscriber /
-   * @c SecurityServer / @c SecurityClient / @c SecuritySetter / @c SecurityGetter
-   * constructors after the base @c Publisher / @c Subscriber / ... has set up
-   * @c impl_ but before @c init() is called.  Builds a new @c Security from
-   * @p cfg, validates it via @c is_configured(), and only swaps it into
-   * @c security_ when validation passes.  Refuses to install when the transport
-   * does not support security (@c intra:// or @c dds:// with CDR) or when
-   * @c init() has already been called.
+   * Internal helper used by @c SecurityPublisher / @c SecuritySubscriber /
+   * @c SecurityServer / @c SecurityClient / @c SecuritySetter /
+   * @c SecurityGetter constructors after @c impl_ is created and before
+   * @c init().  Delegates validation and storage to @c NodeImpl::enable_security().
    *
    * @param cfg  Security configuration aggregate.
-   * @return     @c true on success; @c false on unsupported transport,
-   *             post-init invocation, or unusable @p cfg.
+   * @return     @c true when @p cfg is usable for this node role and transport.
    */
   bool enable_security(const Security::Config& cfg);
+
+  /**
+   * @brief Move-overload for construction-time security installation.
+   *
+   * @details
+   * Used when an internal caller owns the config and can pass it through to
+   * @c NodeImpl::enable_security(Security::Config&&) without an extra copy.
+   *
+   * @param cfg  Security configuration aggregate to consume.
+   * @return     @c true when @p cfg is usable for this node role and transport.
+   */
+  bool enable_security(Security::Config&& cfg);
 
   template <typename CallbackT, typename... ArgsT>
   void invoke_callback(const CallbackT& callback, ArgsT&&... args);
@@ -550,14 +557,14 @@ class Node {
   template <typename TypeT>
   TypeT get_default_value();
 
-  std::atomic_bool has_inited_{false};
-
-  std::unique_ptr<ImplT> impl_;
-  std::optional<Security> security_;
-  std::optional<std::mutex> quit_mtx_;
   void* proto_arena_{nullptr};
   bool is_support_loan_{false};
   bool is_manual_unloan_{false};
+
+  std::atomic_bool has_inited_{false};
+  std::optional<std::mutex> quit_mtx_;  ///< Optional safe-quit mutex guarding callbacks and teardown.
+
+  std::unique_ptr<ImplT> impl_;
 
  private:
   VLINK_DISALLOW_COPY_AND_ASSIGN(Node)

@@ -30,7 +30,7 @@
 //   4. Encryption with raw Bytes payloads
 //   5. Transport / serializer limitations
 //
-// Algorithm: AES-128-GCM (AEAD) with a 12-byte random nonce and 16-byte tag.
+// Algorithm: AES-128-GCM (AEAD) with envelope AAD, sequence nonce, and 16-byte tag.
 //
 // WARNING: intra:// does NOT support security encryption (messages stay in-process).
 // Security requires a cross-process transport such as dds://, shm://, zenoh://, mqtt://, etc.

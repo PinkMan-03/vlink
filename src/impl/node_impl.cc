@@ -29,7 +29,6 @@
 #include <utility>
 
 #include "./base/bytes.h"
-#include "./base/cpu_profiler.h"
 #include "./base/logger.h"
 #include "./base/message_loop.h"
 #include "./extension/bag_writer.h"
@@ -251,6 +250,54 @@ void NodeImpl::set_record_path(const std::string& path) {
   }
 
   old_recorder.reset();
+}
+
+bool NodeImpl::enable_security(const Security::Config& cfg) {
+  auto sec_cfg = cfg;
+
+  return enable_security(std::move(sec_cfg));
+}
+
+bool NodeImpl::enable_security(Security::Config&& cfg) {
+  if VUNLIKELY (transport_type == TransportType::kIntra || (transport_type == TransportType::kDds && is_cdr_type)) {
+    VLOG_W("Security::Config will ignore intra/dds(cdr) transport.");
+    return false;
+  }
+
+  if (cfg.advanced.aad_context.empty()) {
+    cfg.advanced.aad_context = url;
+    cfg.advanced.aad_context += "|";
+    cfg.advanced.aad_context += ser_type;
+    cfg.advanced.aad_context += "|";
+    cfg.advanced.aad_context += std::to_string(static_cast<uint32_t>(schema_type));
+  }
+
+  auto candidate = std::make_unique<Security>(std::move(cfg));
+
+  if VUNLIKELY (!candidate->is_configured()) {
+    VLOG_W("Security::Config has no usable slot.");
+    return false;
+  }
+
+  bool needs_encrypt =
+      (impl_type == kPublisher || impl_type == kSetter || impl_type == kClient || impl_type == kServer);
+
+  bool needs_decrypt =
+      (impl_type == kSubscriber || impl_type == kGetter || impl_type == kClient || impl_type == kServer);
+
+  if VUNLIKELY (needs_encrypt && !candidate->can_encrypt()) {
+    VLOG_W("Security::Config cannot encrypt for this sender role.");
+    return false;
+  }
+
+  if VUNLIKELY (needs_decrypt && !candidate->can_decrypt()) {
+    VLOG_W("Security::Config cannot decrypt for this receiver role.");
+    return false;
+  }
+
+  security = std::move(candidate);
+
+  return true;
 }
 
 void NodeImpl::set_ssl_options(const SslOptions& options) {

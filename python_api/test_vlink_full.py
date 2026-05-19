@@ -799,6 +799,13 @@ def test_ssl_options():
 def test_security():
     cfg = _vlink.SecurityConfig()
     cfg.key = "my_secret_key_16"
+    cfg.advanced.aad_context = "python/security"
+    cfg.advanced.replay_window = 0
+    assert cfg.advanced.key_id == "default"
+    previous = _vlink.SecurityConfigPreviousKey()
+    previous.key_id = "old"
+    previous.key = "old_secret"
+    cfg.advanced.previous_keys = [previous]
     sec = _vlink.Security(cfg)
     plain = b"Hello VLink Security!"
     encrypted = sec.encrypt(plain)
@@ -806,6 +813,17 @@ def test_security():
     assert encrypted != plain
     decrypted = sec.decrypt(encrypted)
     assert decrypted == plain
+    assert sec.decrypt(encrypted) == plain
+
+    old_sender_cfg = _vlink.SecurityConfig()
+    old_sender_cfg.key = "old_secret"
+    old_sender_cfg.advanced.key_id = "old"
+    old_sender_cfg.advanced.aad_context = cfg.advanced.aad_context
+    old_sender_cfg.advanced.replay_window = 0
+    old_sender = _vlink.Security(old_sender_cfg)
+    old_cipher = old_sender.encrypt(plain)
+    assert old_cipher is not None
+    assert sec.decrypt(old_cipher) == plain
     print("[PASS] Security")
 
 
@@ -981,7 +999,7 @@ def test_api_surface():
         "Logger", "ElapsedTimer", "DeadlineTimer", "MessageLoop", "MultiLoop", "Timer", "WheelTimer",
         "ThreadPool", "SpinLock", "CpuProfiler", "CpuProfilerGuard", "MemoryPool",
         "Process", "UrlRemap",
-        "Qos", "SslOptions", "Security", "SecurityConfig",
+        "Qos", "SslOptions", "Security", "SecurityConfig", "SecurityConfigAdvanced", "SecurityConfigPreviousKey",
         "Publisher", "Subscriber", "Server", "Client", "Setter", "Getter",
         "SecurityPublisher", "SecuritySubscriber", "SecurityServer", "SecurityClient", "SecuritySetter",
         "SecurityGetter",
@@ -1106,8 +1124,16 @@ def test_security_node_bindings():
         cfg.key = "python-api-key"
         cfg.encrypt_callback = passthrough
         cfg.decrypt_callback = passthrough
-        node = cls(f"shm://test/security_bindings_{cls.__name__}", cfg, auto_init=False)
+        node = cls(
+            f"shm://test/security_bindings_{cls.__name__}",
+            cfg,
+            ser_type="demo.SecurityBinding",
+            schema_type=_vlink.SchemaType.Protobuf,
+            auto_init=False,
+        )
         assert node.get_transport_type() == _vlink.TransportType.Shm
+        assert node.get_ser_type() == "demo.SecurityBinding"
+        assert node.get_schema_type() == _vlink.SchemaType.Protobuf
 
     assert _vlink.SecurityType.WithSecurity is not None
     assert _vlink.ActionType.Unknown is not None

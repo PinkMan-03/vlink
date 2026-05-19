@@ -38,11 +38,11 @@
  * | Symmetric  | @c key or @c passphrase installed  | Same @c key or @c passphrase + salt  |
  *
  * Cryptographic primitives:
- * - AEAD: AES-128-GCM with a 12-byte random nonce and 16-byte authentication tag.
+ * - AEAD: AES-128-GCM with a 12-byte nonce, authenticated envelope header, and 16-byte tag.
+ * - Envelope binding: version, mode, key id, sender id, sequence, nonce, and @c aad_context
+ *   are authenticated as AAD; receivers reject replayed sequence numbers within @c replay_window.
  * - Asymmetric key wrap: RSA-OAEP-SHA256 wrapping a fresh 16-byte AES session key per message.
- * - Optional sender authentication: RSA-PSS-SHA256 over
- *   @c wrap_len_le(2B) || wrapped_key || nonce || ciphertext || tag (the
- *   sig_len_le field is intentionally excluded to avoid self-referential length).
+ * - Optional sender authentication: RSA-PSS-SHA256 over the AAD-bound envelope and ciphertext/tag.
  * - Symmetric key derivation: SHA-256 truncation (from @c key) or PBKDF2-HMAC-SHA256
  *   (from @c passphrase + @c pbkdf2_salt + @c pbkdf2_iterations).
  *
@@ -61,21 +61,20 @@
  * @code
  * vlink::Security::Config sender;
  * sender.public_key_pem = peer_pub_pem;
- * sender.signing_key_pem = own_priv_pem;
+ * sender.advanced.signing_key_pem = own_priv_pem;
  * vlink::Security sender_sec(sender);
  *
  * vlink::Security::Config receiver;
  * receiver.private_key_pem = own_priv_pem;
- * receiver.verify_key_pem = peer_pub_pem;
+ * receiver.advanced.verify_key_pem = peer_pub_pem;
  * vlink::Security receiver_sec(receiver);
  * @endcode
  *
  * @note
  * - All public methods are thread-safe (internal mutex).
  * - @c encrypt() and @c decrypt() return @c true on success.  An empty input @b fails
- *   with @c false and an empty output, because AEAD cannot authenticate zero bytes
- *   (every valid ciphertext carries at least a 12-byte nonce + 16-byte tag plus
- *   one byte of authenticated plaintext).
+ *   with @c false and an empty output; every built-in ciphertext carries an envelope,
+ *   a 16-byte tag, and at least one byte of authenticated plaintext.
  * - When @c VLINK_ENABLE_SECURITY is undefined, only the custom-callback path works.
  */
 
@@ -84,6 +83,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "../base/bytes.h"
 #include "../base/functional.h"
@@ -117,10 +117,10 @@ class VLINK_EXPORT Security final {
    * @brief Aggregate of every parameter accepted by the @c Security constructor.
    *
    * @details
-   * Fields are processed independently.  Empty PEM strings, empty @c key, empty
-   * @c passphrase, and null callbacks mean "do not install this slot"; non-empty values
-   * are validated and installed.  Validation failures (bad PEM, weak RSA key, missing
-   * salt, etc.) are logged and the corresponding slot is left empty.
+   * Fields are processed independently.  Empty PEM strings, empty @c key, empty @c passphrase,
+   * and null callbacks mean "do not install this slot"; non-empty values are validated and
+   * installed.  Validation failures (bad PEM, weak RSA key, missing salt, etc.) are logged and the
+   * corresponding slot is left empty.
    *
    * @par Mode selection
    * - @c encrypt_callback and @c decrypt_callback override everything else when present.
@@ -131,22 +131,40 @@ class VLINK_EXPORT Security final {
    * @par Symmetric key sources
    * Provide either @c key (raw seed, hashed via SHA-256 truncation) or @c passphrase
    * (low-entropy, normalised via PBKDF2-HMAC-SHA256 with @c pbkdf2_salt and
-   * @c pbkdf2_iterations).  When both are empty no symmetric key is installed.
+   * @c pbkdf2_iterations).  @c advanced.key_id labels the current outbound key on the wire. During
+   * rotation, put decrypt-only old keys into @c advanced.previous_keys; outbound traffic always uses
+   * the top-level current key.  When both are empty no symmetric key is installed.
    *
    * @par RSA constraints
    * All four PEM fields require RSA keys of at least 2048 bits.
    */
-  struct VLINK_EXPORT Config final {
+  struct Config final {
+    struct PreviousKey final {
+      std::string key_id;                   ///< Stable identifier carried on the wire for this key.
+      std::string key;                      ///< Raw symmetric seed; SHA-256 truncated to 16 bytes.
+      std::string passphrase;               ///< Low-entropy passphrase fed into PBKDF2-HMAC-SHA256.
+      Bytes pbkdf2_salt;                    ///< Per-deployment salt (>=16 bytes), shared out-of-band.
+      uint32_t pbkdf2_iterations{200000U};  ///< PBKDF2 iteration count.
+    };
+
+    struct Advanced final {
+      std::string key_id{"default"};           ///< Current key id (<=255 wire bytes); "default" is compact.
+      std::vector<PreviousKey> previous_keys;  ///< Decrypt-only old symmetric keys accepted during rotation.
+      std::string aad_context;                 ///< Application/channel context (<=65535 bytes) bound into AEAD.
+      uint32_t replay_window{4096U};           ///< Sliding replay window size in messages; 0 disables checks.
+      std::string signing_key_pem;             ///< Local RSA private key (PEM) for RSA-PSS signing.
+      std::string verify_key_pem;              ///< Peer's RSA public key (PEM) for RSA-PSS verification.
+    };
+
     std::string key;                      ///< Raw symmetric seed; SHA-256 truncated to 16 bytes.
     std::string passphrase;               ///< Low-entropy passphrase fed into PBKDF2-HMAC-SHA256.
     Bytes pbkdf2_salt;                    ///< Per-deployment salt (>=16 bytes), shared out-of-band.
     uint32_t pbkdf2_iterations{200000U};  ///< PBKDF2 iteration count.
     std::string public_key_pem;           ///< Peer's RSA public key (PEM) for outbound encryption.
     std::string private_key_pem;          ///< Local RSA private key (PEM) for inbound decryption.
-    std::string signing_key_pem;          ///< Local RSA private key (PEM) for RSA-PSS signing.
-    std::string verify_key_pem;           ///< Peer's RSA public key (PEM) for RSA-PSS verification.
     Callback encrypt_callback;            ///< Custom encrypt; bypasses AEAD.
     Callback decrypt_callback;            ///< Custom decrypt; paired with @c encrypt_callback.
+    Advanced advanced;                    ///< Low-frequency knobs: AAD, replay, rotation, and signing.
 
     Config() = default;
   };
@@ -172,6 +190,18 @@ class VLINK_EXPORT Security final {
    * @param cfg  Configuration aggregate.
    */
   explicit Security(const Config& cfg);
+
+  /**
+   * @brief Constructs a @c Security instance by moving @p cfg into the implementation.
+   *
+   * @details
+   * This overload avoids copying callback targets and PEM / key strings when the
+   * caller no longer needs the configuration.  The stored config is normalised
+   * during construction (for example key id and replay-window bounds).
+   *
+   * @param cfg  Configuration aggregate to consume.
+   */
+  explicit Security(Config&& cfg);
 
   /**
    * @brief Destroys the instance and zeroises the symmetric key material in place.
@@ -208,11 +238,10 @@ class VLINK_EXPORT Security final {
    *
    * @details
    * Mode selection order: custom callback > asymmetric (private key present) > symmetric.
-   * Empty input fails with @c false (a valid symmetric AEAD ciphertext is at least
-   * 29 bytes: 12B nonce + 16B tag + 1B plaintext; the asymmetric envelope adds a
-   * 4-byte header plus the RSA-wrapped key and optional signature).  Authentication
+   * Empty input fails with @c false (a valid built-in ciphertext carries an envelope,
+   * at least one ciphertext byte, and a 16-byte tag).  Authentication
    * failures (tampered ciphertext, wrong key, missing or invalid RSA-PSS signature
-   * when @c verify_key_pem is set) also cause @c decrypt() to return @c false.
+   * when @c advanced.verify_key_pem is set) also cause @c decrypt() to return @c false.
    *
    * @param in   Ciphertext bytes produced by a peer's @c encrypt().
    * @param out  Plaintext output buffer.  Overwritten on success; set to empty on failure.

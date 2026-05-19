@@ -43,7 +43,7 @@ constexpr const char* kPassphraseKdf = "PBKDF2-HMAC-SHA256";
 // Print a summary of VLink security primitives.
 inline void print_security_defaults() {
   std::cout << "  VLink Security Primitives:" << std::endl;
-  std::cout << "    AEAD:       " << kDefaultAlgorithm << " (12-byte nonce, 16-byte tag)" << std::endl;
+  std::cout << "    AEAD:       " << kDefaultAlgorithm << " (envelope AAD, sequence nonce, 16-byte tag)" << std::endl;
   std::cout << "    RSA wrap:   " << kAsymmetricWrap << " (>=2048-bit RSA)" << std::endl;
   std::cout << "    Signature:  " << kSignatureScheme << " (optional sender auth)" << std::endl;
   std::cout << "    KDF:        " << kPassphraseKdf << " (passphrase -> 16-byte AES key)" << std::endl;

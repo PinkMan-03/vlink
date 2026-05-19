@@ -12,11 +12,13 @@
  *      Security configuration is one-shot at creation; there is no separate
  *      enable_security() entry point.
  *
- * Security is NOT supported with intra:// or dds:// + CDR; this example uses
- * shm:// for the pub/sub section.  The standalone roundtrip is transport-free.
+ * The C API secure node wrappers encrypt/decrypt Bytes payloads in the wrapper
+ * layer.  For cross-language interop, use the same URL, schema metadata, and
+ * Security config on the C, C++, and Python endpoints.
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <vlink/external/c_api.h>
 
@@ -57,6 +59,8 @@ int main(void) {
     vlink_security_config_t cfg;
     vlink_security_config_init(&cfg);
     cfg.key = "my-secret-key-16";
+    cfg.advanced.key_id = "c-raw-v1";
+    cfg.advanced.aad_context = "c_api/security/raw";
 
     vlink_security_handle_t sec = vlink_security_create(&cfg);
     if (sec == NULL) {
@@ -83,6 +87,13 @@ int main(void) {
     } else {
       printf("  Roundtrip: FAIL\n");
     }
+
+    uint8_t* replay_plain = NULL;
+    size_t replay_plain_size = 0;
+    fflush(stdout);
+    ret = vlink_security_decrypt(sec, cipher, cipher_size, &replay_plain, &replay_plain_size);
+    printf("  replay decrypt ret=%d (expected %d)\n", ret, VLINK_RET_TRANSFER_ERROR);
+    vlink_security_free_buffer(replay_plain);
 
     vlink_security_free_buffer(cipher);
     vlink_security_free_buffer(recovered);
@@ -133,11 +144,14 @@ int main(void) {
   }
 
   /* ======== Section 3: Publisher/Subscriber with Encryption ======== */
-  /* Security is NOT supported with intra:// (and dds:// + CDR).
-   * shm:// requires the Iceoryx RouDi daemon to be running.  This section is
-   * illustrative; running it standalone without RouDi will fail at create. */
+  /* C API secure wrappers encrypt Bytes payloads in the wrapper layer.  This
+   * shm:// section is illustrative and requires the Iceoryx RouDi daemon. */
   printf("\n[3] Publisher/Subscriber with shm:// + Security\n");
-  printf("    (requires `iox-roudi` daemon; skipped gracefully if unavailable)\n");
+  printf("    (requires `iox-roudi`; set VLINK_C_SECURITY_RUN_SHM=1 to run this section)\n");
+  if (getenv("VLINK_C_SECURITY_RUN_SHM") == NULL) {
+    printf("  Skipping: shm transport section is opt-in to avoid Iceoryx fatal aborts without RouDi.\n");
+    goto section3_end;
+  }
   {
     const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
 
@@ -192,7 +206,7 @@ section3_end:
   printf("                  vlink_create_secure_server     / vlink_create_secure_client\n");
   printf("                  vlink_create_secure_setter     / vlink_create_secure_getter\n");
   printf("  Allocations:    encrypt/decrypt allocate; release with vlink_security_free_buffer.\n");
-  printf("  Limitations:    intra:// and dds:// + CDR do NOT support security.\n");
+  printf("  Interop:        C/C++/Python endpoints must share URL, schema metadata, and security config.\n");
 
   printf("\n=== Example complete ===\n");
   return 0;

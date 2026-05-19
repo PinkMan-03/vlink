@@ -25,6 +25,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "../base/cpu_profiler_guard.h"
 #include "../base/logger.h"
@@ -183,7 +184,7 @@ inline void Setter<ValueT, SecT>::write_bytes(const Bytes& data) {
   if constexpr (SecT == SecurityType::kWithSecurity) {
     Bytes sec_data;
 
-    if VUNLIKELY (!this->security_ || !this->security_->encrypt(data, sec_data)) {
+    if VUNLIKELY (!this->impl_->security || !this->impl_->security->encrypt(data, sec_data)) {
       VLOG_T("Setter encrypt failed, url: ", this->impl_->url, ".");
       return;
     }
@@ -198,24 +199,35 @@ inline void Setter<ValueT, SecT>::write_bytes(const Bytes& data) {
 
 // SecuritySetter<ValueT>
 template <typename ValueT>
+template <typename SecurityConfigT>
 inline typename SecuritySetter<ValueT>::UniquePtr SecuritySetter<ValueT>::create_unique(const std::string& url_str,
-                                                                                        const Security::Config& sec_cfg,
+                                                                                        SecurityConfigT&& sec_cfg,
                                                                                         InitType type) {
-  return std::make_unique<SecuritySetter<ValueT>>(url_str, sec_cfg, type);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_unique<SecuritySetter<ValueT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename ValueT>
+template <typename SecurityConfigT>
 inline typename SecuritySetter<ValueT>::SharedPtr SecuritySetter<ValueT>::create_shared(const std::string& url_str,
-                                                                                        const Security::Config& sec_cfg,
+                                                                                        SecurityConfigT&& sec_cfg,
                                                                                         InitType type) {
-  return std::make_shared<SecuritySetter<ValueT>>(url_str, sec_cfg, type);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_shared<SecuritySetter<ValueT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename ValueT>
-template <typename ConfT, typename>
-inline SecuritySetter<ValueT>::SecuritySetter(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+template <typename ConfT, typename SecurityConfigT, typename>
+inline SecuritySetter<ValueT>::SecuritySetter(const ConfT& conf, SecurityConfigT&& sec_cfg, InitType type)
     : Setter<ValueT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -223,10 +235,13 @@ inline SecuritySetter<ValueT>::SecuritySetter(const ConfT& conf, const Security:
 }
 
 template <typename ValueT>
-inline SecuritySetter<ValueT>::SecuritySetter(const std::string& url_str, const Security::Config& sec_cfg,
-                                              InitType type)
+template <typename SecurityConfigT>
+inline SecuritySetter<ValueT>::SecuritySetter(const std::string& url_str, SecurityConfigT&& sec_cfg, InitType type)
     : Setter<ValueT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)

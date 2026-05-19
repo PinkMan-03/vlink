@@ -270,7 +270,7 @@ inline void Getter<ValueT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callback)
     if constexpr (SecT == SecurityType::kWithSecurity) {
       Bytes sec_data;
 
-      if VUNLIKELY (!this->security_ || !this->security_->decrypt(data, sec_data)) {
+      if VUNLIKELY (!this->impl_->security || !this->impl_->security->decrypt(data, sec_data)) {
         VLOG_T("Getter decrypt failed, url: ", this->impl_->url, ".");
         return;
       }
@@ -286,24 +286,35 @@ inline void Getter<ValueT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callback)
 
 // SecurityGetter<ValueT>
 template <typename ValueT>
+template <typename SecurityConfigT>
 inline typename SecurityGetter<ValueT>::UniquePtr SecurityGetter<ValueT>::create_unique(const std::string& url_str,
-                                                                                        const Security::Config& sec_cfg,
+                                                                                        SecurityConfigT&& sec_cfg,
                                                                                         InitType type) {
-  return std::make_unique<SecurityGetter<ValueT>>(url_str, sec_cfg, type);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_unique<SecurityGetter<ValueT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename ValueT>
+template <typename SecurityConfigT>
 inline typename SecurityGetter<ValueT>::SharedPtr SecurityGetter<ValueT>::create_shared(const std::string& url_str,
-                                                                                        const Security::Config& sec_cfg,
+                                                                                        SecurityConfigT&& sec_cfg,
                                                                                         InitType type) {
-  return std::make_shared<SecurityGetter<ValueT>>(url_str, sec_cfg, type);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_shared<SecurityGetter<ValueT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename ValueT>
-template <typename ConfT, typename>
-inline SecurityGetter<ValueT>::SecurityGetter(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+template <typename ConfT, typename SecurityConfigT, typename>
+inline SecurityGetter<ValueT>::SecurityGetter(const ConfT& conf, SecurityConfigT&& sec_cfg, InitType type)
     : Getter<ValueT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -311,10 +322,13 @@ inline SecurityGetter<ValueT>::SecurityGetter(const ConfT& conf, const Security:
 }
 
 template <typename ValueT>
-inline SecurityGetter<ValueT>::SecurityGetter(const std::string& url_str, const Security::Config& sec_cfg,
-                                              InitType type)
+template <typename SecurityConfigT>
+inline SecurityGetter<ValueT>::SecurityGetter(const std::string& url_str, SecurityConfigT&& sec_cfg, InitType type)
     : Getter<ValueT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)

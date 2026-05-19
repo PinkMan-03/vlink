@@ -85,6 +85,7 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
 
 #include "./impl/publisher_impl.h"
 #include "./node.h"
@@ -288,7 +289,9 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new publisher instance.
    */
-  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, const Security::Config& sec_cfg = {},
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename SecurityConfigT = Security::Config>
+  [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, SecurityConfigT&& sec_cfg = {},
                                                InitType type = InitType::kWithInit);
 
   /**
@@ -299,7 +302,9 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new publisher instance.
    */
-  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, const Security::Config& sec_cfg = {},
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename SecurityConfigT = Security::Config>
+  [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, SecurityConfigT&& sec_cfg = {},
                                                InitType type = InitType::kWithInit);
 
   /**
@@ -307,7 +312,7 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    *
    * @details
    * Builds the base @c Publisher with @c InitType::kWithoutInit using @p conf,
-   * then calls the inherited @c enable_security(sec_cfg) so that @c security_
+   * then forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security
    * is either populated or left empty.  Finally calls @c init() unless the
    * caller requests deferred initialisation.
    *
@@ -317,16 +322,16 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
-  template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
-  explicit SecurityPublisher(const ConfT& conf, const Security::Config& sec_cfg = {},
-                             InitType type = InitType::kWithInit);
+  template <typename ConfT, typename SecurityConfigT = Security::Config,
+            typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+  explicit SecurityPublisher(const ConfT& conf, SecurityConfigT&& sec_cfg = {}, InitType type = InitType::kWithInit);
 
   /**
    * @brief Constructs a @c SecurityPublisher and installs the security configuration in place.
    *
    * @details
    * Always builds the base @c Publisher with @c InitType::kWithoutInit, then
-   * calls the inherited @c enable_security(sec_cfg) so that @c security_ is
+   * forwards @p sec_cfg into @c enable_security() so that @c NodeImpl::security is
    * either populated (when @p sec_cfg contains a usable cryptographic slot)
    * or left empty (when @p sec_cfg is empty or invalid).  Finally calls
    * @c init() unless the caller requests deferred initialisation.
@@ -335,7 +340,9 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    * @param sec_cfg  Security configuration aggregate (empty by default → no encryption).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
-  explicit SecurityPublisher(const std::string& url_str, const Security::Config& sec_cfg = {},
+  // NOLINTNEXTLINE(modernize-use-constraints)
+  template <typename SecurityConfigT = Security::Config>
+  explicit SecurityPublisher(const std::string& url_str, SecurityConfigT&& sec_cfg = {},
                              InitType type = InitType::kWithInit);
 };
 

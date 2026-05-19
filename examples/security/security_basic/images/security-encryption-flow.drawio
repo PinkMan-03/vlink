@@ -97,7 +97,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="note1" value="enable_security(cfg)   -   Config::key is SHA-256-truncated into a 16-byte AES-128-GCM key; replace demo key in production" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#bdbdbd;strokeWidth=1.2;fontSize=12;fontStyle=2;fontColor=#546e7a;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="note1" value="Pass cfg as the SecurityXxx constructor's second argument   -   Config::key is SHA-256-truncated into a 16-byte AES-128-GCM key" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#bdbdbd;strokeWidth=1.2;fontSize=12;fontStyle=2;fontColor=#546e7a;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="140" y="580" width="900" height="26" as="geometry" />
         </mxCell>
 

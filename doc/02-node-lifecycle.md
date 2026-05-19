@@ -82,7 +82,7 @@ static_assert(std::is_base_of_v<NodeImpl, ImplT>, "ImplT must be derived from No
 | ------------------- | ----------------------------- | ---------- | ---------------------------------------- |
 | `has_inited_`       | `std::atomic_bool`            | `false`    | 初始化标志，CAS 保护                     |
 | `impl_`             | `std::unique_ptr<ImplT>`      | 空         | 传输后端实现对象                         |
-| `security_`         | `std::optional<Security>`     | 空         | 安全加解密对象（仅 `kWithSecurity` 节点在构造时由 `SecurityXxx` ctor 内部填充，且 `Security::Config` 验证通过；未传 cfg 或验证失败时保持空，加解密路径直接 drop 消息）|
+| `impl_->security`   | `std::unique_ptr<Security>`   | `nullptr`  | 安全加解密对象（仅 `kWithSecurity` 节点在构造时由 `SecurityXxx` ctor 内部填充，且 `Security::Config` 验证通过；未传 cfg 或验证失败时保持空，加解密路径直接 drop 消息）|
 | `quit_mtx_`         | `std::optional<std::mutex>`   | 空         | 安全退出互斥锁（`set_safety_quit(true)` 时创建） |
 | `proto_arena_`      | `void*`                       | `nullptr`  | Protobuf Arena 指针（仅 proto 指针类型使用） |
 | `is_support_loan_`  | `bool`                        | `false`    | 在 `init()` 中由 `impl_->is_support_loan()` 填写 |
@@ -286,8 +286,9 @@ pub.init();
 `Security::Config` 只能通过 `SecurityPublisher` / `SecuritySubscriber` / `SecurityServer` / `SecurityClient` / `SecuritySetter` / `SecurityGetter` 的**构造函数**一次性传入，无运行时 setter：
 
 ```cpp
+template <typename SecurityConfigT = Security::Config>
 explicit SecurityPublisher(const std::string& url_str,
-                           const Security::Config& sec_cfg = {},
+                           SecurityConfigT&& sec_cfg = {},
                            InitType type = InitType::kWithInit);
 
 // 另有 ConfT 重载和 create_unique / create_shared 工厂方法。
@@ -295,11 +296,11 @@ explicit SecurityPublisher(const std::string& url_str,
 
 构造阶段的处理：
 
-- `SecurityXxx` 总是先以 `InitType::kWithoutInit` 调用基类构造，再用 `sec_cfg` 构造候选 `Security`，验证 `is_configured()` 通过后才装入 `security_`，最后按 `type` 决定是否立刻 `init()`；
+- `SecurityXxx` 总是先以 `InitType::kWithoutInit` 调用基类构造，再把 `sec_cfg` 转发给 `NodeImpl::enable_security()` 构造候选 `Security`，验证 `is_configured()` 通过后才装入 `impl_->security`，最后按 `type` 决定是否立刻 `init()`；
 - 在非 `kWithSecurity` 实例上调用 `enable_security()` 会编译失败（`static_assert(SecT == SecurityType::kWithSecurity, "Must be security type.")`）；
-- `intra://` 与 `dds://` CDR 类型运行时不支持安全加密，构造时会打印 warning 并把 `sec_cfg` 忽略，`security_` 保持空；
-- 验证失败（非法 PEM / 弱 RSA / 缺 salt 等）会打印 warning 并把对应槽位置空；如果整个 cfg 都失效，`security_` 保持空，发送 / 接收路径会直接 drop 消息并打 log，不再触发未定义行为；
-- `Security::Config` 是一个 aggregate struct，包含 `key` / `passphrase` / `pbkdf2_salt` / `public_key_pem` / `private_key_pem` / `signing_key_pem` / `verify_key_pem` / `encrypt_callback` / `decrypt_callback` 等字段；模式按字段自动选择（自定义回调 > RSA 非对称 > 对称）；
+- `intra://` 与 `dds://` CDR 类型运行时不支持安全加密，构造时会打印 warning 并把 `sec_cfg` 忽略，`impl_->security` 保持空；
+- 验证失败（非法 PEM / 弱 RSA / 缺 salt 等）会打印 warning 并把对应槽位置空；如果整个 cfg 都失效，`impl_->security` 保持空，发送 / 接收路径会直接 drop 消息并打 log，不再触发未定义行为；
+- `Security::Config` 是一个 aggregate struct，常用入口包含 `key` / `passphrase` / `pbkdf2_salt` / `public_key_pem` / `private_key_pem` / `encrypt_callback` / `decrypt_callback`，低频项放在 `advanced`（如 `key_id` / `previous_keys` / `aad_context` / `replay_window` / `signing_key_pem` / `verify_key_pem`）；模式按字段自动选择（自定义回调 > RSA 非对称 > 对称）；
 - 自定义回调必须**成对**安装；只设 `encrypt_callback` 或只设 `decrypt_callback` 会被忽略并打印 warning；
 - 内置 AEAD / RSA 需以 `ENABLE_SECURITY=ON` 构建（依赖 OpenSSL）；未启用时只有自定义回调路径生效。
 
@@ -727,7 +728,7 @@ VLink 为每种通信原语提供预定义的安全别名类型：
 - `intra://` -- 进程内通信无需加密
 - `dds://` 且使用 CDR 序列化 -- CDR 数据由 DDS 直接管理，无法在 VLink 层加密
 
-`security_` 保持空 `optional`；发送 / 接收路径会 drop 消息并打 log，不会 UB。
+`impl_->security` 保持 `nullptr`；发送 / 接收路径会 drop 消息并打 log，不会 UB。
 
 ### 2.13.4 安全与零拷贝
 

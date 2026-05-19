@@ -197,7 +197,7 @@ inline bool Publisher<MsgT, SecT>::write_bytes(const Bytes& data) {
   if constexpr (SecT == SecurityType::kWithSecurity) {
     Bytes sec_data;
 
-    if VUNLIKELY (!this->security_ || !this->security_->encrypt(data, sec_data)) {
+    if VUNLIKELY (!this->impl_->security || !this->impl_->security->encrypt(data, sec_data)) {
       VLOG_T("Publisher encrypt failed, url: ", this->impl_->url, ".");
       return false;
     }
@@ -217,22 +217,35 @@ inline bool Publisher<MsgT, SecT>::write_intra(const IntraData& intra_data) {
 
 // SecurityPublisher<MsgT>
 template <typename MsgT>
-inline typename SecurityPublisher<MsgT>::UniquePtr SecurityPublisher<MsgT>::create_unique(
-    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
-  return std::make_unique<SecurityPublisher<MsgT>>(url_str, sec_cfg, type);
+template <typename SecurityConfigT>
+inline typename SecurityPublisher<MsgT>::UniquePtr SecurityPublisher<MsgT>::create_unique(const std::string& url_str,
+                                                                                          SecurityConfigT&& sec_cfg,
+                                                                                          InitType type) {
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_unique<SecurityPublisher<MsgT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename MsgT>
-inline typename SecurityPublisher<MsgT>::SharedPtr SecurityPublisher<MsgT>::create_shared(
-    const std::string& url_str, const Security::Config& sec_cfg, InitType type) {
-  return std::make_shared<SecurityPublisher<MsgT>>(url_str, sec_cfg, type);
+template <typename SecurityConfigT>
+inline typename SecurityPublisher<MsgT>::SharedPtr SecurityPublisher<MsgT>::create_shared(const std::string& url_str,
+                                                                                          SecurityConfigT&& sec_cfg,
+                                                                                          InitType type) {
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  return std::make_shared<SecurityPublisher<MsgT>>(url_str, std::forward<SecurityConfigT>(sec_cfg), type);
 }
 
 template <typename MsgT>
-template <typename ConfT, typename>
-inline SecurityPublisher<MsgT>::SecurityPublisher(const ConfT& conf, const Security::Config& sec_cfg, InitType type)
+template <typename ConfT, typename SecurityConfigT, typename>
+inline SecurityPublisher<MsgT>::SecurityPublisher(const ConfT& conf, SecurityConfigT&& sec_cfg, InitType type)
     : Publisher<MsgT, SecurityType::kWithSecurity>(conf, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
@@ -240,10 +253,13 @@ inline SecurityPublisher<MsgT>::SecurityPublisher(const ConfT& conf, const Secur
 }
 
 template <typename MsgT>
-inline SecurityPublisher<MsgT>::SecurityPublisher(const std::string& url_str, const Security::Config& sec_cfg,
-                                                  InitType type)
+template <typename SecurityConfigT>
+inline SecurityPublisher<MsgT>::SecurityPublisher(const std::string& url_str, SecurityConfigT&& sec_cfg, InitType type)
     : Publisher<MsgT, SecurityType::kWithSecurity>(url_str, InitType::kWithoutInit) {
-  this->enable_security(sec_cfg);
+  static_assert(std::is_same_v<std::decay_t<SecurityConfigT>, Security::Config>,
+                "SecurityConfigT must be Security::Config.");
+
+  this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
   if (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)

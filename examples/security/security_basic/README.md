@@ -34,8 +34,9 @@ cmake --build build --target example_security_basic
 template <typename T>
 class SecurityPublisher : public Publisher<T, SecurityType::kWithSecurity> {
  public:
+  template <typename SecurityConfigT = Security::Config>
   explicit SecurityPublisher(const std::string& url_str,
-                             const Security::Config& sec_cfg = {},
+                             SecurityConfigT&& sec_cfg = {},
                              InitType type = InitType::kWithInit);
   // 另有 ConfT 重载与 create_unique / create_shared 工厂方法。
 };
@@ -43,8 +44,9 @@ class SecurityPublisher : public Publisher<T, SecurityType::kWithSecurity> {
 template <typename T>
 class SecuritySubscriber : public Subscriber<T, SecurityType::kWithSecurity> {
  public:
+  template <typename SecurityConfigT = Security::Config>
   explicit SecuritySubscriber(const std::string& url_str,
-                              const Security::Config& sec_cfg = {},
+                              SecurityConfigT&& sec_cfg = {},
                               InitType type = InitType::kWithInit);
 };
 ```
@@ -68,7 +70,7 @@ vlink::SecuritySubscriber<std::string> sub("shm://secure/topic", cfg);
 
 ## 5. 工作原理
 
-1. **加密**：`SecurityPublisher::publish()` 在发送前对 payload 调用 OpenSSL `EVP_aes_128_gcm()` 加密，wire 上为 `[12B nonce][N B ciphertext][16B tag]`。
+1. **加密**：`SecurityPublisher::publish()` 在发送前对 payload 调用 OpenSSL `EVP_aes_128_gcm()` 加密，wire 上为 `[35B envelope header][K B key_id][N B ciphertext][16B tag]`；默认 `key_id == "default"` 在线上按空 id 编码。
 2. **解密**：`SecuritySubscriber` 在分发回调前对收到的 payload 解密；**GCM tag 校验失败时回调不会被触发**（消息被静默丢弃，日志记录）。
 3. **密钥派生**：`Config::key` 经 SHA-256 截断为 16 字节 AES-128 key，因此可使用任意长度的种子字符串。
 

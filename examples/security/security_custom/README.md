@@ -42,8 +42,9 @@ struct Security::Config {
 };
 
 // 配置随 SecurityXxx 构造函数第二参数一次性传入（无运行时 setter）：
+template <typename SecurityConfigT = Security::Config>
 explicit SecurityPublisher(const std::string& url_str,
-                           const Security::Config& sec_cfg = {},
+                           SecurityConfigT&& sec_cfg = {},
                            InitType type = InitType::kWithInit);
 ```
 

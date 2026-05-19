@@ -346,7 +346,7 @@ URL 格式说明和各传输后端的配置指南。
 | ----------------- | ------------------------------------------------- |
 | `security_basic`  | 内置 AES-128-GCM 加密（`SecurityPublisher`/`SecuritySubscriber` 构造函数传入 `Security::Config::key`） |
 | `security_custom` | 自定义加密回调（`Config::encrypt_callback` / `decrypt_callback`） |
-| `security_rsa`    | RSA-OAEP hybrid + 可选 RSA-PSS 签名（`Config::public_key_pem` / `signing_key_pem`） |
+| `security_rsa`    | RSA-OAEP hybrid + 可选 RSA-PSS 签名（`Config::public_key_pem` / `advanced.signing_key_pem`） |
 | `security_ssl`    | 传输层 SSL/TLS 加密（`set_ssl_options`）          |
 
 ---
