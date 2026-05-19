@@ -147,10 +147,26 @@ int main(void) {
    * shm:// section is illustrative and requires the Iceoryx RouDi daemon. */
   printf("\n[3] Publisher/Subscriber with shm:// + Security\n");
   printf("    (requires `iox-roudi`; set VLINK_C_SECURITY_RUN_SHM=1 to run this section)\n");
+
+#ifdef _WIN32
+  char* env = NULL;
+  size_t len = 0;
+
+  _dupenv_s(&env, &len, "VLINK_C_SECURITY_RUN_SHM");
+
+  if (env == NULL) {
+    printf("  Skipping: shm transport section is opt-in to avoid Iceoryx fatal aborts without RouDi.\n");
+    goto section3_end;
+  }
+
+  free(env);
+#else
   if (getenv("VLINK_C_SECURITY_RUN_SHM") == NULL) {
     printf("  Skipping: shm transport section is opt-in to avoid Iceoryx fatal aborts without RouDi.\n");
     goto section3_end;
   }
+#endif
+
   {
     const vlink_schema_info_t schema = {"text", VLINK_SCHEMA_RAW};
 

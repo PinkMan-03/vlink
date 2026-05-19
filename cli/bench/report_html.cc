@@ -380,16 +380,17 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
     return v;
   };
 
-  constexpr double kWidth = 960.0;
-  constexpr double kHeight = 420.0;
-  constexpr double kLeft = 72.0;
-  constexpr double kRight = 20.0;
-  constexpr double kTop = 30.0;
-  constexpr double kBottom = 70.0;
+  static constexpr double kWidth = 960.0;
+  static constexpr double kHeight = 420.0;
+  static constexpr double kLeft = 72.0;
+  static constexpr double kRight = 20.0;
+  static constexpr double kTop = 30.0;
+  static constexpr double kBottom = 70.0;
+
   const double plot_width = kWidth - kLeft - kRight;
   const double plot_height = kHeight - kTop - kBottom;
 
-  auto map_y = [&plot_height, &y_use_log, &to_y_axis, &y_axis_min, &y_axis_span, &max_y, &kTop](double value) {
+  auto map_y = [&plot_height, &y_use_log, &to_y_axis, &y_axis_min, &y_axis_span, &max_y](double value) {
     if VUNLIKELY (!std::isfinite(value)) {
       return kTop + plot_height;
     }
