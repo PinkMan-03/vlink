@@ -1582,7 +1582,8 @@ auto alive = loop.get_alive_state();   // 引用计数极轻
 #### 11.9.1.1 概述
 
 `vlink::Timer` 与 `MessageLoop` 集成，回调在循环线程上串行触发，无需额外同步。
-当 `interval_ms` 传入 0 时，间隔会回退到内部的 `kMinInterval` 保护值。
+当 `interval_ms` 传入 0 时，内部 tick 间隔会回退到 `kMinInterval`（10000 纳秒 = 10 微秒）保护值，
+避免空转炸 CPU。
 
 #### 11.9.1.2 构造与使用
 

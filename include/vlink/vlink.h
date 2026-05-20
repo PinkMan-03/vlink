@@ -33,12 +33,12 @@
  * @par Included APIs
  * | Header                  | Primitive(s)                    | Communication Model       |
  * | ----------------------- | ------------------------------- | ------------------------- |
- * | @c client.h             | @c Client<ReqT,RespT>          | Method -- caller side      |
- * | @c server.h             | @c Server<ReqT,RespT>          | Method -- handler side     |
- * | @c publisher.h          | @c Publisher<MsgT>              | Event -- message emitter   |
- * | @c subscriber.h         | @c Subscriber<MsgT>             | Event -- message receiver  |
- * | @c getter.h             | @c Getter<ValueT>               | Field -- value reader      |
- * | @c setter.h             | @c Setter<ValueT>               | Field -- value writer      |
+ * | @c client.h             | @c Client\<ReqT,RespT\>        | Method -- caller side      |
+ * | @c server.h             | @c Server\<ReqT,RespT\>        | Method -- handler side     |
+ * | @c publisher.h          | @c Publisher\<MsgT\>            | Event -- message emitter   |
+ * | @c subscriber.h         | @c Subscriber\<MsgT\>           | Event -- message receiver  |
+ * | @c getter.h             | @c Getter\<ValueT\>             | Field -- value reader      |
+ * | @c setter.h             | @c Setter\<ValueT\>             | Field -- value writer      |
  * | @c base/message_loop.h  | @c MessageLoop                  | Callback dispatcher       |
  * | @c base/utils.h         | utility functions               | General helpers           |
  *
@@ -52,6 +52,7 @@
  * Publisher<MyMsg> pub("zenoh://vehicle/speed"); // Zenoh transport
  * @endcode
  *
+ * @verbatim
  *                 .-~~~~~~~~~-._       _.-~~~~~~~~~-.
  *             __.'              ~.   .~              `.__
  *           .'//                  \./                  \\`.
@@ -60,6 +61,7 @@
  *     .'//.-"                 `-.  |  .-'                 "-.\\`.
  *   .'//______.============-..   \ | /   ..-============.______\\`.
  * .'______________________________\|/______________________________`.
+ * @endverbatim
  *
  * @par Quick-start Example
  * @code
@@ -90,8 +92,8 @@
  * @endcode
  *
  * @note To enable message security, replace the type with the security variant:
- *       @c SecurityPublisher<T>, @c SecuritySubscriber<T>, @c SecurityClient<Req,Resp>,
- *       @c SecurityServer<Req,Resp>, @c SecurityGetter<T>, @c SecuritySetter<T>.
+ *       @c SecurityPublisher\<T\>, @c SecuritySubscriber\<T\>, @c SecurityClient\<Req,Resp\>,
+ *       @c SecurityServer\<Req,Resp\>, @c SecurityGetter\<T\>, @c SecuritySetter\<T\>.
  */
 
 #pragma once

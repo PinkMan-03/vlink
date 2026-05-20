@@ -325,9 +325,9 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
  *
  * @details
  * Selects the appropriate unit and formats to 2 decimal places.  Three units
- * are emitted: @c KB (always for @p size @c < @c 1 @c MiB, including small
+ * are emitted: @c KB (always for sizes below 1 MiB, including small
  * sub-KiB byte counts which are rendered as fractional KB), @c MB
- * (@p size @c < @c 1 @c GiB), @c GB (everything else, no @c TB step).
+ * sizes below 1 GiB), @c GB (everything else, no @c TB step).
  * Examples: @c 1536 → @c "1.50KB", @c 100 → @c "0.10KB", @c 5 @c GiB →
  * @c "5.00GB".
  *
@@ -352,7 +352,7 @@ VLINK_EXPORT void replace_string(std::string& str, const std::string& from, cons
  * @brief Converts a date string to a Unix nanosecond timestamp.
  *
  * @details
- * Parses with the format @c "%Y/%m/%d @c %H:%M:%S" (slash-separated date,
+ * Parses with the format @c "%Y/%m/%d %H:%M:%S" (slash-separated date,
  * colon-separated time) plus an optional @c ":<ms>" trailing field for
  * milliseconds, e.g. @c "2026/03/18 12:00:00" or
  * @c "2026/03/18 12:00:00:250".  ISO-8601 dashes (@c "2026-03-18") are

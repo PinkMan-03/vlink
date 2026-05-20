@@ -151,10 +151,11 @@ explicit SecurityPublisher(const ConfT& conf, SecurityConfigT&& sec_cfg = {},
 
 要点：
 
-- 配置**一次性**：`Security::Config` 只在构造时传入。内部在 `init()` 之前用候选 `Security` 验证 `is_configured()`，通过才安装到 `NodeImpl::security`；空 `Security::Config{}` 会在 `Security` 构造路径里使用内置默认安全槽位。
+- 配置**一次性**：`Security::Config` 只在构造时传入。内部在 `init()` 之前用候选 `Security` 验证 `is_configured()`，并按当前节点角色追加 `can_encrypt()` / `can_decrypt()` 校验，通过才安装到 `NodeImpl::security`；空 `Security::Config{}` 会在 `Security` 构造路径里使用内置默认安全槽位。
 - 模式选择**自动**：自定义回调 > RSA 非对称（存在 `public_key_pem` 或 `private_key_pem`）> 对称（`key` / `passphrase` / 内置默认安全槽位）。
 - 不再暴露 `enable_security()` / `security()` 给用户代码（前者已移到 `Node` 的 protected 入口，仅供 `SecurityXxx` 子类内部调用）。需要再次更换配置的场景，请销毁并重新构造节点。
 - 验证失败（PEM 损坏、RSA 长度 < 2048、缺失 salt 等）会打印 warning 并把对应槽位置空；只要还有其他合法槽位即视为成功（`is_configured() == true`）。显式配置无效时不会回退到内置默认安全槽位；仅配置签名/验签 PEM 也不会自动启用默认对称通道，因为它们本身不具备加解密能力。
+- **角色感知校验**：发送端节点（Publisher / Setter / Client、以及需要响应的 Server）会额外检查 `can_encrypt()`；接收端节点（Subscriber / Getter / Server、以及需要回包的 Client）会额外检查 `can_decrypt()`。仅安装 `public_key_pem` 的 Subscriber、或仅安装 `private_key_pem` 的 Publisher 会被拒绝并打印 warning。
 - 自定义回调必须**成对**安装（`encrypt_callback` 与 `decrypt_callback` 同时设置）；仅设其中之一会被忽略并打印 warning。
 - 不支持的传输（`intra://` 或 `dds://` CDR）会打印 warning 并忽略 `Security::Config`；安全节点随后执行 `init()` 会因没有可用 `Security` fatal 并抛 `RuntimeError`，不会自动降级为明文。
 
@@ -296,7 +297,7 @@ Wire format：
 
 常规 `Config::key` 模式的额外开销为 50 字节。Envelope header 绑定 version / mode / flags / sender_id / sequence / nonce；header 与 `aad_context` 一起作为 GCM AAD 认证。
 
-通过 `SecurityPublisher` / `SecuritySubscriber` 等节点构造时，如果 `advanced.aad_context` 为空，VLink 会自动绑定 `url|ser_type|schema_type`；直接使用独立 `Security` 实例时空字符串就是实际 AAD context。
+通过 `SecurityPublisher` / `SecuritySubscriber` 等节点构造时，如果 `advanced.aad_context` 为空，VLink 会自动绑定 `url|ser_type|<schema_type 的整数值>`（schema_type 序列化为 `uint32_t`）；直接使用独立 `Security` 实例时空字符串就是实际 AAD context。
 
 ### 9.8.2 非对称 RSA 混合
 
@@ -325,7 +326,7 @@ Wire format（所有长度字段均小端）：
 
 ## 9.9 不支持安全加密的组合
 
-`include/vlink/internal/node-inl.h` 中 `SecurityXxx` 构造时调用的内部 `enable_security` helper 对以下传输组合会**打印 `VLOG_W` 警告并忽略 `Security::Config`**：
+`src/impl/node_impl.cc` 中 `NodeImpl::enable_security()` 对以下传输组合会**打印 `VLOG_W` 警告并忽略 `Security::Config`**（由 `SecurityXxx` 构造路径经 `Node::enable_security()` 转发调用）：
 
 - `intra://`：进程内直接传对象，不进入序列化/加密管道。
 - `dds://` 配合 CDR 类型（`is_cdr_type == true`）：CDR 直接交给 Fast-DDS 处理，不经过 VLink 的 Bytes 管道。

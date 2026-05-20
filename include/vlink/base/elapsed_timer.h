@@ -170,7 +170,7 @@ class VLINK_EXPORT ElapsedTimer final {
   /**
    * @brief Move-assignment operator.
    *
-   * @param target  The source timer (moved from).
+   * The source timer is unnamed in the declaration and is moved from.
    * @return A reference to @c *this.
    */
   ElapsedTimer& operator=(ElapsedTimer&&) noexcept;

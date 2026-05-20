@@ -357,9 +357,11 @@ struct Url final : public Conf {
    * @details
    * Used to order multiple URLs by transport priority.  Local transports
    * (@c intra://, @c shm://) return lower indices than network transports.
+   * Empty URLs return @c -1.  Non-empty URLs with an unknown or unsupported
+   * transport return @c 0 and still participate in low-index priority sorting.
    *
    * @param url  URL string to classify.
-   * @return     Sort index; lower values = higher priority, @c -1 for an empty URL.
+   * @return     Sort index; lower values = higher priority.
    */
   [[nodiscard]] VLINK_EXPORT static int get_sort_index(std::string_view url);
 

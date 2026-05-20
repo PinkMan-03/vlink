@@ -27,7 +27,7 @@
  *
  * @details
  * This namespace provides a minimal subset of std::format-compatible formatting for use
- * inside the VLink logger hot path where @c <format> may be unavailable (C++17) or too
+ * inside the VLink logger hot path where the standard format header may be unavailable (C++17) or too
  * heavyweight.  All formatting writes through a stack-allocated writer or a user-supplied
  * output iterator and never touches the heap.
  *
@@ -731,6 +731,8 @@ inline detail::RemoveCvref<OutputItT> format_to(OutputItT&& out, format_string<A
 /// Details
 ////////////////////////////////////////////////////////////////
 
+/// @cond INTERNAL
+
 template <typename... ArgsT>
 inline format::detail::FormatArgStore<char, format::detail::RemoveCvref<ArgsT>...> format::make_format_args(
     const ArgsT&... args) {
@@ -777,5 +779,7 @@ inline format::detail::RemoveCvref<OutputItT> format::format_to(OutputItT&& out,
 
   return writer.out();
 }
+
+/// @endcond
 
 }  // namespace vlink

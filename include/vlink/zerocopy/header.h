@@ -77,7 +77,7 @@ namespace zerocopy {
 struct VLINK_EXPORT_AND_ALIGNED(8) Header final {
   char frame_id[16]{"unknown"};  ///< Frame identifier; semantics defined by the producing sensor.
   uint32_t seq{0};               ///< Monotonically increasing sequence number, wraps at UINT32_MAX.
-  uint32_t reserved{0};          ///< Reserved for future use; must be zero.
+  uint32_t reserved{0};          ///< Reserved for future use.
   uint64_t time_meas{0};         ///< Measurement timestamp in nanoseconds since epoch.
   uint64_t time_pub{0};          ///< Publish timestamp in nanoseconds since epoch.
 

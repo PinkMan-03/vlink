@@ -35,7 +35,7 @@
  * -# Construct the @c SysSemaphore object.
  * -# Call @c attach(name) to create or open a named semaphore.
  * -# Use @c acquire() / @c release() for P/V operations.
- * -# Call @c detach(force) to close the handle.  If @p force is @c true the
+ * -# Call @c detach(force) to close the handle.  If @c force is @c true the
  *    semaphore is also removed from the OS namespace.
  * -# The destructor calls @c detach(false) automatically.
  *

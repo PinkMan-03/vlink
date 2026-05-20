@@ -36,8 +36,8 @@
  * | @c kBytesType       | @c T == Bytes                                          | Pass-through, no-copy.            |
  * | @c kDynamicType     | Has @c is_vlink_dynamic_data() member                  | Dynamic type via @c operator>>/<< |
  * | @c kCdrType         | Has @c serialize(Cdr&) and @c deserialize(Cdr&)        | FastDDS CDR codec.                |
- * | @c kProtoType       | Has @c SerializeToArray() and @c ParseFromArray()      | Protobuf by value.                |
- * | @c kProtoPtrType    | Pointer with @c SerializeToArray / @c ParseFromArray   | Arena-managed proto pointer.      |
+ * | @c kProtoType       | Has @c SerializeToArray() and @c ParseFromArray()      | Protobuf-like value.              |
+ * | @c kProtoPtrType    | Pointer with @c SerializeToArray / @c ParseFromArray   | Caller-owned proto-like pointer.  |
  * | @c kFlatTableType   | Inherits @c flatbuffers::NativeTable                   | FlatBuffers native table.         |
  * | @c kFlatPtrType     | Pointer to @c flatbuffers::Table subclass              | Zero-copy FlatBuffers read.       |
  * | @c kFlatBuilderType | Has @c fbb_ member and @c Finish()                     | FlatBuffers builder.              |
@@ -88,11 +88,12 @@
  * Serializer::serialize<kCdrType>(msg, bytes, TransportType::kDds);
  * @endcode
  *
- * @note All functions in this namespace are @c static and @c inline.
- *       The namespace name starts with a capital letter by convention (matches
- *       VLink style).  Direct use by application code is rarely needed; the
- *       framework calls these functions automatically inside @c publish(),
- *       @c listen(), @c invoke(), etc.
+ * @note The namespace exposes header-defined helper functions.  Most are
+ *       templates; a few overloads are declared @c static or @c inline where
+ *       appropriate.  The namespace name starts with a capital letter by
+ *       convention (matches VLink style).  Direct use by application code is
+ *       rarely needed; the framework calls these functions automatically
+ *       inside @c publish(), @c listen(), @c invoke(), etc.
  */
 
 #pragma once
@@ -109,8 +110,9 @@ namespace vlink {
  * @brief Compile-time type detection and codec dispatch for VLink messages.
  *
  * @details
- * All functions are @c static @c inline template functions.  Application code
- * rarely calls these directly; the framework invokes them inside
+ * The functions are header-defined helpers.  Most entry points are templates,
+ * with a small number of non-template overloads declared as needed.  Application
+ * code rarely calls these directly; the framework invokes them inside
  * @c publish(), @c listen(), @c invoke(), @c set(), and @c get().
  */
 namespace Serializer {  // NOLINT(readability-identifier-naming)
@@ -130,8 +132,8 @@ enum Type : uint8_t {
   kDynamicType = 2,       ///< Dynamic typed data via @c is_vlink_dynamic_data().
   kCustomType = 3,        ///< User-defined via @c operator>>(Bytes&) / @c operator<<(const Bytes&).
   kCdrType = 4,           ///< FastDDS CDR via @c serialize(Cdr&) / @c deserialize(Cdr&).
-  kProtoType = 5,         ///< Protobuf value (@c MessageLite derived).
-  kProtoPtrType = 6,      ///< Protobuf raw pointer (Arena-managed).
+  kProtoType = 5,         ///< Protobuf-like value with serialize/parse methods.
+  kProtoPtrType = 6,      ///< Protobuf-like raw pointer; caller owns the pointee.
   kFlatTableType = 7,     ///< FlatBuffers NativeTable (object API).
   kFlatPtrType = 8,       ///< Pointer to @c flatbuffers::Table (zero-copy read).
   kFlatBuilderType = 9,   ///< FlatBuffers builder (@c fbb_ + @c Finish()).
@@ -222,28 +224,29 @@ template <typename T>
 [[nodiscard]] static std::string get_serialized_type() noexcept;
 
 /**
- * @brief Returns the exact serialised byte size for a given @p src value.
+ * @brief Returns a serialised-size hint for a given @p src value.
  *
  * @details
- * Used to pre-allocate loaned buffers before serializing.  Returns @c 0 for
- * types whose serialized size is not known ahead of time or not reported by
- * the implementation (for example @c kBytesType, @c kStringType,
+ * Used to pre-allocate loaned buffers before serializing.  The returned value
+ * is an exact byte count only for codecs that can report one cheaply.  Returns
+ * @c 0 for types whose serialized size is not known ahead of time or not
+ * reported by the implementation (for example @c kBytesType, @c kStringType,
  * @c kFlatTableType, and @c kStandardType).
  *
  * @tparam TypeT  Serializer type.
  * @tparam T      C++ message type.
  * @param src     Source value to measure.
- * @return        Byte count needed to serialise @p src; @c 0 if unknown.
+ * @return        Byte-count hint for @p src; @c 0 if unknown or unreported.
  */
 template <Type TypeT, typename T>
 [[nodiscard]] static size_t get_serialized_size(const T& src) noexcept;
 
 /**
- * @brief Returns the serialized byte size (type auto-detected).
+ * @brief Returns a serialized-size hint (type auto-detected).
  *
  * @tparam T   C++ message type.
  * @param src  Source value to measure.
- * @return     Byte count; @c 0 if unknown.
+ * @return     Byte-count hint; @c 0 if unknown or unreported.
  */
 template <typename T>
 [[nodiscard]] static size_t get_serialized_size(const T& src) noexcept;
@@ -256,6 +259,11 @@ template <typename T>
  * pointer passing for @c kDds).  Pass @c TransportType::kUnknown for the default
  * copy-based path.  The @p offset parameter prepends @p offset zero bytes
  * before the payload (used internally for some transports).
+ *
+ * For @c kFlatBuilderType, serialization calls the builder's @c Finish() path
+ * and therefore may mutate/finalize @p src.  Loaned output buffers shallow-borrow
+ * the builder's internal FlatBuffer storage; keep the builder alive while the
+ * borrowed @c Bytes is in use.
  *
  * @tparam TypeT   Serializer type.
  * @tparam T       C++ message type.
@@ -330,7 +338,7 @@ static bool convert(const SrcT& src, DesT& des);
  * @brief Dereferences a value, unwrapping @c shared_ptr if necessary.
  *
  * @details
- * If @c T is a @c shared_ptr<U>, returns @c *t; otherwise returns @c t.
+ * If @c T is a @c shared_ptr\<U\>, returns @c *t; otherwise returns @c t.
  * Used internally so serialisation code handles both value and shared-ptr
  * message types uniformly.
  *
@@ -381,7 +389,8 @@ template <typename T>
  *
  * @details
  * Requires @c protobuf to be present and the type to have both
- * @c SerializeToArray() and @c ParseFromArray() methods.
+ * @c SerializeToArray() and @c ParseFromArray() methods.  The detector is
+ * method-based and may also match protobuf-compatible value types.
  *
  * @tparam T  Type to test.
  * @return    @c true for Protobuf value types.
@@ -390,10 +399,14 @@ template <typename T>
 [[nodiscard]] static constexpr bool is_proto_type() noexcept;
 
 /**
- * @brief Returns @c true if @c T is a raw pointer to a Protobuf message.
+ * @brief Returns @c true if @c T is a raw pointer to a Protobuf-like message.
+ *
+ * @details
+ * The pointee is not owned by the serializer and must be non-null when the
+ * serialize/deserialize path dereferences it.
  *
  * @tparam T  Type to test (expected to be @c MyProto*).
- * @return    @c true for Protobuf pointer types.
+ * @return    @c true for Protobuf-compatible pointer types.
  */
 template <typename T>
 [[nodiscard]] static constexpr bool is_proto_ptr_type() noexcept;

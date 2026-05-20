@@ -48,10 +48,10 @@
  * | kObserveOne       |   1   | Observe a single selected topic.                        |
  * | kObserveAll       |   2   | Observe all discovered topics.                          |
  * | kRecord           |   3   | Record all topics matching the subscription URL list.   |
- * | kPlay             |   4   | Replay previously recorded data via the server.         |
- * | kEdit             |   5   | Edit mode: injects data through the server.             |
- * | kAuto             |   6   | Auto mode: observe specified topics.                    |
- * | kAutoAndObserveAll|   7   | Auto + observe all topics simultaneously.               |
+ * | kPlay             |   4   | Injection/playback mode; data is usually recorded input.|
+ * | kEdit             |   5   | Edit mode: injects controller-supplied data.            |
+ * | kAuto             |   6   | Observe selected topics and allow controller injection. |
+ * | kAutoAndObserveAll|   7   | Observe all topics and allow controller injection.      |
  *
  * @par Error Codes
  *
@@ -76,22 +76,25 @@
  * before any Control message can be published; the server replies with a
  * per-process @em token that the API caches under a dedicated mutex and stamps
  * onto every outgoing @c Control.  Each incoming Time heartbeat must carry the
- * same token or the cached token is cleared and @c kTokenError is raised.  The
- * 1-second heartbeat then automatically re-runs the handshake until it
+ * same token or the cached token is cleared and the handshake is retried; a
+ * debounced @c kTokenError is reported only after repeated mismatch evidence.
+ * The 1-second heartbeat then automatically re-runs the handshake until it
  * succeeds, recovering transparently from server restarts.  If no heartbeat is
  * received for 5 consecutive seconds the connection is declared lost and
  * @c ConnectCallback is invoked with @c connected = @c false.  A @c kController
- * client also sends an initial @c Control message at construction and re-sends
- * the last control automatically when the server reconnects.  When the macro
- * is 0 the handshake is bypassed and Controls flow without a token field.
+ * client caches and posts an initial @c kAuto Control at construction and
+ * re-sends the last control automatically when the server reconnects.  Actual
+ * publication depends on the MessageLoop and transport channels being active.
+ * When the macro is 0 the handshake is bypassed and Controls flow without a
+ * token field.
  *
  * @par Communication Channels
  * The transport channels are determined by @c Config::direct:
  *
- * | direct | Data path                   | Control/Info/Time/Handshake path |
- * | ------ | --------------------------- | -------------------------------- |
- * | false  | DDS (reliable or best-effort) | DDS (security-enabled)         |
- * | true   | SHM (Iceoryx)               | DDS (security-enabled)           |
+ * | direct | Data path                                      | Control/Info/Time/Handshake path |
+ * | ------ | ---------------------------------------------- | -------------------------------- |
+ * | false  | Server-relayed DDS data channel                | DDS (security-enabled)           |
+ * | true   | Local direct SHM publishers/subscribers        | DDS (security-enabled)           |
  *
  * @par Version Matching
  * When @c Config::match_version is @c true (default) the client checks that
@@ -121,14 +124,14 @@
  *   }
  * });
  *
+ * api.async_run();      // required for handshake, timers, and async control posts
+ *
  * // Start observing a specific topic
  * vlink::ProxyAPI::Control ctrl;
  * ctrl.mode = vlink::ProxyAPI::kObserveOne;
  * ctrl.url_meta_list.emplace_back(
  *     {"dds://my/topic", "demo.proto.PointCloud", vlink::SchemaType::kProtobuf, vlink::kSubscriber});
  * api.send_control(ctrl);
- *
- * api.async_run();      // optional: runs the inherited MessageLoop on a background thread
  * @endcode
  *
  * @note
@@ -171,11 +174,13 @@ namespace vlink {
  * @brief Client-side proxy monitoring and control API backed by a MessageLoop.
  *
  * @details
- * Connects to a @c ProxyServer daemon over DDS (or SHM in direct mode) and
- * exposes callbacks for connection state, error codes, heartbeat timestamps,
- * topic statistics, and raw data payloads.  Inherits @c MessageLoop; start the
- * loop explicitly if you need queued tasks, timers, or async control posts to
- * execute on that loop.
+ * Connects to a @c ProxyServer daemon over security-authenticated DDS control
+ * channels and exposes callbacks for connection state, error codes, heartbeat
+ * timestamps, topic statistics, and raw data payloads.  In direct mode, data
+ * payloads use local SHM channels created by @c ProxyAPI rather than the
+ * server-relayed data channel.  Inherits @c MessageLoop; start the loop with
+ * @c run() or @c async_run() so the handshake, heartbeat timer, handle reset,
+ * and async control posts can execute.
  */
 class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
  public:
@@ -184,18 +189,18 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Proxy operation modes sent via @c send_control().
    *
    * @details
-   * The mode governs what the @c ProxyServer observes or replays.
-   * Only a @c kController client may change the mode.
+   * The mode governs what the @c ProxyServer observes or what the controller
+   * may inject.  Only a @c kController client may change the mode.
    */
   enum Mode : uint8_t {
     kOffline = 0,            ///< Disconnected; server releases all subscriptions.
     kObserveOne = 1,         ///< Observe a single topic from the URL list.
     kObserveAll = 2,         ///< Observe all discovered topics on the network.
     kRecord = 3,             ///< Record data from topics in the URL list.
-    kPlay = 4,               ///< Replay: inject previously recorded data.
+    kPlay = 4,               ///< Injection/playback mode, usually fed by recorded data.
     kEdit = 5,               ///< Edit: forward data injected by the controller.
-    kAuto = 6,               ///< Auto: observe specified URLs and forward to subscribers.
-    kAutoAndObserveAll = 7,  ///< Auto + observe every discovered topic.
+    kAuto = 6,               ///< Observe specified URLs and allow controller injection.
+    kAutoAndObserveAll = 7,  ///< Observe every discovered topic and allow injection.
   };
 
   /**
@@ -270,7 +275,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
     float freq{0};                            ///< Observed message frequency in messages/s.
     uint64_t rate{0};                         ///< Observed throughput in bytes/s.
     float loss{0};                            ///< Sample loss ratio in the range [0, 1].
-    float latency{0};                         ///< End-to-end latency in milliseconds.
+    float latency{0};                         ///< Latency in ms; -1 = no sample, -2 = invalid.
     std::vector<Process> process_list;        ///< List of connected publisher/subscriber processes.
   };
 
@@ -296,7 +301,8 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Control message sent from a @c kController client to @c ProxyServer.
    *
    * @details
-   * Sets the server's operating mode and the list of topics to observe or play.
+   * Sets the server's operating mode and the list of topics to observe or
+   * inject/play.
    * The @c filter_str is a space-separated list of substrings; topics (or process
    * names when @c filter_by_process is @c true) must contain at least one
    * substring to be included.
@@ -314,18 +320,18 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Raw message payload delivered via @c DataCallback or sent via @c send_data().
    *
    * @details
-   * In record/observe mode the server relays raw serialised bytes together with
-   * routing metadata.  @c timestamp is the elapsed time in microseconds since the
-   * current proxy data session / control generation started; @c seq is the proxy
-   * relay sequence number for the URL.
+   * In non-direct observe/record modes the server relays raw serialised bytes
+   * together with routing metadata.  In direct mode, the callback is fed by the
+   * local direct subscriber created by @c ProxyAPI.  When sending data, @c timestamp
+   * and @c seq are caller-defined and forwarded as supplied.
    */
   struct Data final {
     std::string url;                          ///< Topic URL the data was captured on.
     std::string ser;                          ///< Serialisation type of the payload.
     SchemaType schema{SchemaType::kUnknown};  ///< Coarse schema family of the payload.
     Bytes raw;                                ///< Raw serialised message bytes.
-    int64_t timestamp{-1};                    ///< Elapsed time in microseconds since session start; -1 if unset.
-    int64_t seq{0};                           ///< Proxy relay sequence number for the URL.
+    int64_t timestamp{-1};                    ///< Sender/session timestamp in microseconds; -1 if unset.
+    int64_t seq{0};                           ///< Sender or relay sequence number for the URL.
   };
 
   /**
@@ -383,17 +389,19 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
   /**
    * @brief Callback delivering the per-topic statistics list once per second.
    *
-   * @param info_list  List of @c Info records for all currently observed topics.
+   * @param info_list  Filtered discovered topic records for the current mode,
+   *                   including their status fields.
    */
   using InfoCallback = MoveFunction<void(const std::vector<Info>& info_list)>;
 
   /**
-   * @brief Callback delivering raw message data relayed by @c ProxyServer.
+   * @brief Callback delivering raw message data from the active proxy data path.
    *
    * @details
-   * Fired for every message forwarded by the server in observe, record, or
-   * auto modes.  The @c Data::raw bytes are shallow-borrowed; copy if you need
-   * to retain them beyond the callback.
+   * Fired for every message forwarded in observe, record, or auto modes.  In
+   * non-direct mode the bytes are relayed by @c ProxyServer; in direct mode they
+   * come from local direct subscribers.  The @c Data::raw bytes are
+   * shallow-borrowed; copy if you need to retain them beyond the callback.
    */
   using DataCallback = MoveFunction<void(const Data& data)>;
 
@@ -401,11 +409,13 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Constructs a @c ProxyAPI with the given configuration.
    *
    * @details
-   * Initialises all DDS/SHM channels based on @c config.  A unique @c control_id
-   * is derived from the CPU timestamp at construction time so that the server can
-   * distinguish simultaneous controllers.  The inherited @c MessageLoop is not
-   * started automatically; call @c run() or @c async_run() yourself if you need
-   * timer-driven reconnect logic or queued control posts to execute.
+   * Stores @c config, starts the internal heartbeat timer, and derives a unique
+   * @c control_id from the CPU timestamp so the server can distinguish
+   * simultaneous controllers.  Transport handles are created by
+   * @c reset_handle(), which runs when the inherited @c MessageLoop starts and
+   * when reconnect logic resets the connection.  A controller also caches/posts
+   * an initial @c kAuto Control, but it is only published after the loop,
+   * handshake, and transport handles are ready.
    *
    * @param config  Configuration for the proxy connection.
    */
@@ -487,10 +497,13 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * for @c kListener.  The control is cached internally and automatically
    * re-sent if the server reconnects after a dropout.
    *
-   * When @c async is @c true (default) the DDS publish is posted to the
+   * When @c async is @c true (default) the DDS Control publish is posted to the
    * MessageLoop thread and the return value only reports whether posting was
-   * accepted.  When @c async is @c false it is executed synchronously on the
-   * calling thread and the return value reports the actual publish result.
+   * accepted.  When @c async is @c false the DDS Control publish is executed
+   * synchronously on the calling thread and that part of the return value reports
+   * the publish result.  In direct mode, direct-map synchronisation is still
+   * queued on the MessageLoop; the return value also depends on whether that
+   * enqueue was accepted.
    *
    * Entries in @c control.url_meta_list are encoded with their supplied
    * @c ser and @c schema values.  Proxy no longer back-fills missing routing
@@ -507,10 +520,11 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @param control  Control message to send.
    * @param async    @c true to post asynchronously (default); @c false to block.
-   * @return         With @p async=false, @c true only if the control was
-   *                 published. With @p async=true, @c true means the publish
-   *                 task was accepted. Returns @c false if role is @c kListener,
-   *                 the API is shutting down, or enqueue/publish failed.
+   * @return         With @p async=false, @c true means the DDS Control publish
+   *                 succeeded and any direct-map sync was queued.  With
+   *                 @p async=true, @c true means the publish task was accepted.
+   *                 Returns @c false if role is @c kListener, the API is
+   *                 shutting down, or enqueue/publish failed.
    */
   bool send_control(const Control& control, bool async = true);
 
@@ -519,9 +533,10 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @details
    * Only valid when the role is @c kController; returns @c false for @c kListener.
-   * In direct mode the data is published directly on the SHM publisher
-   * corresponding to @c data.url.  In non-direct mode it is wrapped in a
-   * @c ProxyData envelope and forwarded over the DDS data channel.
+   * In direct mode the data is published through the local SHM publisher
+   * corresponding to @c data.url; @c ProxyServer is not on the data relay path.
+   * In non-direct mode it is wrapped in a @c ProxyData envelope and forwarded
+   * over the DDS data channel.
    *
    * Returns @c false if no subscribers are listening on the target channel.
    *
@@ -530,7 +545,11 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    *
    * @param data  Data to inject, including URL, serialisation type, schema
    *              family, raw bytes, timestamp, and sequence number.
-   * @return      @c true if data was published; @c false otherwise.
+   * @return      In non-direct mode, @c true only if the underlying data publish
+   *              succeeds.  In direct mode, @c true means a matching local direct
+   *              publisher and subscriber were found, metadata matched, and the
+   *              publish attempt was made; the backend publish result is not
+   *              surfaced.  Returns @c false otherwise.
    */
   bool send_data(const Data& data);
 
@@ -621,14 +640,15 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
   [[nodiscard]] double get_current_memory_usage() const;
 
   /**
-   * @brief Returns the measured round-trip latency on the data channel.
+   * @brief Returns the latest backend-reported latency on the data channel.
    *
    * @details
    * In direct (SHM) mode, or before the DDS data subscriber is initialised, this
    * returns 0.  Otherwise it delegates to the underlying data subscriber's
-   * latency tracker.
+   * latency tracker.  Main backends report one-way/end-to-end data latency in
+   * nanoseconds.
    *
-   * @return Latency in microseconds, or 0 when unavailable.
+   * @return Latency in nanoseconds, or 0 when unavailable.
    */
   [[nodiscard]] int64_t get_latency() const;
 

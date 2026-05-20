@@ -47,7 +47,7 @@
  * @note
  * - All callbacks are invoked from an internal monitor thread; access shared state with care.
  * - @c close() requests termination and optionally force-kills after a timeout.
- * - @c Process objects are non-moveable and non-copyable.
+ * - @c Process objects are non-movable and non-copyable.
  * - The destructor waits @c kDestructorWaitTimeoutMs (5 s) for the process to exit.
  *
  * @par Example
@@ -88,7 +88,7 @@ namespace vlink {
  *
  * @details
  * A single @c Process object manages one child process at a time.
- * It is non-copyable and non-moveable.
+ * It is non-copyable and non-movable.
  */
 class VLINK_EXPORT Process {
  public:

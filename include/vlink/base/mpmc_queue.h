@@ -286,7 +286,7 @@ class VLINK_EXPORT MpmcQueueBase {
  * @class MpmcQueue
  * @brief Fixed-capacity, lock-free, cache-line-aligned MPMC ring buffer.
  *
- * @tparam T  Element type.  Must be moveable.
+ * @tparam T  Element type.  Must be movable.
  */
 template <typename T>
 class MpmcQueue : public MpmcQueueBase {
@@ -302,7 +302,7 @@ class MpmcQueue : public MpmcQueueBase {
    * compute @c idx() without wrapping mid-call.
    *
    * Validates that the allocated pointer is itself aligned to
-   * @c kInterferenceSize (64 bytes); on mis-alignment the allocation is
+   * @c kInterferenceSize (64 bytes); on misalignment the allocation is
    * released and @c std::bad_alloc is thrown.  Each chunk's turn counter is
    * default-initialised to 0.
    *
@@ -317,7 +317,7 @@ class MpmcQueue : public MpmcQueueBase {
    *
    * @details
    * Walks the chunk array and calls @c Chunk::~Chunk() on each entry; the
-   * @c Chunk destructor in turn destroys its stored @p T iff the slot's turn
+   * @c Chunk destructor in turn destroys its stored @c T object if and only if the slot's turn
    * counter has its low bit set (i.e. the slot is "full").  Then the chunk
    * array is returned to the allocator.
    *

@@ -45,8 +45,8 @@
  * | Category        | Type                           | Serializer       |
  * | --------------- | ------------------------------ | ---------------- |
  * | Raw bytes       | @c Bytes                       | kBytesType       |
- * | Protobuf        | @c MyProto (MessageLite)       | kProtoType       |
- * | Protobuf ptr    | @c MyProto* (Arena-managed)    | kProtoPtrType    |
+ * | Protobuf-like   | @c MyProto                     | kProtoType       |
+ * | Protobuf ptr    | @c MyProto* (caller-owned)     | kProtoPtrType    |
  * | FlatBuffers     | @c MyTableT (NativeTable)      | kFlatTableType   |
  * | FlatBuffers     | @c MyBuilder (has fbb_+Finish) | kFlatBuilderType |
  * | CDR (DDS only)  | @c MyCdrType (serialize/des.)  | kCdrType         |

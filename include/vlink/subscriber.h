@@ -43,8 +43,8 @@
  * | Category        | Type                        | Serializer       |
  * | --------------- | --------------------------- | ---------------- |
  * | Raw bytes       | @c Bytes                    | kBytesType       |
- * | Protobuf        | @c MyProto (MessageLite)    | kProtoType       |
- * | Protobuf ptr    | @c MyProto* (Arena-managed) | kProtoPtrType    |
+ * | Protobuf-like   | @c MyProto                  | kProtoType       |
+ * | Protobuf ptr    | @c MyProto* (caller-owned)  | kProtoPtrType    |
  * | FlatBuffers     | @c MyTableT (NativeTable)   | kFlatTableType   |
  * | FlatBuffers     | @c MyTable* (Table ptr)     | kFlatPtrType     |
  * | CDR (DDS only)  | @c MyCdrType                | kCdrType         |
@@ -76,7 +76,7 @@
  * Subscriber<MyMsg> sub("dds://my_topic");
  * sub.set_latency_and_lost_enabled(true);
  * // ... after receiving messages:
- * int64_t latency_us = sub.get_latency();
+ * int64_t latency_ns = sub.get_latency();
  * SampleLostInfo lost = sub.get_lost();
  * std::cout << "lost: " << lost.lost << " / " << lost.total << std::endl;
  * @endcode
@@ -230,7 +230,7 @@ class Subscriber : public Node<SubscriberImpl, SecT> {
    * Only meaningful when tracking is enabled.  Measured from publication
    * timestamp to receive timestamp.
    *
-   * @return Latency in microseconds; @c 0 if tracking is disabled.
+   * @return Latency in nanoseconds; @c 0 if tracking is disabled.
    */
   [[nodiscard]] int64_t get_latency() const;
 

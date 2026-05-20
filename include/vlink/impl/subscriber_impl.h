@@ -118,14 +118,14 @@ class VLINK_EXPORT SubscriberImpl : public NodeImpl {
   [[nodiscard]] virtual bool is_latency_and_lost_enabled() const;
 
   /**
-   * @brief Returns the most recently measured end-to-end message latency in microseconds.
+   * @brief Returns the most recently measured end-to-end message latency in nanoseconds.
    *
    * @details
    * Only meaningful when @c is_latency_and_lost_enabled() returns @c true.  The
    * default implementation returns @c 0.  Transports that support latency measurement
    * override this to return the measured value.
    *
-   * @return Latency in microseconds, or @c 0 if tracking is disabled or unsupported.
+   * @return Latency in nanoseconds, or @c 0 if tracking is disabled or unsupported.
    */
   [[nodiscard]] virtual int64_t get_latency() const;
 

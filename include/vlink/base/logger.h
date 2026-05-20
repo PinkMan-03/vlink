@@ -23,7 +23,7 @@
 
 /**
  * @file logger.h
- * @brief Global singleton logger with three output styles and pluggable backends.
+ * @brief Global singleton logger with stream, format, C-style and RAII stream entry points.
  *
  * @details
  * @c Logger is the central logging facility in VLink.  It is a singleton accessed via
@@ -31,7 +31,7 @@
  * written to a console sink and/or a file sink, each with an independently configured
  * minimum level.
  *
- * Output styles:
+ * Logging entry points:
  *
  * | Style                | Syntax                         | Notes                                          |
  * | -------------------- | ------------------------------ | ---------------------------------------------- |
@@ -107,7 +107,7 @@ namespace vlink {
 
 /**
  * @class Logger
- * @brief Global singleton logger supporting three output styles and configurable log levels.
+ * @brief Global singleton logger supporting multiple logging entry points and configurable log levels.
  *
  * @details
  * Construct the singleton with @c Logger::init() once at application startup.
@@ -497,7 +497,7 @@ class VLINK_EXPORT Logger final {
    * @brief RAII stream wrapper that accumulates tokens and flushes on destruction.
    *
    * @details
-   * Used by the @c SLOG_* macros to allow natural @c << chaining.  The message is
+   * Used by the @c SLOG_* macros to allow natural stream chaining.  The message is
    * emitted when the temporary @c WrapperStream object goes out of scope.
    * If the log level is disabled at compile time (@c kIsEnabled == false), all
    * methods are compiled away and the object has zero runtime cost.

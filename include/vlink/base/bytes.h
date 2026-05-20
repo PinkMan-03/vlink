@@ -298,8 +298,9 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    *
    * @details
    * Accepts whitespace-separated byte tokens such as @c "1A 2B 3C", optional
-   * @c 0x / @c 0X prefixes, and contiguous even-length hex after such a prefix
-   * (for example @c "0x1A2B3C").  Sets @p ok to @c false if parsing fails.
+   * @c 0x / @c 0X prefixes, and contiguous even-length hex with or without a
+   * prefix (for example @c "1A2B3C" or @c "0x1A2B3C").  Sets @p ok to
+   * @c false if parsing fails.
    *
    * @param str  Input string to parse.
    * @param ok   Optional pointer set to @c true on success, @c false on failure.
@@ -653,16 +654,16 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
   [[nodiscard]] const uint8_t* real_begin() const noexcept;
 
   /**
-   * @brief Iterator end for the full backing buffer (mutable).
+   * @brief Iterator end for the raw used region (mutable).
    *
-   * @return Pointer to one past the last byte of the raw buffer.
+   * @return Pointer to one past the prefix plus usable byte region.
    */
   [[nodiscard]] uint8_t* real_end() noexcept;
 
   /**
-   * @brief Iterator end for the full backing buffer (const).
+   * @brief Iterator end for the raw used region (const).
    *
-   * @return Const pointer to one past the last byte of the raw buffer.
+   * @return Const pointer to one past the prefix plus usable byte region.
    */
   [[nodiscard]] const uint8_t* real_end() const noexcept;
 
@@ -807,11 +808,13 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Reduces the logical size of the buffer without reallocating.
    *
    * @details
-   * Sets @c size_ to @p size if @p size <= current @c size(); the backing buffer is
-   * not freed or shrunk.
+   * Valid only for owned buffers.  Sets @c size_ to @p size if @p size <=
+   * current @c size(); the backing buffer is not freed or shrunk.  Non-owned,
+   * shallow, and loaned buffers return @c false.
    *
    * @param size  New logical size in bytes.  Must be <= current @c size().
-   * @return @c true on success, @c false if @p size exceeds the current size.
+   * @return @c true on success, @c false for non-owned buffers or if @p size
+   *         exceeds the current size.
    */
   [[nodiscard]] bool shrink_to(size_t size) noexcept;
 
@@ -819,11 +822,14 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Ensures the backing buffer can hold at least @p new_capacity bytes.
    *
    * @details
-   * If the current capacity is already >= @p new_capacity this is a no-op.
-   * Otherwise a new buffer is allocated and the existing data is copied.
+   * Valid only for owned buffers.  If the current capacity is already
+   * @c >= @p new_capacity this is a no-op.  Otherwise a new buffer is
+   * allocated and the existing data is copied.  Non-owned, shallow, and
+   * loaned buffers return @c false.
    *
    * @param new_capacity  Minimum required capacity in bytes.
-   * @return @c true on success, @c false if allocation failed.
+   * @return @c true on success, @c false for non-owned buffers or if
+   *         allocation failed.
    */
   bool reserve(size_t new_capacity) noexcept;
 
@@ -831,12 +837,15 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Resizes the logical data region to @p size bytes.
    *
    * @details
-   * If @p size <= current capacity, only @c size_ is updated.
-   * If @p size > current capacity, @c reserve(size) is called first.
-   * Newly added bytes are @b not initialised.
+   * Valid only for owned buffers.  If @p size <= current capacity, only
+   * @c size_ is updated.  If @p size > current capacity, @c reserve(size) is
+   * called first.  Newly added bytes are @b not initialised unless
+   * @c VLINK_BYTES_MEM_RESET is enabled.  Non-owned, shallow, and loaned
+   * buffers return @c false.
    *
    * @param size  New desired size in bytes.
-   * @return @c true on success, @c false if reallocation failed.
+   * @return @c true on success, @c false for non-owned buffers or if
+   *         reallocation failed.
    */
   [[nodiscard]] bool resize(size_t size) noexcept;
 
@@ -844,8 +853,10 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Makes this object a non-owning alias of @p bytes (shallow copy in-place).
    *
    * @details
-   * Releases the current buffer, then copies the pointer and metadata from @p bytes
-   * without copying the underlying data.  After this call @c is_owner() is @c false.
+   * Releases the current buffer, then copies @p bytes' raw pointer, logical size,
+   * and offset without copying the underlying data.  The resulting object is a
+   * non-owning alias and is not marked as loaned even if @p bytes was loaned;
+   * use @c loan_internal() for an explicit loaned wrapper.
    *
    * @param bytes  Source to alias.
    * @return Reference to @c *this.

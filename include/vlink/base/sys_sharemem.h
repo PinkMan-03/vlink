@@ -36,9 +36,9 @@
  * -# Creator process: call @c create(name, size) to allocate and map the region.
  * -# Peer processes: call @c attach(name) to map the existing region.
  * -# Access the raw memory via @c data().
- * -# Call @c detach(force) to unmap.  If @p force is @c true, POSIX backends
+ * -# Call @c detach(force) to unmap.  If @c force is @c true, POSIX backends
  *    also unlink the backing object from the OS namespace.
- * -# The destructor calls @c detach() automatically with @p force == @c false.
+ * -# The destructor calls @c detach() automatically with @c force == @c false.
  *
  * Access modes:
  *

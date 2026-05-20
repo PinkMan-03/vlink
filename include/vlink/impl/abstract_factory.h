@@ -31,7 +31,7 @@
  * callbacks across multiple concurrent transport implementations sharing the same
  * logical topic:
  *
- * @par AbstractObject<FilterT>
+ * @par AbstractObject Template
  * A per-topic object that holds:
  * - A set of active @c NodeImpl* instances registered on this topic.
  * - Per-impl callback maps for all six callback types (server-connect, sub-connect,
@@ -40,7 +40,7 @@
  *   a @c std::recursive_mutex, with @c has_called() accounting that can ignore
  *   selected callbacks via @c ignore_called().
  *
- * @par AbstractFactory<FilterT>
+ * @par AbstractFactory Template
  * A map-based factory keyed on @c FilterT (typically @c std::string topic name)
  * that creates and caches @c AbstractObject<FilterT> instances.  Objects are stored
  * as @c std::weak_ptr so they are automatically destroyed when no @c NodeImpl holds

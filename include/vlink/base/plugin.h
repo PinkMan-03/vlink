@@ -253,8 +253,8 @@ class VLINK_EXPORT Plugin final {
    * @param target_version_minor Minor version required by the caller.
    * @param log_level            Threshold used to gate this function's own
    *                             diagnostic output (@c kInfo / @c kError).
-   * @return @c true iff the IDs match and the local version satisfies
-   *         @c "major @c == @c target_major @c && @c minor @c >= @c target_minor".
+   * @return @c true if and only if the IDs match and the local version satisfies
+   *         @c major == @c target_major and @c minor >= @c target_minor.
    */
   static bool process_plugin_internal(const std::string& lib_name, const std::string& local_plugin_id,
                                       uint16_t local_version_major, uint16_t local_version_minor,

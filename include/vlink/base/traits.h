@@ -29,7 +29,7 @@
  * The @c vlink::Traits namespace collects a set of small, self-contained
  * template meta-programming helpers that are used throughout the VLink codebase
  * to detect type properties at compile time.  They follow the same conventions
- * as the C++ standard library @c <type_traits> header.
+ * as the C++ standard library @c type_traits header.
  *
  * All helpers are either:
  * - Struct templates inheriting from @c std::true_type / @c std::false_type, or
@@ -42,8 +42,8 @@
  * | Callable            | Detects whether T is callable with no arguments                       |
  * | Assignable          | Detects whether OT is assignable from T                               |
  * | EqualityComparable  | Detects whether OT supports == with T                                 |
- * | GreaterComparable   | Detects whether OT supports < and > with T                            |
- * | Operatorable        | Detects whether OT supports << and >> stream operators with T         |
+ * | GreaterComparable   | Detects whether OT supports less-than and greater-than with T         |
+ * | Operatorable        | Detects whether OT supports stream insertion and extraction with T    |
  * | IsAtomic            | Detects whether T is a std::atomic specialization                     |
  * | IsSharedPtr         | Detects whether T is a std::shared_ptr specialization                 |
  * | RemoveSharedPtr     | Strips the std::shared_ptr wrapper to obtain the element type         |
@@ -155,10 +155,10 @@ struct EqualityComparable<OT, T, std::void_t<decltype(std::declval<OT>() == std:
 
 /**
  * @struct GreaterComparable
- * @brief Detects whether @p OT supports both @c < and @c > operators with @p T.
+ * @brief Detects whether @p OT supports both less-than and greater-than operators with @p T.
  *
  * @details
- * Inherits from @c std::true_type when both @c ot < t and @c ot > t are
+ * Inherits from @c std::true_type when both comparison expressions are
  * well-formed expressions.
  *
  * @tparam OT  The left-hand side type.
@@ -175,10 +175,10 @@ struct GreaterComparable<
 
 /**
  * @struct Operatorable
- * @brief Detects whether @p OT supports @c << and @c >> stream operators with @p T.
+ * @brief Detects whether @p OT supports stream insertion and extraction with @p T.
  *
  * @details
- * Inherits from @c std::true_type when both @c ot << t and @c ot >> t are
+ * Inherits from @c std::true_type when both stream expressions are
  * well-formed expressions.  Primarily used to detect stream-compatible types.
  *
  * @tparam OT  The stream type.
@@ -197,7 +197,7 @@ struct Operatorable<OT, T,
  * @brief Detects whether type @p T is a @c std::atomic specialization.
  *
  * @details
- * Inherits from @c std::true_type only for @c std::atomic<U> for any @c U.
+ * Inherits from @c std::true_type only for std::atomic specializations.
  *
  * @tparam T  The type to test.
  */
@@ -213,7 +213,7 @@ struct IsAtomic<std::atomic<T>> : std::true_type {};
  *
  * @details
  * Inherits from @c std::true_type when @p T is (or derives from)
- * @c std::shared_ptr<element_type>.
+ * @c std::shared_ptr specializations.
  *
  * @tparam T  The type to test.
  */

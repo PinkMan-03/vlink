@@ -37,11 +37,11 @@
  * - Throttling task submission to a bounded work queue.
  *
  * @note
- * - @c acquire() blocks the caller until at least @p n permits are available.
+ * - @c acquire() blocks the caller until at least the requested number of permits is available.
  * - @c release() is safe to call from any thread.  It is NOT
  *   async-signal-safe because it acquires @c std::mutex internally; do not
  *   call it from a signal handler.
- * - @c reset() with @p interrupt_waiters == @c true is a disruptive operation
+ * - @c reset() with @c interrupt_waiters == @c true is a disruptive operation
  *   that wakes all blocked @c acquire() callers and returns @c false to them.
  *   Use it only during controlled shutdown.
  * - This is an in-process semaphore.  For cross-process synchronisation, use

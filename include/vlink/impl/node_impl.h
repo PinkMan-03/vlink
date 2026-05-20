@@ -93,7 +93,7 @@ namespace vlink {
  * handle, allowing advanced users to access transport internals without
  * breaking the VLink API boundary.
  *
- * @note The base implementation returns an empty @c std::any.
+ * @note The base implementation returns a @c std::any containing @c nullptr.
  */
 class VLINK_EXPORT AbstractNode {
  public:
@@ -103,9 +103,11 @@ class VLINK_EXPORT AbstractNode {
    * @details
    * Transport-specific subclasses override this to return, for example, a
    * DDS @c DataWriter or @c DataReader pointer.  Callers must @c std::any_cast
-   * to the correct type.  The base implementation returns an empty @c std::any.
+   * to the correct type.  The base implementation returns a non-empty
+   * @c std::any containing @c nullptr.
    *
-   * @return Backend-specific handle, or empty @c std::any in the base class.
+   * @return Backend-specific handle, or @c nullptr wrapped in @c std::any in
+   *         the base class.
    */
   virtual std::any get_native_handle() const;
 
@@ -145,7 +147,8 @@ class VLINK_EXPORT NodeImpl {
   /**
    * @brief Callback invoked when the peer connection state changes.
    *
-   * @param bool  @c true when connected; @c false when disconnected.
+   * The single callback argument is @c true when connected and @c false when
+   * disconnected.
    */
   using ConnectCallback = Function<void(bool)>;
 
@@ -348,10 +351,14 @@ class VLINK_EXPORT NodeImpl {
    *
    * @details
    * Once attached, @c call_status() posts callbacks onto the loop thread.
-   * Returns @c false if another loop is already attached.
+   * Pass a non-null loop.  This base implementation only records the pointer
+   * atomically; passing @c nullptr can return @c true from the compare-exchange
+   * when the node was already detached, but it does not create a usable loop
+   * binding.  Returns @c false if another non-null loop is already attached.
    *
    * @param message_loop  Loop to attach to.
-   * @return              @c true on success; @c false if another loop is already attached.
+   * @return              @c true when the pointer was recorded; @c false if
+   *                      another loop is already attached.
    */
   virtual bool attach(class MessageLoop* message_loop);
 

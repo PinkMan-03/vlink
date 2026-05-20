@@ -50,10 +50,10 @@
  * |                         | task is dequeued: if elapsed time since scheduling exceeds      |
  * |                         | @c delay_ms + this budget, the task is **dropped** and          |
  * |                         | @c on_schedule_timeout fires instead of the user callback.      |
- * | @c execution_timeout_ms | Run-time budget.  Checked once **after** the user callback     |
- * |                         | returns: if it ran longer than the budget,                     |
- * |                         | @c on_execution_timeout fires.  This is a post-hoc notifier —  |
- * |                         | it does **not** interrupt or cancel a long-running callback.   |
+ * | @c execution_timeout_ms | Run-time budget for each executed callback in the chain.       |
+ * |                         | Checked once **after** the callback returns: if it ran longer  |
+ * |                         | than the budget, @c on_execution_timeout fires.  This is a     |
+ * |                         | post-hoc notifier; it does not interrupt a running callback.   |
  *
  * @note
  * - @c Status is move-only; copying is disabled.  The internal state is reference-counted
@@ -204,6 +204,10 @@ struct VLINK_EXPORT Schedule final {
     /**
      * @brief Registers a callback fired when the task does not start within @c schedule_timeout_ms.
      *
+     * @details
+     * Must be registered before the wrapped task is dispatched.  Late registration
+     * is ignored.  Only one schedule-timeout callback may be installed.
+     *
      * @param callback  Callback invoked from the loop thread on schedule timeout.
      * @return Reference to @c *this for chaining.
      */
@@ -211,6 +215,11 @@ struct VLINK_EXPORT Schedule final {
 
     /**
      * @brief Registers a callback fired when the task runs longer than @c execution_timeout_ms.
+     *
+     * @details
+     * Must be registered before the wrapped task is dispatched.  Late registration
+     * is ignored.  Only one execution-timeout callback may be installed.  The
+     * timeout is checked after each executed callback in the schedule chain.
      *
      * @param callback  Callback invoked from the loop thread on execution timeout.
      * @return Reference to @c *this for chaining.
@@ -221,6 +230,9 @@ struct VLINK_EXPORT Schedule final {
      * @brief Registers a callback fired when the task throws a @c std::exception.
      *
      * @details
+     * Must be registered before the wrapped task is dispatched.  Late registration
+     * is ignored.  Only one catch callback may be installed.
+     *
      * @c std::exception-derived failures are caught inside the wrapper and passed
      * to this callback.  Non-standard exceptions are not caught here.  The task
      * is considered failed after a caught exception.
@@ -262,6 +274,10 @@ struct VLINK_EXPORT Schedule final {
     /**
      * @brief Registers a callback fired when the task returns @c false.
      *
+     * @details
+     * Must be registered before the wrapped task is dispatched.  Late registration
+     * is ignored.  Only one else callback may be installed.
+     *
      * @param callback  Invoked from the loop thread when the return value is @c false.
      * @return Reference to the base @c Status for further chaining.
      */
@@ -271,10 +287,11 @@ struct VLINK_EXPORT Schedule final {
      * @brief Registers a callback chain element fired when the task returns @c true.
      *
      * @details
-     * Multiple @c on_then callbacks may be chained; each is invoked in registration
-     * order only if the previous callback returned @c true.  As soon as any callback
-     * returns @c false, the registered @c on_else callback (if any) is invoked and
-     * the chain stops.
+     * Must be registered before the wrapped task is dispatched.  Late registration
+     * is ignored.  Multiple @c on_then callbacks may be chained; each is invoked in
+     * registration order only if the previous callback returned @c true.  As soon
+     * as any callback returns @c false, the registered @c on_else callback (if any)
+     * is invoked and the chain stops.
      *
      * @param callback  Callback taking no arguments and returning @c bool.
      * @return Reference to @c *this for further @c on_then chaining.

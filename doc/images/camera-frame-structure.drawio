@@ -14,7 +14,7 @@
 
         <!-- Outer container -->
         <mxCell id="outer" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#1976d2;strokeWidth=2;arcSize=6;shadow=1;gradientColor=#e3f2fd;gradientDirection=north;" vertex="1" parent="1">
-          <mxGeometry x="40" y="96" width="440" height="560" as="geometry" />
+          <mxGeometry x="40" y="96" width="440" height="588" as="geometry" />
         </mxCell>
         <mxCell id="outerbar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1976d2;strokeColor=none;arcSize=30;" vertex="1" parent="1">
           <mxGeometry x="40" y="96" width="440" height="8" as="geometry" />
@@ -53,7 +53,7 @@
 
         <!-- Metadata -->
         <mxCell id="meta" value="&lt;b&gt;Frame Metadata&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=14;verticalAlign=top;fontColor=#e65100;spacingTop=6;shadow=1;" vertex="1" parent="1">
-          <mxGeometry x="60" y="462" width="400" height="182" as="geometry" />
+          <mxGeometry x="60" y="462" width="400" height="206" as="geometry" />
         </mxCell>
         <mxCell id="m1" value="channel : uint32_t" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef6c00;strokeWidth=1;fontSize=12;fontFamily=Courier New;fontColor=#e65100;align=left;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="80" y="494" width="360" height="22" as="geometry" />
@@ -67,11 +67,14 @@
         <mxCell id="m4" value="freq : uint32_t" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef6c00;strokeWidth=1;fontSize=12;fontFamily=Courier New;fontColor=#e65100;align=left;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="80" y="566" width="360" height="22" as="geometry" />
         </mxCell>
-        <mxCell id="m5" value="format : Format (enum)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef6c00;strokeWidth=1;fontSize=12;fontFamily=Courier New;fontColor=#e65100;align=left;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="m5" value="format : Format (uint8_t enum)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef6c00;strokeWidth=1;fontSize=12;fontFamily=Courier New;fontColor=#e65100;align=left;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="80" y="590" width="360" height="22" as="geometry" />
         </mxCell>
-        <mxCell id="m6" value="stream : Stream (enum)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef6c00;strokeWidth=1;fontSize=12;fontFamily=Courier New;fontColor=#e65100;align=left;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="m6" value="stream : Stream (uint8_t enum)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef6c00;strokeWidth=1;fontSize=12;fontFamily=Courier New;fontColor=#e65100;align=left;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="80" y="614" width="360" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="m7" value="is_owner : bool   |   reserved : uint32_t" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#ef6c00;strokeWidth=1;fontSize=12;fontFamily=Courier New;fontColor=#e65100;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="638" width="360" height="22" as="geometry" />
         </mxCell>
 
         <!-- Bytes buffer (external) -->

@@ -222,10 +222,12 @@ class VLINK_EXPORT Timer final {
    *
    * @details
    * Must be called before @c start() if the timer was constructed without a loop.
-   * If the timer is already attached to a different loop it is detached first.
+   * @p message_loop must be non-null; a null pointer logs a fatal error and
+   * throws.  If the timer is already attached to a different loop it is detached
+   * first.
    *
    * @param message_loop  Loop to attach to.
-   * @return @c true on success.
+   * @return @c true on success; @c false only when loop registration fails.
    */
   bool attach(class MessageLoop* message_loop);
 
@@ -244,8 +246,10 @@ class VLINK_EXPORT Timer final {
    * @brief Arms and starts the timer.
    *
    * @details
-   * If @p callback is provided it replaces the previously set callback.
-   * The first tick fires after one full interval.
+   * If @p callback is provided it replaces the previously set callback.  Calling
+   * @c start() without a valid stored callback arms the timer state but there is
+   * no user callback to invoke.  Timer delivery also requires a successfully
+   * attached @c MessageLoop.  The first tick fires after one full interval.
    *
    * @param callback  Optional replacement callback.  Default: nullptr (keep existing).
    */

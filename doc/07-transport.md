@@ -169,12 +169,12 @@ Publisher<Imu> pub("zenoh://sensor/imu");    // Zenoh 云边
 intra://<address>[?event=<name>&pipeline=<N>][#queue|#direct]
 ```
 
-| IntraConf 参数 | 类型    | 必填 | URL 参数             | 说明                               |
-| -------------- | ------- | :--: | -------------------- | ---------------------------------- |
-| `address`      | string  | Yes  | `<host>/<path>`      | 主题地址，最大 80 字符             |
-| `event`        | string  |  -   | `?event=`            | 可选次级事件过滤名称               |
-| `pipeline`     | int32_t |  -   | `?pipeline=`         | 队列深度，0 表示无流水线           |
-| `type`         | string  |  -   | `#queue` / `#direct` | 队列模式（默认 queue）             |
+| IntraConf 参数 | 类型    | 必填 | URL 参数             | 说明                                                      |
+| -------------- | ------- | :--: | -------------------- | --------------------------------------------------------- |
+| `address`      | string  | Yes  | `<host>/<path>`      | 主题地址，不能为空                                        |
+| `event`        | string  |  -   | `?event=`            | 可选次级事件过滤名称                                      |
+| `pipeline`     | int32_t |  -   | `?pipeline=`         | 队列模式下的 pipeline 标识（不同 ID 对应不同的工作线程池）|
+| `type`         | string  |  -   | `#queue` / `#direct` | 投递模式（默认 queue；`is_valid()` 仅接受这两个取值）     |
 
 **URL 示例：**
 ```
@@ -205,7 +205,8 @@ pub.publish(42);
 Publisher<int> pub_direct("intra://sensor/value#direct");
 
 // 方式 3：配置对象
-IntraConf conf("sensor/value", "", 4, "queue");  // pipeline 深度 4
+// 参数：address, event, pipeline_id, type
+IntraConf conf("sensor/value", "", 4, "queue");  // pipeline ID = 4
 Publisher<int> pub_conf(conf);
 
 // Server/Client 示例
@@ -246,13 +247,13 @@ shm://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<0|1>]
 | `domain`     | int32_t |  -   | `?domain=`   | Iceoryx 域 ID（默认 0）                             |
 | `depth`      | int32_t |  -   | `?depth=`    | 历史缓冲深度（默认 0，即无缓冲）                   |
 | `history`    | int32_t |  -   | `?history=`  | 历史计数（默认 0 用于 pub/sub，1 用于 setter/getter）|
-| `wait`       | int32_t |  -   | `?wait=0/1`  | 启用阻塞等待模式（仅 Publisher/Subscriber 有效）    |
+| `wait`       | int32_t |  -   | `?wait=<ms>` | 阻塞等待超时（毫秒，>0 启用；仅 Publisher/Subscriber 有效，Client/Server/Setter/Getter 使用时 `parse_protocol()` 返回 false） |
 
 **URL 示例：**
 ```
 shm://sensor/lidar
 shm://sensor/lidar?depth=10
-shm://sensor/lidar?domain=1&depth=5&wait=1
+shm://sensor/lidar?domain=1&depth=5&wait=100
 ```
 
 **依赖**：Eclipse iceoryx（`iceoryx_posh::iceoryx_posh`），CMake 配置阶段探测；未安装时该模块被跳过。可通过 Conan、发行版包或源码构建安装。
@@ -329,7 +330,7 @@ int main() {
 **注意事项：**
 - **SHM 守护进程必须在所有使用 `shm://` 的业务进程启动前运行**（推荐 `vlink-proxy -c`）。
 - 进程名称在同一 RouDi 域内必须唯一，长度不超过 80 字符。
-- `wait=1` 阻塞等待模式仅对 Publisher/Subscriber 有效，用于 RPC 或字段节点会导致 `parse_protocol()` 返回 `false`。
+- `wait>0` 阻塞等待模式仅对 Publisher/Subscriber 有效，用于 RPC 或字段节点会导致 `parse_protocol()` 返回 `false`。
 - 地址字符串不能包含特殊字符，Iceoryx 对命名有严格限制。
 
 ---

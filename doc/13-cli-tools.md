@@ -590,7 +590,7 @@ File Name:     bag.vdb
 File Size:     128.50 MB (Raw: 256.00 MB)
 Tag Name:      my_recording
 Version:       2.0.0
-Storage Type:  sqlite
+Storage Type:  SQLite3
 Compression:   lzav (Ratio: 50%)
 Process Name:  my_node
 Meta Flags:    completed | idx_elapsed | idx_url | schema
@@ -1042,7 +1042,7 @@ vlink-efbs pub dds://test/msg --fbs_dir /home/fbs_schemas/ -s TestMsg \
 - 适合终端快速翻页、搜索、导出的交互式表格报告：`terminal`
 
 默认内建 URL 会按当前编译宏已启用的 transport 生成，并在运行前做有限的前置条件过滤。普通默认集合包含 `intra`、`shm`、`shm2`、DDS 系列、`zenoh`、`someip`、`mqtt`、`fdbus`、`qnx` 中当前构建可用的项；`shm` / `shm2` 默认带 `?depth=10`，DDS 系列与 `zenoh` 默认带 `?qos=better`，例如 `shm://bench/perf_shm?depth=10`、`dds://bench/perf_dds?qos=better`、`zenoh://bench/perf_zenoh?qos=better`。除 SOME/IP 使用固定 service/event URL 外，内建 URL 使用 `scheme://bench/perf_<scheme>` 格式，避免不同 transport 复用同一 topic 路径产生干扰。showcase 默认 URL 集合只选跨进程 transport（不含 `intra`），按 `shm`、`shm2`、DDS 系列、`zenoh`、`someip`、`mqtt`、`fdbus`、`qnx` 的顺序加入所有可运行项。
-直接执行 `vlink-bench run` 时（无 `--preset`），会走 showcase 默认矩阵，重点覆盖 `throughput` + `latency` 主通信 suite、当前构建可用的跨进程 transport、`bytes` payload，全部在 `process` 模式下测量真实 cross-process IPC 性能。两个 suite 各有自己的 payload 档位（不混用）：**throughput** 用 3 档（16KiB / 256KiB / 1MiB，专挑大消息容易出差异的中大档）；**latency** 用 6 档（128B / 1KiB / 8KiB / 64KiB / 512KiB / 2MiB，覆盖控制消息 → OS 页 → MTU → DDS 分片 → 多 MiB 等性能拐点）。
+直接执行 `vlink-bench run` 时（无 `--preset`），会走 showcase 默认矩阵，重点覆盖 `throughput` + `latency` 主通信 suite、当前构建可用的跨进程 transport、`bytes` payload，全部在 `process` 模式下测量真实 cross-process IPC 性能。两个 suite 各有自己的 payload 档位（不混用）：**throughput** 用 3 档（16KiB / 256KiB / 1MiB，专挑大消息容易出差异的中大档）；**latency** 用 5 档（128B / 4KiB / 64KiB / 512KiB / 2MiB，覆盖控制消息 → OS 页 → DDS 分片 → 多 MiB 等性能拐点）。
 
 所有报告文件（`json` / `csv` / `html`）都通过 `.tmp` 临时文件 + `rename` 原子落盘，磁盘满或写入中断不会留下半成品。Worker 子进程异常退出会被主进程校验 exit code + exit status 捕获，不再被静默误判成功。
 
@@ -1079,9 +1079,9 @@ vlink-bench run [options]
 | `-k` / `--payload` | 负载类型：`bytes` `string` `rawdata`；showcase 默认 `bytes`，`string` 主要保留在 serialization |
 | `-q` / `--qos` | QoS profile 列表；`full` 默认 sweep `sensor`（Reliable）与 `best`（BestEffort） |
 | `--size` | 吞吐测试 payload 大小列表（字节）；showcase 默认 `16384, 262144, 1048576`（3 档，挑大消息差异），`full` 扩展到 `16`–`4 MiB` |
-| `--latency-size` | 时延测试 payload 大小列表（字节）；showcase 默认 `128, 1024, 8192, 65536, 524288, 2097152`（6 档，覆盖控制消息 → 大消息全谱）|
+| `--latency-size` | 时延测试 payload 大小列表（字节）；showcase 默认 `128, 4096, 65536, 524288, 2097152`（5 档，覆盖控制消息 → 大消息全谱）|
 | `--topology-size` | 拓扑测试 payload 大小列表（字节）；showcase 默认 `4096` |
-| `-r` / `--rate` | 固定速率场景的总 cadence 列表（Hz），`burst` 场景也会把它当作 burst 调度频率；showcase latency suite 默认 `1000`（中频典型负载，1000 Hz × 2.5s = 2500 个延迟样本统计置信度足够），多 publisher 按 worker 分摊 |
+| `-r` / `--rate` | 固定速率场景的总 cadence 列表（Hz），`burst` 场景也会把它当作 burst 调度频率；showcase latency suite 默认 `1000`（中频典型负载，1000 Hz × 2s = 2000 个延迟样本统计置信度足够），多 publisher 按 worker 分摊 |
 | `-f` / `--fanout` | `1:n` 场景 subscriber 数量列表；showcase 默认值为 `4, 16`，但默认矩阵不启用 topology suite；`full` 扩到 `1, 2, 4, 8, 16` |
 | `--publishers` | 多 publisher 场景数量列表；showcase 默认值为 `4, 16`，但默认矩阵不启用 multi-publisher topology；`full` 扩到 `1, 2, 4, 8, 16` |
 | `--burst` | `burst` 场景每轮总发送条数列表，多 publisher 会按 worker 分摊；showcase 默认值为 `32`，但默认矩阵不启用 burst |
@@ -1131,11 +1131,11 @@ showcase 默认矩阵（无 `--preset`，目标 2 分钟内跑完）：
 - rate pattern：默认 `max`，延迟套件单独使用固定 rate
 - payload：默认 `bytes`
 - URL：`get_showcase_urls()` 按优先级加入所有可运行的跨进程内建 URL；`intra` 在 `process` 模式必跳，因此不进 showcase
-- 代表性尺寸与速率：`payload_sizes = [16384, 262144, 1048576]`（throughput 3 档）、`latency_sizes = [128, 1024, 8192, 65536, 524288, 2097152]`（latency 6 档）、`latency_rates = [1000]`
-- 默认 payload 分两组：throughput 用 16KiB / 256KiB / 1MiB 三档（挑大消息容易拉开差距的尺寸），latency 用 128B / 1KiB / 8KiB / 64KiB / 512KiB / 2MiB 六档（覆盖控制消息 → 多 MiB 全谱）
+- 代表性尺寸与速率：`payload_sizes = [16384, 262144, 1048576]`（throughput 3 档）、`latency_sizes = [128, 4096, 65536, 524288, 2097152]`（latency 5 档）、`latency_rates = [1000]`
+- 默认 payload 分两组：throughput 用 16KiB / 256KiB / 1MiB 三档（挑大消息容易拉开差距的尺寸），latency 用 128B / 4KiB / 64KiB / 512KiB / 2MiB 五档（覆盖控制消息 → 多 MiB 全谱）
 - 每 scenario 耗时：warmup 1000ms、measure 2000ms、drain 300ms 起（按 payload 自动加长）；case 与 case 之间额外有 200ms cooldown，让 OS pagecache、socket 缓冲、TCP TIME_WAIT 有时间落地，避免相邻 case 互相干扰
 - 运行期间终端会在每个 case 完成后打印 ETA 行（`done X/N · elapsed ... · eta ... · ~Xs/case`），ETA 取静态计划估算（剩余 `warmup + duration + drain + 200ms cooldown + 400ms setup/teardown` 之和）与实际耗时滚动均值的折中，方便提前判断完成时间
-- showcase 默认 repeat = 1（单次 2.5s 测量统计置信度足够）；显式传 `--repeat N` (N≥2) 时才启用 worst-of-N 聚合（吞吐取最低、延迟取最高、丢包取最高、CPU/内存取最高），暴露最坏 case 而非平均掩盖问题
+- showcase 默认 repeat = 1（单次 2s 测量统计置信度足够）；显式传 `--repeat N` (N≥2) 时才启用 worst-of-N 聚合（吞吐取最低、延迟取最高、丢包取最高、CPU/内存取最高），暴露最坏 case 而非平均掩盖问题
 
 `quick` 预设：
 
@@ -1269,7 +1269,7 @@ HTML 报告面向“先看结论、再定位问题、最后看细节”的阅读
 
 ```bash
 # 默认直接跑 showcase 矩阵：重点覆盖 throughput + latency、当前可用 process transport；
-# throughput payload 为 16KiB/256KiB/1MiB，latency payload 为 128B/4KiB/64KiB/512KiB/2MiB，输出 html + terminal
+# throughput payload 为 16KiB/256KiB/1MiB，latency payload 为 128B/4KiB/64KiB/512KiB/2MiB（5 档），输出 html + terminal
 vlink-bench run
 
 # 指定 URL、QoS、大小和速率，只在终端查看交互表格

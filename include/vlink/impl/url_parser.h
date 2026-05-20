@@ -46,7 +46,7 @@
  * | password   | @c pass                     | Optional credential after @c :         |
  * | host       | @c 127.0.0.1                | Hostname or IP address                 |
  * | port       | @c 30490                    | TCP/UDP port number                    |
- * | path       | @c /vehicle/speed           | Topic path                             |
+ * | path       | @c vehicle/speed            | Topic path; leading slash stored separately |
  * | query      | @c domain_id=1&qos=...      | Raw query string after @c ?            |
  * | fragment   | @c section1                 | Fragment identifier after @c #         |
  *
@@ -81,6 +81,8 @@ namespace vlink {
  * Parses the input URL string once at construction time.  All accessor methods
  * are @c const and return references to internally stored strings; the lifetime
  * of the returned references is tied to the lifetime of the @c UrlParser object.
+ * For hierarchical URLs, the stored path does not include the leading @c /
+ * marker; rootedness is tracked separately so @c to_string() can reconstruct it.
  */
 class VLINK_EXPORT UrlParser final {
  public:
@@ -240,9 +242,12 @@ class VLINK_EXPORT UrlParser final {
    *
    * @details
    * Valid only for @c Category::kHierarchical; calling this on a
-   * non-hierarchical URL throws @c Exception::RuntimeError.
+   * non-hierarchical URL throws @c Exception::RuntimeError.  The returned path
+   * omits the leading @c / for rooted hierarchical URLs; rootedness is preserved
+   * internally for reconstruction by @c to_string().
    *
-   * @return Reference to the parsed path string; empty if not present.
+   * @return Reference to the parsed path string without the leading root slash;
+   *         empty if not present.
    */
   [[nodiscard]] const std::string& get_path() const;
 

@@ -104,7 +104,7 @@ class VLINK_EXPORT MemoryResource : public std::pmr::memory_resource {
    *
    * @details
    * Used by @c MemoryResource::make_unique().  Carries one
-   * @c polymorphic_allocator copy, so @c sizeof(Deleter<T>)@ ==@ sizeof(void*).
+   * @c polymorphic_allocator copy, so @c sizeof(Deleter<T>) == sizeof(void*).
    */
   template <typename T>
   struct Deleter final {
@@ -225,7 +225,7 @@ class VLINK_EXPORT MemoryResource : public std::pmr::memory_resource {
    * @brief @c make_unique backed by @c global_instance().
    *
    * @details
-   * Returns @c std::unique_ptr<T,@ Deleter<T>> -- not convertible to plain
+   * Returns @c std::unique_ptr<T, Deleter<T>> -- not convertible to plain
    * @c std::unique_ptr<T>.  Storage is returned to the pool if @c T's
    * constructor throws.
    */
@@ -283,13 +283,13 @@ namespace vlink {
 
 /**
  * @namespace vlink::MemoryResource
- * @brief Fallback shim when @c <memory_resource> is unavailable.
+ * @brief Fallback shim when the standard memory_resource header is unavailable.
  *
  * @details
  * Only @c make_shared / @c make_unique are emulated, forwarding to the
  * standard @c std versions.  The @c MemoryResource class, @c Deleter, and
  * @c global_instance() are not available in this mode.  @c make_unique
- * here returns @c std::unique_ptr<T>, not @c unique_ptr<T,@ Deleter<T>>.
+ * here returns @c std::unique_ptr<T>, not @c unique_ptr<T, Deleter<T>>.
  */
 namespace MemoryResource {  // NOLINT(readability-identifier-naming)
 

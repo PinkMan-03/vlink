@@ -26,7 +26,7 @@
  * @brief Multi-threaded event loop backed by a pool of worker threads sharing one task queue.
  *
  * @details
- * @c MultiLoop extends @c MessageLoop with an internal @c ThreadPool of @p thread_num workers.
+ * @c MultiLoop extends @c MessageLoop with an internal @c ThreadPool of configurable worker threads.
  * The base @c MessageLoop dispatcher thread continues to dequeue tasks from the loop's queue,
  * but instead of running each task inline, it forwards the task to the internal @c ThreadPool
  * for execution on one of the worker threads.  This enables parallel task execution without
@@ -86,7 +86,7 @@ namespace vlink {
 class VLINK_EXPORT MultiLoop : public MessageLoop {
  public:
   /**
-   * @brief Constructs a @c MultiLoop with the default @c kNormalType queue and @p thread_num workers.
+   * @brief Constructs a @c MultiLoop with the default @c kNormalType queue and the requested worker count.
    *
    * @param thread_num  Number of worker threads.  Default: 4.  A zero-worker
    *                    pool rejects forwarded posts, so tasks fall back to the

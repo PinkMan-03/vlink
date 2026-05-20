@@ -32,9 +32,9 @@
  * manager or a connection-pool keep-alive system.
  *
  * Algorithm:
- * - The wheel contains @p slots evenly-spaced time buckets.
- * - Each tick advances the wheel by one slot; the advance period is @p interval_ms.
- * - Timeouts longer than @c slots * @p interval_ms are stored with a round counter and
+ * - The wheel contains @c slots evenly-spaced time buckets.
+ * - Each tick advances the wheel by one slot; the advance period is @c interval_ms.
+ * - Timeouts longer than @c slots * @c interval_ms are stored with a round counter and
  *   skipped until the counter reaches zero.
  * - Adding a timer is O(1).  Removal is O(1) via the internal key-to-slot index.
  * - Expiry detection per tick is O(k) where k is the number of handlers in the current slot.
@@ -84,7 +84,7 @@ namespace vlink {
  * @brief O(1) hash-wheel timer backed by a fixed-size circular slot array.
  *
  * @details
- * Runs its own internal background thread to advance the wheel on each @p interval_ms tick.
+ * Runs its own internal background thread to advance the wheel on each @c interval_ms tick.
  */
 class VLINK_EXPORT WheelTimer {
  public:
@@ -105,7 +105,9 @@ class VLINK_EXPORT WheelTimer {
    * @brief Constructs the wheel timer.
    *
    * @details
-   * Creates the internal slot array.  Call @c start() to begin advancing the wheel.
+   * Creates the internal slot array.  Both @p slots and @p interval_ms must be
+   * greater than zero; invalid values log a fatal error and throw.  Call
+   * @c start() to begin advancing the wheel.
    *
    * @param slots        Number of time buckets in the wheel.  Higher values reduce the
    *                     number of round counters needed for long timeouts.

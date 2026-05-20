@@ -124,7 +124,9 @@
  * @endcode
  *
  * @warning Do not pass a coroutine lambda as a temporary, for example
- *          @code co_spawn(loop, []() -> Task<> { co_await ... ; }()) @endcode
+ *          @code
+ *          co_spawn(loop, []() -> Task<> { co_await ... ; }());
+ *          @endcode
  *          The lambda object is destroyed at the end of the full-expression,
  *          long before the coroutine body actually runs.  Any captured state
  *          (including @c [&] and @c [=]) becomes a dangling reference and
@@ -1021,7 +1023,7 @@ class FutureAwaiter final {
    *
    * @return Future result for non-void instantiations.
    * @throws OperationCancelled if the target loop closed before the resume could be posted.
-   * @throws (anything stored in the future) Whatever @c future.get() rethrows.
+   * @note Exceptions stored in the future are rethrown by @c future.get().
    */
   TypeT await_resume();
 

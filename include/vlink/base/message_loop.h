@@ -256,6 +256,10 @@ class VLINK_EXPORT MessageLoop {
   /**
    * @brief Registers a callback invoked once when the loop thread starts.
    *
+   * @details
+   * Register before @c run() or @c async_run().  Registrations attempted after
+   * the loop has started are ignored and do not replace the active handler.
+   *
    * @param callback  Called from the loop thread before the first task is processed.
    */
   void register_begin_handler(Callback&& callback);
@@ -263,12 +267,20 @@ class VLINK_EXPORT MessageLoop {
   /**
    * @brief Registers a callback invoked once when the loop thread exits.
    *
+   * @details
+   * Register before @c run() or @c async_run().  Registrations attempted after
+   * the loop has started are ignored and do not replace the active handler.
+   *
    * @param callback  Called from the loop thread after the last task has been processed.
    */
   void register_end_handler(Callback&& callback);
 
   /**
    * @brief Registers a callback invoked each time the task queue becomes empty.
+   *
+   * @details
+   * Register before @c run() or @c async_run().  Registrations attempted after
+   * the loop has started are ignored and do not replace the active handler.
    *
    * @param callback  Called from the loop thread on each idle cycle.
    */

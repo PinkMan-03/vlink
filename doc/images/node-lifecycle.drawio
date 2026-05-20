@@ -32,15 +32,15 @@
           <mxGeometry x="300" y="380" width="400" height="80" as="geometry" />
         </mxCell>
 
-        <mxCell id="sl" value="&lt;span style=&quot;font-size:11px&quot;&gt;register callback&lt;br/&gt;listen() / on_request()&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=12;fontColor=#bf360c;shadow=1;arcSize=10;verticalAlign=middle;align=center;" vertex="1" parent="1">
-          <mxGeometry x="60" y="390" width="200" height="60" as="geometry" />
+        <mxCell id="sl" value="&lt;span style=&quot;font-size:11px&quot;&gt;register callback&lt;br/&gt;listen() / listen_for_reply()&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=12;fontColor=#bf360c;shadow=1;arcSize=10;verticalAlign=middle;align=center;" vertex="1" parent="1">
+          <mxGeometry x="60" y="390" width="220" height="60" as="geometry" />
         </mxCell>
         <mxCell id="al" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#ef6c00;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="s3" target="sl" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="sr" value="&lt;span style=&quot;font-size:11px&quot;&gt;data plane&lt;br/&gt;publish() / invoke() / set() / get()&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=12;fontColor=#bf360c;shadow=1;arcSize=10;verticalAlign=middle;align=center;" vertex="1" parent="1">
-          <mxGeometry x="740" y="390" width="220" height="60" as="geometry" />
+        <mxCell id="sr" value="&lt;span style=&quot;font-size:11px&quot;&gt;data plane&lt;br/&gt;publish() / invoke() / send() / reply() / set() / get()&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=12;fontColor=#bf360c;shadow=1;arcSize=10;verticalAlign=middle;align=center;" vertex="1" parent="1">
+          <mxGeometry x="700" y="390" width="260" height="60" as="geometry" />
         </mxCell>
         <mxCell id="ar" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#ef6c00;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="s3" target="sr" parent="1">
           <mxGeometry relative="1" as="geometry" />

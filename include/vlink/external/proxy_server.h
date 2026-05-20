@@ -38,7 +38,9 @@
  * -# Publishes per-topic statistics (@c freq, @c rate, @c loss, @c latency)
  *    once per second via a security-authenticated @c InfoList channel.
  * -# Relays raw message bytes from discovered publishers/setters to connected
- *    @c ProxyAPI listeners when operating in observe, record, or auto modes.
+ *    @c ProxyAPI listeners when operating in non-direct observe, record, or
+ *    auto modes.  In direct mode, data publishers/subscribers are created by
+ *    @c ProxyAPI and the server remains on the control/discovery path.
  *    Setter endpoints are observed with getter semantics to preserve field
  *    last-value delivery.
  * -# Optionally manages an embedded Iceoryx RouDi daemon when
@@ -48,8 +50,9 @@
  *
  * @par Singleton Constraint
  * Only one @c ProxyServer may be constructed per operating-system process.
- * A second construction attempt logs a fatal message and returns without
- * initialising any channels.
+ * A second construction attempt logs a fatal message and throws before any
+ * server channels are initialised; constructing multiple instances in one
+ * process is unsupported.
  *
  * @par Communication Architecture
  * @code
@@ -66,13 +69,15 @@
  * @endcode
  *
  * @par Authentication Token
- * The server generates a 128-bit hex token at construction (cryptographically
- * seeded @c std::random_device + @c std::mt19937_64) and exposes it through
- * @c get_token().  Clients obtain it by invoking the handshake RPC over the
+ * The server generates a 128-bit hex session token at construction via
+ * @c vlink::Uuid::random_hex() and exposes it through @c get_token().  The
+ * token is a process-lifetime protocol nonce, not a long-term cryptographic
+ * key.  Clients obtain it by invoking the handshake RPC over the
  * security-authenticated DDS channel; subsequent Control messages without a
- * matching token are dropped server-side.  The token lives for the lifetime of
- * the process; restarting the server invalidates all previously-issued tokens
- * and forces clients to re-handshake on their next reset.
+ * matching token are dropped server-side.  Restarting the server invalidates
+ * all previously-issued tokens; clients re-handshake after a token mismatch
+ * heartbeat or after a local reset before accepting heartbeats or publishing
+ * further controls.
  *
  * @par Runnable Plugin Lifecycle
  * Plugins listed in @c Config::runnable_list are loaded in the constructor.
@@ -137,9 +142,11 @@ namespace vlink {
  * @brief VLink proxy server daemon backed by a MessageLoop.
  *
  * @details
- * Manages all DDS/SHM channels, a @c DiscoveryViewer, heartbeat timers, and
- * optional runnable plugins.  Only one instance may exist per process.
- * Use @c async_run() (inherited from @c MessageLoop) to start the event loop.
+ * Manages DDS/SHM proxy channels, a @c DiscoveryViewer, heartbeat/info timers,
+ * and optional runnable plugins.  Construction starts the internal
+ * @c DiscoveryViewer loop and its timers.  Only one instance may exist per
+ * process.  Use @c async_run() (inherited from @c MessageLoop) to start the
+ * server's own event loop for async forwarding and plugin lifecycle callbacks.
  */
 class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
  public:
@@ -189,7 +196,7 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
     bool async{false};        ///< Async data forwarding on the MessageLoop thread.
     bool reliable{false};     ///< Use reliable DDS QoS; must match all client configs.
     bool enable_tcp{false};   ///< Use TCP transport for DDS data channels.
-    bool direct{false};       ///< Use SHM channels for data (requires use_iox or external RouDi).
+    bool direct{false};       ///< Use ProxyAPI local SHM channels for data.
     bool native_mode{false};  ///< Restrict all DDS traffic to loopback (127.0.0.1).
     int domain_id{0};         ///< DDS domain ID.
     uint32_t buf_size{0};     ///< DDS socket send/receive buffer in bytes; 0 = default.
@@ -211,12 +218,12 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
   };
 
   /**
-   * @brief Constructs a @c ProxyServer and initialises all subsystems.
+   * @brief Constructs a @c ProxyServer and initialises all proxy subsystems.
    *
    * @details
    * Performs the following steps in order:
    * -# Checks the process-global singleton guard; logs a fatal message and
-   *    returns early if another instance already exists.
+   *    throws if another instance already exists.
    * -# Reads the @c VLINK_INTRA_BIND environment variable.
    * -# If @c config.use_iox is @c true, calls @c init_shm_roudi() to start
    *    an embedded Iceoryx RouDi process.
@@ -228,8 +235,10 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    *
    * @param config  Server configuration.  See @c Config for field details.
    *
-   * @note The constructor does not start the MessageLoop; call @c async_run()
-   *       (or @c run()) separately.
+   * @note The constructor starts the @c DiscoveryViewer loop and the heartbeat
+   *       / info timers, but it does not start the server's own
+   *       @c MessageLoop.  Call @c async_run() or @c run() separately for
+   *       async forwarding and runnable-plugin lifecycle callbacks.
    */
   explicit ProxyServer(const Config& config);
 
@@ -237,9 +246,12 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    * @brief Destructor.
    *
    * @details
-   * Stops and waits for the MessageLoop, all runnable plugins, the
-   * @c DiscoveryViewer, and all DDS handles in a deterministic teardown
-   * sequence.  The process-global singleton guard remains set for the process
+   * Requests the MessageLoop to stop, waits for the loop, stops the proxy
+   * timers, waits for the @c DiscoveryViewer, and releases DDS/SHM handles in
+   * a deterministic teardown sequence.  Runnable plugins receive
+   * @c on_deinit(), @c quit(), and @c wait_for_quit() from @c on_end() when the
+   * loop has been started; the destructor then releases the held plugin
+   * objects.  The process-global singleton guard remains set for the process
    * lifetime.
    */
   ~ProxyServer() override;

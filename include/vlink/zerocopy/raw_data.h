@@ -46,7 +46,10 @@
  * [ magic_begin (4) | RawData struct (64) | payload bytes (N) | magic_end (4) ]
  * @endcode
  * Magic numbers allow the receiver to detect data corruption before
- * @c memcpy-ing the struct header.
+ * @c memcpy-ing the struct header.  The struct block is a raw snapshot of the
+ * 64-bit ABI layout used by this library; receivers must parse it through
+ * @c operator<< and must not treat embedded pointer/ownership fields as
+ * portable wire values.
  *
  * @par Usage
  * @code
@@ -117,7 +120,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Performs a deep copy of @p target, allocating a new buffer and copying
    * the payload.
    *
-   * @param target  Source to copy from.
+   * Parameter @c target: Source to copy from.
    */
   RawData(const RawData& target) noexcept;
 
@@ -128,7 +131,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Transfers ownership from @p target.  After the call @p target is empty
    * and no longer owns any buffer.
    *
-   * @param target  Source to move from.
+   * Parameter @c target: Source to move from.
    */
   RawData(RawData&& target) noexcept;
 
@@ -138,7 +141,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * @details
    * Deep-copies @p target into @c *this.  Self-assignment is a no-op.
    *
-   * @param target  Source to copy from.
+   * Parameter @c target: Source to copy from.
    * @return        Reference to @c *this.
    */
   RawData& operator=(const RawData& target) noexcept;
@@ -150,7 +153,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Transfers ownership from @p target into @c *this.  Self-assignment is a
    * no-op.  After the call @p target is empty.
    *
-   * @param target  Source to move from.
+   * Parameter @c target: Source to move from.
    * @return        Reference to @c *this.
    */
   RawData& operator=(RawData&& target) noexcept;
@@ -159,12 +162,12 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * @brief Deserialises a @c RawData from a @c Bytes wire buffer.
    *
    * @details
-   * Validates the magic-number envelope, then @c memcpy's the struct fields
-   * from the buffer.  The internal data pointer is set to point directly into
-   * @p bytes (zero-copy, @c is_owner() == false).  The caller must ensure
-   * @p bytes outlives this @c RawData.
+   * Validates the magic-number envelope, then @c memcpy's the raw struct
+   * snapshot from the buffer.  The internal data pointer is set to point
+   * directly into @p bytes (zero-copy, @c is_owner() == false).  The caller
+   * must ensure @p bytes outlives this @c RawData.
    *
-   * @param bytes  Serialised buffer produced by @c operator>>.
+   * Parameter @c bytes: Serialised buffer produced by @c operator>>.
    * @return       @c true on success, @c false if the buffer is invalid or
    *               the total size does not match @c get_serialized_size().
    */
@@ -174,10 +177,11 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * @brief Serialises this @c RawData into a @c Bytes wire buffer.
    *
    * @details
-   * Writes the magic-number envelope, the struct fields, and the payload into
-   * @p bytes.  If @p bytes is the wrong size it is reallocated automatically.
+   * Writes the magic-number envelope, this object's raw struct snapshot, and
+   * the payload into @p bytes.  If @p bytes is the wrong size it is reallocated
+   * automatically.
    *
-   * @param bytes  Output buffer (resized if necessary).
+   * Parameter @c bytes: Output buffer (resized if necessary).
    * @return       Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
@@ -189,7 +193,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Verifies that the buffer is large enough and that both the begin and end
    * magic numbers match the expected constants.
    *
-   * @param bytes  Buffer to check.
+   * Parameter @c bytes: Buffer to check.
    * @return       @c true if the magic numbers are present and the minimum
    *               size constraint is satisfied.
    */
@@ -220,7 +224,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * copying data.  @c is_owner() becomes @c false.  The source must outlive
    * this object.  Any previously owned buffer is freed first.
    *
-   * @param target  Source to borrow from.
+   * Parameter @c target: Source to borrow from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool shallow_copy(const RawData& target) noexcept;
@@ -233,7 +237,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * already owns a buffer of the same size, the data is copied in-place without
    * reallocation.
    *
-   * @param target  Source to copy from.
+   * Parameter @c target: Source to copy from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool deep_copy(const RawData& target) noexcept;
@@ -245,7 +249,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Equivalent to a move operation implemented as a member function.  After
    * the call @p target is empty and @c is_owner() on @p target is @c false.
    *
-   * @param target  Source to move from.
+   * Parameter @c target: Source to move from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool move_copy(RawData& target) noexcept;
@@ -257,7 +261,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Any previously owned buffer is freed before the new allocation.  The
    * new buffer content is uninitialised.
    *
-   * @param size  Number of bytes to allocate.  Must be non-zero.
+   * Parameter @c size: Number of bytes to allocate.  Must be non-zero.
    * @return      @c false if @p size is zero, otherwise @c true.
    */
   bool create(size_t size) noexcept;
@@ -279,8 +283,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * owned buffer is freed.  The caller is responsible for the lifetime of
    * @p data.
    *
-   * @param data  Pointer to the data to borrow.  Must be non-null.
-   * @param size  Size of the data in bytes.  Must be non-zero.
+   * Parameter @c data: Pointer to the data to borrow.  Must be non-null.
+   * Parameter @c size: Size of the data in bytes.  Must be non-zero.
    * @return      @c false if @p data is null, @p size is zero, or @p data
    *              already equals the current internal pointer.
    */
@@ -293,8 +297,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * If @c *this already owns a buffer of the same @p size the data is copied
    * in-place; otherwise a new buffer is allocated first via @c create().
    *
-   * @param data  Source data pointer.  Must be non-null.
-   * @param size  Number of bytes to copy.  Must be non-zero.
+   * Parameter @c data: Source data pointer.  Must be non-null.
+   * Parameter @c size: Number of bytes to copy.  Must be non-zero.
    * @return      @c false if @p data is null, @p size is zero, this object
    *              claims ownership but has no buffer, or @p data already equals
    *              the current internal pointer; otherwise @c true.
@@ -304,8 +308,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
   /**
    * @brief Alias for @c deep_copy(uint8_t*, size_t).
    *
-   * @param data  Source data pointer.
-   * @param size  Number of bytes.
+   * Parameter @c data: Source data pointer.
+   * Parameter @c size: Number of bytes.
    * @return      Result of the underlying @c deep_copy call.
    */
   bool fill_data(uint8_t* data, size_t size) noexcept;
@@ -324,7 +328,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
   /**
    * @brief Returns a read-only pointer to the payload bytes.
    *
-   * @return Pointer to the payload, or @c nullptr if the object is empty.
+   * @return Pointer to the payload.  Empty deserialised payloads may still
+   *         hold a non-null borrowed pointer; use @c size() / @c is_valid() to
+   *         test for usable payload bytes.
    */
   [[nodiscard]] const uint8_t* data() const noexcept;
 
@@ -348,7 +354,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
 
   Header header;  ///< Sequencing and timestamp metadata for this data packet.
 
-  static constexpr bool kZerocopyTypes{true};  /// Internal
+  static constexpr bool kZerocopyTypes{true};  ///< Internal marker for VLink zero-copy type traits.
 
  private:
   uint8_t* data_{nullptr};

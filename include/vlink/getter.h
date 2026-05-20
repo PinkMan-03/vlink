@@ -246,7 +246,7 @@ class Getter : public Node<GetterImpl, SecT> {
   /**
    * @brief Returns the most recently measured end-to-end value latency.
    *
-   * @return Latency in microseconds; @c 0 if tracking is disabled.
+   * @return Latency in nanoseconds; @c 0 if tracking is disabled.
    */
   [[nodiscard]] int64_t get_latency() const;
 

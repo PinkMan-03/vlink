@@ -101,13 +101,14 @@ struct VLINK_EXPORT Conf {
    *
    * @details
    * Called by the Node<> template before invoking any @c create_*() factory.
-   * The base implementation logs a fatal message and returns @c false for
-   * @c kUnknownImplType; otherwise it caches @p impl_type and returns @c true.
-   * Concrete subclasses typically call this base and then validate their own
-   * fields.
+   * The base implementation logs a fatal message for @c kUnknownImplType;
+   * that fatal path throws, so the documented @c false return is not normally
+   * observable for the unknown type.  Otherwise it caches @p impl_type and
+   * returns @c true.  Concrete subclasses typically call this base and then
+   * validate their own fields.
    *
    * @param impl_type  The role being requested (e.g. @c kPublisher).
-   * @return           @c true on success; @c false if the type is unknown.
+   * @return           @c true on success; the unknown-type fatal path throws.
    */
   [[nodiscard]] virtual bool parse(ImplType impl_type) const;
 

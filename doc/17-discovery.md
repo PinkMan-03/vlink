@@ -82,9 +82,9 @@ vlink::DiscoveryReporter* reporter = vlink::DiscoveryReporter::global_get();
 
 | FilterType       | 含义                                      |
 | ---------------- | ----------------------------------------- |
-| `kFilterNone`    | 显示所有当前已发现的节点                   |
-| `kFilterAvailable` | 只显示当前有存活进程的节点              |
-| `kFilterNative`  | 只显示本机（同一主机名）的节点           |
+| `kFilterNone`    | 显示所有发现到的节点                       |
+| `kFilterAvailable` | 屏蔽来自其它主机的本地传输（`intra://`、`shm://`）节点；本机节点全部保留 |
+| `kFilterNative`  | 只显示本机（同一主机名）的节点             |
 
 ### 17.3.2 基本用法
 

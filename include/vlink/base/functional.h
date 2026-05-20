@@ -31,8 +31,8 @@
  * @details
  * @par Storage predicate (kIsInline)
  * A target @c FunctorT is held inline iff @b all three conditions hold:
- * @c sizeof(FunctorT) @c <= @c SboSizeT, @c alignof(FunctorT) @c <=
- * @c alignof(std::max_align_t), and @c FunctorT is nothrow move-constructible.
+ * @c sizeof(FunctorT) is no greater than @c SboSizeT, @c alignof(FunctorT)
+ * is no greater than @c alignof(std::max_align_t), and @c FunctorT is nothrow move-constructible.
  * Otherwise @c FunctorT is allocated through @c vlink::MemoryPool::global_instance();
  * the original @c sizeof(FunctorT) and @c alignof(FunctorT) are passed back to
  * @c deallocate so the block routes to its source tier. This predicate
