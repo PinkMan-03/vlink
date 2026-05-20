@@ -509,7 +509,7 @@ Shm2Server::Shm2Server(const ShmID2& id) {
         }
 
         auto* ml = impl->get_message_loop();
-        if VLIKELY (ml) {
+        if (ml) {
           std::weak_ptr<Shm2Server> weak_self = weak_from_this();
           ml->post_task([weak_self]() {
             auto self = weak_self.lock();
@@ -976,7 +976,7 @@ Shm2Client::Shm2Client(const ShmID2& id) {
         }
 
         auto* ml = impl->get_message_loop();
-        if VLIKELY (ml) {
+        if (ml) {
           std::weak_ptr<Shm2Client> weak_self = weak_from_this();
           ml->post_task([weak_self]() {
             auto self = weak_self.lock();
@@ -1989,7 +1989,7 @@ void Shm2Subscriber::subscribe() {
         }
 
         auto* ml = impl->get_message_loop();
-        if VLIKELY (ml) {
+        if (ml) {
           std::weak_ptr<Shm2Subscriber> weak_self = weak_from_this();
           ml->post_task([weak_self]() {
             auto self = weak_self.lock();

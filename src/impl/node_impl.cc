@@ -59,7 +59,6 @@ struct NodeImplHelper final {
   std::mutex post_mtx;
   NodeImpl::StatusCallback status_callback;
   std::atomic<MessageLoop*> message_loop{nullptr};
-  bool has_detached{false};
 
   std::shared_ptr<BagWriter> data_recorder;
 };
@@ -134,16 +133,9 @@ bool NodeImpl::check_version(const Version& version) {
 }
 
 bool NodeImpl::attach(class MessageLoop* message_loop) {
-  std::lock_guard lock(helper_->post_mtx);
-
   MessageLoop* expected = nullptr;
-  if VUNLIKELY (!helper_->message_loop.compare_exchange_strong(expected, message_loop, std::memory_order_release,
-                                                               std::memory_order_relaxed)) {
-    return false;
-  }
-
-  helper_->has_detached = false;
-  return true;
+  return helper_->message_loop.compare_exchange_strong(expected, message_loop, std::memory_order_release,
+                                                       std::memory_order_relaxed);
 }
 
 bool NodeImpl::detach() {
@@ -153,10 +145,6 @@ bool NodeImpl::detach() {
     std::lock_guard lock(helper_->post_mtx);
 
     message_loop = helper_->message_loop.exchange(nullptr, std::memory_order_acq_rel);
-
-    if (message_loop) {
-      helper_->has_detached = true;
-    }
   }
 
   if (!message_loop) {
@@ -171,19 +159,6 @@ bool NodeImpl::detach() {
 }
 
 class MessageLoop* NodeImpl::get_message_loop() const { return helper_->message_loop.load(std::memory_order_acquire); }
-
-bool NodeImpl::post_task(PostCallback&& callback) {
-  std::lock_guard lock(helper_->post_mtx);
-
-  auto* message_loop = helper_->message_loop.load(std::memory_order_acquire);
-
-  if (message_loop) {
-    (void)message_loop->post_task(std::move(callback));
-    return true;
-  }
-
-  return helper_->has_detached;
-}
 
 void NodeImpl::register_status_handler(StatusCallback&& callback) {
   if VUNLIKELY (transport_type != TransportType::kDds && transport_type != TransportType::kDdsc &&

@@ -37,18 +37,21 @@ DdsClientImpl::WriterListener::WriterListener(NodeImpl* impl) : DdsWriterListene
 void DdsClientImpl::WriterListener::on_publication_matched(dds::DataWriter* writer,
                                                            const dds::PublicationMatchedStatus& status) {
   auto* instance = static_cast<DdsClientImpl*>(get_impl());
+  auto* message_loop = instance->get_message_loop();
 
   instance->write_session_count_ = status.current_count;
 
   // std::this_thread::sleep_for(std::chrono::microseconds(1));  //?
 
-  if VUNLIKELY (!instance->post_task([instance]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->update_connected();
-                })) {
+      instance->update_connected();
+    });
+  } else {
     instance->update_connected();
   }
 
@@ -63,18 +66,21 @@ DdsClientImpl::ReaderListener::ReaderListener(NodeImpl* impl) : DdsReaderListene
 void DdsClientImpl::ReaderListener::on_subscription_matched(dds::DataReader* reader,
                                                             const dds::SubscriptionMatchedStatus& status) {
   auto* instance = static_cast<DdsClientImpl*>(get_impl());
+  auto* message_loop = instance->get_message_loop();
 
   instance->read_session_count_ = status.current_count;
 
   // std::this_thread::sleep_for(std::chrono::microseconds(1));  //?
 
-  if VUNLIKELY (!instance->post_task([instance]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->update_connected();
-                })) {
+      instance->update_connected();
+    });
+  } else {
     instance->update_connected();
   }
 
@@ -83,14 +89,17 @@ void DdsClientImpl::ReaderListener::on_subscription_matched(dds::DataReader* rea
 
 void DdsClientImpl::ReaderListener::on_data_available(dds::DataReader* reader) {
   auto* instance = static_cast<DdsClientImpl*>(get_impl());
+  auto* message_loop = instance->get_message_loop();
 
-  if VUNLIKELY (!instance->post_task([instance, reader]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance, reader]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->process_message(reader);
-                })) {
+      instance->process_message(reader);
+    });
+  } else {
     instance->process_message(reader);
   }
 }

@@ -45,7 +45,7 @@ void Shm2PublisherImpl::init() {
   object_->register_sub_connect_callback(this, [this](bool) {
     auto* message_loop = get_message_loop();
 
-    if VLIKELY (message_loop) {
+    if (message_loop) {
       message_loop->post_task([this]() { PublisherImpl::update_subscribers(); });
     } else {
       PublisherImpl::update_subscribers();

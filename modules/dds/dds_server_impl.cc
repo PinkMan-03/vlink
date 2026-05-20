@@ -47,6 +47,7 @@ void DdsServerImpl::ReaderListener::on_subscription_matched(dds::DataReader* rea
 
 void DdsServerImpl::ReaderListener::on_data_available(dds::DataReader* reader) {
   auto* instance = static_cast<DdsServerImpl*>(get_impl());
+  auto* message_loop = instance->get_message_loop();
 
   if VUNLIKELY (instance->has_suspend) {
     if (instance->is_cdr_type) {
@@ -78,13 +79,15 @@ void DdsServerImpl::ReaderListener::on_data_available(dds::DataReader* reader) {
     return;
   }
 
-  if VUNLIKELY (!instance->post_task([instance, reader]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance, reader]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->process_message(reader);
-                })) {
+      instance->process_message(reader);
+    });
+  } else {
     instance->process_message(reader);
   }
 }

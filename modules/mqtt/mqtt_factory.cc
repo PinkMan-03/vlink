@@ -901,7 +901,7 @@ void MqttSubscriber::process_message(uint64_t channel, uint64_t seq, uint64_t gu
 
   auto* message_loop = impl->get_message_loop();
 
-  if VLIKELY (message_loop) {
+  if (message_loop) {
     auto weak_self = weak_from_this();
 
     message_loop->post_task([weak_self, channel, bytes]() {
@@ -1043,7 +1043,7 @@ void MqttServer::process_message(uint64_t channel, uint64_t seq, const Bytes& re
 
   auto* message_loop = impl->get_message_loop();
 
-  if VLIKELY (message_loop) {
+  if (message_loop) {
     auto weak_self = weak_from_this();
 
     message_loop->post_task([weak_self, channel, seq, req_bytes]() {

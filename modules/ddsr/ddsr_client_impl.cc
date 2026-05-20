@@ -39,16 +39,19 @@ DdsrClientImpl::WriterListener::WriterListener(NodeImpl* impl) : DdsrWriterListe
 void DdsrClientImpl::WriterListener::on_publication_matched(NodeImpl* impl,
                                                             const DDS_PublicationMatchedStatus& status) {
   auto* instance = static_cast<DdsrClientImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
   instance->write_session_count_ = status.current_count;
 
-  if VUNLIKELY (!instance->post_task([instance]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->update_connected();
-                })) {
+      instance->update_connected();
+    });
+  } else {
     instance->update_connected();
   }
 
@@ -97,16 +100,19 @@ void DdsrClientImpl::process_message(DDS_DataReader* reader) {
 void DdsrClientImpl::ReaderListener::on_subscription_matched(NodeImpl* impl,
                                                              const DDS_SubscriptionMatchedStatus& status) {
   auto* instance = static_cast<DdsrClientImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
   instance->read_session_count_ = status.current_count;
 
-  if VUNLIKELY (!instance->post_task([instance]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->update_connected();
-                })) {
+      instance->update_connected();
+    });
+  } else {
     instance->update_connected();
   }
 
@@ -115,14 +121,17 @@ void DdsrClientImpl::ReaderListener::on_subscription_matched(NodeImpl* impl,
 
 void DdsrClientImpl::ReaderListener::on_data_available(NodeImpl* impl, DDS_DataReader* reader) {
   auto* instance = static_cast<DdsrClientImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
-  if VUNLIKELY (!instance->post_task([instance, reader]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance, reader]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->process_message(reader);
-                })) {
+      instance->process_message(reader);
+    });
+  } else {
     instance->process_message(reader);
   }
 }

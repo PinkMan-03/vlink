@@ -52,7 +52,7 @@ void ZenohPublisherImpl::init() {
   object_->register_sub_connect_callback(this, [this, weak_object](bool) {
     auto* message_loop = get_message_loop();
 
-    if VLIKELY (message_loop) {
+    if (message_loop) {
       message_loop->post_task([this, weak_object]() {
         auto object = weak_object.lock();
 

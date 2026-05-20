@@ -37,16 +37,19 @@ DdscClientImpl::WriterListener::WriterListener(NodeImpl* impl) : DdscWriterListe
 void DdscClientImpl::WriterListener::on_publication_matched(NodeImpl* impl,
                                                             const dds_publication_matched_status_t& status) {
   auto* instance = static_cast<DdscClientImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
   instance->write_session_count_ = status.current_count;
 
-  if VUNLIKELY (!instance->post_task([instance]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->update_connected();
-                })) {
+      instance->update_connected();
+    });
+  } else {
     instance->update_connected();
   }
 
@@ -59,16 +62,19 @@ DdscClientImpl::ReaderListener::ReaderListener(NodeImpl* impl) : DdscReaderListe
 void DdscClientImpl::ReaderListener::on_subscription_matched(NodeImpl* impl,
                                                              const dds_subscription_matched_status_t& status) {
   auto* instance = static_cast<DdscClientImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
   instance->read_session_count_ = status.current_count;
 
-  if VUNLIKELY (!instance->post_task([instance]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->update_connected();
-                })) {
+      instance->update_connected();
+    });
+  } else {
     instance->update_connected();
   }
 
@@ -77,14 +83,17 @@ void DdscClientImpl::ReaderListener::on_subscription_matched(NodeImpl* impl,
 
 void DdscClientImpl::ReaderListener::on_data_available(NodeImpl* impl, dds_entity_t reader) {
   auto* instance = static_cast<DdscClientImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
-  if VUNLIKELY (!instance->post_task([instance, reader]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance, reader]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->process_message(reader);
-                })) {
+      instance->process_message(reader);
+    });
+  } else {
     instance->process_message(reader);
   }
 }

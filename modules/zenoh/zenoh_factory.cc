@@ -1388,7 +1388,7 @@ bool ZenohServer::reply(uint64_t channel, uint64_t req_id, const Bytes& resp_dat
 }
 
 void ZenohServer::process_message(uint64_t channel, uint64_t seq, MessageLoop* message_loop, Bytes&& req_bytes) {
-  if VLIKELY (message_loop) {
+  if (message_loop) {
     auto weak_self = weak_from_this();
     auto task = [weak_self, channel, seq, req_bytes = std::move(req_bytes)]() mutable {
       auto self = weak_self.lock();
@@ -2178,7 +2178,7 @@ void ZenohSubscriber::process_message(uint64_t channel, uint64_t seq, uint64_t g
                         std::memory_order_relaxed);
   }
 
-  if VLIKELY (message_loop) {
+  if (message_loop) {
     auto weak_self = weak_from_this();
     auto task = [weak_self, channel, bytes = std::move(bytes)]() mutable {
       auto self = weak_self.lock();

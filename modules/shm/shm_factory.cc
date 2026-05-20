@@ -730,7 +730,7 @@ void ShmServer::on_request_received(shm::popo::UntypedServer*, ShmServer* target
   }
 
   auto* message_loop = impl->get_message_loop();
-  if VLIKELY (message_loop) {
+  if (message_loop) {
     std::weak_ptr<ShmServer> weak_target = target->weak_from_this();
     message_loop->post_task([weak_target]() {
       auto target = weak_target.lock();
@@ -1014,7 +1014,7 @@ void ShmClient::on_response_received(shm::popo::UntypedClient*, ShmClient* targe
   }
 
   auto* message_loop = impl->get_message_loop();
-  if VLIKELY (message_loop) {
+  if (message_loop) {
     std::weak_ptr<ShmClient> weak_target = target->weak_from_this();
     message_loop->post_task([weak_target]() {
       auto target = weak_target.lock();
@@ -1372,7 +1372,7 @@ void ShmSubscriber::on_msg_received(shm::popo::UntypedSubscriber*, ShmSubscriber
   }
 
   auto* message_loop = impl->get_message_loop();
-  if VLIKELY (message_loop) {
+  if (message_loop) {
     std::weak_ptr<ShmSubscriber> weak_target = target->weak_from_this();
     message_loop->post_task([weak_target]() {
       auto target = weak_target.lock();

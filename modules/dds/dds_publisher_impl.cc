@@ -33,16 +33,19 @@ DdsPublisherImpl::WriterListener::WriterListener(NodeImpl* impl) : DdsWriterList
 void DdsPublisherImpl::WriterListener::on_publication_matched(dds::DataWriter* writer,
                                                               const dds::PublicationMatchedStatus& status) {
   auto* instance = static_cast<DdsPublisherImpl*>(get_impl());
+  auto* message_loop = instance->get_message_loop();
 
   instance->session_count_ = status.current_count;
 
-  if VUNLIKELY (!instance->post_task([instance]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->update_subscribers();
-                })) {
+      instance->update_subscribers();
+    });
+  } else {
     instance->update_subscribers();
   }
 

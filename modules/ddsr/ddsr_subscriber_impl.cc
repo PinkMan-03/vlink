@@ -36,6 +36,7 @@ DdsrSubscriberImpl::ReaderListener::ReaderListener(NodeImpl* impl) : DdsrReaderL
 
 void DdsrSubscriberImpl::ReaderListener::on_data_available(NodeImpl* impl, DDS_DataReader* reader) {
   auto* instance = static_cast<DdsrSubscriberImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
   if VUNLIKELY (instance->has_suspend) {
     DdsrFactory::ReadMessage msg;
@@ -55,13 +56,15 @@ void DdsrSubscriberImpl::ReaderListener::on_data_available(NodeImpl* impl, DDS_D
     return;
   }
 
-  if VUNLIKELY (!instance->post_task([instance, reader]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance, reader]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->process_message(reader);
-                })) {
+      instance->process_message(reader);
+    });
+  } else {
     instance->process_message(reader);
   }
 }

@@ -47,6 +47,7 @@ void DdscServerImpl::ReaderListener::on_subscription_matched(NodeImpl* impl,
 
 void DdscServerImpl::ReaderListener::on_data_available(NodeImpl* impl, dds_entity_t reader) {
   auto* instance = static_cast<DdscServerImpl*>(impl);
+  auto* message_loop = instance->get_message_loop();
 
   if VUNLIKELY (instance->has_suspend) {
     DdscFactory::ReadMessage msg;
@@ -66,13 +67,15 @@ void DdscServerImpl::ReaderListener::on_data_available(NodeImpl* impl, dds_entit
     return;
   }
 
-  if VUNLIKELY (!instance->post_task([instance, reader]() {
-                  if VUNLIKELY (!instance->get_message_loop()) {
-                    return;
-                  }
+  if (message_loop) {
+    message_loop->post_task([instance, reader]() {
+      if VUNLIKELY (!instance->get_message_loop()) {
+        return;
+      }
 
-                  instance->process_message(reader);
-                })) {
+      instance->process_message(reader);
+    });
+  } else {
     instance->process_message(reader);
   }
 }

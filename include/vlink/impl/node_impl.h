@@ -188,11 +188,6 @@ class VLINK_EXPORT NodeImpl {
   using IntraMsgCallback = Function<void(const IntraData&)>;
 
   /**
-   * @brief Move-only task callback posted to a node-bound @c MessageLoop.
-   */
-  using PostCallback = MoveFunction<void()>;
-
-  /**
    * @brief Initialises the underlying transport channel.
    *
    * @details
@@ -378,15 +373,6 @@ class VLINK_EXPORT NodeImpl {
    * @return Pointer to the loop, or @c nullptr if not attached.
    */
   [[nodiscard]] class MessageLoop* get_message_loop() const;
-
-  /**
-   * @brief Posts @p callback to the attached node @c MessageLoop.
-   *
-   * @param callback  Move-only task to execute on the attached loop.
-   * @return @c true if the task was accepted; @c false if no loop is attached
-   *         or the loop rejected the task.
-   */
-  bool post_task(PostCallback&& callback);
 
   /**
    * @brief Returns a typed pointer to the conf by downcasting to @c T.

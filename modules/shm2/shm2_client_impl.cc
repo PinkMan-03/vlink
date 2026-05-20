@@ -46,7 +46,7 @@ void Shm2ClientImpl::init() {
   object_->register_server_connect_callback(this, [this](bool) {
     auto* message_loop = get_message_loop();
 
-    if VLIKELY (message_loop) {
+    if (message_loop) {
       message_loop->post_task([this]() { ClientImpl::update_connected(); });
     } else {
       ClientImpl::update_connected();
