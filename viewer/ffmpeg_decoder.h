@@ -83,7 +83,7 @@ class FFmpegDecoder : protected vlink::MessageLoop {
 
   void post_data(int channel, int seq, const vlink::Bytes& raw_data);
 
-  bool wait_for_idle(int ms = vlink::Timer::kInfinite);
+  bool wait_for_idle(int ms = vlink::Timer::kInfinite, bool check = true) override;
 
   [[nodiscard]] float get_average_decode_cost();
 

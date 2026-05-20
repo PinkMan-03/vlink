@@ -315,7 +315,7 @@ void FFmpegDecoder::post_data(int channel, int seq, const vlink::Bytes& raw_data
 #endif
 }
 
-bool FFmpegDecoder::wait_for_idle(int ms) { return vlink::MessageLoop::wait_for_idle(ms); }
+bool FFmpegDecoder::wait_for_idle(int ms, bool check) { return vlink::MessageLoop::wait_for_idle(ms, check); }
 
 float FFmpegDecoder::get_average_decode_cost() {
   float cost = -1;
