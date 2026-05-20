@@ -1834,7 +1834,8 @@ void MainWindow::update_error(int error) {
     }
 
     is_show_warn_ = true;
-    QMessageBox::warning(this, tr("Warning"), tr("Multiple proxys detected:\n%1").arg(hostname_info));
+    QMessageBox::warning(this, tr("Warning"),
+                         tr("Multiple proxy servers or proxy identity mismatch detected:\n%1").arg(hostname_info));
   } else if (error == vlink::ProxyAPI::kVersionCompError) {
     QString proxy_version = QString::fromStdString(proxy_->get_proxy_version());
     QString viewer_version = VLINK_VERSION;
@@ -1849,7 +1850,8 @@ void MainWindow::update_error(int error) {
                              .arg(proxy_version, viewer_version));
   } else if (error == vlink::ProxyAPI::kTokenError) {
     is_show_warn_ = true;
-    QMessageBox::warning(this, tr("Warning"), tr("The proxy authentication handshake failed or token does not match."));
+    QMessageBox::warning(this, tr("Warning"),
+                         tr("The proxy authentication handshake failed or same-server token does not match."));
   }
 }
 

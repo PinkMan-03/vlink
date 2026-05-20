@@ -63,9 +63,9 @@
  * | kReliableCompError    |   3   | reliable setting mismatch between client/server.  |
  * | kTcpCompError         |   4   | enable_tcp setting mismatch.                      |
  * | kDirectCompError      |   5   | direct setting mismatch.                          |
- * | kMultiProxyError      |   7   | Multiple proxy servers detected on the network.   |
+ * | kMultiProxyError      |   7   | Multiple proxy servers or Time identity mismatch. |
  * | kVersionCompError     |   8   | VLink version mismatch between client and server. |
- * | kTokenError           |   9   | Handshake refused/empty token or token mismatch.  |
+ * | kTokenError           |   9   | Handshake refused/empty token or same-identity token mismatch. |
  * | kUnknownError         |  10   | Unknown or unclassified error.                    |
  *
  * @par Connectivity, Handshake, and Heartbeat
@@ -78,8 +78,11 @@
  * onto every outgoing @c Control.  A refused handshake or empty response token
  * reports @c kTokenError, while handshake client setup/connect/invoke timeouts
  * are treated as channel-not-ready and retried silently.  Each incoming Time
- * heartbeat must carry the same token or the cached token is cleared and the
- * handshake is retried; the mismatch path reports a debounced @c kTokenError.
+ * heartbeat must come from the same server identity and carry the same token;
+ * an identity mismatch is reported as @c kMultiProxyError, while an
+ * identity-matching token mismatch is reported as @c kTokenError. In both
+ * token mismatch paths the cached token is cleared and the handshake is
+ * retried.
  * The 1-second heartbeat then automatically re-runs the handshake until it
  * succeeds, recovering transparently from server restarts.  If no heartbeat is
  * received for 5 consecutive seconds the connection is declared lost and
@@ -210,8 +213,9 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Compatibility and protocol error codes reported via @c ErrorCallback.
    *
    * @details
-   * Errors are detected when the client parses an incoming @c Time heartbeat.
-   * The callback fires only when the error state changes.
+   * Errors are detected when the client parses an incoming @c Time heartbeat
+   * or a handshake response.  The callback fires only when the error state
+   * changes.
    */
   enum Error : uint8_t {
     kNoError = 0,            ///< No error; connection is healthy.
@@ -220,9 +224,9 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
     kReliableCompError = 3,  ///< Client and server have mismatched reliable setting.
     kTcpCompError = 4,       ///< Client and server have mismatched enable_tcp setting.
     kDirectCompError = 5,    ///< Client and server have mismatched direct setting.
-    kMultiProxyError = 7,    ///< Multiple proxy servers detected on the same domain.
+    kMultiProxyError = 7,    ///< Multiple proxy servers, or Time identity differs from the handshake.
     kVersionCompError = 8,   ///< VLINK_VERSION string differs between client and server.
-    kTokenError = 9,         ///< Handshake refused/empty token, or Time token mismatch.
+    kTokenError = 9,         ///< Handshake refused/empty token, or identity-matching Time token mismatch.
     kUnknownError = 10,      ///< Unknown or unclassified error.
   };
 
@@ -584,10 +588,12 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Returns the hostname of the connected @c ProxyServer.
    *
    * @details
-   * Populated from the server's @c Time heartbeat.  Returns an empty string
-   * before the first heartbeat is received or after disconnection.
+   * With handshake enabled, initialized from the successful handshake response
+   * and then cross-checked against @c Time heartbeats. Without handshake,
+   * populated from the server's @c Time heartbeat. Returns an empty string
+   * before any server identity is accepted or after disconnection.
    *
-   * @return Hostname string, or empty if not yet connected.
+   * @return Hostname string, or empty if no server identity is available.
    */
   [[nodiscard]] std::string get_current_hostname() const;
 
@@ -595,10 +601,12 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Returns the machine ID of the connected @c ProxyServer.
    *
    * @details
-   * Populated from the server's @c Time heartbeat.  Returns an empty string
-   * before the first heartbeat is received or after disconnection.
+   * With handshake enabled, initialized from the successful handshake response
+   * and then cross-checked against @c Time heartbeats. Without handshake,
+   * populated from the server's @c Time heartbeat. Returns an empty string
+   * before any server identity is accepted or after disconnection.
    *
-   * @return Machine ID string, or empty if not yet connected.
+   * @return Machine ID string, or empty if no server identity is available.
    */
   [[nodiscard]] std::string get_current_machine_id() const;
 
@@ -682,8 +690,10 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
    * @brief Returns the @c VLINK_VERSION string reported by the server.
    *
    * @details
-   * Populated from the first valid heartbeat.  Returns an empty string before
-   * connection or after handle reset.
+   * With handshake enabled, initialized from the successful handshake response
+   * and then updated from @c Time metadata after token/control checks. Without
+   * handshake, populated from the first valid heartbeat. Returns an empty
+   * string before any server version is accepted or after handle reset.
    *
    * @return Server VLink version string, e.g. @c "2.0.0".
    */

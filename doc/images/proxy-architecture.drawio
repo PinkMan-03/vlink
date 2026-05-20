@@ -123,8 +123,8 @@
         <mxCell id="ch2_l" value="Time (Sub) + token" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=11;fontStyle=1;fontColor=#1b5e20;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
           <mxGeometry x="420" y="262" width="160" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="ch2_s" value="1Hz heartbeat - client compares token" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=9;fontStyle=2;fontColor=#455a64;" vertex="1" parent="1">
-          <mxGeometry x="400" y="284" width="200" height="16" as="geometry" />
+        <mxCell id="ch2_s" value="1Hz heartbeat - client compares identity + token" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=9;fontStyle=2;fontColor=#455a64;" vertex="1" parent="1">
+          <mxGeometry x="380" y="284" width="240" height="16" as="geometry" />
         </mxCell>
 
         <!-- Channel 3: InfoList (Server -> API) -->

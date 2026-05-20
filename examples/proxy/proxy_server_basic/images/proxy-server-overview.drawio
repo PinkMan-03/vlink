@@ -117,7 +117,7 @@
         <mxCell id="ch_ctrl" value="ControlSub &lt;- ControlPub&#10;validates token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
           <mxGeometry x="840" y="220" width="240" height="36" as="geometry" />
         </mxCell>
-        <mxCell id="ch_time" value="TimePub -&gt; TimeSub&#10;echoes token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
+        <mxCell id="ch_time" value="TimePub -&gt; TimeSub&#10;echoes identity + token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
           <mxGeometry x="840" y="264" width="240" height="36" as="geometry" />
         </mxCell>
         <mxCell id="ch_info" value="InfoPub -&gt; InfoSub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">

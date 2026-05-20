@@ -75,8 +75,9 @@
  * key.  Clients obtain it by invoking the handshake RPC over the
  * security-authenticated DDS channel; subsequent Control messages without a
  * matching token are dropped server-side.  Restarting the server invalidates
- * all previously-issued tokens; clients re-handshake after a token mismatch
- * heartbeat or after a local reset before accepting heartbeats or publishing
+ * all previously-issued tokens; clients re-handshake after a same-identity
+ * token mismatch heartbeat, an identity-mismatch heartbeat that also carries a
+ * different token, or a local reset before accepting heartbeats or publishing
  * further controls.
  *
  * @par Runnable Plugin Lifecycle
@@ -264,9 +265,9 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    * once at construction via @c vlink::Uuid::random_hex() and stays constant for the
    * server's lifetime.  Clients learn it by invoking the security-authenticated
    * handshake RPC; the server then validates that every incoming @c Control carries the
-   * same token and echoes the token inside each @c Time heartbeat so clients can detect
-   * server restarts.  When the macro is 0 the token is empty and validation is disabled
-   * (handshake channel is not created).
+   * same token and echoes the token plus server identity inside each @c Time heartbeat
+   * so clients can detect server restarts and identity mismatches.  When the macro is
+   * 0 the token is empty and validation is disabled (handshake channel is not created).
    *
    * @return Hex-encoded token string, or empty when @c VLINK_PROXY_ENABLE_HANDSHAKE is 0.
    */

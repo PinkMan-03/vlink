@@ -492,7 +492,7 @@ api.register_connect_callback([](bool connected){ ... });
 api.register_info_callback([](auto& infos){ ... });
 ```
 
-**Handshake/token**：默认开启 `VLINK_PROXY_ENABLE_HANDSHAKE=1`。`ProxyAPI` 通过 `HandshakeReq/Resp` 自动获取服务器 128-bit token；Control 带 token，Time 回显 token。RPC 未就绪 / 超时是静默重试，握手被拒或 Time token 失配才进入 `kTokenError=9`。
+**Handshake/token**：默认开启 `VLINK_PROXY_ENABLE_HANDSHAKE=1`。`ProxyAPI` 通过 `HandshakeReq/Resp` 自动获取服务器 128-bit token；Control 带 token，Time 回显 token。RPC 未就绪 / 超时是静默重试；握手被拒或身份匹配的 Time token 失配进入 `kTokenError=9`，Time 的服务器身份不一致进入 `kMultiProxyError=7`。
 
 **ProxyAPI::Mode**：`kOffline=0`/`kObserveOne=1`/`kObserveAll=2`/`kRecord=3`/`kPlay=4`/`kEdit=5`/`kAuto=6`/`kAutoAndObserveAll=7`。
 

@@ -1948,7 +1948,7 @@ VLink Viewer 依赖的主要技术组件如下：
 实时主窗口 `vlink-viewer` 通过 VLink 内部的 **ProxyAPI** 进行消息订阅与接收；`vlink-player` 与 `vlink-analyzer` 主要面向离线 Bag 读取与回放分析路径。ProxyAPI 的核心设计有三个关键特性：
 
 1. **传输后端透明**：Viewer 组件无需感知底层使用的是 `shm://`、`dds://` 还是 `zenoh://` — ProxyAPI 自动将订阅请求路由到合适的传输后端，Viewer 只看到经过统一格式化的消息流。
-2. **默认安全握手**：ProxyAPI 通过 Handshake RPC 自动获取 ProxyServer 签发的 128-bit token；后续 Control 带 token，Time 心跳回显 token，用于识别服务器重启和 token 失配。
+2. **默认安全握手**：ProxyAPI 通过 Handshake RPC 自动获取 ProxyServer 签发的 128-bit token 与服务器身份；后续 Control 带 token，Time 心跳回显 token 和身份信息，用于识别服务器重启、身份不一致和 token 失配。
 3. **零侵入集成**：用户的应用程序代码完全不需要修改，也不需要在启动参数中添加任何调试标志。Viewer 以旁路观察者的方式"静默接入"运行中的系统，不会影响正常业务逻辑的时序和行为。
 
 这一设计使 VLink Viewer 在实际项目中可以做到真正的"零成本接入"——在系统联调的第一天就可以打开 vlink-viewer 观察全局数据流，无需任何代码改动。

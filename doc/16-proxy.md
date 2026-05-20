@@ -68,9 +68,9 @@ VLink 业务节点在启动时通过 `DiscoveryReporter` 以 UDP 组播方式广
 3. ProxyServer 每秒通过 DDS 安全信道广播：
    - **Time 心跳**：携带 `VLINK_VERSION`、主机名、CPU/内存占用、系统时间（Unix epoch 微秒）、启动时长、以及**服务器签发的 token**。
    - **InfoList**：所有已发现话题的统计数组（url、ser、status、freq、rate、loss、latency、process_list）。
-4. ProxyAPI 收到第一条 Time 心跳后，若 `time.token() == impl_->token` 则触发 `ConnectCallback(true)`，确认连接已通过握手验证。
+4. ProxyAPI 收到 Time 心跳后，先校验服务器身份与 `token`，再校验 `control_id`、模式、版本和传输兼容项；全部通过后才触发 `ConnectCallback(true)`。
 
-握手未成功之前 `send_control_sync` 直接拒发（`token` 为空），Time 监听器对 token 失配会清空本地 token 并上报 `kTokenError`，由 1 秒心跳路径自动重握手 —— 服务器重启、版本不一致都会走这条自愈路径。版本不符走 `HANDSHAKE_VERSION_MISMATCH` → `kVersionCompError`，与 token 失配区分上报。
+握手未成功之前 `send_control_sync` 直接拒发（`token` 为空）。Time 监听器先用握手返回的 `hostname/machine_id` 区分服务器身份：身份不一致上报 `kMultiProxyError`（若同时 token 不一致，也会清空本地 token 触发重握手）；身份匹配但 token 失配则清空本地 token 并上报 `kTokenError`，由 1 秒心跳路径自动重握手。版本不符走 `HANDSHAKE_VERSION_MISMATCH` → `kVersionCompError`，与 token 失配区分上报。
 
 关闭握手时（`VLINK_PROXY_ENABLE_HANDSHAKE = 0`）跳过步骤 2，token 字段保持空串，与早期版本 wire 兼容。
 
@@ -105,7 +105,7 @@ ProxyAPI 客户端通过心跳检测连接状态。若连续 **5 秒** 未收到
 
 启用握手时，以下三类事件都会触发自动恢复（无需用户干预）：
 
-- **服务器重启**：新服务器进程会签发**新的** token，客户端旧 token 与心跳里的新 token 不一致 → `impl_->token.clear()` + `kTokenError` → 心跳路径每秒重试 `do_handshake()`，取到新 token 后清错并补发上一次 Control。
+- **服务器重启**：新服务器进程会签发**新的** token。若服务器身份仍匹配，客户端旧 token 与心跳里的新 token 不一致 → `impl_->token.clear()` + `kTokenError` → 心跳路径每秒重试 `do_handshake()`，取到新 token 后清错并补发上一次 Control；若心跳里的服务器身份也变化，则优先按 `kMultiProxyError` 上报。
 - **网络抖动（>5 秒）**：`main_elapsed_timer` 抖动检测触发，`reset_handle()` 重建所有 Security 句柄并重做握手。
 - **`process_connected(false)` 路径**：当 `impl_->error ∈ { kNoError, kTokenError, kVersionCompError }` 且没有正在 `resetting` 时，`post_task(reset_handle)` 自动重连。
 
@@ -327,9 +327,9 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 | `kReliableCompError` | 3      | 客户端与服务器的 reliable 设置不一致             | 否(需配置一致后重启) |
 | `kTcpCompError`      | 4      | 客户端与服务器的 enable_tcp 设置不一致           | 否(同上) |
 | `kDirectCompError`   | 5      | 客户端与服务器的 direct 设置不一致               | 否(同上) |
-| `kMultiProxyError`   | 7      | 同一 DDS 域内检测到多个 ProxyServer              | 否       |
+| `kMultiProxyError`   | 7      | 同一 DDS 域内检测到多个 ProxyServer，或 Time 身份与握手身份不一致 | 部分(真实多 Proxy 需移除额外服务器；瞬时身份/token 失配可随重握手恢复) |
 | `kVersionCompError`  | 8      | 握手 / 心跳显示客户端与服务器的 VLINK_VERSION 不一致 | **是**(心跳自动重握手,版本恢复后即清错) |
-| `kTokenError`        | 9      | 握手被拒 / 返回空 token，或 Time 心跳里的 token 与本地缓存不一致 | **是**(本地 token 自动清空,心跳每秒重试握手直至成功) |
+| `kTokenError`        | 9      | 握手被拒 / 返回空 token，或身份匹配时 Time token 与本地缓存不一致 | **是**(本地 token 自动清空,心跳每秒重试握手直至成功) |
 | `kUnknownError`      | 10     | 未分类错误                                       | —        |
 
 ### 16.8.4 ProxyAPI::Config 字段说明
@@ -360,8 +360,8 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
     - `out_err = kVersionCompError` —— 服务器回复 `HANDSHAKE_VERSION_MISMATCH`。
     - `out_err = kTokenError` —— 服务器回复非 `HANDSHAKE_OK` 或返回空 token（如 `HANDSHAKE_INTERNAL_ERROR`）。
     - `out_err = kNoError`（**静默重试**） —— `handshake_cli` 尚未 init 完毕、`wait_for_connected` 超时、`invoke()` 超时；这三种情况都视为 RPC 通道未就绪，由心跳路径下个 tick 重试。
-  - 心跳路径每秒检查 `impl_->token.empty()`，若为空则再调一次 `do_handshake()`，成功后 `process_error(kNoError)` 并补发上一次 `Control`。
-  - Time 监听器收到 token 失配会清空本地缓存的 token，从而**自动触发**心跳层的重握手 —— 完整自愈，不需要用户回调。
+  - 心跳路径每秒检查 `impl_->token.empty()`，若为空则再调一次 `do_handshake()`；成功后通常 `process_error(kNoError)` 并补发上一次 `Control`，但当前错误仍为 `kMultiProxyError` 时会等下一条可信 Time 完整通过后再清错。
+  - Time 监听器收到身份匹配的 token 失配会清空本地缓存的 token 并上报 `kTokenError`；收到身份不一致的 Time 会优先上报 `kMultiProxyError`，若同时 token 不一致也会清空 token，从而触发心跳层重握手。
 - `kController` 角色会在握手 / 重连成功后自动重新发送最后一次 `Control` 指令。
 - 关闭握手时(`VLINK_PROXY_ENABLE_HANDSHAKE = 0`),`do_handshake()` 直接返回成功且本地 token 始终为空,Time 不带 token,Control 入站不校验 token -- 行为与早期版本一致。
 
@@ -422,7 +422,7 @@ message HandshakeResp {
    │
    ├─[impl_->token.empty()]─────────────────────> Silent handshake retry
    │     do_handshake(out_err)
-   │       success → process_error(kNoError) + 补发 last_control
+   │       success → process_error(kNoError)* + 补发 last_control
    │       err != kNoError → process_error(err)  (kTokenError / kVersionCompError)
    │       err == kNoError → 静默重试(下个 tick 再试)
    │
@@ -431,6 +431,8 @@ message HandshakeResp {
             && !resetting:
             post_task(reset_handle)
 ```
+
+`*` 若当前错误仍是 `kMultiProxyError`，握手成功不会立即清错；需要下一条可信 `Time` 完整通过后才回到 `kNoError`。
 
 每秒一次的 1.6s 最大握手开销发生在 loop 线程上,在 do_handshake 期间其它 posted task 暂时挂起,但不会卡住 DDS 接收线程。
 

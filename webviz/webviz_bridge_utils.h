@@ -64,7 +64,7 @@ inline std::string proxy_bridge_error_message(const ProxyBridge& bridge, ProxyAP
         hosts += hostname;
       }
 
-      return "Proxy error: multiple proxy servers detected [" + hosts + "]";
+      return "Proxy error: multiple proxy servers or proxy identity mismatch detected [" + hosts + "]";
     }
     case ProxyAPI::kVersionCompError: {
       auto proxy_ver = bridge.get_proxy_version();
@@ -72,7 +72,7 @@ inline std::string proxy_bridge_error_message(const ProxyBridge& bridge, ProxyAP
              "] vs client [" + VLINK_VERSION + "]";
     }
     case ProxyAPI::kTokenError:
-      return "Proxy error: authentication handshake failed or token mismatch";
+      return "Proxy error: authentication handshake failed or same-server token mismatch";
     case ProxyAPI::kUnknownError:
       return "Proxy error: unknown or unclassified startup/runtime failure";
     default:

@@ -200,9 +200,14 @@ ProxyAPI::ProxyAPI(const Config& config) : impl_(std::make_unique<Impl>()) {
 
     if VUNLIKELY (token_empty) {
       Error handshake_err = kNoError;
+      bool handshake_ok = false;
 
       if (do_handshake(handshake_err)) {
-        process_error(kNoError);
+        handshake_ok = true;
+
+        if (impl_->error != kMultiProxyError) {
+          process_error(kNoError);
+        }
 
         if (impl_->config.role == kController) {
           std::shared_lock lock(impl_->control_mtx);
@@ -210,6 +215,10 @@ ProxyAPI::ProxyAPI(const Config& config) : impl_(std::make_unique<Impl>()) {
         }
       } else if (handshake_err != kNoError && impl_->error != handshake_err) {
         process_error(handshake_err);
+      }
+
+      if (!handshake_ok && impl_->connect_elapsed_timer.get() > 5000) {
+        process_connected(false);
       }
 
       return;
@@ -852,6 +861,21 @@ bool ProxyAPI::do_handshake(Error& out_err) {
   }
 
   {
+    std::lock_guard version_lock(impl_->version_mtx);
+    impl_->hostname = resp.hostname();
+    impl_->machine_id = resp.machine_id();
+    impl_->proxy_version = resp.version();
+
+    if (!impl_->hostname.empty()) {
+      impl_->hostname_set.emplace(impl_->hostname);
+    }
+
+    if (!impl_->machine_id.empty()) {
+      impl_->machine_id_set.emplace(impl_->machine_id);
+    }
+  }
+
+  {
     std::lock_guard token_lock(impl_->token_mtx);
     impl_->token = resp.token();
   }
@@ -1154,50 +1178,36 @@ void ProxyAPI::reset_handle() {
       return;
     }
 
-    if VUNLIKELY (time.control_id() == 0) {
-      return;
-    }
-
 #if VLINK_PROXY_ENABLE_HANDSHAKE
     bool token_mismatch = false;
     bool token_present = false;
+    std::string expected_token;
 
     {
       std::shared_lock token_lock(impl_->token_mtx);
-      token_present = !impl_->token.empty();
-      token_mismatch = token_present && (time.token() != impl_->token);
+      expected_token = impl_->token;
+      token_present = !expected_token.empty();
+      token_mismatch = token_present && (time.token() != expected_token);
     }
 
     if VUNLIKELY (!token_present) {
       return;
     }
 
-    if VUNLIKELY (token_mismatch) {
-      {
-        std::lock_guard token_lock(impl_->token_mtx);
-        impl_->token.clear();
+    const auto clear_expected_token = [this, &expected_token]() {
+      std::lock_guard token_lock(impl_->token_mtx);
+      if (impl_->token != expected_token) {
+        return false;
       }
 
-      if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
-        process_error(kTokenError);
-      }
-
+      impl_->token.clear();
+      return true;
+    };
+#else
+    if VUNLIKELY (time.control_id() == 0) {
       return;
     }
 #endif
-
-    if (impl_->config.role == kController) {
-      if VUNLIKELY (time.control_id() != impl_->control_id) {
-        if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
-          process_error(kControlError);
-        }
-        return;
-      }
-
-      if VUNLIKELY (time.mode() != static_cast<int>(impl_->mode)) {
-        return;
-      }
-    }
 
     {
       std::unique_lock lock(impl_->version_mtx);
@@ -1210,6 +1220,16 @@ void ProxyAPI::reset_handle() {
         impl_->hostname = time.hostname();
       } else if (impl_->hostname != time.hostname()) {
         lock.unlock();
+
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+        if (token_mismatch) {
+          if (clear_expected_token()) {
+            process_error(kMultiProxyError);
+          }
+
+          return;
+        }
+#endif
 
         if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
           process_error(kMultiProxyError);
@@ -1227,13 +1247,54 @@ void ProxyAPI::reset_handle() {
       } else if (impl_->machine_id != time.machine_id()) {
         lock.unlock();
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+        if (token_mismatch) {
+          if (clear_expected_token()) {
+            process_error(kMultiProxyError);
+          }
+
+          return;
+        }
+#endif
+
         if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
           process_error(kMultiProxyError);
         }
 
         return;
       }
+    }
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    if VUNLIKELY (token_mismatch) {
+      if (clear_expected_token()) {
+        process_error(kTokenError);
+      }
+
+      return;
+    }
+
+    if VUNLIKELY (time.control_id() == 0) {
+      return;
+    }
+#endif
+
+    if (impl_->config.role == kController) {
+      if VUNLIKELY (time.control_id() != impl_->control_id) {
+        if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
+          process_error(kControlError);
+        }
+
+        return;
+      }
+
+      if VUNLIKELY (time.mode() != static_cast<int>(impl_->mode)) {
+        return;
+      }
+    }
+
+    {
+      std::lock_guard lock(impl_->version_mtx);
       impl_->proxy_version = time.version();
     }
 

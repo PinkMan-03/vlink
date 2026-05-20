@@ -143,8 +143,8 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="m5_l" value="ConnectCallback(true) - heartbeat received + token validated, connection confirmed" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#1565c0;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
-          <mxGeometry x="995" y="438" width="340" height="18" as="geometry" />
+        <mxCell id="m5_l" value="ConnectCallback(true) - identity + token + control checks passed" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#1565c0;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="995" y="438" width="370" height="18" as="geometry" />
         </mxCell>
 
         <!-- Phase 3 band -->

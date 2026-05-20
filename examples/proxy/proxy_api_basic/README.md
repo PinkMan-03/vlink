@@ -38,9 +38,9 @@
 | `kReliableCompError` | 3 | reliable 设置不匹配 |
 | `kTcpCompError` | 4 | enable_tcp 设置不匹配 |
 | `kDirectCompError` | 5 | direct 设置不匹配 |
-| `kMultiProxyError` | 7 | 同一域检测到多个 ProxyServer |
+| `kMultiProxyError` | 7 | 同一域检测到多个 ProxyServer，或心跳身份与握手身份不一致 |
 | `kVersionCompError` | 8 | 客户端与服务器版本不匹配 |
-| `kTokenError` | 9 | 握手被拒 / 返回空 token，或心跳 token 失配 |
+| `kTokenError` | 9 | 握手被拒 / 返回空 token，或身份匹配时心跳 token 失配 |
 | `kUnknownError` | 10 | 未知或未分类错误 |
 
 ### 2.4 配置

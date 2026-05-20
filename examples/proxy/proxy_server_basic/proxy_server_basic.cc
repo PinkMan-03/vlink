@@ -87,7 +87,7 @@ int main() {
     VLOG_I("[Architecture] ProxyAPI (kController) communicates with ProxyServer via secure DDS channels:");
     VLOG_I("  HandshakeCli <--> [DDS secure] <--> HandshakeSrv (server issues token)");
     VLOG_I("  ControlPub   --> [DDS secure] --> ControlSub    (API sends token-stamped controls)");
-    VLOG_I("  TimeSub      <-- [DDS secure] <-- TimePub        (server sends 1-second heartbeat + token)");
+    VLOG_I("  TimeSub      <-- [DDS secure] <-- TimePub        (server sends 1-second heartbeat + identity/token)");
     VLOG_I("  InfoSub      <-- [DDS secure] <-- InfoPub        (server sends per-topic statistics to API)");
     VLOG_I("  DataSub   <-- [DDS/SHM] <-- DataPub   (server relays raw message data to API)");
   }

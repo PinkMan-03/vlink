@@ -142,9 +142,9 @@ int main() {
     std::cout << "  kReliableCompError(3)  Reliable setting mismatch" << std::endl;
     std::cout << "  kTcpCompError(4)       TCP setting mismatch" << std::endl;
     std::cout << "  kDirectCompError(5)    Direct setting mismatch" << std::endl;
-    std::cout << "  kMultiProxyError(7)    Multiple proxy servers" << std::endl;
+    std::cout << "  kMultiProxyError(7)    Multiple proxy servers or identity mismatch" << std::endl;
     std::cout << "  kVersionCompError(8)   Version mismatch" << std::endl;
-    std::cout << "  kTokenError(9)         Handshake refused/empty token or token mismatch" << std::endl;
+    std::cout << "  kTokenError(9)         Handshake refused/empty token or same-identity token mismatch" << std::endl;
     std::cout << "  kUnknownError(10)      Unknown or unclassified error" << std::endl;
   }
 
