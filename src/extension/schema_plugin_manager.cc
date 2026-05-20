@@ -55,7 +55,7 @@ SchemaPluginManager::SchemaPluginManager(std::string schema_plugin_path) : impl_
 
   impl_->interface = impl_->plugin.load<SchemaPluginInterface>(schema_plugin_path, 1, 0);
 
-  if (impl_->interface) {
+  if VLIKELY (impl_->interface) {
     auto version_info = impl_->interface->get_version_info();
 
     VLOG_D("");

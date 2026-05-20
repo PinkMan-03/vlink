@@ -78,7 +78,7 @@ inline Publisher<MsgT, SecT>::Publisher(const ConfT& conf, InitType type) {
     this->impl_->is_security_type = true;
   }
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -247,7 +247,7 @@ inline SecurityPublisher<MsgT>::SecurityPublisher(const ConfT& conf, SecurityCon
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -261,7 +261,7 @@ inline SecurityPublisher<MsgT>::SecurityPublisher(const std::string& url_str, Se
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }

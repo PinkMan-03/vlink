@@ -69,7 +69,7 @@ size_t StringWriter::total_size() const noexcept { return total_size_; }
 void StringWriter::write(char c) {
   ++total_size_;
 
-  if (ptr_ < end_) {
+  if VLIKELY (ptr_ < end_) {
     *ptr_++ = c;
   }
 }
@@ -80,7 +80,7 @@ void StringWriter::write(const char* s, size_t count) {
   auto avail = static_cast<size_t>(end_ - ptr_);
   size_t n = (count <= avail) ? count : avail;
 
-  if (n > 0) {
+  if VLIKELY (n > 0) {
     std::memcpy(ptr_, s, n);
     ptr_ += n;
   }
@@ -150,7 +150,7 @@ size_t format_pointer_to(char* buf, const void* ptr) noexcept {
 size_t format_float_to(char* buf, size_t buflen, float value) noexcept {
   int len = std::snprintf(buf, buflen, "%g", static_cast<double>(value));
 
-  if (len > 0 && static_cast<size_t>(len) < buflen) {
+  if VLIKELY (len > 0 && static_cast<size_t>(len) < buflen) {
     return static_cast<size_t>(len);
   }
 
@@ -160,7 +160,7 @@ size_t format_float_to(char* buf, size_t buflen, float value) noexcept {
 size_t format_double_to(char* buf, size_t buflen, double value) noexcept {
   int len = std::snprintf(buf, buflen, "%g", value);
 
-  if (len > 0 && static_cast<size_t>(len) < buflen) {
+  if VLIKELY (len > 0 && static_cast<size_t>(len) < buflen) {
     return static_cast<size_t>(len);
   }
 

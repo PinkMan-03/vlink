@@ -57,6 +57,7 @@ std::string get_ping_url() {
   }
 
   auto transport = vlink::Utils::get_env("PING_TRANSPORT", "dds");
+
   if (transport == "dds") {
     url = DDS_PING_URL;
   } else if (transport == "ddsc") {

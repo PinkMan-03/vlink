@@ -62,6 +62,7 @@ int main() {
 
   server.listen([](const DynamicData& req, DynamicData& res) {
     // Dispatch based on the type tag
+
     if (req.get_type() == "type1") {
       // Deserialize DynamicData to pb::Request
       if (req.as<pb::Request>().type() == 521) {
@@ -89,6 +90,7 @@ int main() {
 
   // Send a type1 request; load() automatically serializes the Protobuf message and tags it
   auto resp1 = client.invoke(DynamicData().load("type1", req1));
+
   if (resp1.has_value()) {
     // Deserialize the response to std::string
     VLOG_I("resp1:", resp1.value().as<std::string>());
@@ -100,6 +102,7 @@ int main() {
 
   // Send a type2 request
   auto resp2 = client.invoke(DynamicData().load("type2", req2));
+
   if (resp2.has_value()) {
     // Deserialize the response to int
     VLOG_I("resp2:", resp2.value().as<int>());
@@ -111,6 +114,7 @@ int main() {
 
   sub.listen([](const DynamicData& msg) {
     // Select the deserialization method based on the type tag
+
     if (msg.get_type() == "Request") {
       VLOG_I("msg1:", msg.as<pb::Request>().type());
     } else if (msg.get_type() == "Response") {

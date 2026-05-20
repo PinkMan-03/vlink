@@ -499,25 +499,30 @@ Shm2Server::Shm2Server(const ShmID2& id) {
         } while (has_received_event);
 
         bool has_requests = false;
+
         if (iox2_server_has_requests(&server_, &has_requests) != IOX2_OK || !has_requests) {
           return;
         }
 
         auto* impl = get_first_impl();
+
         if VUNLIKELY (!impl) {
           return;
         }
 
         auto* ml = impl->get_message_loop();
+
         if (ml) {
           std::weak_ptr<Shm2Server> weak_self = weak_from_this();
           ml->post_task([weak_self]() {
             auto self = weak_self.lock();
+
             if VUNLIKELY (!self) {
               return;
             }
 
             auto* impl = self->get_first_impl();
+
             if VUNLIKELY (!impl || !impl->get_message_loop()) {
               return;
             }
@@ -971,20 +976,24 @@ Shm2Client::Shm2Client(const ShmID2& id) {
         } while (has_received_event);
 
         auto* impl = get_first_impl();
+
         if VUNLIKELY (!impl) {
           return;
         }
 
         auto* ml = impl->get_message_loop();
+
         if (ml) {
           std::weak_ptr<Shm2Client> weak_self = weak_from_this();
           ml->post_task([weak_self]() {
             auto self = weak_self.lock();
+
             if VUNLIKELY (!self) {
               return;
             }
 
             auto* impl = self->get_first_impl();
+
             if VUNLIKELY (!impl || !impl->get_message_loop()) {
               return;
             }
@@ -1146,6 +1155,7 @@ void Shm2Client::disable_detect_timer() {
 
 Bytes Shm2Client::loan(uint64_t channel, int64_t size) {
   (void)channel;
+
   if VUNLIKELY (size <= 0 || !client_) {
     return Bytes();
   }
@@ -1257,6 +1267,7 @@ bool Shm2Client::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCall
       if (channel != target_channel) {
         return;
       }
+
       cb(bytes);
     };
 
@@ -1307,6 +1318,7 @@ void Shm2Client::remove_response_callback(uint64_t seq) {
   callbacks_.erase(seq);
 
   auto pending_iter = pending_map_.find(seq);
+
   if (pending_iter != pending_map_.end()) {
     iox2_pending_response_drop(pending_iter->second);
     pending_map_.erase(pending_iter);
@@ -1984,20 +1996,24 @@ void Shm2Subscriber::subscribe() {
         } while (has_received_event);
 
         auto* impl = get_first_impl();
+
         if VUNLIKELY (!impl) {
           return;
         }
 
         auto* ml = impl->get_message_loop();
+
         if (ml) {
           std::weak_ptr<Shm2Subscriber> weak_self = weak_from_this();
           ml->post_task([weak_self]() {
             auto self = weak_self.lock();
+
             if VUNLIKELY (!self) {
               return;
             }
 
             auto* impl = self->get_first_impl();
+
             if VUNLIKELY (!impl || !impl->get_message_loop()) {
               return;
             }

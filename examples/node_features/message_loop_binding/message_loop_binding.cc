@@ -189,6 +189,7 @@ int main() {
     std::this_thread::sleep_for(50ms);
 
     auto result = client.invoke(21);
+
     if (result.has_value()) {
       std::cout << "  21 * 2 = " << result.value() << std::endl;
     }

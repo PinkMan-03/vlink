@@ -279,6 +279,7 @@ std::string::const_iterator UrlParser::parse_transport(const std::string& str,
       throw Exception::RuntimeError("Invalid character found in the URL transport prefix. Supplied URL was: \"" + str +
                                     "\".");
     }
+
     ++transport_end;
   }
 
@@ -340,6 +341,7 @@ std::string::const_iterator UrlParser::parse_content(const std::string& str,
 
     path_ = std::string(path_start, path_end);
   }
+
   return content_end;
 }
 

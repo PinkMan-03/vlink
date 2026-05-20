@@ -151,6 +151,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Se
     dds_impl_ = settings.value("dds_impl", "dds").toString().toStdString();
 
     QByteArray key_base64 = settings.value("security_key", "").toByteArray();
+
     if (!key_base64.isEmpty()) {
       security_key_ = QByteArray::fromBase64(key_base64).toStdString();
     }
@@ -217,11 +218,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Se
     item->setData(Qt::UserRole, QString::fromStdString(address));
     item->setData(Qt::ToolTipRole, QString::fromStdString(address));
     QCheckBox* checkbox = new QCheckBox(ui->listWidget);
+
     if (std::find(setting_ip_list.begin(), setting_ip_list.end(), address) == setting_ip_list.end()) {
       checkbox->setChecked(false);
     } else {
       checkbox->setChecked(true);
     }
+
     checkbox->setText(QString::fromStdString(address));
     ui->listWidget->setItemWidget(item, checkbox);
   }
@@ -233,6 +236,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Se
   }
 
   QRegularExpressionMatch ip_match = g_ip_regex.match(peer_ip);
+
   if (!ip_match.hasMatch()) {
     peer_ip.clear();
   }
@@ -369,6 +373,7 @@ void SettingsDialog::save_profile() {
     settings.setValue("direct_mode", direct_mode_);
 
     peer_ip = ui->lineEdit_peer->text().toStdString();
+
     if (peer_ip == "0.0.0.0") {
       peer_ip.clear();
     }

@@ -42,7 +42,7 @@ std::string_view CachedTimestamp::get(const char* format, bool use_utc) {
 
   int64_t cached_sec = last_sec_.load(std::memory_order_relaxed);
 
-  if (sec == cached_sec && is_utc_ == use_utc) {
+  if VLIKELY (sec == cached_sec && is_utc_ == use_utc) {
     update_milliseconds(ms);
     return std::string_view(buffer_, buffer_len_);
   }
@@ -61,12 +61,14 @@ void CachedTimestamp::format_full_timestamp(const char* format, std::chrono::sys
   std::tm now_tm{};
 
 #if defined(_WIN32)
+
   if (use_utc) {
     gmtime_s(&now_tm, &now_time_t);
   } else {
     localtime_s(&now_tm, &now_time_t);
   }
 #else
+
   if (use_utc) {
     gmtime_r(&now_time_t, &now_tm);
   } else {

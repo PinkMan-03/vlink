@@ -131,6 +131,7 @@ class CustomSqlQueryModel : public QSqlQueryModel {
         return QString::number(section + 1);
       }
     }
+
     return QVariant();
   }
 };
@@ -409,12 +410,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
         for (int i = 0; i < ui->treeWidget_url->topLevelItemCount(); ++i) {
           QTreeWidgetItem* item = ui->treeWidget_url->topLevelItem(i);
+
           if (item->isSelected()) {
             ++select_count;
           }
         }
 
         ui->checkBox_selectall->blockSignals(true);
+
         if (select_count <= 1) {
           ui->checkBox_selectall->setCheckState(Qt::Unchecked);
         } else if (select_count == ui->treeWidget_url->topLevelItemCount()) {
@@ -422,6 +425,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         } else {
           ui->checkBox_selectall->setCheckState(Qt::PartiallyChecked);
         }
+
         ui->checkBox_selectall->blockSignals(false);
 
         // ui->checkBox_selectall->setEnabled(ui->treeWidget_url->topLevelItemCount() != 0);
@@ -487,6 +491,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   connect(ui->treeWidget_url, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
     auto item_index = ui->treeWidget_url->indexAt(pos);
+
     if (!item_index.isValid()) {
       return;
     }
@@ -499,6 +504,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   connect(ui->treeWidget_property, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
     auto item_index = ui->treeWidget_property->indexAt(pos);
+
     if (!item_index.isValid()) {
       return;
     }
@@ -516,6 +522,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   connect(ui->treeWidget_process1, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
     auto item_index = ui->treeWidget_process1->indexAt(pos);
+
     if (!item_index.isValid()) {
       return;
     }
@@ -528,6 +535,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   connect(ui->treeWidget_process2, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
     auto item_index = ui->treeWidget_process2->indexAt(pos);
+
     if (!item_index.isValid()) {
       return;
     }
@@ -540,6 +548,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
   connect(ui->tableView_data, &QTableView::customContextMenuRequested, this, [this](const QPoint& pos) {
     auto item_index = ui->tableView_data->indexAt(pos);
+
     if (!item_index.isValid()) {
       return;
     }
@@ -690,6 +699,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
   proxy_->register_info_callback([this](const std::vector<vlink::ProxyAPI::Info>& info_list) {
     {
       std::shared_lock lock(data_mutex_);
+
       if (info_callback_) {
         info_callback_(info_list);
         return;
@@ -707,6 +717,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
   proxy_->register_data_callback([this, proxy_ptr = proxy_.get()](const vlink::ProxyAPI::Data& proxy_data) {
     {
       std::shared_lock lock(data_mutex_);
+
       if (data_callback_) {
         data_callback_(proxy_data);
         return;
@@ -818,6 +829,7 @@ void MainWindow::open_url(const QString& url) {
   QDesktopServices::openUrl(QUrl(url, QUrl::TolerantMode));
 
 #ifdef __linux__
+
   if (!lib_env.empty()) {
     vlink::Utils::set_env("LD_LIBRARY_PATH", lib_env);
   }
@@ -1376,6 +1388,7 @@ void MainWindow::on_pushButton_protoselect_clicked() {
   select_source_dir(file_dir.toStdString());
 
   QFile file(global_proto_dir_config);
+
   if (file.open(QFile::WriteOnly | QFile::Truncate)) {
     file.write(file_dir.toUtf8());
     file.close();
@@ -1417,6 +1430,7 @@ void MainWindow::on_pushButton_fbsselect_clicked() {
   }
 
   QFile file(global_fbs_dir_config);
+
   if (file.open(QFile::WriteOnly | QFile::Truncate)) {
     file.write(file_dir.toUtf8());
     file.close();
@@ -1492,6 +1506,7 @@ void MainWindow::on_checkBox_time_clicked(bool checked) {
 
 void MainWindow::on_pushButton_analyze_clicked() {
   auto current_item = ui->treeWidget_property->currentItem();
+
   if (!current_item) {
     return;
   }
@@ -1671,6 +1686,7 @@ void MainWindow::on_pushButton_jump_clicked() {
   switch (ui->comboBox_jump->currentIndex()) {
     case 0: {
       int row = value.toInt() - 1;
+
       if (row >= 0 && row < local_info_.message_count) {
         ui->tableView_data->scrollTo(ui->tableView_data->model()->index(row, 0), QAbstractItemView::PositionAtCenter);
         ui->tableView_data->selectRow(row);
@@ -1688,6 +1704,7 @@ void MainWindow::on_pushButton_jump_clicked() {
         uint64_t mid = left + (right - left) / 2;
         uint64_t current_elapsed =
             ui->tableView_data->model()->data(ui->tableView_data->model()->index(mid, 0), Qt::UserRole).toULongLong();
+
         if (current_elapsed >= target_elapsed) {
           row_index = mid;
           right = mid - 1;
@@ -1880,6 +1897,7 @@ void MainWindow::update_url_widget(const QVariant& variant) {
         break;
       }
     }
+
     if (!find) {
       QTreeWidgetItem* current_item = ui->treeWidget_url->currentItem();
       // ui->treeWidget_url->blockSignals(true);
@@ -1914,6 +1932,7 @@ void MainWindow::update_url_widget(const QVariant& variant) {
 
     for (int n = 0; n < ui->treeWidget_url->topLevelItemCount(); ++n) {
       auto* p = ui->treeWidget_url->topLevelItem(n);
+
       if (p->text(1) == QString::fromStdString(info_list[m].url)) {
         item = p;
       }
@@ -1973,6 +1992,7 @@ void MainWindow::update_url_widget(const QVariant& variant) {
     item->setText(2, QString::number(freq, 'f', 2) + "Hz");
 
     // item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+
     if (rate < 1024) {
       item->setText(3, QString::number(rate) + "B/s");
     } else if (rate < 1024LL * 1024) {
@@ -2550,6 +2570,7 @@ void MainWindow::update_property_widget(const QVariant& variant, const QElapsedT
   to_hide_item_list_ = all_item_list_;
 
   ui->treeWidget_property->setUpdatesEnabled(false);
+
   if (ui->checkBox_perf->isChecked()) {
     property_timer_.restart();
     qApp->processEvents();
@@ -2659,6 +2680,7 @@ void MainWindow::update_process_widget() {
 
   for (const auto& process : process_list) {
     QTreeWidgetItem* item = nullptr;
+
     if (process.type == vlink::kPublisher || process.type & vlink::kServer || process.type & vlink::kSetter) {
       for (int i = 0; i < ui->treeWidget_process1->topLevelItemCount(); i++) {
         auto* p = ui->treeWidget_process1->topLevelItem(i);
@@ -2859,6 +2881,7 @@ void MainWindow::reload_root_msg(QTreeWidgetItem* item) {
   }
 
   auto iter = last_data_map_.find(url);
+
   if (iter != last_data_map_.end()) {
     proxy_data.raw = iter->second;
   }
@@ -3227,6 +3250,7 @@ bool MainWindow::select_fbs_dir(const std::string& dir) {
   }
 
   std::string error;
+
   if (!flatbuffers_runtime_.load_dir(dir, &error)) {
     status_label2_->setText(tr("   Load fbs dir failed.   "));
     return false;
@@ -3248,6 +3272,7 @@ bool MainWindow::get_property_list(QTreeWidget* widget, const std::string& paren
   for (int i = 0; i < msg->GetDescriptor()->field_count(); ++i) {
     std::string current_id = parent_id + "." + std::to_string(i);
     const auto* field = msg->GetDescriptor()->field(i);
+
     if (!field->is_repeated()) {
       auto* item = get_item_property(widget, parent_id, current_id);
       item_to_msg_map_[item] = const_cast<google::protobuf::Message*>(msg);
@@ -3256,6 +3281,7 @@ bool MainWindow::get_property_list(QTreeWidget* widget, const std::string& paren
       item->setText(0, QString::number(field->number()));
 
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
+
       if (field->message_type()) {
         item->setText(1, field->message_type()->name().data());
       } else {
@@ -3271,6 +3297,7 @@ bool MainWindow::get_property_list(QTreeWidget* widget, const std::string& paren
                         : static_cast<int>(EditDialog::EditValueKind::kUnknown));
       item->setText(2, field->name().data());
 #else
+
       if (field->message_type()) {
         item->setText(1, field->message_type()->name().c_str());
       } else {
@@ -3456,6 +3483,7 @@ bool MainWindow::get_property_list(QTreeWidget* widget, const std::string& paren
         array_item->setText(0, QString::number(field->number()));
 
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
+
         if (field->is_map()) {
           if (field->message_type()) {
             array_item->setText(
@@ -3474,6 +3502,7 @@ bool MainWindow::get_property_list(QTreeWidget* widget, const std::string& paren
 
         array_item->setText(2, field->name().data());
 #else
+
         if (field->is_map()) {
           if (field->message_type()) {
             array_item->setText(
@@ -3507,6 +3536,7 @@ bool MainWindow::get_property_list(QTreeWidget* widget, const std::string& paren
           item_to_field_map_[item] = const_cast<google::protobuf::FieldDescriptor*>(field);
 
           item->setText(0, "");
+
           if (field->is_map()) {
             item->setText(1, QString("{%1}").arg(QString::number(j)));
           } else {
@@ -3700,6 +3730,7 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
       item->setText(0, QString::number(field->number()));
 
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
+
       if (field->message_type()) {
         item->setText(1, field->message_type()->name().data());
       } else {
@@ -3715,6 +3746,7 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
                         : static_cast<int>(EditDialog::EditValueKind::kUnknown));
       item->setText(2, field->name().data());
 #else
+
       if (field->message_type()) {
         item->setText(1, field->message_type()->name().c_str());
       } else {
@@ -3736,48 +3768,56 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
           if (item->text(3).isEmpty()) {
             item->setText(3, "0");
           }
+
           ref->SetInt32(msg, field, get_int_for_str(item->text(3)));
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_INT64: {
           if (item->text(3).isEmpty()) {
             item->setText(3, "0");
           }
+
           ref->SetInt64(msg, field, get_longlong_for_str(item->text(3)));
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_UINT32: {
           if (item->text(3).isEmpty()) {
             item->setText(3, "0");
           }
+
           ref->SetUInt32(msg, field, get_uint_for_str(item->text(3)));
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_UINT64: {
           if (item->text(3).isEmpty()) {
             item->setText(3, "0");
           }
+
           ref->SetUInt64(msg, field, get_ulonglong_for_str(item->text(3)));
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_DOUBLE: {
           if (item->text(3).isEmpty()) {
             item->setText(3, "0");
           }
+
           ref->SetDouble(msg, field, item->text(3).toDouble());
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT: {
           if (item->text(3).isEmpty()) {
             item->setText(3, "0");
           }
+
           ref->SetFloat(msg, field, item->text(3).toFloat());
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_BOOL: {
           if (item->text(3).isEmpty()) {
             item->setText(3, "false");
           }
+
           ref->SetBool(msg, field, item->text(3) == "true");
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_ENUM: {
           if (item->text(3).isEmpty()) {
             item->setText(3, "0");
           }
+
           ref->SetEnumValue(msg, field, item->text(3).toInt());
         } break;
         case google::protobuf::FieldDescriptor::CPPTYPE_STRING: {
@@ -3806,6 +3846,7 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
       array_item->setText(0, QString::number(field->number()));
 
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
+
       if (field->is_map()) {
         if (field->message_type()) {
           array_item->setText(1,
@@ -3824,6 +3865,7 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
 
       array_item->setText(2, field->name().data());
 #else
+
       if (field->is_map()) {
         if (field->message_type()) {
           array_item->setText(
@@ -3857,6 +3899,7 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
         item_to_field_map_[item] = const_cast<google::protobuf::FieldDescriptor*>(field);
 
         item->setText(0, "");
+
         if (field->is_map()) {
           item->setText(1, QString("{%1}").arg(QString::number(j)));
         } else {
@@ -3877,48 +3920,56 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
             if (item->text(3).isEmpty()) {
               item->setText(3, "0");
             }
+
             ref->SetRepeatedInt32(msg, field, j, get_int_for_str(item->text(3)));
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_INT64: {
             if (item->text(3).isEmpty()) {
               item->setText(3, "0");
             }
+
             ref->SetRepeatedInt64(msg, field, j, get_longlong_for_str(item->text(3)));
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_UINT32: {
             if (item->text(3).isEmpty()) {
               item->setText(3, "0");
             }
+
             ref->SetRepeatedUInt32(msg, field, j, get_uint_for_str(item->text(3)));
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_UINT64: {
             if (item->text(3).isEmpty()) {
               item->setText(3, "0");
             }
+
             ref->SetRepeatedUInt64(msg, field, j, get_ulonglong_for_str(item->text(3)));
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_DOUBLE: {
             if (item->text(3).isEmpty()) {
               item->setText(3, "0");
             }
+
             ref->SetRepeatedDouble(msg, field, j, item->text(3).toDouble());
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT: {
             if (item->text(3).isEmpty()) {
               item->setText(3, "0");
             }
+
             ref->SetRepeatedFloat(msg, field, j, item->text(3).toFloat());
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_BOOL: {
             if (item->text(3).isEmpty()) {
               item->setText(3, "false");
             }
+
             ref->SetRepeatedBool(msg, field, j, item->text(3) == "true");
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_ENUM: {
             if (item->text(3).isEmpty()) {
               item->setText(3, "0");
             }
+
             ref->SetRepeatedEnumValue(msg, field, j, item->text(3).toInt());
           } break;
           case google::protobuf::FieldDescriptor::CPPTYPE_STRING: {
@@ -3951,6 +4002,7 @@ bool MainWindow::set_property_list(QTreeWidget* widget, const std::string& paren
             if (delete_item == target_item) {
               del_list.emplace_back(t);
             }
+
             target_item = target_item->parent();
           }
         }
@@ -3987,6 +4039,7 @@ bool MainWindow::get_flatbuffers_property_list(QTreeWidget* widget, const std::s
 
   for (unsigned i = 0; i < view.object->fields()->size(); ++i) {
     const auto* field = view.object->fields()->Get(i);
+
     if (!field) {
       continue;
     }
@@ -4307,6 +4360,7 @@ void MainWindow::clear_all_process_item() {
 
 void MainWindow::remove_all_item(QTreeWidgetItem* item) {
   int count = item->childCount();
+
   if (count == 0) {
     delete item;
     return;
@@ -4454,6 +4508,7 @@ void MainWindow::check_new_version() {
 
 void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
   ui->treeWidget_property->setUpdatesEnabled(false);
+
   if (current_ser_.find("RawData") != std::string::npos) {
     for (const auto& [name, item] : raw_item_map_) {
       item->setHidden(true);

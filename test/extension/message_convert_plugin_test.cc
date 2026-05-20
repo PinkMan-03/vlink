@@ -73,6 +73,7 @@ class FakeConvertPlugin final : public MessageConvertPlugin {
       schema_encoding.clear();
       schema_data.clear();
     }
+
     return true;
   }
 
@@ -81,6 +82,7 @@ class FakeConvertPlugin final : public MessageConvertPlugin {
     if (vlink_ser != handled_ser) {
       return false;
     }
+
     last_target = target;
     last_input_size = raw.size();
     payload = Bytes::create(static_cast<size_t>(payload_size_));

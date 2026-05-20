@@ -57,7 +57,7 @@ struct SysSemaphore::Impl final {
 SysSemaphore::SysSemaphore(size_t count) : impl_(std::make_unique<Impl>()) { impl_->count = count; }
 
 SysSemaphore::~SysSemaphore() {
-  if (is_attached()) {
+  if VLIKELY (is_attached()) {
     detach(false);
   }
 }
@@ -125,6 +125,7 @@ bool SysSemaphore::detach(bool force) {
 
 #if defined(_WIN32) || defined(__CYGWIN__)
   (void)force;
+
   if VUNLIKELY (!::CloseHandle(impl_->handle)) {
     VLOG_E("SysSemaphore: CloseHandle failed.");
     return false;
@@ -140,6 +141,7 @@ bool SysSemaphore::detach(bool force) {
   return true;
 
 #else
+
   if VUNLIKELY (impl_->handle == SEM_FAILED) {
     VLOG_E("SysSemaphore: Handle is empty.");
     return false;
@@ -175,6 +177,7 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
 
 #if defined(_WIN32) || defined(__CYGWIN__)
   size_t acquired = 0;
+
   if (timeout_ms < 0) {
     for (; n > 0; --n) {
       if VUNLIKELY (::WaitForSingleObjectEx(impl_->handle, INFINITE, FALSE) != WAIT_OBJECT_0) {
@@ -184,6 +187,7 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
         }
         return false;
       }
+
       ++acquired;
     }
   } else {
@@ -207,6 +211,7 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
       if (acquired > 0) {
         release(acquired);
       }
+
       return false;
     }
   }
@@ -229,6 +234,7 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
 
 #else
   size_t acquired = 0;
+
   if (timeout_ms < 0) {
     for (; n > 0; --n) {
       int rc = -1;
@@ -244,19 +250,22 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
         if (acquired > 0) {
           release(acquired);
         }
+
         return false;
       }
       ++acquired;
     }
   } else {
     struct timespec ts;
-    if (::clock_gettime(CLOCK_REALTIME, &ts) == -1) {
+
+    if VUNLIKELY (::clock_gettime(CLOCK_REALTIME, &ts) == -1) {
       VLOG_E("SysSemaphore: clock_gettime failed.");
       return false;
     }
 
     ts.tv_sec += timeout_ms / 1000;
     ts.tv_nsec += (timeout_ms % 1000) * 1000'000;
+
     if (ts.tv_nsec >= 1000'000'000) {
       ts.tv_sec++;
       ts.tv_nsec -= 1000'000'000;
@@ -268,7 +277,7 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
         rc = ::sem_timedwait(impl_->handle, &ts);
       } while (rc == -1 && errno == EINTR);
 
-      if (rc == -1) {
+      if VUNLIKELY (rc == -1) {
         // if (is_attached()) {
         //   if (errno == ETIMEDOUT) {
         //     VLOG_E("Sys semaphore sem_timedwait timed out.");
@@ -280,6 +289,7 @@ bool SysSemaphore::acquire(size_t n, int timeout_ms) {
         if (acquired > 0) {
           release(acquired);
         }
+
         return false;
       }
       ++acquired;
@@ -301,6 +311,7 @@ void SysSemaphore::release(size_t n) {
   }
 
 #if defined(_WIN32) || defined(__CYGWIN__)
+
   if VUNLIKELY (!::ReleaseSemaphore(impl_->handle, n, nullptr)) {
     VLOG_E("SysSemaphore: ReleaseSemaphore failed.");
     return;

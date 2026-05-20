@@ -62,10 +62,12 @@ class MonitorPlugin : public vlink::RunablePluginInterface {
 
   void on_deinit() override {
     VLOG_I("[MonitorPlugin] on_deinit -- stopping timer");
+
     if (timer_) {
       timer_->stop();
       timer_.reset();
     }
+
     int64_t total_us = uptime_.get();
     uptime_.stop();
     VLOG_I("[MonitorPlugin] total ticks=", tick_count_.load(), "  total uptime=", total_us / 1000, " ms");

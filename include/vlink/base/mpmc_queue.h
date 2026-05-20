@@ -463,7 +463,7 @@ class MpmcQueue : public MpmcQueueBase {
     using value_type = ChunkT;
 
     ChunkT* allocate(size_t n) {
-      if (n > std::numeric_limits<size_t>::max() / sizeof(ChunkT)) {
+      if VUNLIKELY (n > std::numeric_limits<size_t>::max() / sizeof(ChunkT)) {
         throw std::bad_array_new_length();
       }
 
@@ -572,6 +572,7 @@ inline void MpmcQueue<T>::emplace(Args&&... args) noexcept {
 
   if constexpr (BehaviorT == kConditionBehavior) {
     wait_not_full(std::chrono::milliseconds(0));
+
     if VUNLIKELY (quit_flag_.value.load(kMemoryOrderAcquire)) {
       return;
     }
@@ -629,6 +630,7 @@ inline bool MpmcQueue<T>::try_emplace(Args&&... args) noexcept {
     } else {
       const auto prev_head = head;
       head = head_.load(kMemoryOrderAcquire);
+
       if VUNLIKELY (head == prev_head) {
         return false;
       }

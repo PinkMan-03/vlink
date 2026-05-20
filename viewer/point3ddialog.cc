@@ -268,6 +268,7 @@ static int get_point_value_type(google::protobuf::FieldDescriptor::CppType type)
 static bool read_proto_numeric(const google::protobuf::Message& message, const google::protobuf::FieldDescriptor& field,
                                double& value) {
   const auto* reflection = message.GetReflection();
+
   if (!reflection || field.is_repeated()) {
     return false;
   }
@@ -309,6 +310,7 @@ static std::string join_proto_path(const std::vector<const google::protobuf::Fie
     if (i > 0) {
       result += ".";
     }
+
     result += path.at(i)->name();
   }
 
@@ -341,11 +343,13 @@ static bool get_proto_numeric_by_path(const google::protobuf::Message& message,
 
   for (size_t i = 0; i + 1 < path.size(); ++i) {
     const auto* field = path.at(i);
+
     if (!field || field->is_repeated() || field->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       return false;
     }
 
     const auto* reflection = current->GetReflection();
+
     if (!reflection) {
       return false;
     }
@@ -358,6 +362,7 @@ static bool get_proto_numeric_by_path(const google::protobuf::Message& message,
   }
 
   const auto* leaf = path.back();
+
   if (!leaf) {
     return false;
   }
@@ -458,6 +463,7 @@ static void find_proto_xyz_candidate_recursive(const google::protobuf::Descripto
 
   for (int i = 0; i < descriptor->field_count(); ++i) {
     const auto* field = descriptor->field(i);
+
     if (!field || field->is_repeated() || !is_proto_numeric_type(field->cpp_type())) {
       continue;
     }
@@ -491,6 +497,7 @@ static void find_proto_xyz_candidate_recursive(const google::protobuf::Descripto
 
   for (int i = 0; i < descriptor->field_count(); ++i) {
     const auto* field = descriptor->field(i);
+
     if (!field || field->is_repeated() || field->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE ||
         !field->message_type()) {
       continue;
@@ -520,6 +527,7 @@ static void collect_proto_value_fields_recursive(const google::protobuf::Descrip
 
   for (int i = 0; i < descriptor->field_count(); ++i) {
     const auto* field = descriptor->field(i);
+
     if (!field || field->is_repeated()) {
       continue;
     }
@@ -554,6 +562,7 @@ static std::string join_flatbuffers_path(const std::vector<const reflection::Fie
     if (i > 0) {
       result += ".";
     }
+
     result += path.at(i)->name()->str();
   }
 
@@ -586,11 +595,13 @@ static bool get_flatbuffers_numeric_by_path(const FlatbuffersObjectView& view,
 
   for (size_t i = 0; i + 1 < path.size(); ++i) {
     const auto* field = path.at(i);
+
     if (!field || field->type()->base_type() != reflection::Obj) {
       return false;
     }
 
     FlatbuffersObjectView child_view;
+
     if (!get_child_view(current_view, *field, schema, child_view)) {
       return false;
     }
@@ -599,11 +610,13 @@ static bool get_flatbuffers_numeric_by_path(const FlatbuffersObjectView& view,
   }
 
   const auto* leaf = path.back();
+
   if (!leaf) {
     return false;
   }
 
   const auto numeric = get_numeric(current_view, *leaf);
+
   if (!numeric.has_value()) {
     return false;
   }
@@ -656,11 +669,13 @@ static void find_flatbuffers_xyz_candidate_recursive(const reflection::Object* o
 
   for (uint32_t i = 0; i < object->fields()->size(); ++i) {
     const auto* field = object->fields()->Get(i);
+
     if (!field || !is_fbs_numeric_type(field->type()->base_type())) {
       continue;
     }
 
     const auto name = field->name()->str();
+
     if (name == "x") {
       x_field = field;
     } else if (name == "y") {
@@ -690,11 +705,13 @@ static void find_flatbuffers_xyz_candidate_recursive(const reflection::Object* o
 
   for (uint32_t i = 0; i < object->fields()->size(); ++i) {
     const auto* field = object->fields()->Get(i);
+
     if (!field || field->type()->base_type() != reflection::Obj || !schema.objects()) {
       continue;
     }
 
     const auto* child_object = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
+
     if (!child_object) {
       continue;
     }
@@ -721,6 +738,7 @@ static void collect_flatbuffers_value_fields_recursive(
 
   for (uint32_t i = 0; i < object->fields()->size(); ++i) {
     const auto* field = object->fields()->Get(i);
+
     if (!field) {
       continue;
     }
@@ -787,6 +805,7 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
     std::lock_guard lock(window_->data_mutex_);
 
     select_urls_.clear();
+
     if (selected_items.count() == 1) {
       QString url = selected_items.at(0)->text(1);
       QString ser = selected_items.at(0)->data(1, Qt::UserRole).toString();
@@ -932,6 +951,7 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
 
     for (const auto& value_field : candidate.value_fields) {
       const auto item_name = QString::fromStdString(value_field.display_name);
+
       if (ui->comboBox_value->findText(item_name) < 0) {
         ui->comboBox_value->addItem(item_name);
       }
@@ -947,6 +967,7 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
 
     const auto* element_object =
         target_fbs_context_->schema->objects()->Get(static_cast<uint32_t>(field->type()->index()));
+
     if (!element_object || !element_object->fields()) {
       return;
     }
@@ -974,6 +995,7 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
 
     for (const auto& value_field : candidate.value_fields) {
       const auto item_name = QString::fromStdString(value_field.display_name);
+
       if (ui->comboBox_value->findText(item_name) < 0) {
         ui->comboBox_value->addItem(item_name);
       }
@@ -1390,6 +1412,7 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
 
   QSettings settings(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/settings.ini",
                      QSettings::IniFormat);
+
   if (this->parent()) {
     settings.beginGroup("Point3DDialog_ext");
   } else {
@@ -1418,6 +1441,7 @@ Point3DDialog::~Point3DDialog() {
   {
     QSettings settings(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/settings.ini",
                        QSettings::IniFormat);
+
     if (this->parent()) {
       settings.beginGroup("Point3DDialog_ext");
     } else {
@@ -1458,6 +1482,7 @@ Point3DDialog::~Point3DDialog() {
 
 void Point3DDialog::init_osg() {
 #ifdef VLINK_ENABLE_VIEWER_OSG
+
   if (osg_inited_) {
     return;
   }
@@ -1670,6 +1695,7 @@ void Point3DDialog::init_osg() {
       for (auto& [url, list] : point3d_map_) {
         for (auto& [x, y, z, index, c1, c2, intensity, value_list] : list) {
           osg::Vec3d screen_point = OsgCommon::worldToScreen(osg::Vec3d(x, y, z), viewer->getCamera());
+
           if (screen_point.x() >= xMin && screen_point.x() <= xMax && screen_point.y() >= yMin &&
               screen_point.y() <= yMax) {
             c2 = 0xFFFFFF;
@@ -1771,6 +1797,7 @@ void Point3DDialog::mouseReleaseEvent(QMouseEvent* event) { QDialog::mouseReleas
 void Point3DDialog::keyPressEvent(QKeyEvent* event) {
 #ifdef VLINK_ENABLE_VIEWER_OSG
 #if USE_GRAPHICS_VIEW
+
   if (ui->lineEdit_exp->hasFocus()) {
     QDialog::keyPressEvent(event);
     return;
@@ -1781,11 +1808,13 @@ void Point3DDialog::keyPressEvent(QKeyEvent* event) {
   //   return;
   // }
 #else
+
   if (!osg_widget_->geometry().contains(osg_widget_->mapFromGlobal(QCursor::pos()))) {
     QDialog::keyPressEvent(event);
     return;
   }
 #endif
+
   if (event->key() == Qt::Key_Control) {
     if (!ui->checkBox_select->isChecked()) {
       ui->checkBox_select->setChecked(true);
@@ -1797,6 +1826,7 @@ void Point3DDialog::keyPressEvent(QKeyEvent* event) {
       on_checkBox_select_clicked(false);
     }
   }
+
   QDialog::keyPressEvent(event);
 #else
   QDialog::keyPressEvent(event);
@@ -1814,10 +1844,12 @@ void Point3DDialog::resizeEvent(QResizeEvent* event) {
 
 #ifdef VLINK_ENABLE_VIEWER_OSG
 #if USE_GRAPHICS_VIEW
+
   if (osg_view_) {
     osg_view_->resize(ui->label_osg->width(), ui->label_osg->height());
   }
 #else
+
   if (osg_widget_) {
     osg_widget_->resize(ui->label_osg->width(), ui->label_osg->height());
   }
@@ -1829,6 +1861,7 @@ void Point3DDialog::on_pushButton_close_clicked() { this->close(); }
 
 void Point3DDialog::on_checkBox_platform_clicked(bool checked) {
 #ifdef VLINK_ENABLE_VIEWER_OSG
+
   if (!osg_inited_) {
     ui->checkBox_platform->setChecked(false);
     return;
@@ -1851,6 +1884,7 @@ void Point3DDialog::on_checkBox_platform_clicked(bool checked) {
 
 void Point3DDialog::on_checkBox_car_clicked(bool checked) {
 #ifdef VLINK_ENABLE_VIEWER_OSG
+
   if (!osg_inited_) {
     ui->checkBox_car->setChecked(false);
     return;
@@ -1882,6 +1916,7 @@ void Point3DDialog::on_pushButton_camera_clicked() {
 
 void Point3DDialog::on_checkBox_select_clicked(bool checked) {
 #ifdef VLINK_ENABLE_VIEWER_OSG
+
   if (select_handler_) {
     select_handler_->setSelecting(checked);
   }
@@ -2083,6 +2118,7 @@ void Point3DDialog::update_ui_for_proto(const QVariant& variant, bool cache, con
 
   for (int i = 0; i < field_size; ++i) {
     const auto* sub_msg = &target_msg_->GetReflection()->GetRepeatedMessage(*target_msg_, field, i);
+
     if (!sub_msg) {
       continue;
     }
@@ -2100,6 +2136,7 @@ void Point3DDialog::update_ui_for_proto(const QVariant& variant, bool cache, con
     }
 
     PointValueList value_list;
+
     if (has_exp_value) {
       value_list.reserve(candidate.value_fields.size() + 3);
       value_list.emplace_back("x", vlink::zerocopy::PointCloud::kFloatType, x);
@@ -2109,6 +2146,7 @@ void Point3DDialog::update_ui_for_proto(const QVariant& variant, bool cache, con
 
     for (const auto& value_field : candidate.value_fields) {
       double value = 0;
+
       if (!get_proto_numeric_by_path(*sub_msg, value_field.path, value)) {
         continue;
       }
@@ -2294,6 +2332,7 @@ void Point3DDialog::update_ui_for_zero_copy_types(const QVariant& variant, bool 
   point3d_map_[proxy_data.url].clear();
 
   ui->groupBox_time->setEnabled(true);
+
   if (ui->groupBox_time->isChecked()) {
     auto time_meas_str = vlink::Helpers::format_date(pcl.header.time_meas);
     auto time_pub_str = vlink::Helpers::format_date(pcl.header.time_pub);
@@ -2340,6 +2379,7 @@ void Point3DDialog::update_ui_for_zero_copy_types(const QVariant& variant, bool 
     if (item.name == ui->comboBox_value->currentText().toStdString()) {
       return true;
     }
+
     return false;
   });
 
@@ -2411,6 +2451,7 @@ void Point3DDialog::update_ui_for_zero_copy_types(const QVariant& variant, bool 
     }
 
     PointValueList value_list;
+
     if (has_exp_value) {
       value_list.reserve(key_list.size());
 
@@ -2540,11 +2581,13 @@ void Point3DDialog::update_ui_for_flatbuffers(const QVariant& variant, bool cach
   }
 
   FlatbuffersObjectView root_view;
+
   if (!make_root_view(*target_fbs_context_, proxy_data.raw, root_view)) {
     return;
   }
 
   const auto* root_field = candidate.repeated_field;
+
   if (!root_field ||
       (root_field->type()->base_type() != reflection::Vector &&
        root_field->type()->base_type() != reflection::Vector64) ||
@@ -2622,6 +2665,7 @@ void Point3DDialog::update_ui_for_flatbuffers(const QVariant& variant, bool cach
 
   for (size_t i = 0; i < vector_size; ++i) {
     FlatbuffersObjectView element_view;
+
     if (!get_vector_elem_view(root_view, *root_field, i, *target_fbs_context_->schema, element_view)) {
       continue;
     }
@@ -2629,6 +2673,7 @@ void Point3DDialog::update_ui_for_flatbuffers(const QVariant& variant, bool cach
     double x = 0;
     double y = 0;
     double z = 0;
+
     if (!get_flatbuffers_numeric_by_path(element_view, candidate.x_path, *target_fbs_context_->schema, x) ||
         !get_flatbuffers_numeric_by_path(element_view, candidate.y_path, *target_fbs_context_->schema, y) ||
         !get_flatbuffers_numeric_by_path(element_view, candidate.z_path, *target_fbs_context_->schema, z) ||
@@ -2637,6 +2682,7 @@ void Point3DDialog::update_ui_for_flatbuffers(const QVariant& variant, bool cach
     }
 
     PointValueList value_list;
+
     if (has_exp_value) {
       value_list.emplace_back("x", vlink::zerocopy::PointCloud::kFloatType, x);
       value_list.emplace_back("y", vlink::zerocopy::PointCloud::kFloatType, y);
@@ -2653,6 +2699,7 @@ void Point3DDialog::update_ui_for_flatbuffers(const QVariant& variant, bool cach
 
     for (const auto& value_field : candidate.value_fields) {
       double value = 0;
+
       if (!get_flatbuffers_numeric_by_path(element_view, value_field.path, *target_fbs_context_->schema, value)) {
         continue;
       }
@@ -2843,6 +2890,7 @@ void Point3DDialog::update_points() {
 
     for (const auto& [x, y, z, index, c1, c2, intensity, value_list] : list) {
       QColor color;
+
       if (select_handler_ && select_handler_->isSelecting()) {
         color = c2;
         if (c2 == 0xFFFFFF) {
@@ -2866,11 +2914,13 @@ void Point3DDialog::update_points() {
     color_array_select->dirty();
 
     auto* draw_arrays = static_cast<osg::DrawArrays*>(geometry->getPrimitiveSet(0));
+
     if (draw_arrays) {
       draw_arrays->setCount(vertex_array->size());
     }
 
     auto* draw_arrays_select = static_cast<osg::DrawArrays*>(geometry_select->getPrimitiveSet(0));
+
     if (draw_arrays_select) {
       draw_arrays_select->setCount(vertex_array_select->size());
     }

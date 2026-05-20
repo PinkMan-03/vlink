@@ -423,12 +423,14 @@ void GraphTask::remove_succeed_task(const std::shared_ptr<GraphTask>& task) {
 
   auto iter_precede = std::remove_if(impl_->precede_task_list.begin(), impl_->precede_task_list.end(),
                                      [&task](const auto& weak_task) { return weak_task.lock() == task; });
+
   if (iter_precede != impl_->precede_task_list.end()) {
     impl_->precede_task_list.erase(iter_precede, impl_->precede_task_list.end());
   }
 
   auto iter_succeed = std::remove_if(task->impl_->succeed_task_list.begin(), task->impl_->succeed_task_list.end(),
                                      [this](const auto& weak_task) { return weak_task.lock().get() == this; });
+
   if (iter_succeed != task->impl_->succeed_task_list.end()) {
     task->impl_->succeed_task_list.erase(iter_succeed, task->impl_->succeed_task_list.end());
   }
@@ -833,6 +835,7 @@ void GraphTask::notify(int condition_number) {
         invoke_list.emplace_back(task);
       } else if (task_ptr->impl_->policy == kPolicyWaitAll) {
         bool has_active = false;
+
         if (!task_ptr->mark_predecessor_satisfied(true, &has_active) || !has_active) {
           continue;
         }

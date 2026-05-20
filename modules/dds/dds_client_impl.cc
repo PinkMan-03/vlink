@@ -309,6 +309,7 @@ bool DdsClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chr
 
   auto cleanup_callback = [this, &id, &sample_identity]() {
     std::lock_guard param_lock(param_mtx_);
+
     if (is_cdr_type) {
       cdr_callbacks_.erase(sample_identity);
     } else {
@@ -336,14 +337,14 @@ bool DdsClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::chr
     ElapsedTimer timer;
     timer.start();
 
-    if (!wait_for_connected(timeout)) {
+    if VUNLIKELY (!wait_for_connected(timeout)) {
       cleanup_callback();
       return false;
     }
 
     auto elapsed = timer.get();
 
-    if (timeout.count() > 0 && elapsed >= timeout.count()) {
+    if VUNLIKELY (timeout.count() > 0 && elapsed >= timeout.count()) {
       cleanup_callback();
       return false;
     }

@@ -873,6 +873,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
     }
 
     total_pages = (print_lines.size() + target_row - 1) / target_row;
+
     if (current_page >= total_pages) {
       current_page = total_pages - 1;
     }
@@ -1063,11 +1064,13 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
           current_str.append(vline);
 
           std::string process_part;
+
           if (static_cast<size_t>(panel_row) < process_panel_lines.size()) {
             process_part = process_panel_lines[panel_row];
           } else {
             process_part = std::string(process_panel_width, ' ');
           }
+
           current_str.append(process_part);
         }
 
@@ -1075,11 +1078,13 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
           current_str.append(vline);
 
           std::string chart_part;
+
           if (static_cast<size_t>(panel_row) < chart_panel_lines.size()) {
             chart_part = chart_panel_lines[panel_row];
           } else {
             chart_part = std::string(chart_panel_width, ' ');
           }
+
           current_str.append(chart_part);
         }
       } else {
@@ -1466,6 +1471,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
         line << info.url;
 
         space_cnt = max_url_size - info.url.size() + 3;
+
         if VUNLIKELY (space_cnt < 3) {
           space_cnt = 3;
         }
@@ -1476,6 +1482,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
           line << info.ser_type;
 
           space_cnt = max_ser_size - info.ser_type.size() + 3;
+
           if VUNLIKELY (space_cnt < 3) {
             space_cnt = 3;
           }
@@ -1513,6 +1520,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
       SparklineHistory& spark_history = sparkline_history_map[info.url];
 
       space_cnt = max_url_size - info.url.size() + 3;
+
       if VUNLIKELY (space_cnt < 3) {
         space_cnt = 3;
       }
@@ -1554,6 +1562,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
           line << info.ser_type;
 
           space_cnt = max_ser_size - info.ser_type.size() + 3;
+
           if VUNLIKELY (space_cnt < 3) {
             space_cnt = 3;
           }
@@ -1595,6 +1604,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
       }
 
       auto ptr_iter = sub_ptr_map.find(info.url);
+
       if VLIKELY (ptr_iter != sub_ptr_map.end()) {
         auto* sub_ptr = ptr_iter->second.get();
 
@@ -1712,6 +1722,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
         line << info.ser_type;
 
         space_cnt = max_ser_size - info.ser_type.size() + 3;
+
         if VUNLIKELY (space_cnt < 3) {
           space_cnt = 3;
         }
@@ -1792,6 +1803,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
         line << seq_str;
 
         space_cnt = 12 - seq_str.size();
+
         if VUNLIKELY (space_cnt < 1) {
           space_cnt = 1;
         }
@@ -1805,6 +1817,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
         line << rate_str;
 
         space_cnt = 12 - rate_str.size();
+
         if VUNLIKELY (space_cnt < 1) {
           space_cnt = 1;
         }
@@ -1816,6 +1829,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
         line << loss_str;
 
         space_cnt = 9 - loss_str.size();
+
         if VUNLIKELY (space_cnt < 1) {
           space_cnt = 1;
         }
@@ -1838,6 +1852,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
 
         if (profiler_mode) {
           space_cnt = 12 - latency_str.size();
+
           if VUNLIKELY (space_cnt < 1) {
             space_cnt = 1;
           }
@@ -1848,6 +1863,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
           line << std::string(1, ' ');
         } else {
           space_cnt = 10 - latency_str.size();
+
           if VUNLIKELY (space_cnt < 1) {
             space_cnt = 1;
           }
@@ -1984,11 +2000,13 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
     }
 
     command_str += " -x ";
+
     if (blob_mode) {
       command_str += "blob";
     } else {
       command_str += std::string(schema_label);
     }
+
     command_str += " -e -y";
 
     if (native_mode) {
@@ -2078,6 +2096,7 @@ int start_monitor(const std::vector<std::string>& urls, const std::string& filte
     } else if (key == "up") {
       if (selected_line < 0) {
         selected_line = ((current_page + 1) * target_row) - 1;
+
         if (selected_line < 0) {
           selected_line = 0;
         } else if (selected_line > row_count - 1) {
@@ -2429,6 +2448,7 @@ int main(int argc, char* argv[]) {
   }
 
 #ifdef _WIN32
+
   if (program.is_used("-d")) {
     try {
       proto_dir = vlink::Helpers::path_to_string(std::filesystem::path(proto_dir));

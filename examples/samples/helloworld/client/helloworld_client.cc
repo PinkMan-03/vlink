@@ -52,6 +52,7 @@ int set(int left, int right) {
   Client<Helloworld::Request, Helloworld::Response> client(Common::get_method_url());
 
   // Block and wait for the server to come online (timeout: 1 second)
+
   if (!client.wait_for_connected(1s)) {
     VLOG_W("[Client] Server not ready.");
     return -1;
@@ -65,6 +66,7 @@ int set(int left, int right) {
   // Synchronous call: send the request and wait for the response (timeout: 3 seconds)
   Helloworld::Response resp;
   bool ret = client.invoke(req, resp, 3s);
+
   if (!ret) {
     VLOG_W("[Client] Invoke failed.");
     return -1;
@@ -102,11 +104,13 @@ int sub() {
 ///   set L R   - RPC call mode, compute L + R
 int main(int argc, char* argv[]) {
   // Mode 1: Event subscription
+
   if (argc == 2 && ::strcmp(argv[1], "sub") == 0) {
     return sub();
   }
 
   // Mode 2: RPC call
+
   if (argc == 4 && ::strcmp(argv[1], "set") == 0) {
     int left = std::stoi(argv[2]);
     int right = std::stoi(argv[3]);

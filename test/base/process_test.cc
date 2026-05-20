@@ -670,6 +670,7 @@ TEST_SUITE("base-Process") {
 
     proc.register_ready_read_stdout_callback([&]() {
       std::string local;
+
       if (proc.read_all_output(local)) {
         std::lock_guard lock(output_mtx);
         output += local;
@@ -718,6 +719,7 @@ TEST_SUITE("base-Process") {
 
     std::vector<uint8_t> stderr_buf;
     bool ok = proc.read_all_error(stderr_buf);
+
     if (ok && !stderr_buf.empty()) {
       std::string stderr_str(stderr_buf.begin(), stderr_buf.end());
       CHECK(stderr_str.find("error_msg") != std::string::npos);
@@ -731,6 +733,7 @@ TEST_SUITE("base-Process") {
 
     std::string line;
     bool has_line = proc.read_line_stderr(line);
+
     if (has_line) {
       CHECK(line.find("stderr_line") != std::string::npos);
     }
@@ -774,6 +777,7 @@ TEST_SUITE("base-Process") {
     proc.start("/bin/echo", {"hello_ready_read"});
 
     bool ready = proc.wait_for_ready_read(2000);
+
     if (ready) {
       std::string output;
       proc.read_all_output(output);

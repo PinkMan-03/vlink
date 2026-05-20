@@ -56,6 +56,7 @@ int main() {
   plugin.set_log_level(vlink::Logger::kInfo);
 
   auto greeter = plugin.load<GreeterInterface>("greeter_plugin", 1, 0);
+
   if (!greeter) {
     VLOG_E("Failed to load greeter_plugin. Make sure libgreeter_plugin.so is in a search path.");
     VLOG_I("Tip: run from the build/output/bin directory or set LD_LIBRARY_PATH.");
@@ -99,6 +100,7 @@ int main() {
   VLOG_I("=== [6] Attempting load with wrong version (2.0) ===");
 
   auto bad = plugin.load<GreeterInterface>("greeter_plugin", 2, 0);
+
   if (!bad) {
     VLOG_I("  Version mismatch -- load returned nullptr (expected).");
   } else {
@@ -110,6 +112,7 @@ int main() {
   VLOG_I("=== [7] Reloading with correct version (1.0) ===");
 
   auto reloaded = plugin.load<GreeterInterface>("greeter_plugin", 1, 0);
+
   if (reloaded) {
     VLOG_I("  Reload OK: ", reloaded->greet("Reload"));
     reloaded.reset();

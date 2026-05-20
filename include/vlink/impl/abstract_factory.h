@@ -640,7 +640,7 @@ inline std::shared_ptr<ObjectT> AbstractFactory<FilterT>::get_object(const Filte
 
         auto iter = map_.find(filter);
 
-        if (iter != map_.end() && iter->second.expired()) {
+        if VUNLIKELY (iter != map_.end() && iter->second.expired()) {
           map_.erase(iter);
         }
       }

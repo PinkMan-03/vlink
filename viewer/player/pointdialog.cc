@@ -71,11 +71,13 @@ PointDialog::PointDialog(QWidget* parent) : QDialog(parent), ui(new Ui::PointDia
 
   connect(ui->treeWidget, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
     auto item_index = ui->treeWidget->indexAt(pos);
+
     if (!item_index.isValid()) {
       return;
     }
 
     QTreeWidgetItem* item = ui->treeWidget->itemAt(pos);
+
     if (!item) {
       return;
     }

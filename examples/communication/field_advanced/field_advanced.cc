@@ -116,6 +116,7 @@ int main() {
   });
 
   // wait_for_value should succeed because the Setter's cached value is synced
+
   if (late_getter.wait_for_value(2000ms)) {
     auto val = late_getter.get();
     if (val.has_value()) {
@@ -179,9 +180,18 @@ int main() {
   auto v1 = g1.get();
   auto v2 = g2.get();
   auto v3 = g3.get();
-  if (v1.has_value()) VLOG_I("[Getter1] final: ", v1.value());
-  if (v2.has_value()) VLOG_I("[Getter2] final: ", v2.value());
-  if (v3.has_value()) VLOG_I("[Getter3] final: ", v3.value());
+
+  if (v1.has_value()) {
+    VLOG_I("[Getter1] final: ", v1.value());
+  }
+
+  if (v2.has_value()) {
+    VLOG_I("[Getter2] final: ", v2.value());
+  }
+
+  if (v3.has_value()) {
+    VLOG_I("[Getter3] final: ", v3.value());
+  }
 
   // Check lost stats on Getter3
   vlink::SampleLostInfo lost = g3.get_lost();

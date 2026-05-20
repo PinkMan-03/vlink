@@ -57,6 +57,7 @@ std::string get_method_url() {
   }
 
   auto transport = vlink::Utils::get_env("METHOD_TRANSPORT", "dds");
+
   if (transport == "dds") {
     url = DDS_METHOD_URL;
   } else if (transport == "ddsc") {

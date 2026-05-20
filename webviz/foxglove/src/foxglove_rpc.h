@@ -54,8 +54,8 @@ class FoxgloveRpc final {
     ProxyBridge::TransportConfig transport;
   };
 
-  using RpcResponseCallback = vlink::Function<void(uint32_t, uint32_t, const std::string&, const Bytes&)>;
-  using RpcErrorCallback = vlink::Function<void(uint32_t, uint32_t, const std::string&)>;
+  using RpcResponseCallback = Function<void(uint32_t, uint32_t, const std::string&, const Bytes&)>;
+  using RpcErrorCallback = Function<void(uint32_t, uint32_t, const std::string&)>;
   using RawClient = Client<Bytes, Bytes>;
 
   FoxgloveRpc(const Config& config, VlinkConvert* vlink_convert, MessageLoop* loop);
@@ -64,13 +64,13 @@ class FoxgloveRpc final {
 
   bool has_rpcs() const;
 
-  bool has_rpcs(vlink::MoveFunction<bool(std::string_view)>&& allow_url) const;
+  bool has_rpcs(MoveFunction<bool(std::string_view)>&& allow_url) const;
 
   std::vector<Json> get_rpcs() const;
 
-  std::vector<Json> get_rpcs(vlink::MoveFunction<bool(std::string_view)>&& allow_url) const;
+  std::vector<Json> get_rpcs(MoveFunction<bool(std::string_view)>&& allow_url) const;
 
-  bool is_rpc_allowed(uint32_t rpc_id, vlink::MoveFunction<bool(std::string_view)>&& allow_url) const;
+  bool is_rpc_allowed(uint32_t rpc_id, MoveFunction<bool(std::string_view)>&& allow_url) const;
 
   bool call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_id, const std::string& request_encoding,
                 const Bytes& request, RpcResponseCallback&& on_response, RpcErrorCallback&& on_error);

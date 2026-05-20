@@ -66,6 +66,7 @@ void demonstrate_url_parsing(const std::string& url_str) {
 
   // Display parsed query dictionary (key-value pairs)
   const auto& dict = parser.get_query_dictionary();
+
   if (!dict.empty()) {
     VLOG_I("  query parameters:");
     for (const auto& [key, value] : dict) {

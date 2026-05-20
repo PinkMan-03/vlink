@@ -117,15 +117,16 @@ bool Shm2Conf::parse_protocol(struct Protocol* protocol) {
       multiplier = 1;
     } else if (unit.size() == 1) {
       char c0 = static_cast<char>(std::tolower(static_cast<unsigned char>(unit[0])));
-      if (c0 == 'b')
+
+      if (c0 == 'b') {
         multiplier = 1;
-      else if (c0 == 'k')
+      } else if (c0 == 'k') {
         multiplier = 1024ULL;
-      else if (c0 == 'm')
+      } else if (c0 == 'm') {
         multiplier = 1024ULL * 1024ULL;
-      else if (c0 == 'g')
+      } else if (c0 == 'g') {
         multiplier = 1024ULL * 1024ULL * 1024ULL;
-      else {
+      } else {
         VLOG_E("Shm2Conf: Unknown size unit in fragment: ", protocol->fragment, ".");
         return false;
       }
@@ -138,13 +139,13 @@ bool Shm2Conf::parse_protocol(struct Protocol* protocol) {
         return false;
       }
 
-      if (c0 == 'k')
+      if (c0 == 'k') {
         multiplier = 1024ULL;
-      else if (c0 == 'm')
+      } else if (c0 == 'm') {
         multiplier = 1024ULL * 1024ULL;
-      else if (c0 == 'g')
+      } else if (c0 == 'g') {
         multiplier = 1024ULL * 1024ULL * 1024ULL;
-      else {
+      } else {
         VLOG_E("Shm2Conf: Unknown size unit in fragment: ", protocol->fragment, ".");
         return false;
       }

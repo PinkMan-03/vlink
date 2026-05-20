@@ -297,6 +297,7 @@ constexpr std::string_view pretty_name(std::string_view name, bool remove_suffix
       break;
     }
   }
+
   if (remove_suffix) {
     name.remove_suffix(s);
   }
@@ -595,11 +596,13 @@ inline constexpr std::string_view NameDetector::get() noexcept {
   std::string_view view = detail::kTypeName<DecayT>;
 
   constexpr std::string_view kStructPrefix = "struct ";
+
   if (view.size() >= kStructPrefix.size() && view.substr(0, kStructPrefix.size()) == kStructPrefix) {
     view.remove_prefix(kStructPrefix.size());
   }
 
   constexpr std::string_view kClassPrefix = "class ";
+
   if (view.size() >= kClassPrefix.size() && view.substr(0, kClassPrefix.size()) == kClassPrefix) {
     view.remove_prefix(kClassPrefix.size());
   }
@@ -630,6 +633,7 @@ inline constexpr std::string_view NameDetector::get_enum(EnumT value) noexcept {
     }
   } else {
     const auto v = static_cast<UnderlyingT>(value);
+
     if (v >= detail::kMinTalue<DecayT> && v <= detail::kMaxValue<DecayT>) {
       return detail::kNames<DecayT>[static_cast<size_t>(v - detail::kMinTalue<DecayT>)];
     }

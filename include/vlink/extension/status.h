@@ -257,9 +257,11 @@ template <typename T>
 inline std::shared_ptr<T> Base::as() const {
   static_assert(std::is_base_of_v<Base, T> && !std::is_same_v<struct Unknown, T>,
                 "Can not convert target status type.");
+
   if VUNLIKELY (get_type() == kUnknown) {
     throw Exception::RuntimeError("Target status is unknown");
   }
+
   return std::dynamic_pointer_cast<T>(const_cast<Base*>(this)->shared_from_this());
 }
 

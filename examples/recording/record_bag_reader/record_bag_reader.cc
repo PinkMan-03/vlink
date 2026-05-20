@@ -113,6 +113,7 @@ int main() {
                                                   vlink::ActionType action_type, const vlink::Bytes& data) {
       (void)action_type;
       ++msg_count;
+
       if (msg_count <= 5) {
         VLOG_I("  ts:", timestamp, "url:", url, "size:", data.size());
       }
@@ -185,6 +186,7 @@ int main() {
     reader->register_output_callback(
         [&msg_count](int64_t timestamp, const std::string& url, vlink::ActionType, const vlink::Bytes&) {
           ++msg_count;
+
           if (msg_count <= 3) {
             VLOG_I("  ts:", timestamp, "url:", url);
           }
@@ -211,6 +213,7 @@ int main() {
     reader->register_output_callback(
         [&msg_count](int64_t, const std::string& url, vlink::ActionType, const vlink::Bytes&) {
           ++msg_count;
+
           if (msg_count <= 3) {
             VLOG_I("  url:", url);
           }
@@ -239,6 +242,7 @@ int main() {
     processor.register_output_callback(
         [&ordered_count](int64_t timestamp, const std::string& url, vlink::ActionType, const vlink::Bytes&) {
           ++ordered_count;
+
           if (ordered_count <= 3) {
             VLOG_I("  Processor output: ts:", timestamp, "url:", url);
           }

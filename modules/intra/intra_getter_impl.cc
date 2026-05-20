@@ -54,6 +54,7 @@ void IntraGetterImpl::init() {
 
 void IntraGetterImpl::deinit() {
   object_->remove_impl(this);
+
   if (object_->msg_map_is_empty()) {
     object_->traverse_sub_connect_callback([](NodeImpl*, const auto& callback) { callback(false); });
   }

@@ -93,6 +93,7 @@ int main() {
   // ---------------------------------------------------------------
   // 5. Check writability before expensive argument construction.
   // ---------------------------------------------------------------
+
   if (vlink::Logger::is_writable(vlink::Logger::kDebug)) {
     std::string expensive_data = "computed-only-when-debug-is-active";
     VLOG_D("Expensive debug data: ", expensive_data);

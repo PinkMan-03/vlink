@@ -78,7 +78,7 @@ inline Subscriber<MsgT, SecT>::Subscriber(const ConfT& conf, InitType type) {
     this->impl_->is_security_type = true;
   }
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -262,7 +262,7 @@ inline SecuritySubscriber<MsgT>::SecuritySubscriber(const ConfT& conf, SecurityC
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -277,7 +277,7 @@ inline SecuritySubscriber<MsgT>::SecuritySubscriber(const std::string& url_str, 
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }

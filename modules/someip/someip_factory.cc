@@ -73,8 +73,8 @@ SomeipServer::SomeipServer(const SomeipID& id) {
 
   app_->register_message_handler(
       service_id_, instance_id_, someip::ANY_METHOD, [this](const std::shared_ptr<someip::message>& request) {
-        if (request->get_message_type() != someip::message_type_e::MT_REQUEST &&
-            request->get_message_type() != someip::message_type_e::MT_REQUEST_NO_RETURN) {
+        if VUNLIKELY (request->get_message_type() != someip::message_type_e::MT_REQUEST &&
+                      request->get_message_type() != someip::message_type_e::MT_REQUEST_NO_RETURN) {
           return;
         }
 
@@ -84,7 +84,7 @@ SomeipServer::SomeipServer(const SomeipID& id) {
         traverse_req_resp_callback([this, &request, &req_data](NodeImpl* impl, const auto& callback) {
           const auto* conf_ptr = impl->get_target_conf<SomeipConf>();
 
-          if (conf_ptr->method != request->get_method() || impl->has_suspend) {
+          if VUNLIKELY (conf_ptr->method != request->get_method() || impl->has_suspend) {
             ignore_called();
             return;
           }
@@ -164,7 +164,7 @@ SomeipClient::SomeipClient(const SomeipID& id) {
                                      traverse_msg_callback([&message, &msg_data](NodeImpl* impl, const auto& callback) {
                                        const auto* conf_ptr = impl->get_target_conf<SomeipConf>();
 
-                                       if (conf_ptr->event != message->get_method() || impl->has_suspend) {
+                                       if VUNLIKELY (conf_ptr->event != message->get_method() || impl->has_suspend) {
                                          return;
                                        }
 

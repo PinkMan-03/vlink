@@ -187,6 +187,7 @@ Version Version::from_string(const std::string& version_str) noexcept {
       version.major = -1;
     }
   }
+
   if (std::getline(ss, token, '.')) {
     const auto* end = token.data() + token.size();
     auto result = std::from_chars(token.data(), end, version.minor);
@@ -194,6 +195,7 @@ Version Version::from_string(const std::string& version_str) noexcept {
       version.minor = -1;
     }
   }
+
   if (std::getline(ss, token, '.')) {
     const auto* end = token.data() + token.size();
     auto result = std::from_chars(token.data(), end, version.patch);

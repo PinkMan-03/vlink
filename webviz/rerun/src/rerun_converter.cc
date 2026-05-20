@@ -279,7 +279,8 @@ bool RerunConverter::init_proto_resolver() {
   }
 
 #ifdef VLINK_HAS_PROTO_COMPILER
-  if (!config_.proto_dir.empty()) {
+
+  if VLIKELY (!config_.proto_dir.empty()) {
     auto proto_path = std::filesystem::path(config_.proto_dir);
     std::error_code ec;
 
@@ -457,13 +458,13 @@ bool RerunConverter::resolve_fbs_schema(const std::string& fbs_ser, std::string&
       std::string sub_dir_str = Helpers::path_to_string(fbs_file.parent_path());
 
       if (sub_dir_str == root_dir_str) {
-        if (!parser->Parse(schema_file.c_str(), include_dirs)) {
+        if VUNLIKELY (!parser->Parse(schema_file.c_str(), include_dirs)) {
           continue;
         }
       } else {
         const char* full_dirs[] = {root_dir_str.c_str(), sub_dir_str.c_str(), nullptr};
 
-        if (!parser->Parse(schema_file.c_str(), full_dirs)) {
+        if VUNLIKELY (!parser->Parse(schema_file.c_str(), full_dirs)) {
           continue;
         }
       }
@@ -478,7 +479,7 @@ bool RerunConverter::resolve_fbs_schema(const std::string& fbs_ser, std::string&
       }
     }
 
-    if (!found) {
+    if VLIKELY (!found) {
       fbs_not_found_.insert(fbs_ser);
       return false;
     }
@@ -541,12 +542,13 @@ std::unique_ptr<google::protobuf::Message> RerunConverter::deserialize_proto_mes
   const google::protobuf::Message* prototype = nullptr;
 
 #ifdef VLINK_HAS_PROTO_COMPILER
+
   if (disk_factory_ && imported_proto_descriptors_.find(ser) != imported_proto_descriptors_.end()) {
     prototype = disk_factory_->GetPrototype(desc);
   }
 #endif
 
-  if (!prototype && schema_interface_) {
+  if VUNLIKELY (!prototype && schema_interface_) {
     prototype = proto_factory_.GetPrototype(desc);
   }
 
@@ -575,7 +577,7 @@ void RerunConverter::load_mappings() {
   mapping_multi_index_.clear();
 
   for (const auto& file : config_.vlink_msgs) {
-    if (!load_mapping_file(file)) {
+    if VUNLIKELY (!load_mapping_file(file)) {
       MLOG_W("Failed to load mapping: {}", file);
     }
   }
@@ -597,9 +599,11 @@ bool RerunConverter::load_mapping_file(const std::string& path) {
 
           RerunMap mapping;
           mapping.ser = obj.value("ser", std::string());
+
           if VUNLIKELY (!parse_url_selector(obj, path, "mapping", mapping.url_selector)) {
             return false;
           }
+
           mapping.archetype = obj.value("archetype", std::string());
           mapping.encoding = obj.value("encoding", std::string("protobuf"));
           mapping.converter = obj.value("converter", std::string());
@@ -899,6 +903,7 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
       }
 
 #ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+
       if (schema_type == SchemaType::kFlatbuffers && mapping->encoding == "flatbuffers") {
         const reflection::Schema* schema = nullptr;
 
@@ -941,6 +946,7 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
         }
       } else if (schema_type == SchemaType::kFlatbuffers && mapping->encoding == "flatbuffers") {
 #ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+
         if (log_fbs_with_mapping(rec, log_path, *mapping, ser, raw)) {
           any_logged = true;
           continue;
@@ -1473,6 +1479,7 @@ bool RerunConverter::log_proto_with_mapping(::rerun::RecordingStream& rec, const
   }
 
   thread_local std::unordered_set<std::string> warned_archtypes;
+
   if (warned_archtypes.insert(archetype).second) {
     MLOG_W("Unknown rerun archetype '{}', falling back to TextLog", archetype);
   }
@@ -1548,7 +1555,7 @@ bool RerunConverter::log_transform3d(::rerun::RecordingStream& rec, const std::s
     auto get_field = [&orientation_msg](const char* name) -> double {
       const auto* f = find_proto_field_cached(*orientation_msg->GetDescriptor(), name);
 
-      if (!f || !is_proto_numeric_type(f->cpp_type())) {
+      if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
         return 0.0;
       }
 
@@ -1572,7 +1579,7 @@ bool RerunConverter::log_transform3d(::rerun::RecordingStream& rec, const std::s
     auto get_euler = [&euler_msg](const char* name) -> double {
       const auto* f = find_proto_field_cached(*euler_msg->GetDescriptor(), name);
 
-      if (!f || !is_proto_numeric_type(f->cpp_type())) {
+      if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
         return 0.0;
       }
 
@@ -1787,11 +1794,11 @@ bool RerunConverter::log_boxes3d(::rerun::RecordingStream& rec, const std::strin
     const google::protobuf::Message* entities_parent = nullptr;
     std::string entities_field_name;
 
-    if (!resolve_proto_parent_field_path(msg, fm.source, entities_parent, entities_field_name)) {
+    if VUNLIKELY (!resolve_proto_parent_field_path(msg, fm.source, entities_parent, entities_field_name)) {
       continue;
     }
 
-    if (!entities_parent) {
+    if VUNLIKELY (!entities_parent) {
       continue;
     }
 
@@ -1799,7 +1806,7 @@ bool RerunConverter::log_boxes3d(::rerun::RecordingStream& rec, const std::strin
     const auto* ref = entities_parent->GetReflection();
     const auto* vec_field = find_proto_field_cached(*desc, entities_field_name);
 
-    if (!vec_field || !vec_field->is_repeated()) {
+    if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
       continue;
     }
 
@@ -1938,11 +1945,11 @@ bool RerunConverter::log_points3d(::rerun::RecordingStream& rec, const std::stri
     const google::protobuf::Message* parent = nullptr;
     std::string field_name;
 
-    if (!resolve_proto_parent_field_path(msg, fm.source, parent, field_name)) {
+    if VUNLIKELY (!resolve_proto_parent_field_path(msg, fm.source, parent, field_name)) {
       continue;
     }
 
-    if (!parent) {
+    if VUNLIKELY (!parent) {
       continue;
     }
 
@@ -1950,7 +1957,7 @@ bool RerunConverter::log_points3d(::rerun::RecordingStream& rec, const std::stri
     const auto* p_ref = parent->GetReflection();
     const auto* vec_field = find_proto_field_cached(*p_desc, field_name);
 
-    if (!vec_field || !vec_field->is_repeated()) {
+    if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
       continue;
     }
 
@@ -2324,7 +2331,7 @@ bool RerunConverter::log_boxes2d(::rerun::RecordingStream& rec, const std::strin
   std::string field_name = entities_src.empty() ? "boxes" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     return false;
   }
 
@@ -2392,7 +2399,7 @@ bool RerunConverter::log_arrows3d(::rerun::RecordingStream& rec, const std::stri
   std::string field_name = entities_src.empty() ? "arrows" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     double ox = get_proto_double(msg, origin_x_src.empty() ? "origin_x" : origin_x_src, empty_fm);
     double oy = get_proto_double(msg, origin_y_src.empty() ? "origin_y" : origin_y_src, empty_fm);
@@ -2464,7 +2471,7 @@ bool RerunConverter::log_points2d(::rerun::RecordingStream& rec, const std::stri
   std::string field_name = entities_src.empty() ? "points" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     return false;
   }
 
@@ -2579,7 +2586,7 @@ bool RerunConverter::log_arrows2d(::rerun::RecordingStream& rec, const std::stri
   std::string field_name = entities_src.empty() ? "arrows" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     double ox = get_proto_double(msg, origin_x_src.empty() ? "origin_x" : origin_x_src, empty_fm);
     double oy = get_proto_double(msg, origin_y_src.empty() ? "origin_y" : origin_y_src, empty_fm);
@@ -2866,7 +2873,7 @@ bool RerunConverter::log_cylinders3d(::rerun::RecordingStream& rec, const std::s
   std::string field_name = entities_src.empty() ? "cylinders" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     auto length = static_cast<float>(get_proto_double(msg, length_src.empty() ? "length" : length_src, empty_fm));
     auto radius = static_cast<float>(get_proto_double(msg, radius_src.empty() ? "radius" : radius_src, empty_fm));
@@ -2983,7 +2990,7 @@ bool RerunConverter::log_ellipsoids3d(::rerun::RecordingStream& rec, const std::
   std::string field_name = entities_src.empty() ? "ellipsoids" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     auto hx =
         static_cast<float>(get_proto_double(msg, half_size_x_src.empty() ? "half_size_x" : half_size_x_src, empty_fm));
@@ -3124,11 +3131,11 @@ bool RerunConverter::log_bar_chart(::rerun::RecordingStream& rec, const std::str
   std::string field_name = values_src.empty() ? "values" : values_src;
   const auto* values_field = find_proto_field_cached(*desc, field_name);
 
-  if (!values_field) {
+  if VUNLIKELY (!values_field) {
     return false;
   }
 
-  if (!values_field->is_repeated()) {
+  if VUNLIKELY (!values_field->is_repeated()) {
     FieldMapping empty_fm;
     double value = get_proto_double(msg, field_name, empty_fm);
     rec.log(entity_path, ::rerun::archetypes::BarChart::f64({value}));
@@ -3196,7 +3203,7 @@ bool RerunConverter::log_annotation_context(::rerun::RecordingStream& rec, const
   std::string field_name = entities_src.empty() ? "annotations" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     return false;
   }
 
@@ -3313,7 +3320,7 @@ bool RerunConverter::log_capsules3d(::rerun::RecordingStream& rec, const std::st
   std::string field_name = entities_src.empty() ? "capsules" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     auto length = static_cast<float>(get_proto_double(msg, length_src.empty() ? "length" : length_src, empty_fm));
     auto radius = static_cast<float>(get_proto_double(msg, radius_src.empty() ? "radius" : radius_src, empty_fm));
@@ -3530,7 +3537,7 @@ bool RerunConverter::log_graph_nodes(::rerun::RecordingStream& rec, const std::s
   std::string field_name = entities_src.empty() ? "nodes" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     auto node_id = get_proto_string(msg, node_id_src.empty() ? "node_id" : node_id_src, empty_fm);
 
@@ -3657,7 +3664,7 @@ bool RerunConverter::log_graph_edges(::rerun::RecordingStream& rec, const std::s
   std::string field_name = entities_src.empty() ? "edges" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     auto src = get_proto_string(msg, source_src.empty() ? "source" : source_src, empty_fm);
     auto tgt = get_proto_string(msg, target_src.empty() ? "target" : target_src, empty_fm);
@@ -3783,7 +3790,7 @@ bool RerunConverter::log_instance_poses3d(::rerun::RecordingStream& rec, const s
   std::string field_name = entities_src.empty() ? "poses" : entities_src;
   const auto* vec_field = find_proto_field_cached(*desc, field_name);
 
-  if (!vec_field || !vec_field->is_repeated()) {
+  if VUNLIKELY (!vec_field || !vec_field->is_repeated()) {
     FieldMapping empty_fm;
     auto poses = ::rerun::archetypes::InstancePoses3D();
 
@@ -5663,6 +5670,7 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
+
     if VUNLIKELY (vec == nullptr || vec->size() == 0) {
       return false;
     }
@@ -5757,6 +5765,7 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
+
     if VUNLIKELY (vec == nullptr || vec->size() == 0) {
       return false;
     }
@@ -5800,6 +5809,7 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
+
     if VUNLIKELY (vec == nullptr || vec->size() == 0) {
       return false;
     }
@@ -6806,6 +6816,7 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* data_vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
+
     if (data_vec == nullptr || data_vec->size() == 0 || shape.empty()) {
       return false;
     }

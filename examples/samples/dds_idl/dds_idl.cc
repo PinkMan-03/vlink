@@ -56,6 +56,7 @@ int main() {
   req.type(100);
 
   std::optional<dds::Response> resp1 = client.invoke(req);
+
   if (resp1.has_value()) {
     VLOG_I("resp1:", resp1.value().value());
   }
@@ -72,6 +73,7 @@ int main() {
   Subscriber<dds::Message> sub("dds://hello/event");
   sub.listen([&exit_flag](const dds::Message& msg) {
     VLOG_I("msg:", msg.value());
+
     if (msg.value() == "hello") {
       exit_flag = true;
     }

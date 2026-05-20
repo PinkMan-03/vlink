@@ -54,6 +54,7 @@ class TestSetterImpl : public SetterImpl {
 
   void sync(SyncCallback&& callback) override {
     ++sync_count;
+
     if (callback) {
       callback();
     }

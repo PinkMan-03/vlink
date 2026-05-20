@@ -126,6 +126,7 @@ Json VlinkConvert::make_proto_field_json_schema(const google::protobuf::FieldDes
       if VUNLIKELY (field->type() == google::protobuf::FieldDescriptor::TYPE_BYTES) {
         base_schema["contentEncoding"] = "base64";
       }
+
       break;
     case google::protobuf::FieldDescriptor::CPPTYPE_ENUM: {
       base_schema = make_json_schema_leaf("string");
@@ -142,6 +143,7 @@ Json VlinkConvert::make_proto_field_json_schema(const google::protobuf::FieldDes
       if VLIKELY (!values.empty()) {
         base_schema["enum"] = std::move(values);
       }
+
       break;
     }
     case google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE:
@@ -239,7 +241,7 @@ Json VlinkConvert::make_fbs_object_json_schema(const reflection::Schema& schema,
   stack.insert(object_name);
   Json required = Json::array();
 
-  if (obj->fields()) {
+  if VLIKELY (obj->fields()) {
     for (unsigned i = 0; i < obj->fields()->size(); ++i) {
       const auto* field = obj->fields()->Get(i);
 
@@ -282,11 +284,11 @@ Json VlinkConvert::make_fbs_scalar_json_schema(const reflection::Schema& schema,
     const auto* enum_def = (schema.enums() && index >= 0 && index < static_cast<int32_t>(schema.enums()->size()))
                                ? schema.enums()->Get(static_cast<uint32_t>(index))
                                : nullptr;
-    if (enum_def && !enum_def->is_union()) {
+    if VLIKELY (enum_def && !enum_def->is_union()) {
       Json enum_schema = make_json_schema_leaf("string");
       Json values = Json::array();
 
-      if (enum_def->values()) {
+      if VLIKELY (enum_def->values()) {
         for (unsigned i = 0; i < enum_def->values()->size(); ++i) {
           if (const auto* value = enum_def->values()->Get(i); value && value->name()) {
             values.emplace_back(value->name()->str());
@@ -389,13 +391,14 @@ bool VlinkConvert::init_proto_resolver() {
 
   auto& mgr = SchemaPluginManager::get(config_.schema_plugin_path);
 
-  if (mgr.is_valid()) {
+  if VLIKELY (mgr.is_valid()) {
     schema_interface_ = mgr.get_interface();
     has_resolver = true;
   }
 
 #ifdef VLINK_HAS_PROTO_COMPILER
-  if (!config_.proto_dir.empty()) {
+
+  if VLIKELY (!config_.proto_dir.empty()) {
     auto proto_path = std::filesystem::path(config_.proto_dir);
     std::error_code ec;
 
@@ -431,7 +434,7 @@ void VlinkConvert::load_mappings() {
   mappings_.clear();
 
   for (const auto& file : config_.foxglove_msgs) {
-    if (!load_mapping_file(file)) {
+    if VUNLIKELY (!load_mapping_file(file)) {
       MLOG_W("Failed to load foxglove_msgs mapping: {}", file);
     }
   }
@@ -467,17 +470,18 @@ bool VlinkConvert::load_mapping_file(const std::string& path) {
 
           mapping.schema_name = obj.value("schema_name", std::string());
           mapping.schema_encoding = obj.value("schema_encoding", std::string());
-          if (obj.contains("schema")) {
+
+          if VLIKELY (obj.contains("schema")) {
             if VLIKELY (obj["schema"].is_string()) {
               mapping.schema = obj["schema"].get<std::string>();
             } else {
               mapping.schema = obj["schema"].dump();
             }
-          } else if (obj.contains("schema_base64")) {
+          } else if VUNLIKELY (obj.contains("schema_base64")) {
             MLOG_W("Invalid foxglove_msgs mapping in {}: schema_base64 is not supported for frontend JSON schema",
                    path);
             return false;
-          } else if (obj.contains("schema_path")) {
+          } else if VUNLIKELY (obj.contains("schema_path")) {
             auto schema_path = std::filesystem::path(obj["schema_path"].get<std::string>());
 
             if VUNLIKELY (!schema_path.is_absolute()) {
@@ -500,6 +504,7 @@ bool VlinkConvert::load_mapping_file(const std::string& path) {
           if VUNLIKELY (!parse_url_selector(obj, path, "foxglove_msgs mapping", mapping.url_selector)) {
             return false;
           }
+
           mapping.ser = obj.value("ser", std::string());
 
           if VUNLIKELY (obj.contains("converter")) {
@@ -514,10 +519,10 @@ bool VlinkConvert::load_mapping_file(const std::string& path) {
 
           mapping.payload_encoding = obj.value("encoding", std::string());
 
-          if (mapping.payload_encoding.empty()) {
-            if (is_json_ser(mapping.ser)) {
+          if VUNLIKELY (mapping.payload_encoding.empty()) {
+            if VLIKELY (is_json_ser(mapping.ser)) {
               mapping.payload_encoding = "json";
-            } else if (is_text_ser(mapping.ser)) {
+            } else if VLIKELY (is_text_ser(mapping.ser)) {
               mapping.payload_encoding = "text";
             } else {
               mapping.payload_encoding = "protobuf";
@@ -561,7 +566,7 @@ bool VlinkConvert::load_mapping_file(const std::string& path) {
             return false;
           }
 
-          if (mapping.schema_type == SchemaType::kFlatbuffers) {
+          if VUNLIKELY (mapping.schema_type == SchemaType::kFlatbuffers) {
             mapping.payload_encoding = "flatbuffers";
           }
 
@@ -614,21 +619,21 @@ bool VlinkConvert::finalize_mapping(CommandMapping& mapping, std::string_view pa
 bool VlinkConvert::resolve_input_schema(CommandMapping& mapping) {
   mapping.encoding = "json";
 
-  if (mapping.payload_encoding.empty()) {
-    if (mapping.schema_type == SchemaType::kProtobuf) {
+  if VUNLIKELY (mapping.payload_encoding.empty()) {
+    if VLIKELY (mapping.schema_type == SchemaType::kProtobuf) {
       mapping.payload_encoding = "protobuf";
-    } else if (mapping.schema_type == SchemaType::kFlatbuffers) {
+    } else if VLIKELY (mapping.schema_type == SchemaType::kFlatbuffers) {
       mapping.payload_encoding = "flatbuffers";
-    } else if (mapping.schema_type == SchemaType::kRaw) {
-      if (is_json_ser(mapping.ser)) {
+    } else if VLIKELY (mapping.schema_type == SchemaType::kRaw) {
+      if VLIKELY (is_json_ser(mapping.ser)) {
         mapping.payload_encoding = "json";
-      } else if (is_text_ser(mapping.ser)) {
+      } else if VLIKELY (is_text_ser(mapping.ser)) {
         mapping.payload_encoding = "text";
       }
     }
   }
 
-  if (mapping.schema_type == SchemaType::kUnknown) {
+  if VUNLIKELY (mapping.schema_type == SchemaType::kUnknown) {
     mapping.schema_type = SchemaData::convert_encoding(mapping.payload_encoding);
   }
 
@@ -636,12 +641,12 @@ bool VlinkConvert::resolve_input_schema(CommandMapping& mapping) {
     return false;
   }
 
-  if (mapping.schema_type == SchemaType::kProtobuf) {
+  if VLIKELY (mapping.schema_type == SchemaType::kProtobuf) {
     if VUNLIKELY (mapping.payload_encoding != "protobuf") {
       MLOG_W("Foxglove frontend target encoding mismatch: ser={} encoding={}", mapping.ser, mapping.payload_encoding);
       return false;
     }
-  } else if (mapping.schema_type == SchemaType::kFlatbuffers) {
+  } else if VLIKELY (mapping.schema_type == SchemaType::kFlatbuffers) {
     if VUNLIKELY (!is_flatbuffers_encoding(mapping.payload_encoding)) {
       MLOG_W("Foxglove frontend target encoding mismatch: ser={} encoding={}", mapping.ser, mapping.payload_encoding);
       return false;
@@ -669,12 +674,12 @@ bool VlinkConvert::resolve_input_schema(CommandMapping& mapping) {
   }
 
   if VUNLIKELY (mapping.schema.empty()) {
-    if (mapping.payload_encoding == "protobuf" && !mapping.ser.empty()) {
+    if VLIKELY (mapping.payload_encoding == "protobuf" && !mapping.ser.empty()) {
       if VUNLIKELY (!build_proto_json_schema(find_proto_descriptor(mapping.ser), mapping.schema)) {
         return false;
       }
 #ifdef VLINK_HAS_FBS_PARSER
-    } else if (mapping.payload_encoding == "flatbuffers" && !mapping.ser.empty()) {
+    } else if VLIKELY (mapping.payload_encoding == "flatbuffers" && !mapping.ser.empty()) {
       std::string schema_storage;
       const auto* schema = resolve_fbs_schema(mapping.ser, schema_storage);
 
@@ -682,7 +687,7 @@ bool VlinkConvert::resolve_input_schema(CommandMapping& mapping) {
         return false;
       }
 #endif
-    } else if (mapping.payload_encoding == "text") {
+    } else if VLIKELY (mapping.payload_encoding == "text") {
       mapping.schema = make_json_schema_leaf("string").dump();
     } else {
       mapping.schema = make_default_json_object_schema().dump();
@@ -701,7 +706,7 @@ bool VlinkConvert::resolve_input_schema(CommandMapping& mapping) {
       bool last_was_sep = true;
 
       for (unsigned char ch : schema_topic) {
-        if (std::isalnum(ch) != 0U || ch == '_') {
+        if VLIKELY (std::isalnum(ch) != 0U || ch == '_') {
           schema_name.push_back(static_cast<char>(std::tolower(ch)));
           last_was_sep = false;
         } else if VLIKELY (!last_was_sep) {
@@ -787,7 +792,7 @@ bool VlinkConvert::resolve_proto_schema(const std::string& proto_name, std::stri
   std::unordered_set<std::string> seen;
 #endif
 
-  vlink::MoveFunction<void(const google::protobuf::FileDescriptor*)> dfs =
+  MoveFunction<void(const google::protobuf::FileDescriptor*)> dfs =
       [&dfs, &ordered, &seen](const google::protobuf::FileDescriptor* fd) {
         if VUNLIKELY (!fd) {
           return;
@@ -833,23 +838,24 @@ bool VlinkConvert::resolve_proto_schema(const std::string& proto_name, std::stri
 std::unique_ptr<google::protobuf::Message> VlinkConvert::create_proto_message(const std::string& proto_name) {
   const auto* desc = find_proto_descriptor(proto_name);
 
-  if (!desc) {
+  if VUNLIKELY (!desc) {
     return nullptr;
   }
 
   const google::protobuf::Message* prototype = nullptr;
 
 #ifdef VLINK_HAS_PROTO_COMPILER
-  if (disk_factory_ && imported_proto_descriptors_.find(proto_name) != imported_proto_descriptors_.end()) {
+
+  if VLIKELY (disk_factory_ && imported_proto_descriptors_.find(proto_name) != imported_proto_descriptors_.end()) {
     prototype = disk_factory_->GetPrototype(desc);
   }
 #endif
 
-  if (!prototype && schema_interface_) {
+  if VUNLIKELY (!prototype && schema_interface_) {
     prototype = proto_factory_.GetPrototype(desc);
   }
 
-  if (!prototype) {
+  if VUNLIKELY (!prototype) {
     return nullptr;
   }
 
@@ -860,7 +866,7 @@ std::unique_ptr<google::protobuf::Message> VlinkConvert::deserialize_proto_messa
                                                                                    const Bytes& raw) {
   auto message = create_proto_message(proto_name);
 
-  if (!message) {
+  if VUNLIKELY (!message) {
     return nullptr;
   }
 
@@ -928,9 +934,9 @@ const CommandMapping* VlinkConvert::find_mapping(const CommandChannel& channel, 
 
   thread_local MappingCache cache;
 
-  if (cache.owner == this && cache.topic == channel.topic && cache.encoding == channel.encoding &&
-      cache.schema_name == channel.schema_name && cache.schema_encoding == channel.schema_encoding) {
-    if (ambiguous) {
+  if VLIKELY (cache.owner == this && cache.topic == channel.topic && cache.encoding == channel.encoding &&
+              cache.schema_name == channel.schema_name && cache.schema_encoding == channel.schema_encoding) {
+    if VLIKELY (ambiguous) {
       *ambiguous = cache.ambiguous;
     }
 
@@ -960,7 +966,7 @@ const CommandMapping* VlinkConvert::find_mapping(const CommandChannel& channel, 
     }
   }
 
-  if (ambiguous) {
+  if VLIKELY (ambiguous) {
     *ambiguous = has_ambiguity;
   }
 
@@ -1078,7 +1084,7 @@ std::vector<CommandChannel> VlinkConvert::get_publish_channels() const {
 
       auto topic_iter = by_topic.find(channel.topic);
 
-      if (topic_iter == by_topic.end()) {
+      if VLIKELY (topic_iter == by_topic.end()) {
         by_topic.emplace(channel.topic, std::move(channel));
         continue;
       }
@@ -1167,7 +1173,8 @@ bool VlinkConvert::decode_backend_message_to_json(const std::string& ser, Schema
   }
 
 #ifdef VLINK_HAS_FBS_PARSER
-  if (schema_type == SchemaType::kFlatbuffers) {
+
+  if VLIKELY (schema_type == SchemaType::kFlatbuffers) {
     std::lock_guard lock(mtx_);
 
     if VUNLIKELY (!find_fbs_parser_locked(ser)) {
@@ -1287,6 +1294,7 @@ CommandMessage VlinkConvert::encode_json_payload(const CommandRoute& route, cons
   }
 
 #ifdef VLINK_HAS_FBS_PARSER
+
   if VUNLIKELY (route.mapping->payload_encoding == "flatbuffers") {
     std::lock_guard lock(mtx_);
 
@@ -1322,7 +1330,7 @@ CommandMessage VlinkConvert::encode_json_payload(const CommandRoute& route, cons
 
 #ifdef VLINK_HAS_FBS_PARSER
 bool VlinkConvert::init_fbs_resolver() {
-  if (config_.fbs_dir.empty()) {
+  if VUNLIKELY (config_.fbs_dir.empty()) {
     return false;
   }
 
@@ -1355,14 +1363,14 @@ bool VlinkConvert::init_fbs_resolver() {
     auto parser = std::make_unique<flatbuffers::Parser>();
     std::string sub_dir_str = Helpers::path_to_string(fbs_file.parent_path());
 
-    if (sub_dir_str == root_dir_str) {
-      if (!parser->Parse(schema_file.c_str(), include_dirs)) {
+    if VLIKELY (sub_dir_str == root_dir_str) {
+      if VUNLIKELY (!parser->Parse(schema_file.c_str(), include_dirs)) {
         continue;
       }
     } else {
       const char* full_dirs[] = {root_dir_str.c_str(), sub_dir_str.c_str(), nullptr};
 
-      if (!parser->Parse(schema_file.c_str(), full_dirs)) {
+      if VUNLIKELY (!parser->Parse(schema_file.c_str(), full_dirs)) {
         continue;
       }
     }
@@ -1370,11 +1378,11 @@ bool VlinkConvert::init_fbs_resolver() {
     std::vector<std::string> type_names;
 
     for (auto* def : parser->structs_.vec) {
-      if (!def || def->generated) {
+      if VUNLIKELY (!def || def->generated) {
         continue;
       }
 
-      if (fbs_parsers_.find(def->name) == fbs_parsers_.end()) {
+      if VLIKELY (fbs_parsers_.find(def->name) == fbs_parsers_.end()) {
         type_names.emplace_back(def->name);
       }
     }
@@ -1395,21 +1403,21 @@ bool VlinkConvert::init_fbs_resolver() {
 }
 
 bool VlinkConvert::find_fbs_parser_locked(const std::string& fbs_ser) {
-  if (fbs_parsers_.find(fbs_ser) != fbs_parsers_.end()) {
+  if VLIKELY (fbs_parsers_.find(fbs_ser) != fbs_parsers_.end()) {
     return true;
   }
 
-  if (fbs_not_found_.count(fbs_ser) > 0) {
+  if VUNLIKELY (fbs_not_found_.count(fbs_ser) > 0) {
     return false;
   }
 
-  if (schema_interface_) {
+  if VLIKELY (schema_interface_) {
     auto schema = schema_interface_->search_schema(fbs_ser, SchemaType::kFlatbuffers);
-    if (!schema.data.empty() && schema.schema_type == SchemaType::kFlatbuffers) {
+    if VLIKELY (!schema.data.empty() && schema.schema_type == SchemaType::kFlatbuffers) {
       auto parser = std::make_unique<flatbuffers::Parser>();
 
-      if (parser->Deserialize(reinterpret_cast<const uint8_t*>(schema.data.data()), schema.data.size()) &&
-          parser->SetRootType(fbs_ser.c_str())) {
+      if VLIKELY (parser->Deserialize(reinterpret_cast<const uint8_t*>(schema.data.data()), schema.data.size()) &&
+                  parser->SetRootType(fbs_ser.c_str())) {
         const size_t parser_index = fbs_parser_vec_.size();
         fbs_parser_vec_.emplace_back(std::move(parser));
         fbs_parsers_[fbs_ser] = parser_index;
@@ -1418,7 +1426,7 @@ bool VlinkConvert::find_fbs_parser_locked(const std::string& fbs_ser) {
     }
   }
 
-  if (config_.fbs_dir.empty()) {
+  if VUNLIKELY (config_.fbs_dir.empty()) {
     fbs_not_found_.insert(fbs_ser);
     return false;
   }
@@ -1447,19 +1455,19 @@ bool VlinkConvert::find_fbs_parser_locked(const std::string& fbs_ser) {
     auto parser = std::make_unique<flatbuffers::Parser>();
     std::string sub_dir_str = Helpers::path_to_string(fbs_file.parent_path());
 
-    if (sub_dir_str == root_dir_str) {
-      if (!parser->Parse(schema_file.c_str(), include_dirs)) {
+    if VLIKELY (sub_dir_str == root_dir_str) {
+      if VUNLIKELY (!parser->Parse(schema_file.c_str(), include_dirs)) {
         continue;
       }
     } else {
       const char* full_dirs[] = {root_dir_str.c_str(), sub_dir_str.c_str(), nullptr};
 
-      if (!parser->Parse(schema_file.c_str(), full_dirs)) {
+      if VUNLIKELY (!parser->Parse(schema_file.c_str(), full_dirs)) {
         continue;
       }
     }
 
-    if (parser->LookupStruct(fbs_ser)) {
+    if VLIKELY (parser->LookupStruct(fbs_ser)) {
       parser->SetRootType(fbs_ser.c_str());
       const size_t parser_index = fbs_parser_vec_.size();
       fbs_parser_vec_.emplace_back(std::move(parser));
@@ -1476,18 +1484,18 @@ const reflection::Schema* VlinkConvert::resolve_fbs_schema(const std::string& fb
   std::lock_guard lock(mtx_);
   auto cache_iter = fbs_schema_cache_.find(fbs_ser);
 
-  if (cache_iter != fbs_schema_cache_.end()) {
+  if VLIKELY (cache_iter != fbs_schema_cache_.end()) {
     bfbs_storage = cache_iter->second;
     return reflection::GetSchema(reinterpret_cast<const uint8_t*>(bfbs_storage.data()));
   }
 
-  if (!find_fbs_parser_locked(fbs_ser)) {
+  if VUNLIKELY (!find_fbs_parser_locked(fbs_ser)) {
     return nullptr;
   }
 
   auto parser_iter = fbs_parsers_.find(fbs_ser);
 
-  if (parser_iter == fbs_parsers_.end() || parser_iter->second >= fbs_parser_vec_.size()) {
+  if VUNLIKELY (parser_iter == fbs_parsers_.end() || parser_iter->second >= fbs_parser_vec_.size()) {
     return nullptr;
   }
 
@@ -1498,7 +1506,7 @@ const reflection::Schema* VlinkConvert::resolve_fbs_schema(const std::string& fb
   auto* bfbs_data = parser.builder_.GetBufferPointer();
   auto bfbs_size = parser.builder_.GetSize();
 
-  if (!bfbs_data || bfbs_size == 0) {
+  if VUNLIKELY (!bfbs_data || bfbs_size == 0) {
     return nullptr;
   }
 

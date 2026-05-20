@@ -61,6 +61,7 @@ void SomeipPublisherImpl::init() {
             std::lock_guard g_lock(mtx_);
 
             auto strong = weak.lock();
+
             if VUNLIKELY (!strong || !strong->is_contains_impl(this)) {
               return false;  // To solve lambda invoke when object destroyed
             }

@@ -52,6 +52,7 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 /// Helper: display an env var's current value
 static void show_env(const std::string& key, const std::string& description) {
   std::string val = vlink::Utils::get_env(key);
+
   if (val.empty()) {
     VLOG_I("  ", key, " = (not set)  --  ", description);
   } else {

@@ -266,6 +266,7 @@ void RecordDialog::on_pushButton_all_clicked() {
   for (int i = 0; i < ui->listWidget->count(); ++i) {
     auto* item = ui->listWidget->item(i);
     auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
     if (!item->isHidden()) {
       checkbox->setChecked(true);
     }
@@ -278,6 +279,7 @@ void RecordDialog::on_pushButton_unall_clicked() {
   for (int i = 0; i < ui->listWidget->count(); ++i) {
     auto* item = ui->listWidget->item(i);
     auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
     if (!item->isHidden()) {
       checkbox->setChecked(false);
     }
@@ -380,6 +382,7 @@ void RecordDialog::on_pushButton_start_clicked() {
     for (int i = 0; i < ui->listWidget->count(); ++i) {
       auto* item = ui->listWidget->item(i);
       auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
       if (!item->isHidden() && checkbox->isChecked()) {
         auto url_str = item->data(Qt::UserRole).toString().toStdString();
         auto ser_iter = window_->ser_map_.find(url_str);
@@ -555,6 +558,7 @@ void RecordDialog::update_status() {
   for (int i = 0; i < ui->listWidget->count(); ++i) {
     auto* item = ui->listWidget->item(i);
     auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
     if (!item->isHidden() && checkbox->isChecked()) {
       has_url = true;
       break;

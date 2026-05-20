@@ -207,6 +207,7 @@ int main() {
     MLOG_I("  level5_pool tier count = {}", level5_pool.get_tier_count());
 
     void* p = level5_pool.allocate(96);
+
     if (p != nullptr) {
       level5_pool.deallocate(p, 96);
       VLOG_I("  level5_pool routed a 96B alloc to the first tier with max_size >= 96 (128B tier at L5):");
@@ -228,8 +229,13 @@ int main() {
     void* a = bypass_pool.allocate(48);
     void* b = bypass_pool.allocate(64U * 1024U);
 
-    if (a != nullptr) bypass_pool.deallocate(a, 48);
-    if (b != nullptr) bypass_pool.deallocate(b, 64U * 1024U);
+    if (a != nullptr) {
+      bypass_pool.deallocate(a, 48);
+    }
+
+    if (b != nullptr) {
+      bypass_pool.deallocate(b, 64U * 1024U);
+    }
 
     auto over = bypass_pool.get_oversized_stats();
     MLOG_I("  bypass oversized: alloc_count={} alloc_bytes={} dealloc_count={}", over.alloc_count, over.alloc_bytes,

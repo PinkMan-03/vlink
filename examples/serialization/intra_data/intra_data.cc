@@ -119,6 +119,7 @@ int main() {
     vlink::Subscriber<MyIntra> sub(topic_url);
     sub.listen([&](const MyIntra& typed) {
       received_count++;
+
       if (typed) {
         std::cout << "  [Sub] #" << received_count << " id=" << typed->value.id << " temp=" << typed->value.temperature
                   << " label=" << typed->value.label << std::endl;

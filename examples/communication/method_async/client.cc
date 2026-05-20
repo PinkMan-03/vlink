@@ -119,6 +119,7 @@ int main() {
   // Synchronous call
   TranslateRequest sync_req{50, 2};
   auto sync_result = client.invoke(sync_req);
+
   if (sync_result.has_value()) {
     VLOG_I("[Client] Sync result: word_id=", sync_result->word_id, " code=", sync_result->result_code);
   }

@@ -257,14 +257,14 @@ bool DdsrClientImpl::call(const Bytes& req_data, MsgCallback&& callback, std::ch
     ElapsedTimer timer;
     timer.start();
 
-    if (!wait_for_connected(timeout)) {
+    if VUNLIKELY (!wait_for_connected(timeout)) {
       cleanup_callback();
       return false;
     }
 
     auto elapsed = timer.get();
 
-    if (timeout.count() > 0 && elapsed >= timeout.count()) {
+    if VUNLIKELY (timeout.count() > 0 && elapsed >= timeout.count()) {
       cleanup_callback();
       return false;
     }

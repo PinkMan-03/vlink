@@ -155,6 +155,7 @@ std::wstring string_to_wstring(const std::string& input) noexcept {
   }
 
   auto* buffer = new (std::nothrow) WCHAR[length + 1];
+
   if VUNLIKELY (!buffer) {
     return dest;
   }
@@ -173,6 +174,7 @@ std::wstring string_to_wstring(const std::string& input) noexcept {
   const char* src = input.c_str();
 
   size_t len = std::mbsrtowcs(nullptr, &src, 0, &state);
+
   if VUNLIKELY (len == static_cast<size_t>(-1)) {
     return std::wstring();
   }
@@ -194,6 +196,7 @@ std::string wstring_to_string(const std::wstring& input) noexcept {
   }
 
   auto* buffer = new (std::nothrow) char[length + 1];
+
   if VUNLIKELY (!buffer) {
     return dest;
   }
@@ -212,6 +215,7 @@ std::string wstring_to_string(const std::wstring& input) noexcept {
   const wchar_t* src = input.c_str();
 
   size_t len = std::wcsrtombs(nullptr, &src, 0, &state);
+
   if VUNLIKELY (len == static_cast<size_t>(-1)) {
     return std::string();
   }
@@ -225,11 +229,13 @@ std::string wstring_to_string(const std::wstring& input) noexcept {
 
 std::string string_local_to_utf8(const std::string& local_str) noexcept {
 #ifdef _WIN32
+
   if VUNLIKELY (local_str.empty()) {
     return {};
   }
 
   int wide_size = MultiByteToWideChar(CP_ACP, 0, local_str.c_str(), -1, nullptr, 0);
+
   if VUNLIKELY (wide_size <= 0) {
     return {};
   }
@@ -238,6 +244,7 @@ std::string string_local_to_utf8(const std::string& local_str) noexcept {
   MultiByteToWideChar(CP_ACP, 0, local_str.c_str(), -1, wide_str.data(), wide_size);
 
   int utf8_size = WideCharToMultiByte(CP_UTF8, 0, wide_str.c_str(), -1, nullptr, 0, nullptr, nullptr);
+
   if VUNLIKELY (utf8_size <= 0) {
     return {};
   }
@@ -253,11 +260,13 @@ std::string string_local_to_utf8(const std::string& local_str) noexcept {
 
 std::string string_utf8_to_local(const std::string& utf8_str) noexcept {
 #ifdef _WIN32
+
   if VUNLIKELY (utf8_str.empty()) {
     return {};
   }
 
   int wide_size = MultiByteToWideChar(CP_UTF8, 0, utf8_str.c_str(), -1, nullptr, 0);
+
   if VUNLIKELY (wide_size <= 0) {
     return {};
   }
@@ -266,6 +275,7 @@ std::string string_utf8_to_local(const std::string& utf8_str) noexcept {
   MultiByteToWideChar(CP_UTF8, 0, utf8_str.c_str(), -1, wide_str.data(), wide_size);
 
   int local_size = WideCharToMultiByte(CP_ACP, 0, wide_str.c_str(), -1, nullptr, 0, nullptr, nullptr);
+
   if VUNLIKELY (local_size <= 0) {
     return {};
   }
@@ -462,6 +472,7 @@ std::string format_milliseconds(int64_t milliseconds, bool show_millis) noexcept
   int64_t seconds = ((milliseconds % (1000 * 60 * 60)) % (1000 * 60)) / 1000;
 
   // NOLINTBEGIN
+
   if (show_millis) {
     int64_t millis = ((milliseconds % (1000 * 60 * 60)) % (1000 * 60)) % 1000;
 
@@ -472,6 +483,7 @@ std::string format_milliseconds(int64_t milliseconds, bool show_millis) noexcept
     std::snprintf(buffer, sizeof(buffer), "%02lld:%02lld:%02lld", static_cast<long long>(hours),
                   static_cast<long long>(minutes), static_cast<long long>(seconds));
   }
+
   // NOLINTEND
 
   return buffer;
@@ -491,10 +503,12 @@ std::string format_date(int64_t nanoseconds_since_epoch) noexcept {
   std::tm* tm_ptr = nullptr;
 
 #if defined(_WIN32) || defined(_WIN64)
+
   if (gmtime_s(&tm_result, &time_t_seconds) == 0) {
     tm_ptr = &tm_result;
   }
 #else
+
   if (gmtime_r(&time_t_seconds, &tm_result) != nullptr) {
     tm_ptr = &tm_result;
   }

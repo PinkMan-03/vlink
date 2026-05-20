@@ -120,7 +120,7 @@ class DynamicLibrary final {
   }
 
   ~DynamicLibrary() {
-    if (handle_) {
+    if VLIKELY (handle_) {
       close_library(handle_);
     }
   }
@@ -128,9 +128,10 @@ class DynamicLibrary final {
   DynamicLibrary(DynamicLibrary&& other) noexcept : handle_(other.handle_) { other.handle_ = nullptr; }
 
   DynamicLibrary& operator=(DynamicLibrary&& other) noexcept {
-    if (this != &other) {
+    if VLIKELY (this != &other) {
       std::swap(handle_, other.handle_);
     }
+
     return *this;
   }
 

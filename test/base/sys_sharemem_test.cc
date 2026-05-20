@@ -247,6 +247,7 @@ TEST_SUITE("base-SysSharemem") {
 
     // Cleanup: remove the name left in the namespace by first
     SysSharemem cleanup;
+
     if (cleanup.attach(name)) {
       cleanup.detach(true);
     }
@@ -273,6 +274,7 @@ TEST_SUITE("base-SysSharemem") {
     CHECK(ok);
 
     // Cleanup: remove the name from the namespace
+
     if (ok) {
       probe.detach(true);
     }

@@ -63,7 +63,7 @@ int main(int argc, char* argv[]) {
 
     for (const auto& candidate : candidates) {
       try {
-        if (std::filesystem::exists(candidate)) {
+        if VLIKELY (std::filesystem::exists(candidate)) {
           options_path = std::filesystem::absolute(candidate).string();
           break;
         }
@@ -72,7 +72,7 @@ int main(int argc, char* argv[]) {
       }
     }
 
-    if (options_path.empty()) {
+    if VUNLIKELY (options_path.empty()) {
       std::cerr << "Cannot find vlink-options.txt. Searched:" << std::endl;
 
       for (const auto& candidate : candidates) {
@@ -84,7 +84,7 @@ int main(int argc, char* argv[]) {
 
     std::ifstream file(options_path);
 
-    if (!file.is_open()) {
+    if VUNLIKELY (!file.is_open()) {
       std::cerr << "Cannot open options for path [" << options_path << "]." << std::endl;
       return 1;
     }

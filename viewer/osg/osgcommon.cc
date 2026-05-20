@@ -78,6 +78,7 @@ T getVecForString(const QString& value) {
 
   for (int i = 0; i < T::num_components; i++) {
     double t = list[i].trimmed().toDouble(&ok);
+
     if (!ok) {
       return T();
     }

@@ -57,15 +57,15 @@ inline bool is_flatbuffers_encoding(std::string_view encoding) {
 }
 
 inline bool is_target_encoding_compatible(std::string_view ser, std::string_view encoding) {
-  if (encoding == "json") {
+  if VLIKELY (encoding == "json") {
     return is_json_ser(ser);
   }
 
-  if (encoding == "text") {
+  if VLIKELY (encoding == "text") {
     return is_text_ser(ser);
   }
 
-  if (encoding == "protobuf" || is_flatbuffers_encoding(encoding)) {
+  if VLIKELY (encoding == "protobuf" || is_flatbuffers_encoding(encoding)) {
     return !ser.empty() && !is_json_ser(ser) && !is_text_ser(ser);
   }
 
@@ -91,7 +91,7 @@ inline bool parse_field_mappings(const Json& obj, std::string_view path, std::st
     return false;
   }
 
-  if (obj.contains("field_mappings")) {
+  if VLIKELY (obj.contains("field_mappings")) {
     out.reserve(out.size() + obj["field_mappings"].size());
 
     for (const auto& fm : obj["field_mappings"]) {
@@ -105,10 +105,10 @@ inline bool parse_field_mappings(const Json& obj, std::string_view path, std::st
       field.target = fm.value("target", std::string());
       field.expression = fm.value("expression", std::string());
 
-      if (fm.contains("default_value")) {
+      if VLIKELY (fm.contains("default_value")) {
         field.has_default_value = true;
 
-        if (fm["default_value"].is_string()) {
+        if VLIKELY (fm["default_value"].is_string()) {
           field.default_value = fm["default_value"].get<std::string>();
           field.default_value_is_string = true;
         } else {
@@ -139,7 +139,7 @@ inline bool parse_url_selector(const Json& obj, std::string_view path, std::stri
   selector = UrlSelector{};
 
   if VUNLIKELY (!obj.contains("url")) {
-    if (!required) {
+    if VLIKELY (!required) {
       return true;
     }
 
@@ -150,7 +150,7 @@ inline bool parse_url_selector(const Json& obj, std::string_view path, std::stri
   const auto& value = obj["url"];
   selector.configured = true;
 
-  if (value.is_string()) {
+  if VLIKELY (value.is_string()) {
     auto url = value.get<std::string>();
 
     if VUNLIKELY (url.empty()) {
@@ -220,7 +220,7 @@ bool load_json_entries(const std::string& path, std::string_view not_found_prefi
     Json root;
     ifs >> root;
 
-    if (root.is_array()) {
+    if VLIKELY (root.is_array()) {
       bool all_ok = true;
 
       for (const auto& item : root) {

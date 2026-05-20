@@ -658,6 +658,7 @@ int start_efbs_sub(const std::string& url, const std::string& fbs_dir, const std
     if (discovery_viewer) {
       discovery_viewer->quit(true);
     }
+
     parser_loop->quit(true);
   };
 
@@ -733,6 +734,7 @@ int start_efbs_sub(const std::string& url, const std::string& fbs_dir, const std
   bool is_blob_type = target_schema_type == vlink::SchemaType::kRaw && use_blob_encoding;
   bool is_text_type = !is_blob_type && (target_schema_type == vlink::SchemaType::kRaw || is_text_ser_type(target_ser));
   auto schema_interface = vlink::SchemaPluginManager::get().get_interface();
+
   if (target_schema_type == vlink::SchemaType::kZeroCopy) {
     is_fbs_type = false;
   } else if (target_schema_type == vlink::SchemaType::kRaw) {
@@ -994,6 +996,7 @@ int start_efbs_sub(const std::string& url, const std::string& fbs_dir, const std
             print_str += "\n";
 
             pos += line_chars;
+
             if (pos < hex_str.size() && hex_str[pos] == ' ') {
               ++pos;
             }
@@ -1607,6 +1610,7 @@ int start_efbs_sub(const std::string& url, const std::string& fbs_dir, const std
     }
 
     std::lock_guard lock(bytes_mtx);
+
     if VLIKELY (!is_paused) {
       current_bytes = bytes;
       has_new_data = true;
@@ -1658,6 +1662,7 @@ int start_efbs_sub(const std::string& url, const std::string& fbs_dir, const std
     frame_seq_buffer.clear();
     current_frame_rate = 0.0;
     current_rate_color = 33;
+
     if (last_frame_timestamp_ms.load() == 0) {
       last_frame_timestamp_ms.store(vlink::ElapsedTimer::get_cpu_timestamp(vlink::ElapsedTimer::kMilli));
     }
@@ -1854,6 +1859,7 @@ int start_efbs_sub(const std::string& url, const std::string& fbs_dir, const std
   if (discovery_viewer) {
     discovery_viewer->wait_for_quit();
   }
+
   parser_loop->wait_for_quit();
 
   has_quit = true;
@@ -2006,6 +2012,7 @@ int main(int argc, char* argv[]) {
     program.parse_args(argc, argv);
   } catch (const std::exception& e) {
     std::cerr << e.what() << std::endl;
+
     if (program.is_subcommand_used("pub")) {
       std::cerr << pub_command << std::endl;
     } else if (program.is_subcommand_used("sub")) {
@@ -2022,20 +2029,24 @@ int main(int argc, char* argv[]) {
     const auto& url = pub_command.get<std::string>("url");
     fbs_dir = pub_command.get<std::string>("-d");
     auto schema_plugin_path = pub_command.get<std::string>("--schema_plugin");
+
     if (fbs_dir.empty()) {
       fbs_dir = vlink::Utils::get_env("VLINK_FBS_DIR");
     }
+
     if (schema_plugin_path.empty()) {
       schema_plugin_path = vlink::Utils::get_env("VLINK_SCHEMA_PLUGIN");
     }
 
 #ifdef _WIN32
+
     if (pub_command.is_used("-d")) {
       try {
         fbs_dir = vlink::Helpers::path_to_string(std::filesystem::path(fbs_dir));
       } catch (std::filesystem::filesystem_error&) {
       }
     }
+
     if (pub_command.is_used("--schema_plugin")) {
       try {
         schema_plugin_path = vlink::Helpers::path_to_string(std::filesystem::path(schema_plugin_path));
@@ -2072,6 +2083,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     std::replace(fbs_dir.begin(), fbs_dir.end(), '\\', '/');
     std::replace(schema_plugin_path.begin(), schema_plugin_path.end(), '\\', '/');
+
     if (!fbstxt_file.empty()) {
       std::replace(fbstxt_file.begin(), fbstxt_file.end(), '\\', '/');
     }
@@ -2080,6 +2092,7 @@ int main(int argc, char* argv[]) {
     if (!fbs_dir.empty() && fbs_dir.back() == '/') {
       fbs_dir.pop_back();
     }
+
     if (!schema_plugin_path.empty() && schema_plugin_path.back() == '/') {
       schema_plugin_path.pop_back();
     }
@@ -2106,20 +2119,24 @@ int main(int argc, char* argv[]) {
     auto schema_type = vlink::SchemaData::convert_encoding(encoding);
     fbs_dir = sub_command.get<std::string>("-d");
     auto schema_plugin_path = sub_command.get<std::string>("--schema_plugin");
+
     if (fbs_dir.empty()) {
       fbs_dir = vlink::Utils::get_env("VLINK_FBS_DIR");
     }
+
     if (schema_plugin_path.empty()) {
       schema_plugin_path = vlink::Utils::get_env("VLINK_SCHEMA_PLUGIN");
     }
 
 #ifdef _WIN32
+
     if (sub_command.is_used("-d")) {
       try {
         fbs_dir = vlink::Helpers::path_to_string(std::filesystem::path(fbs_dir));
       } catch (std::filesystem::filesystem_error&) {
       }
     }
+
     if (sub_command.is_used("--schema_plugin")) {
       try {
         schema_plugin_path = vlink::Helpers::path_to_string(std::filesystem::path(schema_plugin_path));
@@ -2161,6 +2178,7 @@ int main(int argc, char* argv[]) {
     if (!fbs_dir.empty() && fbs_dir.back() == '/') {
       fbs_dir.pop_back();
     }
+
     if (!schema_plugin_path.empty() && schema_plugin_path.back() == '/') {
       schema_plugin_path.pop_back();
     }

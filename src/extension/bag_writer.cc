@@ -210,12 +210,14 @@ void BagWriter::get_url_meta(const std::string& url, const std::string& ser, int
   std::unique_lock write_lock(impl_->shared_mtx);
 
   auto& url_id = impl_->url_to_index_map.try_emplace(url, -1).first->second;
+
   if (url_id < 0) {
     url_id = ++impl_->current_url_index;
     impl_->index_to_url_map[url_id] = url;
   }
 
   auto& ser_id = impl_->ser_to_index_map.try_emplace(ser, -1).first->second;
+
   if (ser_id < 0) {
     ser_id = ++impl_->current_ser_index;
     impl_->index_to_ser_map[ser_id] = ser;

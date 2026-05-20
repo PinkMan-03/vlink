@@ -399,7 +399,7 @@ template <typename T>
 inline std::unique_ptr<T> ObjectPool<T>::acquire() {
   std::unique_lock lock(mutex_);
 
-  if (!pool_.empty()) {
+  if VLIKELY (!pool_.empty()) {
     std::unique_ptr<T> obj = std::move(pool_.back());
     pool_.pop_back();
     ++borrowed_;
@@ -452,7 +452,7 @@ inline void ObjectPool<T>::release(std::unique_ptr<T> obj) noexcept {
   {
     std::lock_guard lock(mutex_);
 
-    if (borrowed_ > 0) {
+    if VLIKELY (borrowed_ > 0) {
       --borrowed_;
     }
 

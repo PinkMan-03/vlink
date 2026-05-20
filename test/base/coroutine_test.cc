@@ -483,6 +483,7 @@ Task<> body_when_all_with_throwing(MessageLoop* loop, std::atomic<bool>* caught_
     caught_future_error->store(true, std::memory_order_release);
   } catch (const std::runtime_error& e) {
     caught_runtime_error->store(true, std::memory_order_release);
+
     if (std::strcmp(e.what(), "forced") == 0) {
       what_matches->store(true, std::memory_order_release);
     }
@@ -554,6 +555,7 @@ Task<> body_when_any_all_throw(MessageLoop* loop, std::atomic<bool>* caught_runt
     caught_future_error->store(true, std::memory_order_release);
   } catch (const std::runtime_error& e) {
     caught_runtime_error->store(true, std::memory_order_release);
+
     if (std::strcmp(e.what(), "first") == 0 || std::strcmp(e.what(), "second") == 0) {
       what_in_set->store(true, std::memory_order_release);
     }

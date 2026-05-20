@@ -52,6 +52,7 @@ namespace vlink {
   }
 
 #if !defined(__ANDROID__)
+
   if (str == "shm") {
     return TransportType::kShm;
   }
@@ -94,6 +95,7 @@ namespace vlink {
   }
 
 #if defined(__QNX__)
+
   if (str == "qnx") {
     return TransportType::kQnx;
   }
@@ -133,6 +135,7 @@ namespace vlink {
   }
 
 #if !defined(__ANDROID__)
+
   if (str == "shm") {
     return Url::kEnableShm;
   }
@@ -175,6 +178,7 @@ namespace vlink {
   }
 
 #if defined(__QNX__)
+
   if (str == "qnx") {
     return Url::kEnableQnx;
   }
@@ -201,6 +205,7 @@ namespace vlink {
   }
 
 #if !defined(__ANDROID__)
+
   if (Helpers::has_startwith(url, "shm://")) {
     return static_cast<int>(TransportType::kShm);
   }
@@ -243,6 +248,7 @@ namespace vlink {
   }
 
 #if defined(__QNX__)
+
   if (Helpers::has_startwith(url, "qnx://")) {
     return static_cast<int>(TransportType::kQnx);
   }
@@ -434,6 +440,7 @@ void Url::init_plugins(uint16_t transport_enable_flags) {
 
 std::unique_ptr<Conf> Url::load_for_plugin(TransportType type) {
 #if VLINK_URL_USE_PLUGIN
+
   if VUNLIKELY (type == TransportType::kUnknown) {
     return nullptr;
   }

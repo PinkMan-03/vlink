@@ -87,7 +87,8 @@ struct GilSafePyFunction {
   explicit GilSafePyFunction(nb::callable f) : fn(std::move(f)) {}
   ~GilSafePyFunction() {
     nb::handle leaked = fn.release();
-    if (leaked.is_valid() && Py_IsInitialized()) {
+
+    if VLIKELY (leaked.is_valid() && Py_IsInitialized()) {
       nb::gil_scoped_acquire gil;
       leaked.dec_ref();
     }
@@ -99,7 +100,8 @@ struct GilSafePyObject {
   explicit GilSafePyObject(nb::object o) : obj(std::move(o)) {}
   ~GilSafePyObject() {
     nb::handle leaked = obj.release();
-    if (leaked.is_valid() && Py_IsInitialized()) {
+
+    if VLIKELY (leaked.is_valid() && Py_IsInitialized()) {
       nb::gil_scoped_acquire gil;
       leaked.dec_ref();
     }
@@ -122,15 +124,17 @@ inline void report_current_exception(const char* context) noexcept {
 
 inline nb::str wide_string_to_python_str(const std::wstring& value) {
   PyObject* obj = PyUnicode_FromWideChar(value.c_str(), static_cast<Py_ssize_t>(value.size()));
-  if (!obj) {
+
+  if VUNLIKELY (!obj) {
     throw nb::python_error();
   }
+
   return nb::steal<nb::str>(obj);
 }
 
 struct PyWideStringDeleter {
   void operator()(wchar_t* ptr) const noexcept {
-    if (ptr) {
+    if VLIKELY (ptr) {
       PyMem_Free(ptr);
     }
   }
@@ -139,7 +143,8 @@ struct PyWideStringDeleter {
 inline std::wstring python_str_to_wide_string(nb::str input) {
   Py_ssize_t size = 0;
   wchar_t* raw = PyUnicode_AsWideCharString(input.ptr(), &size);
-  if (!raw) {
+
+  if VUNLIKELY (!raw) {
     throw nb::python_error();
   }
 
@@ -150,9 +155,10 @@ inline std::wstring python_str_to_wide_string(nb::str input) {
 class PythonBufferView {
  public:
   explicit PythonBufferView(nb::handle handle, int flags = PyBUF_SIMPLE) {
-    if (PyObject_GetBuffer(handle.ptr(), &view_, flags) != 0) {
+    if VUNLIKELY (PyObject_GetBuffer(handle.ptr(), &view_, flags) != 0) {
       throw nb::python_error();
     }
+
     valid_ = true;
   }
 
@@ -160,7 +166,7 @@ class PythonBufferView {
   PythonBufferView& operator=(const PythonBufferView&) = delete;
 
   ~PythonBufferView() {
-    if (valid_) {
+    if VLIKELY (valid_) {
       PyBuffer_Release(&view_);
     }
   }
@@ -200,7 +206,7 @@ auto make_value_callback(nb::callable py_cb, const char* context) {
   auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
 
   return [cb = std::move(cb), context](const MsgT& value) {
-    if (!Py_IsInitialized()) {
+    if VUNLIKELY (!Py_IsInitialized()) {
       return;
     }
 
@@ -218,7 +224,7 @@ inline auto make_connect_callback(nb::callable py_cb, const char* context) {
   auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
 
   return [cb = std::move(cb), context](bool connected) {
-    if (!Py_IsInitialized()) {
+    if VUNLIKELY (!Py_IsInitialized()) {
       return;
     }
 
@@ -236,7 +242,7 @@ inline auto make_void_callback(nb::callable py_cb, const char* context) {
   auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
 
   return [cb = std::move(cb), context]() {
-    if (!Py_IsInitialized()) {
+    if VUNLIKELY (!Py_IsInitialized()) {
       return;
     }
 
@@ -254,7 +260,7 @@ inline auto make_security_callback(nb::callable py_cb, const char* context) {
   auto cb = std::make_shared<GilSafePyFunction>(std::move(py_cb));
 
   return [cb = std::move(cb), context](const vlink::Bytes& in, vlink::Bytes& out) -> bool {
-    if (!Py_IsInitialized()) {
+    if VUNLIKELY (!Py_IsInitialized()) {
       return false;
     }
 
@@ -262,9 +268,11 @@ inline auto make_security_callback(nb::callable py_cb, const char* context) {
 
     try {
       nb::object result = cb->fn(PythonCodec<vlink::Bytes>::to_python(in));
-      if (result.is_none()) {
+
+      if VUNLIKELY (result.is_none()) {
         return false;
       }
+
       out = PythonCodec<vlink::Bytes>::from_python_owned(result);
       return true;
     } catch (std::exception&) {
@@ -277,7 +285,7 @@ inline auto make_security_callback(nb::callable py_cb, const char* context) {
 inline nb::dict status_to_dict(const vlink::Status::BasePtr& status) {
   nb::dict d;
 
-  if (!status) {
+  if VUNLIKELY (!status) {
     return d;
   }
 
@@ -287,7 +295,7 @@ inline nb::dict status_to_dict(const vlink::Status::BasePtr& status) {
   d["description"] = status->get_string();
 
   auto put_handle = [&d](const char* key, vlink::Status::InstanceHandle handle) {
-    if (handle == nullptr) {
+    if VUNLIKELY (handle == nullptr) {
       d[key] = nb::none();
     } else {
       d[key] = reinterpret_cast<uintptr_t>(handle);
@@ -369,13 +377,14 @@ NodeT* make_url_node(const std::string& url, const std::string& ser_type, vlink:
 
   auto node = std::make_unique<NodeT>(url, vlink::InitType::kWithoutInit);
 
-  if (has_ser_type) {
+  if VLIKELY (has_ser_type) {
     node->set_ser_type(ser_type, schema_type);
   }
 
-  if (auto_init) {
+  if VLIKELY (auto_init) {
     node->init();
   }
+
   return node.release();
 }
 
@@ -390,6 +399,7 @@ NodeT* make_url_security_node(const std::string& url, vlink::Security::Config se
   }
 
   // SecurityXxx installs Security in its constructor, before this helper can call set_ser_type().
+
   if (has_ser_type && sec_cfg.advanced.aad_context.empty()) {
     const auto resolved_schema_type = has_schema_type ? schema_type : vlink::SchemaData::infer_ser_type(ser_type);
     sec_cfg.advanced.aad_context = url;
@@ -401,13 +411,14 @@ NodeT* make_url_security_node(const std::string& url, vlink::Security::Config se
 
   auto node = std::make_unique<NodeT>(url, std::move(sec_cfg), vlink::InitType::kWithoutInit);
 
-  if (has_ser_type) {
+  if VLIKELY (has_ser_type) {
     node->set_ser_type(ser_type, schema_type);
   }
 
-  if (auto_init) {
+  if VLIKELY (auto_init) {
     node->init();
   }
+
   return node.release();
 }
 
@@ -446,9 +457,11 @@ void bind_node_common(Class& cls) {
           "get_abstract_node",
           [](const NodeT& self) -> nb::object {
             const auto* node = self.get_abstract_node();
-            if (node == nullptr) {
+
+            if VUNLIKELY (node == nullptr) {
               return nb::none();
             }
+
             return nb::int_(reinterpret_cast<uintptr_t>(node));
           },
           "Return the non-owning AbstractNode address, or None if unavailable.")
@@ -457,7 +470,11 @@ void bind_node_common(Class& cls) {
           "get_status",
           [](NodeT& self, vlink::Status::Type type) -> nb::object {
             auto status = self.get_status(type);
-            if (!status) return nb::none();
+
+            if VUNLIKELY (!status) {
+              return nb::none();
+            }
+
             return nb::object(status_to_dict(status));
           },
           "type"_a)
@@ -466,7 +483,10 @@ void bind_node_common(Class& cls) {
           [](NodeT& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_status_handler([cb](const vlink::Status::BasePtr& status) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(status_to_dict(status));
@@ -574,11 +594,15 @@ void bind_server(nb::module_& m, const char* name, const char* doc) {
          [](ServerT& self, nb::callable callback) {
            auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
            return self.listen([cb](const ReqT& req, RespT& resp) {
-             if (!Py_IsInitialized()) return;
+             if VUNLIKELY (!Py_IsInitialized()) {
+               return;
+             }
+
              nb::gil_scoped_acquire gil;
              try {
                nb::object result = cb->fn(ReqCodec::to_python(req));
-               if (!result.is_none()) {
+
+               if VLIKELY (!result.is_none()) {
                  resp = RespCodec::from_python_owned(result);
                }
              } catch (std::exception&) {
@@ -592,7 +616,10 @@ void bind_server(nb::module_& m, const char* name, const char* doc) {
           [](ServerT& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             return self.listen_for_reply([cb](uint64_t req_id, const ReqT& req) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(req_id, ReqCodec::to_python(req));
@@ -627,7 +654,10 @@ void bind_fire_forget_server(nb::module_& m, const char* name, const char* doc) 
          [](ServerT& self, nb::callable callback) {
            auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
            return self.listen([cb](const ReqT& req) {
-             if (!Py_IsInitialized()) return;
+             if VUNLIKELY (!Py_IsInitialized()) {
+               return;
+             }
+
              nb::gil_scoped_acquire gil;
              try {
                cb->fn(ReqCodec::to_python(req));
@@ -675,9 +705,11 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
               nb::gil_scoped_release release;
               res = self.invoke(req, std::chrono::milliseconds(timeout_ms));
             }
-            if (res.has_value()) {
+
+            if VLIKELY (res.has_value()) {
               return RespCodec::to_python(*res);
             }
+
             return nb::none();
           },
           "data"_a, "timeout_ms"_a = 5000)
@@ -687,7 +719,10 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
             auto req = ReqCodec::from_python_owned(data);
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             return self.invoke(req, [cb](const RespT& resp) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(RespCodec::to_python(resp));
@@ -704,7 +739,10 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
             nb::object py_future = nb::module_::import_("concurrent.futures").attr("Future")();
             auto future_ref = std::make_shared<GilSafePyObject>(nb::object(py_future));
             const bool accepted = self.invoke(req, [future_ref](const RespT& resp) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 future_ref->obj.attr("set_result")(RespCodec::to_python(resp));
@@ -713,7 +751,7 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
               }
             });
 
-            if (!accepted) {
+            if VUNLIKELY (!accepted) {
               nb::object exc =
                   nb::module_::import_("builtins").attr("RuntimeError")("VLink async_invoke failed to submit request");
               py_future.attr("set_exception")(exc);
@@ -804,9 +842,11 @@ void bind_getter(nb::module_& m, const char* name, const char* doc) {
       .def("get",
            [](GetterT& self) -> nb::object {
              auto result = self.get();
-             if (result.has_value()) {
+
+             if VLIKELY (result.has_value()) {
                return Codec::to_python(*result);
              }
+
              return nb::none();
            })
       .def(
@@ -903,7 +943,11 @@ NB_MODULE(_vlink_nanobind, m) {
           [](const std::string& s) {
             bool ok = false;
             auto bytes = vlink::Bytes::from_user_input(s, &ok);
-            if (!ok) throw std::runtime_error("Invalid hex/binary input");
+
+            if VUNLIKELY (!ok) {
+              throw std::runtime_error("Invalid hex/binary input");
+            }
+
             return bytes;
           },
           "hex_or_bin"_a)
@@ -995,11 +1039,15 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("__ne__", [](const vlink::Bytes& a, const vlink::Bytes& b) { return a != b; })
       .def("__getitem__",
            [](const vlink::Bytes& self, size_t i) -> uint8_t {
-             if (i >= self.size()) throw nb::index_error();
+             if VUNLIKELY (i >= self.size()) {
+               throw nb::index_error();
+             }
+
              return self.data()[i];
            })
       .def("__repr__", [](const vlink::Bytes& self) {
         std::string repr = "Bytes(size=" + std::to_string(self.size());
+
         if (self.is_owner()) {
           repr += ", owned";
         } else if (self.is_loaned()) {
@@ -1007,6 +1055,7 @@ NB_MODULE(_vlink_nanobind, m) {
         } else {
           repr += ", shallow";
         }
+
         return repr + ")";
       });
 
@@ -1102,7 +1151,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             vlink::Logger::register_console_handler([cb](vlink::Logger::Level level, std::string_view msg) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(level, std::string(msg));
@@ -1117,7 +1169,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             vlink::Logger::register_file_handler([cb](vlink::Logger::Level level, std::string_view msg) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(level, std::string(msg));
@@ -1350,6 +1405,7 @@ NB_MODULE(_vlink_nanobind, m) {
               self.start();
               return;
             }
+
             self.start(make_void_callback(nb::cast<nb::callable>(callback), "vlink::Timer.start"));
           },
           "callback"_a = nb::none())
@@ -1456,7 +1512,10 @@ NB_MODULE(_vlink_nanobind, m) {
             return self.add(
                 timeout_ms,
                 [cb](vlink::WheelTimer::Key key) {
-                  if (!Py_IsInitialized()) return;
+                  if VUNLIKELY (!Py_IsInitialized()) {
+                    return;
+                  }
+
                   nb::gil_scoped_acquire gil;
                   try {
                     cb->fn(key);
@@ -1579,7 +1638,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::Process& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_error_callback([cb](vlink::Process::Error error) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(error);
@@ -1594,7 +1656,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::Process& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_finished_callback([cb](int code, vlink::Process::ExitStatus status) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(code, status);
@@ -1609,7 +1674,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::Process& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_state_changed_callback([cb](vlink::Process::State state) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(state);
@@ -1666,13 +1734,21 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("read_line_stdout",
            [](vlink::Process& self) -> nb::object {
              std::string line;
-             if (!self.read_line_stdout(line)) return nb::none();
+
+             if (!self.read_line_stdout(line)) {
+               return nb::none();
+             }
+
              return nb::object(nb::bytes(line.data(), line.size()));
            })
       .def("read_line_stderr",
            [](vlink::Process& self) -> nb::object {
              std::string line;
-             if (!self.read_line_stderr(line)) return nb::none();
+
+             if (!self.read_line_stderr(line)) {
+               return nb::none();
+             }
+
              return nb::object(nb::bytes(line.data(), line.size()));
            })
       .def(
@@ -1781,7 +1857,10 @@ NB_MODULE(_vlink_nanobind, m) {
         auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
         vlink::Utils::start_detect_keyboard(
             [cb](const std::string& key) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(key);
@@ -1798,7 +1877,10 @@ NB_MODULE(_vlink_nanobind, m) {
       [](nb::callable callback) {
         auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
         vlink::Utils::register_crash_signal([cb](int sig) {
-          if (!Py_IsInitialized()) return;
+          if VUNLIKELY (!Py_IsInitialized()) {
+            return;
+          }
+
           nb::gil_scoped_acquire gil;
           try {
             cb->fn(sig);
@@ -1814,7 +1896,10 @@ NB_MODULE(_vlink_nanobind, m) {
         auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
         vlink::Utils::register_terminate_signal(
             [cb](int sig) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(sig);
@@ -2106,7 +2191,11 @@ NB_MODULE(_vlink_nanobind, m) {
             PythonBufferView view(data);
             auto in_bytes = vlink::Bytes::shallow_copy(view.data(), view.size());
             vlink::Bytes out;
-            if (self.encrypt(in_bytes, out)) return PythonCodec<vlink::Bytes>::to_python(out);
+
+            if VLIKELY (self.encrypt(in_bytes, out)) {
+              return PythonCodec<vlink::Bytes>::to_python(out);
+            }
+
             return nb::none();
           },
           "data"_a)
@@ -2116,7 +2205,11 @@ NB_MODULE(_vlink_nanobind, m) {
             PythonBufferView view(data);
             auto in_bytes = vlink::Bytes::shallow_copy(view.data(), view.size());
             vlink::Bytes out;
-            if (self.decrypt(in_bytes, out)) return PythonCodec<vlink::Bytes>::to_python(out);
+
+            if VLIKELY (self.decrypt(in_bytes, out)) {
+              return PythonCodec<vlink::Bytes>::to_python(out);
+            }
+
             return nb::none();
           },
           "data"_a)
@@ -2215,7 +2308,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::DiscoveryViewer& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_callback([cb](const std::vector<vlink::DiscoveryViewer::Info>& info_list) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(info_list);
@@ -2292,13 +2388,18 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::BagWriter& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_schema_callback([cb](const std::string& ser_type, vlink::SchemaType schema_type) {
-              if (!Py_IsInitialized()) return vlink::SchemaData{};
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return vlink::SchemaData{};
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 nb::object result = cb->fn(ser_type, schema_type);
-                if (result.is_none()) {
+
+                if VUNLIKELY (result.is_none()) {
                   return vlink::SchemaData{};
                 }
+
                 return nb::cast<vlink::SchemaData>(result);
               } catch (std::exception&) {
                 report_current_exception("vlink::BagWriter.register_schema_callback");
@@ -2321,7 +2422,10 @@ NB_MODULE(_vlink_nanobind, m) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_split_callback(
                 [cb](int idx, const std::string& file_name) {
-                  if (!Py_IsInitialized()) return;
+                  if VUNLIKELY (!Py_IsInitialized()) {
+                    return;
+                  }
+
                   nb::gil_scoped_acquire gil;
                   try {
                     cb->fn(idx, file_name);
@@ -2432,7 +2536,10 @@ NB_MODULE(_vlink_nanobind, m) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_output_callback(
                 [cb](int64_t ts, const std::string& url, vlink::ActionType action_type, const vlink::Bytes& data) {
-                  if (!Py_IsInitialized()) return;
+                  if VUNLIKELY (!Py_IsInitialized()) {
+                    return;
+                  }
+
                   nb::gil_scoped_acquire gil;
                   try {
                     cb->fn(ts, url, action_type, PythonCodec<vlink::Bytes>::to_python(data));
@@ -2447,7 +2554,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::BagReader& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_status_callback([cb](vlink::BagReader::Status status) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(status);
@@ -2462,7 +2572,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::BagReader& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_ready_callback([cb]() {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn();
@@ -2477,7 +2590,10 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::BagReader& self, nb::callable callback) {
             auto cb = std::make_shared<GilSafePyFunction>(std::move(callback));
             self.register_finish_callback([cb](bool interrupted) {
-              if (!Py_IsInitialized()) return;
+              if VUNLIKELY (!Py_IsInitialized()) {
+                return;
+              }
+
               nb::gil_scoped_acquire gil;
               try {
                 cb->fn(interrupted);

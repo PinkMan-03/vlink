@@ -83,7 +83,7 @@ inline std::string format_expression_string(double value) {
       text.pop_back();
     }
 
-    if (!text.empty() && text.back() == '.') {
+    if VUNLIKELY (!text.empty() && text.back() == '.') {
       text.pop_back();
     }
   }
@@ -123,7 +123,7 @@ inline bool verify_fbs_payload(const reflection::Schema& schema, const Bytes& ra
   }
 
   if VUNLIKELY (raw.size() < sizeof(flatbuffers::uoffset_t) || raw.data() == nullptr) {
-    if (context.empty()) {
+    if VUNLIKELY (context.empty()) {
       MLOG_W("FlatBuffers buffer too small for: {}", ser);
     } else {
       MLOG_W("FlatBuffers buffer too small for {} during {}", ser, context);
@@ -132,7 +132,7 @@ inline bool verify_fbs_payload(const reflection::Schema& schema, const Bytes& ra
   }
 
   if VUNLIKELY (!flatbuffers::Verify(schema, *schema.root_table(), raw.data(), raw.size())) {
-    if (context.empty()) {
+    if VUNLIKELY (context.empty()) {
       MLOG_W("Invalid FlatBuffers buffer for: {}", ser);
     } else {
       MLOG_W("Invalid FlatBuffers buffer for {} during {}", ser, context);
@@ -248,7 +248,7 @@ inline bool tokenize_field_path(std::string_view path, std::vector<FieldPathToke
   bool expect_segment = true;
 
   while (pos < path.size()) {
-    if (path[pos] == '.') {
+    if VLIKELY (path[pos] == '.') {
       if VUNLIKELY (expect_segment) {
         tokens.clear();
         return false;
@@ -259,7 +259,7 @@ inline bool tokenize_field_path(std::string_view path, std::vector<FieldPathToke
       continue;
     }
 
-    if (path[pos] == '[') {
+    if VUNLIKELY (path[pos] == '[') {
       if VUNLIKELY (tokens.empty() && !expect_segment) {
         tokens.clear();
         return false;
@@ -344,13 +344,13 @@ inline const std::vector<FieldPathToken>* get_tokenized_field_path(std::string_v
     const auto& old_path = oldest_entry.second;
     auto old_bucket_iter = cache.buckets.find(old_hash);
 
-    if (old_bucket_iter != cache.buckets.end()) {
+    if VLIKELY (old_bucket_iter != cache.buckets.end()) {
       auto& old_bucket = old_bucket_iter->second;
       old_bucket.erase(std::remove_if(old_bucket.begin(), old_bucket.end(),
                                       [&old_path](const auto& item) { return item.path == old_path; }),
                        old_bucket.end());
 
-      if (old_bucket.empty()) {
+      if VUNLIKELY (old_bucket.empty()) {
         cache.buckets.erase(old_bucket_iter);
       }
     }
@@ -406,7 +406,7 @@ inline const google::protobuf::FieldDescriptor* find_proto_field_cached(const go
     const auto& old_entry = oldest_entry.second;
     auto old_bucket_iter = cache.buckets.find(old_hash);
 
-    if (old_bucket_iter != cache.buckets.end()) {
+    if VLIKELY (old_bucket_iter != cache.buckets.end()) {
       auto& old_bucket = old_bucket_iter->second;
       old_bucket.erase(std::remove_if(old_bucket.begin(), old_bucket.end(),
                                       [&old_entry](const auto& item) {
@@ -415,7 +415,7 @@ inline const google::protobuf::FieldDescriptor* find_proto_field_cached(const go
                                       }),
                        old_bucket.end());
 
-      if (old_bucket.empty()) {
+      if VUNLIKELY (old_bucket.empty()) {
         cache.buckets.erase(old_bucket_iter);
       }
     }
@@ -447,7 +447,7 @@ inline std::vector<std::string> extract_bracket_paths_from_expression(std::strin
   std::unordered_set<std::string> seen;
 
   for (size_t pos = 0; pos < expression.size();) {
-    if (!is_ident_start(expression[pos])) {
+    if VUNLIKELY (!is_ident_start(expression[pos])) {
       ++pos;
       continue;
     }
@@ -460,7 +460,7 @@ inline std::vector<std::string> extract_bracket_paths_from_expression(std::strin
 
     auto candidate = std::string(expression.substr(start, pos - start));
 
-    if (candidate.find('[') == std::string::npos) {
+    if VLIKELY (candidate.find('[') == std::string::npos) {
       continue;
     }
 
@@ -522,7 +522,7 @@ inline void import_protos(
     const auto& entry = *it;
     std::error_code entry_ec;
 
-    if (entry.is_regular_file(entry_ec) && !entry_ec && entry.path().extension() == ".proto") {
+    if VLIKELY (entry.is_regular_file(entry_ec) && !entry_ec && entry.path().extension() == ".proto") {
       auto rel_path = std::filesystem::relative(entry.path(), root_dir, entry_ec);
 
       if VUNLIKELY (entry_ec) {
@@ -536,11 +536,11 @@ inline void import_protos(
       if VLIKELY (fd) {
         has_import = true;
 
-        if (descriptor_map) {
+        if VLIKELY (descriptor_map) {
           collect_proto_file_descriptors(fd, *descriptor_map);
         }
       }
-    } else if (entry.is_directory(entry_ec) && !entry_ec) {
+    } else if VUNLIKELY (entry.is_directory(entry_ec) && !entry_ec) {
       import_protos(importer, root_dir, entry.path(), has_import, depth + 1, descriptor_map);
     }
   }
@@ -569,28 +569,28 @@ inline double resolve_nested_double(const google::protobuf::Message& msg, std::s
     const auto* ref = current_msg->GetReflection();
     const auto* field = find_proto_field_cached(*desc, (*tokens)[i].name);
 
-    if (!field) {
+    if VUNLIKELY (!field) {
       return kNotFound;
     }
 
-    if (field->is_repeated()) {
+    if VUNLIKELY (field->is_repeated()) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         return kNotFound;
       }
 
       auto index = static_cast<int>((*tokens)[i + 1].index);
 
-      if (index < 0 || index >= ref->FieldSize(*current_msg, field)) {
+      if VUNLIKELY (index < 0 || index >= ref->FieldSize(*current_msg, field)) {
         return kNotFound;
       }
 
-      if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+      if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
         current_msg = &ref->GetRepeatedMessage(*current_msg, field, index);
         ++i;
         continue;
       }
 
-      if (i + 1 != tokens->size() - 1) {
+      if VLIKELY (i + 1 != tokens->size() - 1) {
         return kNotFound;
       }
 
@@ -616,12 +616,12 @@ inline double resolve_nested_double(const google::protobuf::Message& msg, std::s
       }
     }
 
-    if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+    if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       current_msg = &ref->GetMessage(*current_msg, field);
       continue;
     }
 
-    if (i != tokens->size() - 1) {
+    if VLIKELY (i != tokens->size() - 1) {
       return kNotFound;
     }
 
@@ -660,7 +660,7 @@ inline std::string resolve_nested_string(const google::protobuf::Message& msg, s
   const auto* current_msg = &msg;
   const auto* tokens = get_tokenized_field_path(path);
 
-  if (found) {
+  if VLIKELY (found) {
     *found = false;
   }
 
@@ -677,33 +677,33 @@ inline std::string resolve_nested_string(const google::protobuf::Message& msg, s
     const auto* ref = current_msg->GetReflection();
     const auto* field = find_proto_field_cached(*desc, (*tokens)[i].name);
 
-    if (!field) {
+    if VUNLIKELY (!field) {
       return {};
     }
 
-    if (field->is_repeated()) {
+    if VUNLIKELY (field->is_repeated()) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         return {};
       }
 
       auto index = static_cast<int>((*tokens)[i + 1].index);
 
-      if (index < 0 || index >= ref->FieldSize(*current_msg, field)) {
+      if VUNLIKELY (index < 0 || index >= ref->FieldSize(*current_msg, field)) {
         return {};
       }
 
-      if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+      if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
         current_msg = &ref->GetRepeatedMessage(*current_msg, field, index);
         ++i;
         continue;
       }
 
-      if (i + 1 != tokens->size() - 1) {
+      if VLIKELY (i + 1 != tokens->size() - 1) {
         return {};
       }
 
-      if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
-        if (found) {
+      if VUNLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
+        if VLIKELY (found) {
           *found = true;
         }
         return ref->GetRepeatedString(*current_msg, field, index);
@@ -712,8 +712,8 @@ inline std::string resolve_nested_string(const google::protobuf::Message& msg, s
       return {};
     }
 
-    if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
-      if (field->has_presence() && !ref->HasField(*current_msg, field)) {
+    if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+      if VUNLIKELY (field->has_presence() && !ref->HasField(*current_msg, field)) {
         return {};
       }
 
@@ -721,12 +721,12 @@ inline std::string resolve_nested_string(const google::protobuf::Message& msg, s
       continue;
     }
 
-    if (i != tokens->size() - 1) {
+    if VLIKELY (i != tokens->size() - 1) {
       return {};
     }
 
-    if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
-      if (found) {
+    if VUNLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
+      if VLIKELY (found) {
         *found = true;
       }
       return ref->GetString(*current_msg, field);
@@ -755,7 +755,7 @@ inline bool resolve_proto_message_path(const google::protobuf::Message& root, co
       return false;
     }
 
-    if (field->is_repeated()) {
+    if VUNLIKELY (field->is_repeated()) {
       if VUNLIKELY (i + 1 >= token_count || !tokens[i + 1].is_index) {
         return false;
       }
@@ -779,7 +779,7 @@ inline bool resolve_proto_message_path(const google::protobuf::Message& root, co
       return false;
     }
 
-    if (field->has_presence() && !ref->HasField(*current_msg, field)) {
+    if VUNLIKELY (field->has_presence() && !ref->HasField(*current_msg, field)) {
       return false;
     }
 
@@ -809,7 +809,7 @@ inline bool resolve_proto_parent_field_path(const google::protobuf::Message& roo
     return false;
   }
 
-  if (tokens->size() == 1U) {
+  if VUNLIKELY (tokens->size() == 1U) {
     out_parent = &root;
     out_field = tokens->front().name;
     return true;
@@ -868,7 +868,7 @@ inline bool compile_proto_numeric_path(const google::protobuf::Descriptor& root_
     ProtoPathStep step;
     step.field = field;
 
-    if (field->is_repeated()) {
+    if VUNLIKELY (field->is_repeated()) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         steps.clear();
         return false;
@@ -878,7 +878,7 @@ inline bool compile_proto_numeric_path(const google::protobuf::Descriptor& root_
       step.index = (*tokens)[i + 1].index;
       steps.emplace_back(step);
 
-      if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+      if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
         current_desc = field->message_type();
         ++i;
         continue;
@@ -894,7 +894,7 @@ inline bool compile_proto_numeric_path(const google::protobuf::Descriptor& root_
 
     steps.emplace_back(step);
 
-    if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+    if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       current_desc = field->message_type();
       continue;
     }
@@ -950,14 +950,14 @@ inline double resolve_proto_numeric_path_fast(const google::protobuf::Message& r
     const auto* ref = current_msg->GetReflection();
     const auto* field = step.field;
 
-    if (field->is_repeated()) {
+    if VUNLIKELY (field->is_repeated()) {
       auto index = static_cast<int>(step.index);
 
       if VUNLIKELY (index < 0 || index >= ref->FieldSize(*current_msg, field)) {
         return kNotFound;
       }
 
-      if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+      if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
         current_msg = &ref->GetRepeatedMessage(*current_msg, field, index);
         continue;
       }
@@ -984,7 +984,7 @@ inline double resolve_proto_numeric_path_fast(const google::protobuf::Message& r
       }
     }
 
-    if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+    if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       if VUNLIKELY (field->has_presence() && !ref->HasField(*current_msg, field)) {
         return kNotFound;
       }
@@ -1012,7 +1012,7 @@ inline void collect_nested_numeric_fields(const google::protobuf::Descriptor* de
   for (int i = 0; i < desc->field_count(); ++i) {
     const auto* field = desc->field(i);
 
-    if (field->is_repeated()) {
+    if VUNLIKELY (field->is_repeated()) {
       continue;
     }
 
@@ -1023,17 +1023,17 @@ inline void collect_nested_numeric_fields(const google::protobuf::Descriptor* de
 #endif
     std::string dot_path = prefix;
 
-    if (!prefix.empty()) {
+    if VLIKELY (!prefix.empty()) {
       dot_path += ".";
     }
 
     dot_path += field_name;
 
-    if (is_proto_numeric_type(field->cpp_type())) {
-      if (!prefix.empty()) {
+    if VLIKELY (is_proto_numeric_type(field->cpp_type())) {
+      if VLIKELY (!prefix.empty()) {
         out.emplace_back(dot_path, make_expression_variable_name("proto", out.size()));
       }
-    } else if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+    } else if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       collect_nested_numeric_fields(field->message_type(), dot_path, out, depth + 1);
     }
   }
@@ -1041,7 +1041,7 @@ inline void collect_nested_numeric_fields(const google::protobuf::Descriptor* de
 
 inline std::string preprocess_expression_dots(const std::string& expression,
                                               const std::vector<std::pair<std::string, std::string>>& nested_fields) {
-  if (nested_fields.empty()) {
+  if VUNLIKELY (nested_fields.empty()) {
     return expression;
   }
 
@@ -1062,7 +1062,7 @@ inline std::string preprocess_expression_dots(const std::string& expression,
       auto end_pos = pos + dot_path.size();
       bool right_ok = (end_pos >= result.size()) || (!is_ident_char(result[end_pos]) && result[end_pos] != '.');
 
-      if (left_ok && right_ok) {
+      if VLIKELY (left_ok && right_ok) {
         result.replace(pos, dot_path.size(), var_name);
         pos += var_name.size();
       } else {
@@ -1147,9 +1147,9 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
   auto& cache = cache_store.proto_cache;
   auto cache_iter = cache.find(cache_key);
 
-  if (cache_iter == cache.end()) {
+  if VUNLIKELY (cache_iter == cache.end()) {
     if VUNLIKELY (cache.size() >= kExpressionCacheLimit) {
-      if (!cache_store.proto_insertion_order.empty()) {
+      if VLIKELY (!cache_store.proto_insertion_order.empty()) {
         cache.erase(cache_store.proto_insertion_order.front());
         cache_store.proto_insertion_order.erase(cache_store.proto_insertion_order.begin());
       } else {
@@ -1185,25 +1185,25 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
       bool valid_numeric = false;
 
       for (size_t i = 0; i < tokens->size(); ++i) {
-        if ((*tokens)[i].is_index || !current_desc) {
+        if VUNLIKELY ((*tokens)[i].is_index || !current_desc) {
           valid_numeric = false;
           break;
         }
 
         const auto* field = find_proto_field_cached(*current_desc, (*tokens)[i].name);
 
-        if (!field) {
+        if VUNLIKELY (!field) {
           valid_numeric = false;
           break;
         }
 
-        if (field->is_repeated()) {
-          if (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
+        if VUNLIKELY (field->is_repeated()) {
+          if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
             valid_numeric = false;
             break;
           }
 
-          if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+          if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
             current_desc = field->message_type();
             ++i;
             continue;
@@ -1213,7 +1213,7 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
           break;
         }
 
-        if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+        if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
           current_desc = field->message_type();
           continue;
         }
@@ -1226,8 +1226,8 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
         continue;
       }
 
-      if (std::find_if(replacement_paths.begin(), replacement_paths.end(),
-                       [&path](const auto& item) { return item.first == path; }) != replacement_paths.end()) {
+      if VLIKELY (std::find_if(replacement_paths.begin(), replacement_paths.end(),
+                               [&path](const auto& item) { return item.first == path; }) != replacement_paths.end()) {
         continue;
       }
 
@@ -1241,7 +1241,8 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
     size_t proto_direct_count = 0;
     for (int i = 0; i < desc->field_count(); ++i) {
       const auto* field = desc->field(i);
-      if (!field->is_repeated() && is_proto_numeric_type(field->cpp_type())) {
+
+      if VLIKELY (!field->is_repeated() && is_proto_numeric_type(field->cpp_type())) {
         ++proto_direct_count;
       }
     }
@@ -1250,11 +1251,11 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
     for (int i = 0; i < desc->field_count(); ++i) {
       const auto* field = desc->field(i);
 
-      if (field->is_repeated()) {
+      if VUNLIKELY (field->is_repeated()) {
         continue;
       }
 
-      if (is_proto_numeric_type(field->cpp_type())) {
+      if VLIKELY (is_proto_numeric_type(field->cpp_type())) {
         auto value_idx = cached.field_values.size();
         cached.field_values.emplace_back(0.0);
         cached.proto_direct_fields.push_back({field, value_idx});
@@ -1330,9 +1331,9 @@ inline void scan_fbs_files(const std::filesystem::path& dir, std::vector<std::fi
     const auto& entry = *it;
     std::error_code entry_ec;
 
-    if (entry.is_regular_file(entry_ec) && !entry_ec && entry.path().extension() == ".fbs") {
+    if VLIKELY (entry.is_regular_file(entry_ec) && !entry_ec && entry.path().extension() == ".fbs") {
       files.emplace_back(entry.path());
-    } else if (entry.is_directory(entry_ec) && !entry_ec) {
+    } else if VUNLIKELY (entry.is_directory(entry_ec) && !entry_ec) {
       scan_fbs_files(entry.path(), files, depth + 1);
     }
   }
@@ -1375,7 +1376,7 @@ inline const reflection::Field* find_fbs_field(const reflection::Object& obj, st
     const auto& old_entry = oldest_entry.second;
     auto old_bucket_iter = cache.buckets.find(old_hash);
 
-    if (old_bucket_iter != cache.buckets.end()) {
+    if VLIKELY (old_bucket_iter != cache.buckets.end()) {
       auto& old_bucket = old_bucket_iter->second;
       old_bucket.erase(std::remove_if(old_bucket.begin(), old_bucket.end(),
                                       [&old_entry](const auto& item) {
@@ -1384,7 +1385,7 @@ inline const reflection::Field* find_fbs_field(const reflection::Object& obj, st
                                       }),
                        old_bucket.end());
 
-      if (old_bucket.empty()) {
+      if VUNLIKELY (old_bucket.empty()) {
         cache.buckets.erase(old_bucket_iter);
       }
     }
@@ -1423,20 +1424,20 @@ inline double resolve_nested_fbs_double(const flatbuffers::Table& table, const r
 
     const auto* field = find_fbs_field(*current_obj, (*tokens)[i].name);
 
-    if (!field) {
+    if VUNLIKELY (!field) {
       return kNotFound;
     }
 
-    if (field->type()->base_type() == reflection::Obj) {
+    if VLIKELY (field->type()->base_type() == reflection::Obj) {
       const auto* sub_table = flatbuffers::GetFieldT(*current_table, *field);
 
-      if (!sub_table || !schema.objects()) {
+      if VUNLIKELY (!sub_table || !schema.objects()) {
         return kNotFound;
       }
 
       current_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
 
-      if (!current_obj) {
+      if VUNLIKELY (!current_obj) {
         return kNotFound;
       }
 
@@ -1444,7 +1445,7 @@ inline double resolve_nested_fbs_double(const flatbuffers::Table& table, const r
       continue;
     }
 
-    if (field->type()->base_type() == reflection::Vector) {
+    if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         return kNotFound;
       }
@@ -1452,22 +1453,22 @@ inline double resolve_nested_fbs_double(const flatbuffers::Table& table, const r
       const auto* vec = flatbuffers::GetFieldAnyV(*current_table, *field);
       auto index = (*tokens)[i + 1].index;
 
-      if (!vec || index >= vec->size()) {
+      if VUNLIKELY (!vec || index >= vec->size()) {
         return kNotFound;
       }
 
       const auto elem_type = field->type()->element();
 
-      if (elem_type == reflection::Obj) {
+      if VLIKELY (elem_type == reflection::Obj) {
         const auto* sub_table = flatbuffers::GetAnyVectorElemPointer<const flatbuffers::Table>(vec, index);
 
-        if (!sub_table || !schema.objects()) {
+        if VUNLIKELY (!sub_table || !schema.objects()) {
           return kNotFound;
         }
 
         current_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
 
-        if (!current_obj) {
+        if VUNLIKELY (!current_obj) {
           return kNotFound;
         }
 
@@ -1476,7 +1477,7 @@ inline double resolve_nested_fbs_double(const flatbuffers::Table& table, const r
         continue;
       }
 
-      if (i + 1 != tokens->size() - 1) {
+      if VLIKELY (i + 1 != tokens->size() - 1) {
         return kNotFound;
       }
 
@@ -1499,7 +1500,7 @@ inline double resolve_nested_fbs_double(const flatbuffers::Table& table, const r
       }
     }
 
-    if (i != tokens->size() - 1) {
+    if VLIKELY (i != tokens->size() - 1) {
       return kNotFound;
     }
 
@@ -1538,7 +1539,7 @@ inline std::string resolve_nested_fbs_string(const flatbuffers::Table& table, co
   const auto* current_obj = &obj;
   const auto* tokens = get_tokenized_field_path(path);
 
-  if (found) {
+  if VLIKELY (found) {
     *found = false;
   }
 
@@ -1553,20 +1554,20 @@ inline std::string resolve_nested_fbs_string(const flatbuffers::Table& table, co
 
     const auto* field = find_fbs_field(*current_obj, (*tokens)[i].name);
 
-    if (!field) {
+    if VUNLIKELY (!field) {
       return {};
     }
 
-    if (field->type()->base_type() == reflection::Obj) {
+    if VLIKELY (field->type()->base_type() == reflection::Obj) {
       const auto* sub_table = flatbuffers::GetFieldT(*current_table, *field);
 
-      if (!sub_table || !schema.objects()) {
+      if VUNLIKELY (!sub_table || !schema.objects()) {
         return {};
       }
 
       current_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
 
-      if (!current_obj) {
+      if VUNLIKELY (!current_obj) {
         return {};
       }
 
@@ -1574,7 +1575,7 @@ inline std::string resolve_nested_fbs_string(const flatbuffers::Table& table, co
       continue;
     }
 
-    if (field->type()->base_type() == reflection::Vector) {
+    if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         return {};
       }
@@ -1582,22 +1583,22 @@ inline std::string resolve_nested_fbs_string(const flatbuffers::Table& table, co
       const auto* vec = flatbuffers::GetFieldAnyV(*current_table, *field);
       auto index = (*tokens)[i + 1].index;
 
-      if (!vec || index >= vec->size()) {
+      if VUNLIKELY (!vec || index >= vec->size()) {
         return {};
       }
 
       const auto elem_type = field->type()->element();
 
-      if (elem_type == reflection::Obj) {
+      if VLIKELY (elem_type == reflection::Obj) {
         const auto* sub_table = flatbuffers::GetAnyVectorElemPointer<const flatbuffers::Table>(vec, index);
 
-        if (!sub_table || !schema.objects()) {
+        if VUNLIKELY (!sub_table || !schema.objects()) {
           return {};
         }
 
         current_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
 
-        if (!current_obj) {
+        if VUNLIKELY (!current_obj) {
           return {};
         }
 
@@ -1606,12 +1607,12 @@ inline std::string resolve_nested_fbs_string(const flatbuffers::Table& table, co
         continue;
       }
 
-      if (i + 1 != tokens->size() - 1) {
+      if VLIKELY (i + 1 != tokens->size() - 1) {
         return {};
       }
 
-      if (elem_type == reflection::String) {
-        if (found) {
+      if VLIKELY (elem_type == reflection::String) {
+        if VLIKELY (found) {
           *found = true;
         }
         return flatbuffers::GetAnyVectorElemS(vec, elem_type, index);
@@ -1620,12 +1621,12 @@ inline std::string resolve_nested_fbs_string(const flatbuffers::Table& table, co
       return {};
     }
 
-    if (i != tokens->size() - 1) {
+    if VLIKELY (i != tokens->size() - 1) {
       return {};
     }
 
-    if (field->type()->base_type() == reflection::String) {
-      if (found) {
+    if VLIKELY (field->type()->base_type() == reflection::String) {
+      if VLIKELY (found) {
         *found = true;
       }
       return flatbuffers::GetAnyFieldS(*current_table, *field, nullptr);
@@ -1655,7 +1656,7 @@ inline bool resolve_fbs_table_path(const flatbuffers::Table& root_table, const r
       return false;
     }
 
-    if (field->type()->base_type() == reflection::Obj) {
+    if VLIKELY (field->type()->base_type() == reflection::Obj) {
       const auto* sub_table = flatbuffers::GetFieldT(*current_table, *field);
 
       if VUNLIKELY (!sub_table || !schema.objects()) {
@@ -1672,7 +1673,7 @@ inline bool resolve_fbs_table_path(const flatbuffers::Table& root_table, const r
       continue;
     }
 
-    if (field->type()->base_type() == reflection::Vector) {
+    if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
       if VUNLIKELY (i + 1 >= token_count || !tokens[i + 1].is_index) {
         return false;
       }
@@ -1735,7 +1736,7 @@ inline bool resolve_fbs_parent_field_path(const flatbuffers::Table& root_table, 
     return false;
   }
 
-  if (tokens->size() == 1U) {
+  if VUNLIKELY (tokens->size() == 1U) {
     out_parent = &root_table;
     out_parent_obj = &root_obj;
     out_field = tokens->front().name;
@@ -1819,7 +1820,7 @@ inline bool compile_fbs_numeric_path(const reflection::Object& root_obj, const r
     FbsPathStep step;
     step.field = field;
 
-    if (field->type()->base_type() == reflection::Vector) {
+    if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         steps.clear();
         return false;
@@ -1830,7 +1831,7 @@ inline bool compile_fbs_numeric_path(const reflection::Object& root_obj, const r
 
       const auto elem_type = field->type()->element();
 
-      if (elem_type == reflection::Obj && schema.objects()) {
+      if VLIKELY (elem_type == reflection::Obj && schema.objects()) {
         step.next_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
 
         if VUNLIKELY (!step.next_obj) {
@@ -1853,7 +1854,7 @@ inline bool compile_fbs_numeric_path(const reflection::Object& root_obj, const r
       return false;
     }
 
-    if (field->type()->base_type() == reflection::Obj && schema.objects()) {
+    if VLIKELY (field->type()->base_type() == reflection::Obj && schema.objects()) {
       step.next_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
 
       if VUNLIKELY (!step.next_obj) {
@@ -1891,7 +1892,7 @@ inline double resolve_fbs_numeric_path_fast(const flatbuffers::Table& root_table
 
     const auto* field = step.field;
 
-    if (field->type()->base_type() == reflection::Vector) {
+    if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
       const auto* vec = flatbuffers::GetFieldAnyV(*current_table, *field);
       auto index = step.index;
 
@@ -1901,7 +1902,7 @@ inline double resolve_fbs_numeric_path_fast(const flatbuffers::Table& root_table
 
       const auto elem_type = field->type()->element();
 
-      if (elem_type == reflection::Obj) {
+      if VLIKELY (elem_type == reflection::Obj) {
         const auto* sub_table = flatbuffers::GetAnyVectorElemPointer<const flatbuffers::Table>(vec, index);
 
         if VUNLIKELY (!sub_table) {
@@ -1931,7 +1932,7 @@ inline double resolve_fbs_numeric_path_fast(const flatbuffers::Table& root_table
       }
     }
 
-    if (field->type()->base_type() == reflection::Obj) {
+    if VLIKELY (field->type()->base_type() == reflection::Obj) {
       const auto* sub_table = flatbuffers::GetFieldT(*current_table, *field);
 
       if VUNLIKELY (!sub_table) {
@@ -1958,11 +1959,11 @@ inline void collect_nested_numeric_fbs_fields(const reflection::Object& obj, con
   for (unsigned i = 0; i < obj.fields()->size(); ++i) {
     const auto* field = obj.fields()->Get(i);
 
-    if (!field) {
+    if VUNLIKELY (!field) {
       continue;
     }
 
-    if (field->type()->base_type() == reflection::Vector) {
+    if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
       continue;
     }
 
@@ -1971,14 +1972,14 @@ inline void collect_nested_numeric_fbs_fields(const reflection::Object& obj, con
     // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
     std::string dot_path = prefix.empty() ? field_name : (prefix + "." + field_name);
 
-    if (is_fbs_numeric_type(field->type()->base_type())) {
-      if (!prefix.empty()) {
+    if VLIKELY (is_fbs_numeric_type(field->type()->base_type())) {
+      if VLIKELY (!prefix.empty()) {
         out.emplace_back(dot_path, make_expression_variable_name("fbs", out.size()));
       }
-    } else if (field->type()->base_type() == reflection::Obj && schema.objects()) {
+    } else if VLIKELY (field->type()->base_type() == reflection::Obj && schema.objects()) {
       const auto* sub_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
 
-      if (sub_obj) {
+      if VLIKELY (sub_obj) {
         collect_nested_numeric_fbs_fields(*sub_obj, schema, dot_path, out, depth + 1);
       }
     }
@@ -2021,9 +2022,9 @@ inline double evaluate_expression_with_fbs(const std::string& expression, const 
   auto& cache = cache_store.fbs_cache;
   auto cache_iter = cache.find(cache_key);
 
-  if (cache_iter == cache.end()) {
+  if VUNLIKELY (cache_iter == cache.end()) {
     if VUNLIKELY (cache.size() >= kExpressionCacheLimit) {
-      if (!cache_store.fbs_insertion_order.empty()) {
+      if VLIKELY (!cache_store.fbs_insertion_order.empty()) {
         cache.erase(cache_store.fbs_insertion_order.front());
         cache_store.fbs_insertion_order.erase(cache_store.fbs_insertion_order.begin());
       } else {
@@ -2058,27 +2059,27 @@ inline double evaluate_expression_with_fbs(const std::string& expression, const 
       bool valid_numeric = false;
 
       for (size_t i = 0; i < tokens->size(); ++i) {
-        if ((*tokens)[i].is_index || !current_obj) {
+        if VUNLIKELY ((*tokens)[i].is_index || !current_obj) {
           valid_numeric = false;
           break;
         }
 
         const auto* field = find_fbs_field(*current_obj, (*tokens)[i].name);
 
-        if (!field) {
+        if VUNLIKELY (!field) {
           valid_numeric = false;
           break;
         }
 
-        if (field->type()->base_type() == reflection::Vector) {
-          if (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
+        if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
+          if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
             valid_numeric = false;
             break;
           }
 
           const auto elem_type = field->type()->element();
 
-          if (elem_type == reflection::Obj && schema.objects()) {
+          if VLIKELY (elem_type == reflection::Obj && schema.objects()) {
             current_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
             ++i;
             continue;
@@ -2088,7 +2089,7 @@ inline double evaluate_expression_with_fbs(const std::string& expression, const 
           break;
         }
 
-        if (field->type()->base_type() == reflection::Obj && schema.objects()) {
+        if VLIKELY (field->type()->base_type() == reflection::Obj && schema.objects()) {
           current_obj = schema.objects()->Get(static_cast<uint32_t>(field->type()->index()));
           continue;
         }
@@ -2101,8 +2102,8 @@ inline double evaluate_expression_with_fbs(const std::string& expression, const 
         continue;
       }
 
-      if (std::find_if(replacement_paths.begin(), replacement_paths.end(),
-                       [&path](const auto& item) { return item.first == path; }) != replacement_paths.end()) {
+      if VLIKELY (std::find_if(replacement_paths.begin(), replacement_paths.end(),
+                               [&path](const auto& item) { return item.first == path; }) != replacement_paths.end()) {
         continue;
       }
 
@@ -2114,21 +2115,23 @@ inline double evaluate_expression_with_fbs(const std::string& expression, const 
     cached.fbs_indexed_field_refs.clear();
 
     size_t fbs_direct_count = 0;
-    if (obj.fields()) {
+
+    if VLIKELY (obj.fields()) {
       for (unsigned i = 0; i < obj.fields()->size(); ++i) {
         const auto* f = obj.fields()->Get(i);
-        if (f && is_fbs_numeric_type(f->type()->base_type())) {
+        if VLIKELY (f && is_fbs_numeric_type(f->type()->base_type())) {
           ++fbs_direct_count;
         }
       }
     }
+
     cached.field_values.reserve(fbs_direct_count + replacement_paths.size());
 
-    if (obj.fields()) {
+    if VLIKELY (obj.fields()) {
       for (unsigned i = 0; i < obj.fields()->size(); ++i) {
         const auto* f = obj.fields()->Get(i);
 
-        if (!f || !is_fbs_numeric_type(f->type()->base_type())) {
+        if VUNLIKELY (!f || !is_fbs_numeric_type(f->type()->base_type())) {
           continue;
         }
 
@@ -2193,14 +2196,14 @@ inline double evaluate_expression_with_fbs(const std::string& expression, const 
 
 inline double get_proto_double(const google::protobuf::Message& msg, std::string_view field_name,
                                const FieldMapping& mapping) {
-  if (!mapping.expression.empty()) {
+  if VUNLIKELY (!mapping.expression.empty()) {
     return evaluate_expression_with_msg(mapping.expression, msg);
   }
 
-  if (has_nested_field_path(field_name)) {
+  if VUNLIKELY (has_nested_field_path(field_name)) {
     auto val = resolve_nested_double(msg, field_name);
 
-    if (!std::isnan(val)) {
+    if VLIKELY (!std::isnan(val)) {
       return val;
     }
 
@@ -2257,30 +2260,30 @@ inline double get_proto_double(const google::protobuf::Message& msg, std::string
 
 inline std::string get_proto_string(const google::protobuf::Message& msg, std::string_view field_name,
                                     const FieldMapping& mapping, bool* found = nullptr) {
-  if (found) {
+  if VLIKELY (found) {
     *found = false;
   }
 
   if VUNLIKELY (!mapping.expression.empty()) {
-    if (found) {
+    if VLIKELY (found) {
       *found = true;
     }
 
     return format_expression_string(evaluate_expression_with_msg(mapping.expression, msg));
   }
 
-  if (has_nested_field_path(field_name)) {
+  if VUNLIKELY (has_nested_field_path(field_name)) {
     bool nested_found = false;
     auto val = resolve_nested_string(msg, field_name, &nested_found);
 
-    if (nested_found) {
-      if (found) {
+    if VLIKELY (nested_found) {
+      if VLIKELY (found) {
         *found = true;
       }
       return val;
     }
 
-    if (found && mapping.has_default_value) {
+    if VUNLIKELY (found && mapping.has_default_value) {
       *found = true;
     }
 
@@ -2292,21 +2295,21 @@ inline std::string get_proto_string(const google::protobuf::Message& msg, std::s
   const auto* field = find_proto_field_cached(*desc, field_name);
 
   if VLIKELY (field && field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
-    if (field->has_presence() && !ref->HasField(msg, field)) {
-      if (found && mapping.has_default_value) {
+    if VUNLIKELY (field->has_presence() && !ref->HasField(msg, field)) {
+      if VUNLIKELY (found && mapping.has_default_value) {
         *found = true;
       }
       return mapping.has_default_value ? mapping.default_value : std::string{};
     }
 
-    if (found) {
+    if VLIKELY (found) {
       *found = true;
     }
 
     return ref->GetString(msg, field);
   }
 
-  if (found && mapping.has_default_value) {
+  if VUNLIKELY (found && mapping.has_default_value) {
     *found = true;
   }
 
@@ -2330,7 +2333,7 @@ inline Bytes get_proto_bytes(const google::protobuf::Message& msg, std::string_v
   const auto* field = find_proto_field_cached(*desc, field_name);
 
   if VLIKELY (field && field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
-    if (field->has_presence() && !ref->HasField(msg, field)) {
+    if VUNLIKELY (field->has_presence() && !ref->HasField(msg, field)) {
       return {};
     }
 
@@ -2380,19 +2383,19 @@ inline int64_t saturating_mul_to_ns(uint64_t value, uint64_t factor) {
 }
 
 inline int64_t timestamp_unit_to_ns_scale(std::string_view unit) {
-  if (unit == "ns") {
+  if VLIKELY (unit == "ns") {
     return 1;
   }
 
-  if (unit == "us") {
+  if VLIKELY (unit == "us") {
     return 1000;
   }
 
-  if (unit == "ms") {
+  if VLIKELY (unit == "ms") {
     return 1000000;
   }
 
-  if (unit == "s") {
+  if VLIKELY (unit == "s") {
     return 1000000000;
   }
 
@@ -2448,7 +2451,7 @@ inline int64_t extract_proto_timestamp_ns(const google::protobuf::Message& msg, 
       return -1;
     }
 
-    if (field->is_repeated()) {
+    if VUNLIKELY (field->is_repeated()) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         return -1;
       }
@@ -2459,7 +2462,7 @@ inline int64_t extract_proto_timestamp_ns(const google::protobuf::Message& msg, 
         return -1;
       }
 
-      if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+      if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
         current_msg = &ref->GetRepeatedMessage(*current_msg, field, index);
         ++i;
         continue;
@@ -2496,7 +2499,7 @@ inline int64_t extract_proto_timestamp_ns(const google::protobuf::Message& msg, 
       }
     }
 
-    if (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
+    if VLIKELY (field->cpp_type() == google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE) {
       if VUNLIKELY (field->has_presence() && !ref->HasField(*current_msg, field)) {
         return -1;
       }
@@ -2561,7 +2564,7 @@ inline int64_t extract_fbs_timestamp_ns(const flatbuffers::Table& table, const r
       return -1;
     }
 
-    if (field->type()->base_type() == reflection::Obj) {
+    if VLIKELY (field->type()->base_type() == reflection::Obj) {
       const auto* sub_table = flatbuffers::GetFieldT(*current_table, *field);
 
       if VUNLIKELY (!sub_table || !schema.objects()) {
@@ -2578,7 +2581,7 @@ inline int64_t extract_fbs_timestamp_ns(const flatbuffers::Table& table, const r
       continue;
     }
 
-    if (field->type()->base_type() == reflection::Vector) {
+    if VUNLIKELY (field->type()->base_type() == reflection::Vector) {
       if VUNLIKELY (i + 1 >= tokens->size() || !(*tokens)[i + 1].is_index) {
         return -1;
       }
@@ -2592,7 +2595,7 @@ inline int64_t extract_fbs_timestamp_ns(const flatbuffers::Table& table, const r
 
       const auto elem_type = field->type()->element();
 
-      if (elem_type == reflection::Obj) {
+      if VLIKELY (elem_type == reflection::Obj) {
         const auto* sub_table = flatbuffers::GetAnyVectorElemPointer<const flatbuffers::Table>(vec, index);
 
         if VUNLIKELY (!sub_table || !schema.objects()) {

@@ -80,6 +80,7 @@ int main() {
   //
   // Check whether the global writer is active:
   auto* global_writer = vlink::BagWriter::global_get();
+
   if (global_writer) {
     VLOG_I("Global BagWriter is active. All traffic will be recorded.");
   } else {
@@ -100,6 +101,7 @@ int main() {
   client.set_record_path("/tmp/record_basic_rpc.vdb");
 
   auto resp = client.invoke(vlink::Bytes::from_string("request_data"));
+
   if (resp.has_value()) {
     VLOG_I("Client received response:", resp.value().to_string());
   }
@@ -116,6 +118,7 @@ int main() {
   std::this_thread::sleep_for(100ms);
 
   auto val = getter.get();
+
   if (val.has_value()) {
     VLOG_I("Getter value:", val.value().to_string());
   }

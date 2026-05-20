@@ -57,7 +57,7 @@ inline std::string proxy_bridge_error_message(const ProxyBridge& bridge, ProxyAP
       std::string hosts;
 
       for (const auto& hostname : hostnames) {
-        if (!hosts.empty()) {
+        if VLIKELY (!hosts.empty()) {
           hosts += ", ";
         }
 
@@ -81,14 +81,14 @@ inline std::string proxy_bridge_error_message(const ProxyBridge& bridge, ProxyAP
 inline void log_proxy_bridge_error(const ProxyBridge& bridge, ProxyAPI::Error error) {
   auto message = proxy_bridge_error_message(bridge, error);
 
-  if (message.empty()) {
+  if VUNLIKELY (message.empty()) {
     return;
   }
 
-  if (error == ProxyAPI::kUnknownError || error == ProxyAPI::kControlError || error == ProxyAPI::kModeError ||
-      error == ProxyAPI::kReliableCompError || error == ProxyAPI::kTcpCompError ||
-      error == ProxyAPI::kDirectCompError || error == ProxyAPI::kMultiProxyError ||
-      error == ProxyAPI::kVersionCompError) {
+  if VLIKELY (error == ProxyAPI::kUnknownError || error == ProxyAPI::kControlError || error == ProxyAPI::kModeError ||
+              error == ProxyAPI::kReliableCompError || error == ProxyAPI::kTcpCompError ||
+              error == ProxyAPI::kDirectCompError || error == ProxyAPI::kMultiProxyError ||
+              error == ProxyAPI::kVersionCompError) {
     MLOG_E("{}", message);
   } else {
     MLOG_W("{}", message);
@@ -100,7 +100,7 @@ inline std::string build_bridge_control_signature(const ProxyAPI::Control& contr
   entries.reserve(control.url_meta_list.size());
 
   for (const auto& meta : control.url_meta_list) {
-    if (meta.url.empty()) {
+    if VUNLIKELY (meta.url.empty()) {
       continue;
     }
 

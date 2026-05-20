@@ -268,6 +268,7 @@ int main() {
         auto reg = token.register_callback([&fired]() { fired.fetch_add(1); });
         registered.fetch_add(1);
         // Some threads release immediately, some keep the registration alive.
+
         if ((registered.load() & 1U) != 0U) {
           reg.reset();
         }

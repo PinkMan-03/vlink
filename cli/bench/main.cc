@@ -195,6 +195,7 @@ std::string transport_unavailable_reason(const std::string& url) {
 #ifndef VLINK_SUPPORT_SHM
     return "shm:// is not compiled in this build";
 #else
+
     if (!vlink::ShmConf::auto_init_roudi(true)) {
       return "iox-roudi not running";
     }
@@ -263,6 +264,7 @@ std::string transport_unavailable_reason(const std::string& url) {
 #ifndef VLINK_SUPPORT_MQTT
     return "mqtt:// is not compiled in this build";
 #else
+
     if (vlink::Utils::get_env("VLINK_MQTT_BROKER").empty()) {
       return "VLINK_MQTT_BROKER not set";
     }
@@ -275,6 +277,7 @@ std::string transport_unavailable_reason(const std::string& url) {
 #ifndef VLINK_SUPPORT_FDBUS
     return "fdbus:// is not compiled in this build";
 #else
+
     if (!vlink::FdbusConf::has_name_server()) {
       return "name_server not running";
     }
@@ -785,6 +788,7 @@ bool build_run_options(const argparse::ArgumentParser& command, vlink::bench::Be
   deduplicate_values(options.rate_patterns);
   deduplicate_values(options.payloads);
   deduplicate_values(options.urls);
+
   if (!filter_unavailable_urls(options.urls, error)) {
     return false;
   }
@@ -1274,9 +1278,9 @@ int main(int argc, char** argv) {
       keyboard_started = true;
     }
 
-    if (!build_run_options(run_command, options, output_prefix, error) ||
-        !build_output_options(run_command, true, output_options, error) ||
-        !vlink::bench::Bench::run(options, result, error)) {
+    if VUNLIKELY (!build_run_options(run_command, options, output_prefix, error) ||
+                  !build_output_options(run_command, true, output_options, error) ||
+                  !vlink::bench::Bench::run(options, result, error)) {
       if (keyboard_started) {
         vlink::Utils::stop_detect_keyboard();
       }
@@ -1291,7 +1295,7 @@ int main(int argc, char** argv) {
 
     result.command_line = command_line;
 
-    if (!save_outputs(result, output_prefix, output_options, error)) {
+    if VUNLIKELY (!save_outputs(result, output_prefix, output_options, error)) {
       std::cerr << error << std::endl;
       return 1;
     }
@@ -1336,7 +1340,7 @@ int main(int argc, char** argv) {
     vlink::bench::Bench::WorkerOptions options;
     std::string error;
 
-    if (!build_worker_options(pub_command, false, options, error)) {
+    if VUNLIKELY (!build_worker_options(pub_command, false, options, error)) {
       std::cerr << error << std::endl;
       return 1;
     }
@@ -1348,7 +1352,7 @@ int main(int argc, char** argv) {
     vlink::bench::Bench::WorkerOptions options;
     std::string error;
 
-    if (!build_worker_options(sub_command, true, options, error)) {
+    if VUNLIKELY (!build_worker_options(sub_command, true, options, error)) {
       std::cerr << error << std::endl;
       return 1;
     }

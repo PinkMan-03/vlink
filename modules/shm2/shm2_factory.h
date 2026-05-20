@@ -116,18 +116,22 @@ class Shm2Factory final : public AbstractFactory<ShmID2> {
   static void read_data(const uint8_t* loaned_ptr, uint64_t payload_size, uint64_t& channel, uint64_t& seq,
                         Bytes& data) {
 #if SHM2_USE_CUSTOM_SEQ
+
     if VUNLIKELY (payload_size < sizeof(uint64_t) + sizeof(uint64_t)) {
       return;
     }
+
     std::memcpy(&channel, loaned_ptr, sizeof(uint64_t));
     std::memcpy(&seq, loaned_ptr + sizeof(uint64_t), sizeof(uint64_t));
     data = Bytes::shallow_copy(loaned_ptr + sizeof(uint64_t) + sizeof(uint64_t),
                                payload_size - sizeof(uint64_t) - sizeof(uint64_t));
 #else
     (void)seq;
+
     if VUNLIKELY (payload_size < sizeof(uint64_t)) {
       return;
     }
+
     std::memcpy(&channel, loaned_ptr, sizeof(uint64_t));
     data = Bytes::shallow_copy(loaned_ptr + sizeof(uint64_t), payload_size - sizeof(uint64_t));
 #endif

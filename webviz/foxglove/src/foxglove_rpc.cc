@@ -42,7 +42,7 @@ FoxgloveRpc::FoxgloveRpc(const Config& config, VlinkConvert* vlink_convert, Mess
     : config_(config), vlink_convert_(vlink_convert), loop_(loop) {
   lifetime_handle_ = std::make_shared<LifetimeHandle>();
 
-  if (loop_ && rpc_timeout_timer_.attach(loop_)) {
+  if VLIKELY (loop_ && rpc_timeout_timer_.attach(loop_)) {
     rpc_timeout_timer_.set_interval(10);
     rpc_timeout_timer_.set_loop_count(Timer::kInfinite);
     rpc_timeout_timer_.set_callback([this]() { process_rpc_timeout(); });
@@ -67,13 +67,13 @@ FoxgloveRpc::~FoxgloveRpc() {
 
 bool FoxgloveRpc::has_rpcs() const { return has_rpcs({}); }
 
-bool FoxgloveRpc::has_rpcs(vlink::MoveFunction<bool(std::string_view)>&& allow_url) const {
+bool FoxgloveRpc::has_rpcs(MoveFunction<bool(std::string_view)>&& allow_url) const {
   std::shared_lock lock(rpc_mtx_);
 
   for (const auto& rpc_entry : rpcs_) {
     const auto& state = rpc_entry.second;
 
-    if (!allow_url || allow_url(state.target.url)) {
+    if VLIKELY (!allow_url || allow_url(state.target.url)) {
       return true;
     }
   }
@@ -83,12 +83,12 @@ bool FoxgloveRpc::has_rpcs(vlink::MoveFunction<bool(std::string_view)>&& allow_u
 
 std::vector<Json> FoxgloveRpc::get_rpcs() const { return get_rpcs({}); }
 
-std::vector<Json> FoxgloveRpc::get_rpcs(vlink::MoveFunction<bool(std::string_view)>&& allow_url) const {
+std::vector<Json> FoxgloveRpc::get_rpcs(MoveFunction<bool(std::string_view)>&& allow_url) const {
   std::vector<Json> rpcs;
   std::shared_lock lock(rpc_mtx_);
 
   for (const auto& [id, state] : rpcs_) {
-    if (allow_url && !allow_url(state.target.url)) {
+    if VUNLIKELY (allow_url && !allow_url(state.target.url)) {
       continue;
     }
 
@@ -96,42 +96,42 @@ std::vector<Json> FoxgloveRpc::get_rpcs(vlink::MoveFunction<bool(std::string_vie
     rpc["id"] = id;
     rpc["name"] = state.name;
 
-    if (!state.type.empty()) {
+    if VLIKELY (!state.type.empty()) {
       rpc["type"] = state.type;
     }
 
-    if (state.has_request_schema || !state.request_schema.encoding.empty()) {
+    if VLIKELY (state.has_request_schema || !state.request_schema.encoding.empty()) {
       Json request;
       request["encoding"] = state.request_schema.encoding;
 
-      if (!state.request_schema.schema_name.empty()) {
+      if VLIKELY (!state.request_schema.schema_name.empty()) {
         request["schemaName"] = state.request_schema.schema_name;
       }
 
-      if (!state.request_schema.schema_encoding.empty()) {
+      if VLIKELY (!state.request_schema.schema_encoding.empty()) {
         request["schemaEncoding"] = state.request_schema.schema_encoding;
       }
 
-      if (!state.request_schema.protocol_schema.empty()) {
+      if VLIKELY (!state.request_schema.protocol_schema.empty()) {
         request["schema"] = state.request_schema.protocol_schema;
       }
 
       rpc["request"] = std::move(request);
     }
 
-    if (state.has_response_schema || !state.response_schema.encoding.empty()) {
+    if VLIKELY (state.has_response_schema || !state.response_schema.encoding.empty()) {
       Json response;
       response["encoding"] = state.response_schema.encoding;
 
-      if (!state.response_schema.schema_name.empty()) {
+      if VLIKELY (!state.response_schema.schema_name.empty()) {
         response["schemaName"] = state.response_schema.schema_name;
       }
 
-      if (!state.response_schema.schema_encoding.empty()) {
+      if VLIKELY (!state.response_schema.schema_encoding.empty()) {
         response["schemaEncoding"] = state.response_schema.schema_encoding;
       }
 
-      if (!state.response_schema.protocol_schema.empty()) {
+      if VLIKELY (!state.response_schema.protocol_schema.empty()) {
         response["schema"] = state.response_schema.protocol_schema;
       }
 
@@ -146,8 +146,8 @@ std::vector<Json> FoxgloveRpc::get_rpcs(vlink::MoveFunction<bool(std::string_vie
   return rpcs;
 }
 
-bool FoxgloveRpc::is_rpc_allowed(uint32_t rpc_id, vlink::MoveFunction<bool(std::string_view)>&& allow_url) const {
-  if (!allow_url) {
+bool FoxgloveRpc::is_rpc_allowed(uint32_t rpc_id, MoveFunction<bool(std::string_view)>&& allow_url) const {
+  if VUNLIKELY (!allow_url) {
     return true;
   }
 
@@ -173,7 +173,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
     auto rpc_iter = rpcs_.find(rpc_id);
 
     if VUNLIKELY (rpc_iter == rpcs_.end()) {
-      if (error_callback) {
+      if VLIKELY (error_callback) {
         error_callback(rpc_id, call_id, "Unknown RPC id");
       }
       return false;
@@ -184,7 +184,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
   }
 
   if VUNLIKELY (!has_state || !state.client) {
-    if (error_callback) {
+    if VLIKELY (error_callback) {
       error_callback(rpc_id, call_id, "RPC client not initialized");
     }
     return false;
@@ -193,7 +193,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
   const auto expected_request_encoding = std::string("json");
 
   if VUNLIKELY (!request_encoding.empty() && expected_request_encoding != request_encoding) {
-    if (error_callback) {
+    if VLIKELY (error_callback) {
       error_callback(rpc_id, call_id, "RPC request encoding mismatch");
     }
     return false;
@@ -202,7 +202,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
   CommandMapping request_mapping;
 
   if VUNLIKELY (!build_request_mapping(state, request_mapping)) {
-    if (error_callback) {
+    if VLIKELY (error_callback) {
       error_callback(rpc_id, call_id, "Failed to build RPC request route");
     }
     return false;
@@ -218,7 +218,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
   request_channel.schema = state.request_schema.schema;
 
   if VUNLIKELY (!vlink_convert_ || !vlink_convert_->build_route(request_mapping, request_channel, route)) {
-    if (error_callback) {
+    if VLIKELY (error_callback) {
       error_callback(rpc_id, call_id, "Failed to resolve RPC request route");
     }
     return false;
@@ -227,7 +227,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
   auto converted = vlink_convert_ ? vlink_convert_->encode_frontend_message(route, request) : CommandMessage{};
 
   if VUNLIKELY (!converted.success) {
-    if (error_callback) {
+    if VLIKELY (error_callback) {
       error_callback(rpc_id, call_id, "Failed to convert RPC request");
     }
     return false;
@@ -242,7 +242,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
     std::lock_guard lock(pending_rpc_mtx_);
 
     if VUNLIKELY (pending_rpc_calls_.find(pending_key) != pending_rpc_calls_.end()) {
-      if (error_callback) {
+      if VLIKELY (error_callback) {
         error_callback(rpc_id, call_id, "Duplicate in-flight RPC call");
       }
 
@@ -279,7 +279,7 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
                   }
 
                   if VUNLIKELY (!vlink_convert_) {
-                    if (pending.error_callback) {
+                    if VLIKELY (pending.error_callback) {
                       pending.error_callback(rpc_id, call_id, "Vlink convert is not initialized");
                     }
 
@@ -290,21 +290,21 @@ bool FoxgloveRpc::call_rpc(uint64_t client_key, uint32_t rpc_id, uint32_t call_i
 
                   if VUNLIKELY (!vlink_convert_->decode_backend_message_to_json(state.response_ser, state.response_type,
                                                                                 response_raw, response_payload)) {
-                    if (pending.error_callback) {
+                    if VLIKELY (pending.error_callback) {
                       pending.error_callback(rpc_id, call_id, "Failed to convert RPC response");
                     }
 
                     return;
                   }
 
-                  if (response_callback) {
+                  if VLIKELY (response_callback) {
                     response_callback(rpc_id, call_id, "json", response_payload);
                   }
                 })) {
     PendingRpcCall pending;
     take_pending_rpc(pending_key, pending);
 
-    if (pending.error_callback) {
+    if VLIKELY (pending.error_callback) {
       pending.error_callback(rpc_id, call_id, "Failed to dispatch RPC request");
     }
 
@@ -318,7 +318,7 @@ void FoxgloveRpc::cancel_client(uint64_t client_key) {
   std::lock_guard lock(pending_rpc_mtx_);
 
   for (auto pending_iter = pending_rpc_calls_.begin(); pending_iter != pending_rpc_calls_.end();) {
-    if (pending_iter->first.client_key != client_key) {
+    if VUNLIKELY (pending_iter->first.client_key != client_key) {
       ++pending_iter;
       continue;
     }
@@ -368,15 +368,17 @@ bool FoxgloveRpc::load_rpc_file(const std::string& path) {
 
         const auto& request = item["request"];
         RpcState state;
-        if (item.contains("id")) {
+
+        if VLIKELY (item.contains("id")) {
           state.id = item["id"].get<uint32_t>();
 
-          if (state.id >= next_rpc_id) {
+          if VLIKELY (state.id >= next_rpc_id) {
             next_rpc_id = state.id + 1;
           }
         } else {
           state.id = next_rpc_id++;
         }
+
         state.name = item.value("name", std::string());
         state.timeout_ms = item.value("timeout_ms", 2000);
 
@@ -417,7 +419,7 @@ bool FoxgloveRpc::load_rpc_file(const std::string& path) {
         state.has_request_schema =
             load_schema_info(request, base_dir, "schema_name", "schema_encoding", state.request_schema);
 
-        if (has_request_schema_config && !state.has_request_schema) {
+        if VUNLIKELY (has_request_schema_config && !state.has_request_schema) {
           MLOG_W("Foxglove RPC '{}' has invalid request schema", state.name);
           return false;
         }
@@ -457,7 +459,7 @@ bool FoxgloveRpc::load_rpc_file(const std::string& path) {
           state.has_response_schema =
               load_schema_info(response, base_dir, "schema_name", "schema_encoding", state.response_schema, true);
 
-          if (has_response_schema_config && !state.has_response_schema) {
+          if VUNLIKELY (has_response_schema_config && !state.has_response_schema) {
             MLOG_W("Foxglove RPC '{}' has invalid response schema", state.name);
             return false;
           }
@@ -469,10 +471,10 @@ bool FoxgloveRpc::load_rpc_file(const std::string& path) {
 
           auto response_encoding = response.value("encoding", std::string());
 
-          if (response_encoding.empty()) {
-            if (is_json_ser(state.response_ser)) {
+          if VUNLIKELY (response_encoding.empty()) {
+            if VLIKELY (is_json_ser(state.response_ser)) {
               response_encoding = "json";
-            } else if (is_text_ser(state.response_ser)) {
+            } else if VLIKELY (is_text_ser(state.response_ser)) {
               response_encoding = "text";
             }
           }
@@ -521,14 +523,14 @@ bool FoxgloveRpc::load_rpc_file(const std::string& path) {
       }
     };
 
-    if (root.is_array()) {
+    if VLIKELY (root.is_array()) {
       bool ok = true;
 
       for (const auto& item : root) {
         ok = parse_one(item) && ok;
       }
 
-      if (ok) {
+      if VLIKELY (ok) {
         std::unique_lock lock(rpc_mtx_);
         next_rpc_id_ = std::max(next_rpc_id_, next_rpc_id);
 
@@ -553,7 +555,7 @@ bool FoxgloveRpc::load_rpc_file(const std::string& path) {
 
     auto ok = parse_one(root);
 
-    if (ok) {
+    if VLIKELY (ok) {
       std::unique_lock lock(rpc_mtx_);
       next_rpc_id_ = std::max(next_rpc_id_, next_rpc_id);
 
@@ -598,8 +600,8 @@ bool FoxgloveRpc::load_schema_info(const Json& root, const std::filesystem::path
     return false;
   }
 
-  if (root.contains("schema")) {
-    if (root["schema"].is_string()) {
+  if VLIKELY (root.contains("schema")) {
+    if VLIKELY (root["schema"].is_string()) {
       schema.schema = root["schema"].get<std::string>();
     } else {
       schema.schema = root["schema"].dump();
@@ -609,10 +611,10 @@ bool FoxgloveRpc::load_schema_info(const Json& root, const std::filesystem::path
       MLOG_W("Foxglove RPC frontend schema must not be empty");
       return false;
     }
-  } else if (root.contains("schema_path")) {
+  } else if VUNLIKELY (root.contains("schema_path")) {
     auto schema_path = std::filesystem::path(root["schema_path"].get<std::string>());
 
-    if (!schema_path.is_absolute()) {
+    if VLIKELY (!schema_path.is_absolute()) {
       schema_path = base_dir / schema_path;
     }
 
@@ -676,10 +678,10 @@ bool FoxgloveRpc::parse_target(const Json& item, Target& target, const std::stri
 
   target.encoding = item.value("encoding", std::string());
 
-  if (target.encoding.empty()) {
-    if (is_json_ser(target.ser)) {
+  if VUNLIKELY (target.encoding.empty()) {
+    if VLIKELY (is_json_ser(target.ser)) {
       target.encoding = "json";
-    } else if (is_text_ser(target.ser)) {
+    } else if VLIKELY (is_text_ser(target.ser)) {
       target.encoding = "text";
     } else {
       target.encoding = "protobuf";
@@ -700,7 +702,7 @@ bool FoxgloveRpc::parse_target(const Json& item, Target& target, const std::stri
 
   target.schema_type = SchemaData::convert_encoding(target.encoding);
 
-  if (target.schema_type == SchemaType::kFlatbuffers) {
+  if VUNLIKELY (target.schema_type == SchemaType::kFlatbuffers) {
     target.encoding = "flatbuffers";
   }
 
@@ -788,7 +790,7 @@ void FoxgloveRpc::process_rpc_timeout() {
     std::lock_guard lock(pending_rpc_mtx_);
 
     for (auto pending_iter = pending_rpc_calls_.begin(); pending_iter != pending_rpc_calls_.end();) {
-      if (pending_iter->second.deadline_ms > now_ms) {
+      if VLIKELY (pending_iter->second.deadline_ms > now_ms) {
         ++pending_iter;
         continue;
       }
@@ -801,7 +803,7 @@ void FoxgloveRpc::process_rpc_timeout() {
   for (auto& expired_call : expired_calls) {
     auto& pending = expired_call.second;
 
-    if (pending.error_callback) {
+    if VLIKELY (pending.error_callback) {
       pending.error_callback(pending.rpc_id, pending.call_id, "RPC call timed out");
     }
   }
@@ -811,7 +813,7 @@ bool FoxgloveRpc::take_pending_rpc(const PendingRpcKey& key, PendingRpcCall& pen
   std::lock_guard lock(pending_rpc_mtx_);
   auto pending_iter = pending_rpc_calls_.find(key);
 
-  if (pending_iter == pending_rpc_calls_.end()) {
+  if VUNLIKELY (pending_iter == pending_rpc_calls_.end()) {
     return false;
   }
 

@@ -169,7 +169,7 @@ bool PointCloud::operator>>(Bytes& bytes) const noexcept {
   // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
   std::memcpy(bytes.data() + kMagicNumberBeginSize, this, sizeof(PointCloud));
 
-  if (data_ != nullptr && size_ != 0 && pack_size_ != 0) {
+  if VLIKELY (data_ != nullptr && size_ != 0 && pack_size_ != 0) {
     std::memcpy(bytes.data() + kMagicNumberBeginSize + sizeof(PointCloud), data_, size_ * pack_size_);
   }
 
@@ -232,7 +232,7 @@ bool PointCloud::shallow_copy(const PointCloud& target) noexcept {
 }
 
 bool PointCloud::deep_copy(const PointCloud& target) noexcept {
-  if (data_ && is_owner_ && target.data_ && capacity_ != 0 && capacity_ == target.size_ * target.pack_size_) {
+  if VLIKELY (data_ && is_owner_ && target.data_ && capacity_ != 0 && capacity_ == target.size_ * target.pack_size_) {
     if VUNLIKELY (this == &target) {
       return false;
     }
@@ -256,7 +256,7 @@ bool PointCloud::deep_copy(const PointCloud& target) noexcept {
     return false;
   }
 
-  if (data_ != nullptr && size_ != 0 && pack_size_ != 0) {
+  if VLIKELY (data_ != nullptr && size_ != 0 && pack_size_ != 0) {
     capacity_ = size_ * pack_size_;
 
     data_ = Bytes::bytes_malloc(capacity_);

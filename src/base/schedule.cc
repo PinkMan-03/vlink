@@ -52,7 +52,7 @@ Schedule::Status::Status() : impl_(MemoryResource::make_shared<Schedule::Status:
 Schedule::Status::~Status() = default;
 
 Schedule::Status::Status(Status&& status) noexcept {
-  if (this == &status) {
+  if VUNLIKELY (this == &status) {
     return;
   }
 
@@ -60,7 +60,7 @@ Schedule::Status::Status(Status&& status) noexcept {
 }
 
 Schedule::Status& Schedule::Status::operator=(Status&& status) noexcept {
-  if (this == &status) {
+  if VUNLIKELY (this == &status) {
     return *this;
   }
 
@@ -70,7 +70,7 @@ Schedule::Status& Schedule::Status::operator=(Status&& status) noexcept {
 }
 
 void Schedule::Status::set_valid(bool valid) {
-  if (impl_) {
+  if VLIKELY (impl_) {
     impl_->is_valid = valid;
   }
 }

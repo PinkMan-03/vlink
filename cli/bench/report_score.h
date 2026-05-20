@@ -159,6 +159,7 @@ inline double logistic_loss_penalty(double pct, double start_pct, double inflect
   if (pct <= start_pct || max_penalty <= 0.0) {
     return 0.0;
   }
+
   const double offset = std::max(0.001, inflection_pct - start_pct);
   const double s = 1.0 / (1.0 + std::exp(-steepness * (pct - start_pct - offset)));
   const double s0 = 1.0 / (1.0 + std::exp(steepness * offset));
@@ -185,28 +186,45 @@ inline double per_case_capacity_loss_factor(double loss_pct, double drop_pct) {
 
 inline double apply_speed_gate(double avg_score, double min_score) {
   const auto& c = score_config();
+
   if (min_score >= c.speed_gate_threshold || min_score >= 100.5) {
     return avg_score;
   }
+
   const double cap = min_score + c.speed_gate_headroom_factor * (100.0 - min_score);
   return std::min(avg_score, cap);
 }
 
 inline double apply_capacity_gate(double avg_score, double min_score) {
   const auto& c = score_config();
+
   if (min_score >= c.capacity_gate_threshold || min_score >= 100.5) {
     return avg_score;
   }
+
   const double cap = min_score + c.capacity_gate_headroom_factor * (100.0 - min_score);
   return std::min(avg_score, cap);
 }
 
 inline double confidence_multiplier(std::string_view label) {
   const auto& c = score_config();
-  if (label == "high") return c.confidence_high;
-  if (label == "medium") return c.confidence_medium;
-  if (label == "noisy") return c.confidence_noisy;
-  if (label == "solo") return c.confidence_solo;
+
+  if (label == "high") {
+    return c.confidence_high;
+  }
+
+  if (label == "medium") {
+    return c.confidence_medium;
+  }
+
+  if (label == "noisy") {
+    return c.confidence_noisy;
+  }
+
+  if (label == "solo") {
+    return c.confidence_solo;
+  }
+
   return c.confidence_unknown;
 }
 

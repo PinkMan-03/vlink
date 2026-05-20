@@ -137,6 +137,7 @@ bool FlatbuffersRuntime::load_dir(const std::string& dir, std::string* error) {
     if (error) {
       *error = e.what();
     }
+
     return false;
   }
 
@@ -175,6 +176,7 @@ std::shared_ptr<FlatbuffersSchemaContext> FlatbuffersRuntime::find_context(const
     if (error) {
       *error = e.what();
     }
+
     return nullptr;
   }
 
@@ -355,6 +357,7 @@ bool FlatbuffersObjectView::make_root_view(const FlatbuffersSchemaContext& ctx, 
   }
 
   const auto* root_table = flatbuffers::GetAnyRoot(raw.data());
+
   if (!root_table) {
     return false;
   }
@@ -374,6 +377,7 @@ bool FlatbuffersObjectView::get_child_view(const FlatbuffersObjectView& parent, 
   }
 
   const auto* obj = schema.objects()->Get(static_cast<uint32_t>(field.type()->index()));
+
   if (!obj) {
     return false;
   }
@@ -409,6 +413,7 @@ bool FlatbuffersObjectView::get_child_view(const FlatbuffersObjectView& parent, 
   }
 
   const auto* sub_struct = flatbuffers::GetFieldStruct(*as_struct(parent), field);
+
   if (!sub_struct) {
     return false;
   }
@@ -452,6 +457,7 @@ bool FlatbuffersObjectView::get_vector_elem_view(const FlatbuffersObjectView& pa
   }
 
   const auto* sub_table = flatbuffers::GetAnyVectorElemPointer<const flatbuffers::Table>(vec, index);
+
   if (!sub_table) {
     return false;
   }
@@ -595,12 +601,14 @@ std::string FlatbuffersObjectView::get_enum_value_name(const reflection::Field& 
   }
 
   const auto* enum_def = schema.enums()->Get(static_cast<flatbuffers::uoffset_t>(field.type()->index()));
+
   if (!enum_def || !enum_def->values()) {
     return {};
   }
 
   for (flatbuffers::uoffset_t i = 0; i < enum_def->values()->size(); ++i) {
     const auto* ev = enum_def->values()->Get(i);
+
     if (ev && ev->value() == value && ev->name()) {
       return ev->name()->str();
     }

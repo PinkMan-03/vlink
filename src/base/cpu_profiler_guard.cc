@@ -29,13 +29,13 @@ namespace vlink {
 
 // CpuProfilerGuard
 CpuProfilerGuard::CpuProfilerGuard(CpuProfiler* profiler) noexcept : profiler_(profiler) {
-  if (profiler_) {
+  if VLIKELY (profiler_) {
     profiler_->begin();
   }
 }
 
 CpuProfilerGuard::~CpuProfilerGuard() noexcept {
-  if (profiler_) {
+  if VLIKELY (profiler_) {
     profiler_->end();
   }
 }

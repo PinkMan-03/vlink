@@ -281,6 +281,7 @@ std::string get_pid_str() noexcept {
 
 std::string get_tmp_dir() noexcept {
   static std::string env_tmp_dir = get_env("VLINK_TMP_DIR");
+
   if (!env_tmp_dir.empty()) {
     return env_tmp_dir;
   }
@@ -727,6 +728,7 @@ std::vector<std::string> get_all_ipv4_address(bool filter_available) noexcept {
         for (auto* p_unicast = p_curr_addresses->FirstUnicastAddress; p_unicast != nullptr;
              p_unicast = p_unicast->Next) {
           sockaddr* sockaddr = p_unicast->Address.lpSockaddr;
+
           if VLIKELY (::inet_ntop(AF_INET, &(reinterpret_cast<sockaddr_in*>(sockaddr)->sin_addr), ip_buffer,
                                   INET_ADDRSTRLEN) != nullptr) {
             ip_addresses.emplace_back(ip_buffer);
@@ -1166,6 +1168,7 @@ bool set_thread_name(const std::string& name, std::thread* thread) noexcept {
 
   return SUCCEEDED(::SetThreadDescription(native_handle, wname.c_str()));
 #elif defined(__linux__) || defined(__QNX__)
+
   if (thread) {
     native_handle = thread->native_handle();
   } else {
@@ -1197,6 +1200,7 @@ bool set_thread_priority(int priority_level, int policy, std::thread* thread) no
 
   return ::SetThreadPriority(native_handle, priority_level) != FALSE;
 #elif defined(__linux__) || defined(__QNX__) || defined(__APPLE__)
+
   if (thread) {
     native_handle = thread->native_handle();
   } else {
@@ -1231,6 +1235,7 @@ bool set_thread_stick(uint32_t core_mask, std::thread* thread) noexcept {
   std::thread::native_handle_type native_handle;
 
 #ifdef _MSC_VER
+
   if (thread) {
     native_handle = thread->native_handle();
   } else {
@@ -1239,6 +1244,7 @@ bool set_thread_stick(uint32_t core_mask, std::thread* thread) noexcept {
 
   return ::SetThreadAffinityMask(native_handle, core_mask) != 0;
 #elif defined(__linux__) && !defined(__ANDROID__)
+
   if VUNLIKELY (core_mask == 0) {
     return false;
   }
@@ -1296,6 +1302,7 @@ uint64_t get_native_thread_id() noexcept {
 #if (MAC_OS_X_VERSION_MAX_ALLOWED < 1060) || defined(__POWERPC__)
     tid = ::pthread_mach_thread_np(pthread_self());
 #elif MAC_OS_X_VERSION_MIN_REQUIRED < 1060
+
     if (&::pthread_threadid_np) {
       ::pthread_threadid_np(nullptr, &tid);
     } else {
@@ -1340,6 +1347,7 @@ struct SignalHelper final {
       }
 
 #ifdef __unix__
+
       if (!instance.pass_through) {
         ::signal(signal, SIG_IGN);
       }
@@ -1901,6 +1909,7 @@ double get_memory_usage() noexcept {
   return (static_cast<double>(mem_status.ullTotalPhys - mem_status.ullAvailPhys) / mem_status.ullTotalPhys) * 100.0;
 #elif defined(__linux__)
   std::ifstream mem_file("/proc/meminfo");
+
   if (!mem_file.is_open()) {
     return -1;
   }
@@ -1921,6 +1930,7 @@ double get_memory_usage() noexcept {
     } else if (key == "Cached:") {
       mem_file >> cached;
     }
+
     mem_file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
   }
 
@@ -1968,6 +1978,7 @@ bool is_process_running(const std::string& process_name) noexcept {
 
 #ifdef _WIN32
   HANDLE hsnapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
   if VUNLIKELY (hsnapshot == INVALID_HANDLE_VALUE) {
     return false;
   }

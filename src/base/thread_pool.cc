@@ -233,6 +233,7 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
     do {
       {
         std::lock_guard lock(impl_->mtx);
+
         if VUNLIKELY (impl_->quit_flag) {
           return reject();
         }
@@ -252,6 +253,7 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
           if (!drop_one_normal_task()) {
             return reject();
           }
+
           impl_->normal_queue->emplace_back(droppable, std::move(callback));
           is_full = false;
 
@@ -265,6 +267,7 @@ bool ThreadPool::push_task(Callback&& callback, bool droppable, TaskOverflowPoli
           if (++retry_cnt > 10) {
             {
               std::lock_guard lock(impl_->mtx);
+
               if VUNLIKELY (impl_->quit_flag) {
                 return reject();
               }
@@ -438,6 +441,7 @@ size_t ThreadPool::get_max_task_count() const { return kMaxTaskSize; }
 bool ThreadPool::shutdown() {
   {
     std::lock_guard lock(impl_->mtx);
+
     if VUNLIKELY (impl_->quit_flag) {
       return false;
     }
@@ -476,7 +480,7 @@ void ThreadPool::init() {
     impl_->lockfree_task_count.store(0U, std::memory_order_release);
   }
 
-  if (impl_->thread_count == 0) {
+  if VUNLIKELY (impl_->thread_count == 0) {
     VLOG_E("ThreadPool: Thread count is zero.");
     impl_->quit_flag = true;
     return;
@@ -545,6 +549,7 @@ void ThreadPool::init() {
           impl->lockfree_task_count.fetch_sub(1U, std::memory_order_acq_rel);
 
           auto& task = std::get<0>(task_tuple);
+
           if VLIKELY (task) {
             task();
           }

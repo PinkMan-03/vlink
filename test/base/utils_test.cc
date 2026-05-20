@@ -552,6 +552,7 @@ TEST_SUITE("base-Utils - app identity extra") {
   TEST_CASE("get_app_path contains get_app_name") {
     std::string path = Utils::get_app_path();
     std::string name = Utils::get_app_name();
+
     if (!path.empty() && !name.empty()) {
       CHECK(path.find(name) != std::string::npos);
     }
@@ -559,6 +560,7 @@ TEST_SUITE("base-Utils - app identity extra") {
 
   TEST_CASE("get_tmp_dir returns an existing directory") {
     std::string tmp = Utils::get_tmp_dir();
+
     if (!tmp.empty()) {
       CHECK(std::filesystem::exists(tmp));
     }

@@ -81,6 +81,7 @@ int main() {
           resp.result = 0.0;
           resp.success = false;
         }
+
         break;
       case 4:
         resp.result = std::pow(req.x, req.y);
@@ -137,6 +138,7 @@ int main() {
   {
     MathRequest req{6.0, 7.0, 2};  // 6 * 7
     auto result = client.invoke(req);
+
     if (result.has_value()) {
       VLOG_I("[Client] 6 * 7 = ", result->result, " success=", result->success);
     } else {
@@ -146,6 +148,7 @@ int main() {
   {
     MathRequest req{2.0, 10.0, 4};  // 2^10
     auto result = client.invoke(req);
+
     if (result.has_value()) {
       VLOG_I("[Client] 2^10 = ", result->result, " success=", result->success);
     }
@@ -167,6 +170,7 @@ int main() {
   {
     MathRequest req{15.0, 4.0, 3};  // 15 / 4
     auto result = client.invoke(req, 1000ms);
+
     if (result.has_value()) {
       VLOG_I("[Client] 15 / 4 = ", result->result, " success=", result->success);
     }
@@ -179,6 +183,7 @@ int main() {
   for (int i = 1; i <= 5; ++i) {
     MathRequest req{static_cast<double>(i), static_cast<double>(i), 2};
     auto result = client.invoke(req);
+
     if (result.has_value()) {
       VLOG_I("[Client] ", i, " * ", i, " = ", result->result);
     }

@@ -131,7 +131,7 @@ int main(int argc, char* argv[]) {
   auto output_path = program.get<std::string>("--output");
   std::error_code input_ec;
 
-  if (!std::filesystem::exists(input_path, input_ec) || input_ec) {
+  if VUNLIKELY (!std::filesystem::exists(input_path, input_ec) || input_ec) {
     std::cerr << "Input file not found: " << input_path << std::endl;
     return 1;
   }
@@ -185,7 +185,7 @@ int main(int argc, char* argv[]) {
 
   auto reader = vlink::BagReader::create(input_path);
 
-  if (!reader) {
+  if VUNLIKELY (!reader) {
     std::cerr << "Failed to open bag file: " << input_path << std::endl;
     return 1;
   }
@@ -212,7 +212,7 @@ int main(int argc, char* argv[]) {
   auto rec = rerun::RecordingStream(name);
   auto save_err = rec.save(output_path);
 
-  if (save_err.is_err()) {
+  if VUNLIKELY (save_err.is_err()) {
     std::cerr << "Failed to save RRD file '" << output_path << "': " << save_err.description << std::endl;
     return 1;
   }
@@ -286,7 +286,7 @@ int main(int argc, char* argv[]) {
         std::string entity_path = url;
         auto transport_pos = url.find("://");
 
-        if (transport_pos != std::string::npos) {
+        if VLIKELY (transport_pos != std::string::npos) {
           entity_path = url.substr(0, transport_pos) + "/" + url.substr(transport_pos + 3);
         }
 
@@ -294,7 +294,7 @@ int main(int argc, char* argv[]) {
 
         auto total = ++msg_processed;
 
-        if (total % 1000 == 0 && info.message_count > 0) {
+        if VUNLIKELY (total % 1000 == 0 && info.message_count > 0) {
           double progress = static_cast<double>(total) / static_cast<double>(info.message_count) * 100.0;
 
           std::cerr << "\rProgress: " << std::fixed << std::setprecision(1) << progress << "% (" << total << "/"
@@ -314,7 +314,7 @@ int main(int argc, char* argv[]) {
 
   auto flush_err = rec.flush_blocking();
 
-  if (flush_err.is_err()) {
+  if VUNLIKELY (flush_err.is_err()) {
     MLOG_W("Rerun flush error: {}", flush_err.description);
   }
 
@@ -325,10 +325,10 @@ int main(int argc, char* argv[]) {
 
   std::error_code output_ec;
 
-  if (std::filesystem::exists(output_path, output_ec) && !output_ec) {
+  if VLIKELY (std::filesystem::exists(output_path, output_ec) && !output_ec) {
     auto output_size = std::filesystem::file_size(output_path, output_ec);
 
-    if (!output_ec) {
+    if VLIKELY (!output_ec) {
       std::cerr << "  File size: " << output_size << " bytes" << std::endl;
     }
   }

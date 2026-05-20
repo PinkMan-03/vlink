@@ -200,6 +200,7 @@ int main() {
     std::string env = "dev";  // Would come from DEPLOY_ENV or similar
 
     vlink::UrlRemap remap;
+
     if (env == "dev") {
       remap.load(dev_json);
     } else if (env == "staging") {

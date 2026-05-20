@@ -57,7 +57,9 @@ struct JsonPrinter {
   inline static std::vector<std::string>* filter_list{nullptr};
 
   void AddNewLine() {
-    if (opts.indent_step >= 0) text += '\n';
+    if (opts.indent_step >= 0) {
+      text += '\n';
+    }
   }
 
   void AddIndent(int ident) { text.append(ident, ' '); }
@@ -65,9 +67,15 @@ struct JsonPrinter {
   int Indent() const { return std::max(opts.indent_step, 0); }
 
   void OutputIdentifier(const std::string& name) {
-    if (opts.strict_json) text += '\"';
+    if (opts.strict_json) {
+      text += '\"';
+    }
+
     text += name;
-    if (opts.strict_json) text += '\"';
+
+    if (opts.strict_json) {
+      text += '\"';
+    }
   }
 
   template <typename T>
@@ -124,7 +132,9 @@ struct JsonPrinter {
   }
 
   void AddComma() {
-    if (!opts.protobuf_ascii_alike) text += ',';
+    if (!opts.protobuf_ascii_alike) {
+      text += ',';
+    }
   }
 
   template <typename Container, typename SizeT = typename Container::size_type>
@@ -138,6 +148,7 @@ struct JsonPrinter {
         AddComma();
         AddNewLine();
       }
+
       AddIndent(elem_indent);
       PrintScalar(c[i], type, elem_indent);
     }
@@ -159,10 +170,14 @@ struct JsonPrinter {
         AddComma();
         AddNewLine();
       }
+
       AddIndent(elem_indent);
       auto ptr = is_struct ? reinterpret_cast<const void*>(c.Data() + type.struct_def->bytesize * i) : c[i];
       auto err = PrintOffset(ptr, type, elem_indent, prev_val, static_cast<soffset_t>(i));
-      if (err) return err;
+
+      if (err) {
+        return err;
+      }
     }
     AddNewLine();
     AddIndent(indent);
@@ -192,11 +207,14 @@ struct JsonPrinter {
       case BASE_TYPE_UNION: {
         FLATBUFFERS_ASSERT(prev_val);
         auto union_type_byte = *prev_val;
+
         if (vector_index >= 0) {
           auto type_vec = reinterpret_cast<const Vector<uint8_t>*>(prev_val + ReadScalar<uoffset_t>(prev_val));
           union_type_byte = type_vec->Get(static_cast<uoffset_t>(vector_index));
         }
+
         auto enum_val = type.enum_def->ReverseLookup(union_type_byte, true);
+
         if (enum_val) {
           return PrintOffset(val, enum_val->union_type, indent, nullptr, -1);
         } else {
@@ -224,7 +242,9 @@ struct JsonPrinter {
 #define FLATBUFFERS_TD(ENUM, IDLTYPE, CTYPE, ...)                   \
   case BASE_TYPE_##ENUM: {                                          \
     auto err = PrintVector<CTYPE>(val, vec_type, indent, prev_val); \
-    if (err) return err;                                            \
+    if (err) {                                                      \
+      return err;                                                   \
+    }                                                               \
     break;                                                          \
   }
           FLATBUFFERS_GEN_TYPES(FLATBUFFERS_TD)
@@ -242,7 +262,9 @@ struct JsonPrinter {
 #define FLATBUFFERS_TD(ENUM, IDLTYPE, CTYPE, ...)                           \
   case BASE_TYPE_##ENUM: {                                                  \
     auto err = PrintArray<CTYPE>(val, type.fixed_length, vec_type, indent); \
-    if (err) return err;                                                    \
+    if (err) {                                                              \
+      return err;                                                           \
+    }                                                                       \
     break;                                                                  \
   }
           FLATBUFFERS_GEN_TYPES_SCALAR(FLATBUFFERS_TD)
@@ -286,6 +308,7 @@ struct JsonPrinter {
 
   const char* GenFieldOffset(const FieldDef& fd, const Table* table, bool fixed, int indent, const uint8_t* prev_val) {
     const void* val = nullptr;
+
     if (fixed) {
       FLATBUFFERS_ASSERT(IsStruct(fd.value.type) || IsArray(fd.value.type));
       val = reinterpret_cast<const Struct*>(table)->GetStruct<const void*>(fd.value.offset);
@@ -302,6 +325,7 @@ struct JsonPrinter {
       val = IsStruct(fd.value.type) ? table->GetStruct<const void*>(fd.value.offset)
                                     : table->GetPointer<const void*>(fd.value.offset);
     }
+
     return PrintOffset(val, fd.value.type, indent, prev_val, -1);
   }
 
@@ -318,6 +342,7 @@ struct JsonPrinter {
 
         std::string right_str = f;
         std::transform(right_str.begin(), right_str.end(), right_str.begin(), [](char& c) { return std::tolower(c); });
+
         if (left_str.find(right_str) != std::string::npos) {
           skip = black_mode ? true : false;
           break;
@@ -338,16 +363,20 @@ struct JsonPrinter {
       auto is_present = struct_def.fixed || table->CheckField(fd.value.offset);
       auto output_anyway =
           (opts.output_default_scalars_in_json || fd.key) && IsScalar(fd.value.type.base_type) && !fd.deprecated;
+
       if (is_present || output_anyway) {
         if (fd.value.type.base_type != BASE_TYPE_STRUCT && indent <= 0 && filter_list && !filter_list->empty()) {
           continue;
         }
+
         if (fieldout++) {
           AddComma();
         }
+
         AddNewLine();
         AddIndent(elem_indent);
         OutputIdentifier(fd.name);
+
         if (!opts.protobuf_ascii_alike ||
             (fd.value.type.base_type != BASE_TYPE_STRUCT && fd.value.type.base_type != BASE_TYPE_VECTOR))
           text += ':';
@@ -366,10 +395,15 @@ struct JsonPrinter {
 #undef FLATBUFFERS_TD
           {
             auto err = GenFieldOffset(fd, table, struct_def.fixed, elem_indent, prev_val);
-            if (err) return err;
+
+            if (err) {
+              return err;
+            }
+
             break;
           }
         }
+
         if (struct_def.fixed) {
           prev_val = reinterpret_cast<const uint8_t*>(table) + fd.value.offset;
         } else {
@@ -393,9 +427,11 @@ static const char* GenerateTextImpl(const Parser& parser, const Table* table, co
                                     std::string* _text) {
   JsonPrinter printer(parser, *_text);
   auto err = printer.GenStruct(struct_def, table, 0);
+
   if (err) {
     return err;
   }
+
   printer.AddNewLine();
   return nullptr;
 }

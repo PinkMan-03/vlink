@@ -78,6 +78,7 @@ struct NamedValue {
     ptr += sizeof(uint32_t);
 
     // Write name content
+
     if (name_len > 0) {
       std::memcpy(ptr, name.data(), name_len);
       ptr += name_len;
@@ -93,7 +94,9 @@ struct NamedValue {
 
   // Deserialize: read length-prefixed name, then fixed-size fields
   void operator<<(const vlink::Bytes& in) {
-    if (in.size() < sizeof(uint32_t)) return;
+    if (in.size() < sizeof(uint32_t)) {
+      return;
+    }
 
     const uint8_t* ptr = in.data();
 
@@ -103,7 +106,11 @@ struct NamedValue {
     ptr += sizeof(uint32_t);
 
     // Read name content
-    if (in.size() < sizeof(uint32_t) + name_len + sizeof(int32_t) + sizeof(double)) return;
+
+    if (in.size() < sizeof(uint32_t) + name_len + sizeof(int32_t) + sizeof(double)) {
+      return;
+    }
+
     name.assign(reinterpret_cast<const char*>(ptr), name_len);
     ptr += name_len;
 

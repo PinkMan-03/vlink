@@ -45,6 +45,7 @@ int main(int argc, char* argv[]) {
   uint64_t test_size = 1024;
 
   // Parse command-line arguments: optionally specify the payload size
+
   if (argc == 2) {
     std::string str(argv[1]);
     auto [p, error] = std::from_chars(str.data(), str.data() + str.size(), test_size);

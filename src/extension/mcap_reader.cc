@@ -656,7 +656,7 @@ void McapReader::update_status(Status status) {
   }
 
   if (has_changed) {
-    if (impl_->status_callback) {
+    if VLIKELY (impl_->status_callback) {
       impl_->status_callback(impl_->status);
     }
   }
@@ -690,6 +690,7 @@ void McapReader::do_pause() {
     {
       std::lock_guard time_lock(impl_->time_mtx);
       impl_->real_timer.restart();
+
       if (impl_->offset_elapsed > 0) {
         impl_->real_elapsed += (impl_->offset_timer.get() - impl_->pause_elapsed_timer.get()) * impl_->rate;
       }
@@ -1224,6 +1225,7 @@ void McapReader::open(const std::string& path) {
 #endif
 
     std::error_code exists_ec;
+
     if VUNLIKELY (!std::filesystem::exists(file_path, exists_ec)) {
       CLOG_F("McapReader: Mcap [%s] does not exist.", path.c_str());
       return;
@@ -1277,12 +1279,14 @@ void McapReader::open(const std::string& path) {
 
         for (const auto& file_info : files_json) {
 #ifdef _WIN32
+
           if (parent_path.empty()) {
             file_db = std::filesystem::path(Helpers::string_to_wstring(file_info));
           } else {
             file_db = parent_path / std::filesystem::path(Helpers::string_to_wstring(file_info));
           }
 #else
+
           if (parent_path.empty()) {
             file_db = std::filesystem::path(file_info);
           } else {
@@ -1293,6 +1297,7 @@ void McapReader::open(const std::string& path) {
           file_db_str = file_db.string();
 
           std::error_code db_exists_ec;
+
           if VUNLIKELY (!std::filesystem::exists(file_db, db_exists_ec)) {
             CLOG_F("McapReader: Mcap [%s] does not exist.", file_db_str.c_str());
             return;
@@ -1318,10 +1323,12 @@ void McapReader::open(const std::string& path) {
 
           std::error_code db_size_ec;
           std::uintmax_t file_size = std::filesystem::file_size(file_db, db_size_ec);
+
           if VUNLIKELY (db_size_ec) {
             CLOG_W("McapReader: file_size failed for [%s]: %s.", file_db_str.c_str(), db_size_ec.message().c_str());
             file_size = 0;
           }
+
           impl_->info.file_size += file_size;
 
           wrapper_file.start_timestamp_ns = impl_->info.start_timestamp * 1000'000;
@@ -1401,6 +1408,7 @@ void McapReader::open(const std::string& path) {
         if (header_json.contains("split_by_size")) {
           impl_->info.split_by_size = header_json["split_by_size"];
         }
+
         if (header_json.contains("split_by_time")) {
           impl_->info.split_by_time = header_json["split_by_time"];
         }
@@ -1435,9 +1443,11 @@ void McapReader::open(const std::string& path) {
           url_meta.index = url_info["index"];
           url_meta.url = url_info["url"];
           url_meta.url_type = url_info["type"];
+
           if (url_info.contains("action")) {
             url_meta.action_type = convert_action(url_info["action"].get<std::string>());
           }
+
           url_meta.ser_type = url_info["ser"];
 
           if (url_info.contains("encoding")) {
@@ -1482,10 +1492,12 @@ void McapReader::open(const std::string& path) {
 
       std::error_code single_size_ec;
       std::uintmax_t file_size = std::filesystem::file_size(file_path, single_size_ec);
+
       if VUNLIKELY (single_size_ec) {
         CLOG_W("McapReader: file_size failed for [%s]: %s.", path.c_str(), single_size_ec.message().c_str());
         file_size = 0;
       }
+
       impl_->info.file_size += file_size;
 
       wrapper_file.start_timestamp_ns = impl_->info.start_timestamp * 1000'000;

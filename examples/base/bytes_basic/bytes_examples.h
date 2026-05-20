@@ -119,7 +119,10 @@ inline void demo_range_for() {
   vlink::Bytes bytes{10, 20, 30, 40, 50};
   std::string values;
   for (uint8_t b : bytes) {
-    if (!values.empty()) values += ", ";
+    if (!values.empty()) {
+      values += ", ";
+    }
+
     values += std::to_string(b);
   }
   VLOG_I("Range-for: [", values, "]");
@@ -167,6 +170,7 @@ inline void demo_resize() {
   bool ret = false;
 
   ret = buf.reserve(200);
+
   if (ret) {
     VLOG_I("After reserve(200): size=", buf.size(), " capacity=", buf.capacity());
   }
@@ -178,6 +182,7 @@ inline void demo_resize() {
   }
 
   ret = buf.shrink_to(50);
+
   if (ret) {
     VLOG_I("After shrink_to(50): size=", buf.size());
   }

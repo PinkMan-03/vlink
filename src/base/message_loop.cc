@@ -189,7 +189,7 @@ MessageLoop::~MessageLoop() {
     impl_->alive_state->alive.store(false, std::memory_order_release);
   }
 
-  if (impl_->is_running) {
+  if VUNLIKELY (impl_->is_running) {
     CLOG_W("MessageLoop is still running(%s).", impl_->name.c_str());
     quit();
     wait_for_quit(1000, false);
@@ -203,6 +203,7 @@ MessageLoop::~MessageLoop() {
   {
     std::unique_lock lock(impl_->mtx);
     HANDLE thread_handle = impl_->thread_handle.exchange(nullptr);
+
     if (thread_handle != nullptr) {
       ::CloseHandle(thread_handle);
     }
@@ -217,6 +218,7 @@ MessageLoop::~MessageLoop() {
     for (auto iter = impl_->timer_set.begin(); iter != impl_->timer_set.end();) {
       Timer* timer = *iter;
       timer->clear();
+
       if (timer->is_once_type()) {
         timers_to_delete.emplace_back(timer);
         iter = impl_->timer_set.erase(iter);
@@ -282,6 +284,7 @@ bool MessageLoop::run() {
   {
     std::unique_lock lock(impl_->mtx);
     HANDLE thread_handle = impl_->thread_handle.exchange(nullptr);
+
     if (thread_handle != nullptr) {
       ::CloseHandle(thread_handle);
     }
@@ -319,6 +322,7 @@ bool MessageLoop::async_run() {
   {
     std::unique_lock lock(impl_->mtx);
     HANDLE thread_handle = impl_->thread_handle.exchange(nullptr);
+
     if (thread_handle != nullptr) {
       ::CloseHandle(thread_handle);
     }
@@ -396,6 +400,7 @@ bool MessageLoop::wait_for_quit(int ms, bool check) {
 
 #ifdef _WIN32
   HANDLE thread_handle = impl_->thread_handle.load();
+
   if (thread_handle != nullptr) {
     DWORD thread_status = STILL_ACTIVE;
     if (::GetExitCodeThread(thread_handle, &thread_status) && thread_status != STILL_ACTIVE) {
@@ -498,6 +503,7 @@ bool MessageLoop::wakeup() {
   }
 
   bool expected = false;
+
   if (!impl_->wakeup_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel,
                                                      std::memory_order_acquire)) {
     return true;
@@ -538,6 +544,7 @@ bool MessageLoop::is_busy() const { return impl_->is_busy; }
 
 size_t MessageLoop::get_task_count() const {
   std::lock_guard lock(impl_->mtx);
+
   if (impl_->type == kNormalType) {
     return impl_->normal_queue->size();
   } else if (impl_->type == kLockfreeType) {
@@ -554,6 +561,7 @@ bool MessageLoop::wait_for_idle(int ms, bool check) {
 
 #ifdef _WIN32
   HANDLE thread_handle = impl_->thread_handle.load();
+
   if (thread_handle != nullptr) {
     DWORD thread_status = STILL_ACTIVE;
     if (::GetExitCodeThread(thread_handle, &thread_status) && thread_status != STILL_ACTIVE) {
@@ -741,6 +749,7 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
     do {
       {
         std::lock_guard lock(impl_->mtx);
+
         if VUNLIKELY (impl_->quit_flag) {
           return reject();
         }
@@ -775,6 +784,7 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
           if (++retry_cnt > 10) {
             {
               std::lock_guard lock(impl_->mtx);
+
               if VUNLIKELY (impl_->quit_flag) {
                 return reject();
               }
@@ -923,6 +933,7 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
     do {
       {
         std::lock_guard lock(impl_->mtx);
+
         if VUNLIKELY (impl_->quit_flag) {
           return reject();
         }
@@ -958,6 +969,7 @@ bool MessageLoop::push_task(Callback&& callback, uint16_t priority, bool droppab
           if (++retry_cnt > 10) {
             {
               std::lock_guard lock(impl_->mtx);
+
               if VUNLIKELY (impl_->quit_flag) {
                 return reject();
               }
@@ -1017,6 +1029,7 @@ bool MessageLoop::push_lockfree_task(Callback&& callback) {
                     std::forward_as_tuple(start_time, std::move(callback)))) {
       return true;
     }
+
     Utils::yield_cpu();
   }
 
@@ -1302,6 +1315,7 @@ bool MessageLoop::process_timer_task(int64_t& next_sleep_time) {
     if VUNLIKELY (current_time < start_time) {
       remain_time = static_cast<int64_t>((start_time - current_time) + static_cast<uint64_t>(interval_time) -
                                          Timer::kMinInterval);
+
       if (remain_time < 0) {
         remain_time = 0;
       }
@@ -1377,6 +1391,7 @@ bool MessageLoop::process_timer_task(int64_t& next_sleep_time) {
           }
 
           bool pushed = false;
+
           if (timer->is_once_type()) {
             pushed = push_lockfree_task(timer->take_callback());
           } else {

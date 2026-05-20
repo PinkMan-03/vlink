@@ -103,6 +103,7 @@ std::shared_ptr<ddsc::DomainParticipant> DdscFactory::create_participant(uint8_t
 
     bool has_domain_ref = false;
     auto domain_iter = factory.domain_map_.find(conf.domain);
+
     if (domain_iter != factory.domain_map_.end()) {
       ++domain_iter->second.ref_count;
       has_domain_ref = true;
@@ -157,6 +158,7 @@ std::shared_ptr<ddsc::DomainParticipant> DdscFactory::create_participant(uint8_t
 
     dds_delete_qos(dds_qos);
   }
+
   return part;
 }
 
@@ -180,6 +182,7 @@ std::shared_ptr<ddsc::Topic> DdscFactory::create_topic(uint8_t type, const DdscC
   if (!dds_topic) {
     lock.unlock();
     auto* ptr = new ddsc::Topic(part->entity, topic);
+
     if VUNLIKELY (!ptr || ptr->entity <= 0) {
       VLOG_E("DdscFactory: Failed to create topic: ", topic, ".");
       delete ptr;
@@ -190,6 +193,7 @@ std::shared_ptr<ddsc::Topic> DdscFactory::create_topic(uint8_t type, const DdscC
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.topic_map_.find(id);
+
         if (iter != factory.topic_map_.end() && iter->second.expired()) {
           factory.topic_map_.erase(iter);
         }
@@ -247,6 +251,7 @@ std::shared_ptr<ddsc::Publisher> DdscFactory::create_publisher(uint8_t type, con
     lock.unlock();
 
     auto* ptr = new ddsc::Publisher(part->entity);
+
     if VUNLIKELY (!ptr || ptr->entity <= 0) {
       VLOG_E("DdscFactory: Failed to create publisher.");
       delete ptr;
@@ -257,6 +262,7 @@ std::shared_ptr<ddsc::Publisher> DdscFactory::create_publisher(uint8_t type, con
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.publisher_map_.find(id);
+
         if (iter != factory.publisher_map_.end() && iter->second.expired()) {
           factory.publisher_map_.erase(iter);
         }
@@ -300,6 +306,7 @@ std::shared_ptr<ddsc::Subscriber> DdscFactory::create_subscriber(uint8_t type, c
     lock.unlock();
 
     auto* ptr = new ddsc::Subscriber(part->entity);
+
     if VUNLIKELY (!ptr || ptr->entity <= 0) {
       VLOG_E("DdscFactory: Failed to create subscriber.");
       delete ptr;
@@ -310,6 +317,7 @@ std::shared_ptr<ddsc::Subscriber> DdscFactory::create_subscriber(uint8_t type, c
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.subscriber_map_.find(id);
+
         if (iter != factory.subscriber_map_.end() && iter->second.expired()) {
           factory.subscriber_map_.erase(iter);
         }
@@ -481,6 +489,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
   static auto& factory = DdscFactory::get();
 
   static const std::string& cyclone_dds_uri = process_cyclone_dds_uri();
+
   if (!cyclone_dds_uri.empty()) {
     return;
   }
@@ -557,6 +566,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
   ddsi_config_init_default(&config);
 
   auto [domain_iter, inserted] = factory.domain_map_.try_emplace(domain_id);
+
   if VUNLIKELY (!inserted) {
     return;
   }
@@ -583,6 +593,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
   }
 
 #ifdef DDS_HAS_SSL
+
   if (ssl_cfg_valid && prop_enable_tcp) {
     config.ssl_enable = 1;
 
@@ -605,6 +616,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
 
     int provided =
         (ssl_cfg.cert_file.empty() ? 0 : 1) + (ssl_cfg.key_file.empty() ? 0 : 1) + (ssl_cfg.ca_file.empty() ? 0 : 1);
+
     if VUNLIKELY (provided > 1) {
       VLOG_W(
           "DdscFactory: CycloneDDS only supports a single ssl_keystore (PEM/PKCS#12 with private key, certificate "
@@ -621,6 +633,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
     }
   }
 #else
+
   if (ssl_cfg_valid) {
     VLOG_W("DdscFactory: ssl.* properties are set but CycloneDDS was built without DDS_HAS_SSL support.");
   }
@@ -649,6 +662,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
   }
 
 #ifdef DDS_HAS_SHM
+
   if (prop_enable_shm) {
     config.enable_shm = 1;
   } else {
@@ -674,6 +688,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
 
     for (size_t i = 0; i < domain_config.network_interface_list.size(); ++i) {
       auto* interfaces = domain_config.network_interface_elements.get();
+
       if (i < domain_config.network_interface_list.size() - 1) {
         interfaces[i].next = &(interfaces[i + 1]);
       } else {
@@ -699,6 +714,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
 
     for (size_t i = 0; i < domain_config.peer_list.size(); ++i) {
       auto* peers = domain_config.peer_elements.get();
+
       if (i < domain_config.peer_list.size() - 1) {
         peers[i].next = &(peers[i + 1]);
       } else {
@@ -712,6 +728,7 @@ void DdscFactory::set_participant_qos(int32_t domain_id, dds_qos_t* dds_qos, con
   }
 
   auto domain = dds_create_domain_with_rawconfig(domain_id, &config);
+
   if VUNLIKELY (domain <= 0) {
     factory.domain_map_.erase(domain_iter);
     return;

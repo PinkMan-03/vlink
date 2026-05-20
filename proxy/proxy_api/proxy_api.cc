@@ -166,7 +166,7 @@ ProxyAPI::ProxyAPI(const Config& config) : impl_(std::make_unique<Impl>()) {
       return;
     }
 
-    if (impl_->main_elapsed_timer.is_active() && impl_->main_elapsed_timer.restart() > 5000) {
+    if VUNLIKELY (impl_->main_elapsed_timer.is_active() && impl_->main_elapsed_timer.restart() > 5000) {
       VLOG_I("ProxyApi: Wakeup.");
       reset_handle();
 
@@ -175,7 +175,7 @@ ProxyAPI::ProxyAPI(const Config& config) : impl_(std::make_unique<Impl>()) {
         send_control_sync(impl_->last_control);
       }
     } else {
-      if (impl_->connect_elapsed_timer.get() > 5000) {
+      if VUNLIKELY (impl_->connect_elapsed_timer.get() > 5000) {
         process_connected(false);
       }
     }
@@ -318,7 +318,7 @@ bool ProxyAPI::send_data(const Data& data) {
       return false;
     }
 
-    if (!pub_iter->second->has_subscribers()) {
+    if VUNLIKELY (!pub_iter->second->has_subscribers()) {
       return false;
     }
 
@@ -342,7 +342,7 @@ bool ProxyAPI::send_data(const Data& data) {
     return false;
   }
 
-  if (!impl_->data_pub->has_subscribers()) {
+  if VUNLIKELY (!impl_->data_pub->has_subscribers()) {
     return false;
   }
 
@@ -415,7 +415,7 @@ int64_t ProxyAPI::get_latency() const {
 
   std::shared_lock handle_lock(impl_->handle_mtx);
 
-  if (!impl_->data_sub || !impl_->data_sub->has_inited()) {
+  if VUNLIKELY (!impl_->data_sub || !impl_->data_sub->has_inited()) {
     return 0;
   }
 
@@ -429,7 +429,7 @@ SampleLostInfo ProxyAPI::get_lost() const {
 
   std::shared_lock handle_lock(impl_->handle_mtx);
 
-  if (!impl_->data_sub || !impl_->data_sub->has_inited()) {
+  if VUNLIKELY (!impl_->data_sub || !impl_->data_sub->has_inited()) {
     return SampleLostInfo();
   }
 
@@ -474,22 +474,24 @@ std::string ProxyAPI::get_format_sys_time(uint64_t time, bool enable_utc) {
   std::tm* tm_ptr = nullptr;
 
 #if defined(_WIN32) || defined(_WIN64)
+
   if (enable_utc) {
-    if (gmtime_s(&tm_result, &time_t_part) == 0) {
+    if VLIKELY (gmtime_s(&tm_result, &time_t_part) == 0) {
       tm_ptr = &tm_result;
     }
   } else {
-    if (localtime_s(&tm_result, &time_t_part) == 0) {
+    if VLIKELY (localtime_s(&tm_result, &time_t_part) == 0) {
       tm_ptr = &tm_result;
     }
   }
 #else
+
   if (enable_utc) {
-    if (gmtime_r(&time_t_part, &tm_result) != nullptr) {
+    if VLIKELY (gmtime_r(&time_t_part, &tm_result) != nullptr) {
       tm_ptr = &tm_result;
     }
   } else {
-    if (localtime_r(&time_t_part, &tm_result) != nullptr) {
+    if VLIKELY (localtime_r(&time_t_part, &tm_result) != nullptr) {
       tm_ptr = &tm_result;
     }
   }
@@ -566,6 +568,7 @@ void ProxyAPI::sync_direct_maps(const Control& control) {
       desired_sub_meta_map[info.url] = UrlMeta{info.url, info.ser, info.schema, kSubscriber};
 
       // A setter is the field data source; observe it through getter semantics.
+
       if ((info.type & kSetter) != 0U) {
         getter_url_set.emplace(info.url);
       }
@@ -684,7 +687,7 @@ void ProxyAPI::sync_direct_maps(const Control& control) {
       sub->listen([this, sub_ptr = sub.get(), data](const auto& bytes) mutable {
         std::shared_lock data_lock(impl_->data_mtx);
 
-        if (!impl_->data_callback) {
+        if VUNLIKELY (!impl_->data_callback) {
           return;
         }
 
@@ -696,6 +699,7 @@ void ProxyAPI::sync_direct_maps(const Control& control) {
       });
 
       impl_->sub_map.emplace(url, std::move(sub));
+
       if (want_getter) {
         impl_->getter_sub_urls.emplace(url);
       }
@@ -711,7 +715,7 @@ bool ProxyAPI::send_control_sync(const Control& control) {
     return false;
   }
 
-  if (!impl_->control_pub->has_subscribers()) {
+  if VUNLIKELY (!impl_->control_pub->has_subscribers()) {
     return false;
   }
 
@@ -891,7 +895,7 @@ void ProxyAPI::reset_handle() {
 
       if VUNLIKELY (!t_data.hostname().empty()) {
         std::shared_lock version_lock(impl_->version_mtx);
-        if (t_data.hostname() != impl_->hostname) {
+        if VUNLIKELY (t_data.hostname() != impl_->hostname) {
           return;
         }
       }
@@ -907,7 +911,8 @@ void ProxyAPI::reset_handle() {
       }
 
       std::shared_lock lock(impl_->data_mtx);
-      if (impl_->data_callback) {
+
+      if VLIKELY (impl_->data_callback) {
         Data data;
         data.url = t_data.url();
         data.ser = t_data.ser();
@@ -938,7 +943,7 @@ void ProxyAPI::reset_handle() {
 
       if VUNLIKELY (!pbdata.hostname().empty()) {
         std::shared_lock version_lock(impl_->version_mtx);
-        if (pbdata.hostname() != impl_->hostname) {
+        if VUNLIKELY (pbdata.hostname() != impl_->hostname) {
           return;
         }
       }
@@ -954,7 +959,8 @@ void ProxyAPI::reset_handle() {
       }
 
       std::shared_lock lock(impl_->data_mtx);
-      if (impl_->data_callback) {
+
+      if VLIKELY (impl_->data_callback) {
         Data data;
         data.url = std::move(pbdata.url());
         data.ser = std::move(pbdata.ser());
@@ -1001,7 +1007,7 @@ void ProxyAPI::reset_handle() {
     {
       std::unique_lock lock(impl_->version_mtx);
 
-      if (!time.hostname().empty()) {
+      if VLIKELY (!time.hostname().empty()) {
         impl_->hostname_set.emplace(time.hostname());
       }
 
@@ -1013,10 +1019,11 @@ void ProxyAPI::reset_handle() {
         if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
           process_error(kMultiProxyError);
         }
+
         return;
       }
 
-      if (!time.machine_id().empty()) {
+      if VLIKELY (!time.machine_id().empty()) {
         impl_->machine_id_set.emplace(time.machine_id());
       }
 
@@ -1028,6 +1035,7 @@ void ProxyAPI::reset_handle() {
         if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
           process_error(kMultiProxyError);
         }
+
         return;
       }
 
@@ -1085,7 +1093,7 @@ void ProxyAPI::reset_handle() {
 
     if VUNLIKELY (!pb_info_list.hostname().empty()) {
       std::shared_lock version_lock(impl_->version_mtx);
-      if (pb_info_list.hostname() != impl_->hostname) {
+      if VUNLIKELY (pb_info_list.hostname() != impl_->hostname) {
         return;
       }
     }
@@ -1156,7 +1164,8 @@ void ProxyAPI::reset_handle() {
     }
 
     std::shared_lock lock(impl_->info_mtx);
-    if (impl_->info_callback) {
+
+    if VLIKELY (impl_->info_callback) {
       impl_->info_callback(info_list);
     }
   });
@@ -1166,17 +1175,18 @@ void ProxyAPI::reset_handle() {
 
     {
       std::shared_lock lock(impl_->control_mtx);
+
       if (!is_ready_to_quit() && connected && impl_->last_control.mode != kOffline &&
           impl_->config.role == kController) {
         post_task([this, control = impl_->last_control]() {
-          if (!impl_->control_ret) {
+          if VUNLIKELY (!impl_->control_ret) {
             send_control_sync(control);
           }
         });
       }
     }
 
-    if (!connected) {
+    if VUNLIKELY (!connected) {
       process_connected(false);
     }
   });
@@ -1200,7 +1210,8 @@ void ProxyAPI::process_connected(bool connected) {
 
     {
       std::shared_lock lock(impl_->connect_mtx);
-      if (impl_->connect_callback) {
+
+      if VLIKELY (impl_->connect_callback) {
         impl_->connect_callback(connected);
       }
     }
@@ -1218,7 +1229,8 @@ void ProxyAPI::process_time(uint64_t sys_time, uint64_t boot_time) {
   impl_->boot_elapsed_timer.restart();
 
   std::shared_lock lock(impl_->time_mtx);
-  if (impl_->time_callback) {
+
+  if VLIKELY (impl_->time_callback) {
     impl_->time_callback(sys_time, boot_time);
   }
 }
@@ -1233,7 +1245,8 @@ void ProxyAPI::process_error(Error error) {
     }
 
     std::shared_lock lock(impl_->error_mtx);
-    if (impl_->error_callback) {
+
+    if VLIKELY (impl_->error_callback) {
       impl_->error_callback(error);
     }
   }

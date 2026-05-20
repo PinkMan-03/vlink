@@ -153,10 +153,12 @@ void demo_timeout_detection() {
   while (!deadline.has_expired()) {
     iteration++;
     // Simulate checking for a response.
+
     if (iteration == 5) {
       response_received = true;
       break;
     }
+
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
@@ -178,15 +180,19 @@ void demo_retry_with_deadline() {
   while (!overall.has_expired()) {
     attempt++;
     bool success = (attempt >= 4);
+
     if (success) {
       VLOG_I("  Success on attempt ", attempt);
       break;
     }
+
     VLOG_I("  Attempt ", attempt, " failed, remaining=", overall.remaining_time(), " ms");
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
   }
 
-  if (overall.has_expired()) VLOG_W("  Retries exhausted within deadline");
+  if (overall.has_expired()) {
+    VLOG_W("  Retries exhausted within deadline");
+  }
 }
 
 int main() {

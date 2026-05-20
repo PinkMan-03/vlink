@@ -73,6 +73,7 @@ int main() {
     example::CalcRequest req{10, 3, '+'};
     example::CalcResponse resp{};
     bool ok = client.invoke(req, resp);
+
     if (ok) {
       VLOG_I("[Client] 10 + 3 = ", resp.result);
     } else {
@@ -90,6 +91,7 @@ int main() {
   {
     example::CalcRequest req{20, 4, '*'};
     auto result = client.invoke(req);
+
     if (result.has_value()) {
       VLOG_I("[Client] 20 * 4 = ", result->result);
     } else {

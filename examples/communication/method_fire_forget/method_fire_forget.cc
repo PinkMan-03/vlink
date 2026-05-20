@@ -159,6 +159,7 @@ int main() {
   int send_ok = 0;
   for (int i = 0; i < kBurstSize; ++i) {
     LogEntry entry{1, i, static_cast<int64_t>(i)};
+
     if (burst_client.send(entry)) {
       send_ok++;
     }

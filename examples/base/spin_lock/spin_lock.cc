@@ -79,6 +79,7 @@ int main() {
 
     bool third = lock.try_lock();
     MLOG_I("  Third try_lock (after unlock): {}", third);
+
     if (third) {
       lock.unlock();
     }

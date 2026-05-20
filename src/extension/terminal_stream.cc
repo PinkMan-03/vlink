@@ -131,7 +131,7 @@ TerminalStream& TerminalStream::operator<<(char c) noexcept {
 }
 
 TerminalStream& TerminalStream::operator<<(const char* str) noexcept {
-  if (str == nullptr) {
+  if VUNLIKELY (str == nullptr) {
     return *this;
   }
 
@@ -204,7 +204,7 @@ TerminalStream& TerminalStream::operator<<(const void* ptr) noexcept {
   char buf[32];
   int len = std::snprintf(buf, sizeof(buf), "%p", ptr);
 
-  if (len > 0) {
+  if VLIKELY (len > 0) {
     write_to_buffer(buf, static_cast<size_t>(len));
   }
 
@@ -236,15 +236,15 @@ void TerminalStream::flush_unlocked() noexcept {
   while (remaining > 0) {
     auto written = VLINK_TERM_WRITE(fd_, data, static_cast<unsigned int>(remaining));
 
-    if (written < 0) {
-      if (errno == EINTR) {
+    if VUNLIKELY (written < 0) {
+      if VUNLIKELY (errno == EINTR) {
         continue;
       }
 
       break;
     }
 
-    if (written == 0) {
+    if VUNLIKELY (written == 0) {
       break;
     }
 
@@ -267,6 +267,7 @@ void TerminalStream::flush_unlocked() noexcept {
   write_pos_ = 0;
 
 #ifndef _WIN32
+
   if (is_tty_.load(std::memory_order_acquire)) {
     ::tcdrain(fd_);
   }
@@ -274,7 +275,7 @@ void TerminalStream::flush_unlocked() noexcept {
 }
 
 void TerminalStream::write_to_buffer(const char* data, size_t len) noexcept {
-  if (len == 0) {
+  if VUNLIKELY (len == 0) {
     return;
   }
 
@@ -304,15 +305,15 @@ void TerminalStream::write_to_buffer(const char* data, size_t len) noexcept {
     while (remaining > 0) {
       auto written = VLINK_TERM_WRITE(fd_, data, static_cast<unsigned int>(remaining));
 
-      if (written < 0) {
-        if (errno == EINTR) {
+      if VUNLIKELY (written < 0) {
+        if VUNLIKELY (errno == EINTR) {
           continue;
         }
 
         break;
       }
 
-      if (written == 0) {
+      if VUNLIKELY (written == 0) {
         break;
       }
 
@@ -363,10 +364,10 @@ TerminalStream& TerminalStream::write_signed(long long value) noexcept {  // NOL
   if (value < 0) {
     negative = true;
 
-    if (value == std::numeric_limits<long long>::min()) {  // NOLINT(runtime/int,google-runtime-int)
+    if VUNLIKELY (value == std::numeric_limits<long long>::min()) {  // NOLINT(runtime/int,google-runtime-int)
       int len = std::snprintf(buf, sizeof(buf), "%lld", value);
 
-      if (len > 0) {
+      if VLIKELY (len > 0) {
         write_to_buffer(buf, static_cast<size_t>(len));
       }
 
@@ -421,7 +422,7 @@ TerminalStream& TerminalStream::write_double(double value) noexcept {
   char buf[64];
   int len = std::snprintf(buf, sizeof(buf), "%g", value);
 
-  if (len > 0) {
+  if VLIKELY (len > 0) {
     write_to_buffer(buf, static_cast<size_t>(len));
   }
 
@@ -435,7 +436,7 @@ TerminalStream& TerminalStream::write_long_double(long double value) noexcept {
   char buf[64];
   int len = std::snprintf(buf, sizeof(buf), "%Lg", value);
 
-  if (len > 0) {
+  if VLIKELY (len > 0) {
     write_to_buffer(buf, static_cast<size_t>(len));
   }
 

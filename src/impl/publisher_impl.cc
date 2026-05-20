@@ -65,7 +65,7 @@ void PublisherImpl::detect_subscribers(ConnectCallback&& callback) {
 }
 
 bool PublisherImpl::wait_for_subscribers(std::chrono::milliseconds timeout) {
-  if (has_subscribers()) {
+  if VLIKELY (has_subscribers()) {
     return true;
   }
 
@@ -77,7 +77,7 @@ bool PublisherImpl::wait_for_subscribers(std::chrono::milliseconds timeout) {
 
   auto predicate = [this]() -> bool { return has_subscribers() || is_interrupted(); };
 
-  if (timeout.count() < 0) {
+  if VUNLIKELY (timeout.count() < 0) {
     helper_->connected_cv.wait(lock, std::move(predicate));
     return has_subscribers();
   } else {

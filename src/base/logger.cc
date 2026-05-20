@@ -91,12 +91,14 @@ namespace vlink {
   std::tm now_tm{};
 
 #if defined(_WIN32)
+
   if (use_utc) {
     gmtime_s(&now_tm, &now_time_t);
   } else {
     localtime_s(&now_tm, &now_time_t);
   }
 #else
+
   if (use_utc) {
     gmtime_r(&now_time_t, &now_tm);
   } else {
@@ -908,6 +910,7 @@ Logger::~Logger() noexcept {
 #elif defined(VLINK_ENABLE_LOG_NAT) && defined(__ANDROID__)
 #elif defined(VLINK_ENABLE_LOG_NAT) && defined(__QNX__)
 #elif defined(VLINK_ENABLE_LOG_NAT) && defined(__linux__)
+
   if (impl_->kmsg_dev.is_open()) {
     impl_->kmsg_dev.close();
   }
@@ -1229,6 +1232,7 @@ void Logger::write_to_file(Level level, std::string_view log) noexcept {
   slog2c(impl_->slog2_buffer, ::gettid(), nat_level, log.data());
 
 #elif defined(VLINK_ENABLE_LOG_NAT) && defined(__linux__)
+
   if (impl_->kmsg_dev.is_open()) {
     std::lock_guard lock(impl_->file_mtx);
 

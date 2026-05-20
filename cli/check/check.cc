@@ -101,7 +101,7 @@ enum class DiagType : uint8_t {
   FILE* pipe = ::popen(cmd.c_str(), "r");
 #endif
 
-  if (!pipe) {
+  if VUNLIKELY (!pipe) {
     return result;
   }
 
@@ -124,7 +124,7 @@ enum class DiagType : uint8_t {
 #elif defined(__linux__) || defined(__ANDROID__)
   auto out = run_cmd_output("ip route");
 
-  if (out.empty()) {
+  if VUNLIKELY (out.empty()) {
     out = run_cmd_output("route -n");
   }
 
@@ -150,7 +150,7 @@ struct DiagContext final {
 };
 
 static bool diag_accepted(const DiagContext& ctx, const std::string& title) {
-  if (ctx.filter.empty()) {
+  if VLIKELY (ctx.filter.empty()) {
     return true;
   }
 
@@ -237,7 +237,7 @@ static void end_diag(DiagContext& ctx, DiagType type, const std::string& detail)
 
 static void run_check(DiagContext& ctx, const std::string& title, int delay_ms,
                       const vlink::Function<void()>& check_fn) {
-  if (!diag_accepted(ctx, title)) {
+  if VUNLIKELY (!diag_accepted(ctx, title)) {
     return;
   }
 
@@ -298,7 +298,7 @@ void check_dds_ip(DiagContext& ctx) {
     return std::any_of(dds_ip_list.begin(), dds_ip_list.end(), [&ip](const std::string& entry) { return entry == ip; });
   });
 
-  if (available) {
+  if VLIKELY (available) {
     end_diag(ctx, DiagType::kPass, dds_ip + " is valid");
   } else {
     end_diag(ctx, DiagType::kFailed, dds_ip + " is invalid");
@@ -370,14 +370,14 @@ void check_log_dir_space(DiagContext& ctx) {
   try {
     auto space_info = std::filesystem::space(log_dir);
 
-    if (space_info.available >= 1024ULL * 1024ULL * 1024ULL) {
+    if VLIKELY (space_info.available >= 1024ULL * 1024ULL * 1024ULL) {
       end_diag(
           ctx, DiagType::kPass,
           "Available: " + vlink::Helpers::double_to_string(space_info.available / 1024.0 / 1024.0 / 1024.0, 2) + "GB");
       return;
     }
 
-    if (space_info.available >= 1024ULL * 1024ULL) {
+    if VLIKELY (space_info.available >= 1024ULL * 1024ULL) {
       end_diag(ctx, DiagType::kPass,
                "Available: " + vlink::Helpers::double_to_string(space_info.available / 1024.0 / 1024.0, 2) + "MB");
       return;
@@ -401,7 +401,7 @@ void check_log_dir_writable(DiagContext& ctx) {
 
   std::ofstream ofs(probe, std::ios::out | std::ios::trunc);
 
-  if (!ofs.is_open()) {
+  if VUNLIKELY (!ofs.is_open()) {
     end_diag(ctx, DiagType::kFailed, "Cannot write to " + log_dir);
     return;
   }
@@ -425,7 +425,7 @@ void check_directory_env(DiagContext& ctx, const std::string& env_key, bool warn
 
   std::error_code ec;
 
-  if (!std::filesystem::exists(dir, ec) || !std::filesystem::is_directory(dir, ec)) {
+  if VUNLIKELY (!std::filesystem::exists(dir, ec) || !std::filesystem::is_directory(dir, ec)) {
     end_diag(ctx, DiagType::kFailed, dir + " is not a directory");
     return;
   }
@@ -443,7 +443,7 @@ void check_file_env(DiagContext& ctx, const std::string& env_key, bool warn_if_m
 
   std::error_code ec;
 
-  if (!std::filesystem::exists(file, ec) || !std::filesystem::is_regular_file(file, ec)) {
+  if VUNLIKELY (!std::filesystem::exists(file, ec) || !std::filesystem::is_regular_file(file, ec)) {
     end_diag(ctx, DiagType::kFailed, file + " is not a file");
     return;
   }
@@ -556,7 +556,7 @@ void check_others_running(DiagContext& ctx) {
 
   int exit_code = _wsystem(vlink::Helpers::string_to_wstring(command_str).c_str());
 
-  if (exit_code < 0 || exit_code > 250) {
+  if VUNLIKELY (exit_code < 0 || exit_code > 250) {
     end_diag(ctx, DiagType::kFailed, "List running failed");
   } else if (exit_code == 0) {
     end_diag(ctx, DiagType::kPass, "No vlink user process running");
@@ -574,7 +574,7 @@ void check_others_running(DiagContext& ctx) {
     return;
   }
 
-  if (WIFEXITED(status)) {
+  if VLIKELY (WIFEXITED(status)) {
     const int exit_code = WEXITSTATUS(status);
 
     if VUNLIKELY (exit_code < 0 || exit_code > 250) {
@@ -584,6 +584,7 @@ void check_others_running(DiagContext& ctx) {
     } else {
       end_diag(ctx, DiagType::kWarning, std::to_string(exit_code) + " vlink user processes exist");
     }
+
     return;
   }
 
@@ -594,7 +595,7 @@ void check_others_running(DiagContext& ctx) {
 void check_singleton_conflict(DiagContext& ctx) {
   const bool ok = vlink::Utils::check_singleton("check-diag-probe");
 
-  if (ok) {
+  if VLIKELY (ok) {
     end_diag(ctx, DiagType::kPass, "No singleton conflict");
   } else {
     end_diag(ctx, DiagType::kWarning, "Lock dir may be contended");
@@ -604,7 +605,7 @@ void check_singleton_conflict(DiagContext& ctx) {
 void check_cpu_cores(DiagContext& ctx) {
   const unsigned cores = std::thread::hardware_concurrency();
 
-  if (cores == 0) {
+  if VUNLIKELY (cores == 0) {
     end_diag(ctx, DiagType::kWarning, "Unknown core count");
     return;
   }
@@ -613,7 +614,7 @@ void check_cpu_cores(DiagContext& ctx) {
 }
 
 void check_flag(DiagContext& ctx, const std::string& title, const std::string& name, bool is_on) {
-  if (!diag_accepted(ctx, title)) {
+  if VUNLIKELY (!diag_accepted(ctx, title)) {
     return;
   }
 
@@ -629,14 +630,14 @@ void check_flag(DiagContext& ctx, const std::string& title, const std::string& n
 [[maybe_unused]] std::string read_first_line(const std::string& path) {
   std::ifstream ifs(path);
 
-  if (!ifs.is_open()) {
+  if VUNLIKELY (!ifs.is_open()) {
     return {};
   }
 
   std::string line;
 
   while (std::getline(ifs, line)) {
-    if (!line.empty()) {
+    if VLIKELY (!line.empty()) {
       return vlink::Helpers::trim_string(line);
     }
   }
@@ -650,7 +651,7 @@ void check_platform_info(DiagContext& ctx) {
 #if defined(__linux__) || defined(__ANDROID__) || defined(__APPLE__)
   const auto kernel = vlink::Helpers::trim_string(run_cmd_output("uname -sr"));
 
-  if (kernel.empty()) {
+  if VUNLIKELY (kernel.empty()) {
     end_diag(ctx, DiagType::kWarning, "uname failed");
     return;
   }
@@ -670,13 +671,13 @@ void check_shm_space(DiagContext& ctx) {
   try {
     auto info = std::filesystem::space(shm_path);
 
-    if (info.available < 64ULL * 1024ULL * 1024ULL) {
+    if VUNLIKELY (info.available < 64ULL * 1024ULL * 1024ULL) {
       end_diag(ctx, DiagType::kFailed,
                "Only " + vlink::Helpers::double_to_string(info.available / 1024.0 / 1024.0, 2) + "MB free");
       return;
     }
 
-    if (info.available < 512ULL * 1024ULL * 1024ULL) {
+    if VUNLIKELY (info.available < 512ULL * 1024ULL * 1024ULL) {
       end_diag(ctx, DiagType::kWarning,
                vlink::Helpers::double_to_string(info.available / 1024.0 / 1024.0, 2) + "MB free (< 512MB)");
       return;
@@ -696,7 +697,7 @@ void check_sysctl_buffer(DiagContext& ctx, const std::string& path, int64_t warn
 #if defined(__linux__) || defined(__ANDROID__)
   const auto line = read_first_line(path);
 
-  if (line.empty()) {
+  if VUNLIKELY (line.empty()) {
     end_diag(ctx, DiagType::kWarning, "Cannot read " + path);
     return;
   }
@@ -704,7 +705,7 @@ void check_sysctl_buffer(DiagContext& ctx, const std::string& path, int64_t warn
   const int64_t value = vlink::Helpers::to_long(line);
   const std::string human = vlink::Helpers::format_file_size(static_cast<size_t>(value));
 
-  if (value < warn_below) {
+  if VUNLIKELY (value < warn_below) {
     end_diag(ctx, DiagType::kWarning, human + " (< " + vlink::Helpers::format_file_size(warn_below) + ")");
     return;
   }
@@ -741,7 +742,7 @@ void check_rp_filter(DiagContext& ctx) {
 #ifndef _WIN32
   struct rlimit rl{};
 
-  if (::getrlimit(resource_id, &rl) != 0) {
+  if VUNLIKELY (::getrlimit(resource_id, &rl) != 0) {
     end_diag(ctx, DiagType::kWarning, "getrlimit(" + label + ") failed");
     return;
   }
@@ -753,7 +754,7 @@ void check_rp_filter(DiagContext& ctx) {
 
   const std::string detail = label + "=" + std::to_string(rl.rlim_cur);
 
-  if (rl.rlim_cur < warn_below) {
+  if VUNLIKELY (rl.rlim_cur < warn_below) {
     end_diag(ctx, DiagType::kWarning, detail + " (< " + std::to_string(warn_below) + ")");
     return;
   }
@@ -772,7 +773,7 @@ void check_time_sync(DiagContext& ctx) {
   const bool ok = vlink::Utils::is_process_running("chronyd") || vlink::Utils::is_process_running("ntpd") ||
                   vlink::Utils::is_process_running("systemd-timesyncd");
 
-  if (ok) {
+  if VLIKELY (ok) {
     end_diag(ctx, DiagType::kPass, "Time sync daemon running");
     return;
   }
@@ -793,7 +794,7 @@ void check_dds_domain_range(DiagContext& ctx) {
 
   const int domain = vlink::Helpers::to_int(value, -1);
 
-  if (domain < 0 || domain > 232) {
+  if VUNLIKELY (domain < 0 || domain > 232) {
     end_diag(ctx, DiagType::kFailed, "VLINK_DDS_DOMAIN=" + value + " out of [0,232]");
     return;
   }
@@ -811,7 +812,7 @@ void check_log_level_range(DiagContext& ctx) {
 
   const int level = vlink::Helpers::to_int(value, -1);
 
-  if (level < 0 || level > 6) {
+  if VUNLIKELY (level < 0 || level > 6) {
     end_diag(ctx, DiagType::kFailed, "VLINK_LOG_LEVEL=" + value + " out of [0,6]");
     return;
   }
@@ -821,6 +822,7 @@ void check_log_level_range(DiagContext& ctx) {
 
 void check_roudi_running(DiagContext& ctx) {
 #ifdef VLINK_SUPPORT_SHM
+
   if (vlink::ShmConf::has_roudi_running()) {
     end_diag(ctx, DiagType::kPass, "RouDi management segment detected");
     return;
@@ -879,21 +881,21 @@ void check_interface_mtu(DiagContext& ctx) {
     }
   }
 
-  if (ip.empty()) {
+  if VUNLIKELY (ip.empty()) {
     end_diag(ctx, DiagType::kWarning, "No non-loopback IP");
     return;
   }
 
   const auto iface = vlink::Utils::get_interface_name_by_ipv4(ip);
 
-  if (iface.empty()) {
+  if VUNLIKELY (iface.empty()) {
     end_diag(ctx, DiagType::kWarning, "No interface for " + ip);
     return;
   }
 
   const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
 
-  if (fd < 0) {
+  if VUNLIKELY (fd < 0) {
     end_diag(ctx, DiagType::kWarning, "socket() failed");
     return;
   }
@@ -901,7 +903,7 @@ void check_interface_mtu(DiagContext& ctx) {
   struct ifreq ifr{};
   std::snprintf(ifr.ifr_name, IFNAMSIZ, "%s", iface.c_str());
 
-  if (::ioctl(fd, SIOCGIFMTU, &ifr) < 0) {
+  if VUNLIKELY (::ioctl(fd, SIOCGIFMTU, &ifr) < 0) {
     ::close(fd);
     end_diag(ctx, DiagType::kWarning, "ioctl(SIOCGIFMTU) failed on " + iface);
     return;
@@ -912,12 +914,12 @@ void check_interface_mtu(DiagContext& ctx) {
 
   const std::string detail = iface + " mtu=" + std::to_string(mtu);
 
-  if (mtu < 1280) {
+  if VUNLIKELY (mtu < 1280) {
     end_diag(ctx, DiagType::kFailed, detail + " (< 1280)");
     return;
   }
 
-  if (mtu < 1500) {
+  if VUNLIKELY (mtu < 1500) {
     end_diag(ctx, DiagType::kWarning, detail + " (< 1500)");
     return;
   }
@@ -1499,13 +1501,13 @@ std::pair<TestOutcome, std::string> run_event_roundtrip(const std::string& url, 
     sub.listen([&received_count, &mismatch, message_count](const std::string& payload) {
       const int idx = received_count.load();
 
-      if (idx >= message_count) {
+      if VUNLIKELY (idx >= message_count) {
         return;
       }
 
       const auto expected = std::string("payload-") + std::to_string(idx);
 
-      if (payload != expected) {
+      if VUNLIKELY (payload != expected) {
         mismatch = true;
       }
 
@@ -1514,7 +1516,7 @@ std::pair<TestOutcome, std::string> run_event_roundtrip(const std::string& url, 
 
     vlink::Publisher<std::string> pub(url);
 
-    if (!pub.wait_for_subscribers(std::chrono::milliseconds(timeout_ms))) {
+    if VUNLIKELY (!pub.wait_for_subscribers(std::chrono::milliseconds(timeout_ms))) {
       if (external_allowed) {
         return {TestOutcome::kWarning, "no subscriber within " + std::to_string(timeout_ms) + "ms"};
       }
@@ -1537,11 +1539,11 @@ std::pair<TestOutcome, std::string> run_event_roundtrip(const std::string& url, 
     return {TestOutcome::kFailed, "unknown exception during node construction"};
   }
 
-  if (mismatch) {
+  if VUNLIKELY (mismatch) {
     return {TestOutcome::kFailed, "payload mismatch"};
   }
 
-  if (received_count < message_count) {
+  if VUNLIKELY (received_count < message_count) {
     if (external_allowed && received_count == 0) {
       return {TestOutcome::kWarning,
               "delivered " + std::to_string(received_count) + "/" + std::to_string(message_count)};
@@ -1564,7 +1566,7 @@ std::pair<TestOutcome, std::string> run_method_roundtrip(const std::string& url,
 
     vlink::Client<std::string, std::string> client(url);
 
-    if (!client.wait_for_connected(std::chrono::milliseconds(timeout_ms))) {
+    if VUNLIKELY (!client.wait_for_connected(std::chrono::milliseconds(timeout_ms))) {
       if (external_allowed) {
         return {TestOutcome::kWarning, "server not reachable within " + std::to_string(timeout_ms) + "ms"};
       }
@@ -1574,11 +1576,11 @@ std::pair<TestOutcome, std::string> run_method_roundtrip(const std::string& url,
 
     std::string resp;
 
-    if (!client.invoke(std::string("ping"), resp, std::chrono::milliseconds(timeout_ms))) {
+    if VUNLIKELY (!client.invoke(std::string("ping"), resp, std::chrono::milliseconds(timeout_ms))) {
       return {TestOutcome::kFailed, "invoke timed out"};
     }
 
-    if (resp != "echo:ping") {
+    if VUNLIKELY (resp != "echo:ping") {
       return {TestOutcome::kFailed, "unexpected response '" + resp + "'"};
     }
 
@@ -1596,7 +1598,7 @@ std::pair<TestOutcome, std::string> run_field_roundtrip(const std::string& url, 
     vlink::Setter<int> setter(url);
     setter.set(42);
 
-    if (!getter.wait_for_value(std::chrono::milliseconds(timeout_ms))) {
+    if VUNLIKELY (!getter.wait_for_value(std::chrono::milliseconds(timeout_ms))) {
       if (external_allowed) {
         return {TestOutcome::kWarning, "getter did not receive a value in " + std::to_string(timeout_ms) + "ms"};
       }
@@ -1606,7 +1608,7 @@ std::pair<TestOutcome, std::string> run_field_roundtrip(const std::string& url, 
 
     const auto value = getter.get();
 
-    if (!value.has_value() || *value != 42) {
+    if VUNLIKELY (!value.has_value() || *value != 42) {
       return {TestOutcome::kFailed, "expected 42, got " + (value ? std::to_string(*value) : std::string("nullopt"))};
     }
 

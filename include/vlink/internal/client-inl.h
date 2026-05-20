@@ -99,7 +99,7 @@ inline Client<ReqT, RespT, SecT>::Client(const ConfT& conf, InitType type) {
     this->impl_->is_security_type = true;
   }
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -311,7 +311,8 @@ inline std::future<RespT> Client<ReqT, RespT, SecT>::async_invoke(const ReqT& re
     ret = call_bytes(req, [this, target_seq](const Bytes& resp_data) {
       std::lock_guard lock(future_mtx_);
       auto it = future_map_.find(target_seq);
-      if (it != future_map_.end()) {
+
+      if VLIKELY (it != future_map_.end()) {
         it->second->set_value(resp_data);
         future_map_.erase(it);
       }
@@ -359,8 +360,8 @@ inline std::future<RespT> Client<ReqT, RespT, SecT>::async_invoke(const ReqT& re
 
       auto it = future_map_.find(target_seq);
 
-      if (it != future_map_.end()) {
-        if (convert_success) {
+      if VLIKELY (it != future_map_.end()) {
+        if VLIKELY (convert_success) {
           it->second->set_value(resp);
         } else {
           try {
@@ -438,7 +439,7 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
       return false;
     }
 
-    if (!callback) {
+    if VUNLIKELY (!callback) {
       return this->impl_->call(req_sec_data, nullptr, timeout);
     }
 
@@ -458,7 +459,7 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
   } else {
     this->impl_->try_record(ActionType::kClientRequest, req_data);
 
-    if (!callback) {
+    if VUNLIKELY (!callback) {
       return this->impl_->call(req_data, nullptr, timeout);
     }
 
@@ -503,7 +504,7 @@ inline SecurityClient<ReqT, RespT>::SecurityClient(const ConfT& conf, SecurityCo
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -517,7 +518,7 @@ inline SecurityClient<ReqT, RespT>::SecurityClient(const std::string& url_str, S
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }

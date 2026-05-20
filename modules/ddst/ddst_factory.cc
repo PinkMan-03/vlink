@@ -158,6 +158,7 @@ std::shared_ptr<ddst::DomainParticipant> DdstFactory::create_participant(uint8_t
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.part_map_.find(id);
+
         if (iter != factory.part_map_.end() && iter->second.expired()) {
           factory.part_map_.erase(iter);
         }
@@ -193,6 +194,7 @@ std::shared_ptr<ddst::Topic> DdstFactory::create_topic(uint8_t type, const DdstC
   }
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "topic");
+
   if VUNLIKELY (!part) {
     VLOG_E("DdstFactory: Cannot create topic without participant.");
     return nullptr;
@@ -233,6 +235,7 @@ std::shared_ptr<ddst::Topic> DdstFactory::create_topic(uint8_t type, const DdstC
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.topic_map_.find(id);
+
         if (iter != factory.topic_map_.end() && iter->second.expired()) {
           factory.topic_map_.erase(iter);
         }
@@ -281,6 +284,7 @@ std::shared_ptr<ddst::Publisher> DdstFactory::create_publisher(uint8_t type, con
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "pub");
   const auto& writer_qos = get_qos_ext(conf.qos_ext, "writer");
+
   if VUNLIKELY (!part) {
     VLOG_E("DdstFactory: Cannot create publisher without participant.");
     return nullptr;
@@ -313,6 +317,7 @@ std::shared_ptr<ddst::Publisher> DdstFactory::create_publisher(uint8_t type, con
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.publisher_map_.find(id);
+
         if (iter != factory.publisher_map_.end() && iter->second.expired()) {
           factory.publisher_map_.erase(iter);
         }
@@ -345,6 +350,7 @@ std::shared_ptr<ddst::Subscriber> DdstFactory::create_subscriber(uint8_t type, c
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "sub");
   const auto& reader_qos = get_qos_ext(conf.qos_ext, "reader");
+
   if VUNLIKELY (!part) {
     VLOG_E("DdstFactory: Cannot create subscriber without participant.");
     return nullptr;
@@ -376,6 +382,7 @@ std::shared_ptr<ddst::Subscriber> DdstFactory::create_subscriber(uint8_t type, c
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.subscriber_map_.find(id);
+
         if (iter != factory.subscriber_map_.end() && iter->second.expired()) {
           factory.subscriber_map_.erase(iter);
         }
@@ -613,6 +620,7 @@ void DdstFactory::set_participant_qos(ddst::DomainParticipantQos& dds_qos, const
   dds_qos.transport.kinds = 0;
 
 #if !defined(__ANDROID__) && !defined(_WIN32)
+
   if (prop_enable_shm) {
     dds_qos.transport.addTransport(ddst::TRANSPORT_SHM_QOS);
   }

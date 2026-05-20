@@ -139,6 +139,7 @@ void FFmpegDecoder::post_data(int channel, int seq, const vlink::Bytes& raw_data
   }
 
 #ifdef VLINK_ENABLE_VIEWER_FFMPEG
+
   if VUNLIKELY (!impl_->codec_ctx) {
     return;
   }
@@ -335,6 +336,7 @@ uint32_t FFmpegDecoder::get_max_elapsed_time() const { return impl_->config.max_
 
 void FFmpegDecoder::on_begin() {
 #ifdef VLINK_ENABLE_VIEWER_FFMPEG
+
   if VUNLIKELY (impl_->codec) {
     return;
   }
@@ -483,6 +485,7 @@ void FFmpegDecoder::on_begin() {
 
 void FFmpegDecoder::on_end() {
 #ifdef VLINK_ENABLE_VIEWER_FFMPEG
+
   if VLIKELY (impl_->packet) {
     av_packet_free(&impl_->packet);
   }

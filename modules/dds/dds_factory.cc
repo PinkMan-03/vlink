@@ -161,6 +161,7 @@ std::shared_ptr<dds::DomainParticipant> DdsFactory::create_participant(uint8_t t
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.part_map_.find(id);
+
         if (iter != factory.part_map_.end() && iter->second.expired()) {
           factory.part_map_.erase(iter);
         }
@@ -214,6 +215,7 @@ std::shared_ptr<dds::Topic> DdsFactory::create_topic(uint8_t type, const DdsConf
   }
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "topic");
+
   if VUNLIKELY (!part) {
     VLOG_E("DdsFactory: Cannot create topic without participant.");
     return nullptr;
@@ -258,6 +260,7 @@ std::shared_ptr<dds::Topic> DdsFactory::create_topic(uint8_t type, const DdsConf
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.topic_map_.find(id);
+
         if (iter != factory.topic_map_.end() && iter->second.expired()) {
           factory.topic_map_.erase(iter);
         }
@@ -323,6 +326,7 @@ std::shared_ptr<dds::Publisher> DdsFactory::create_publisher(uint8_t type, const
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "pub");
   const auto& writer_qos = get_qos_ext(conf.qos_ext, "writer");
+
   if VUNLIKELY (!part) {
     VLOG_E("DdsFactory: Cannot create publisher without participant.");
     return nullptr;
@@ -355,6 +359,7 @@ std::shared_ptr<dds::Publisher> DdsFactory::create_publisher(uint8_t type, const
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.publisher_map_.find(id);
+
         if (iter != factory.publisher_map_.end() && iter->second.expired()) {
           factory.publisher_map_.erase(iter);
         }
@@ -387,6 +392,7 @@ std::shared_ptr<dds::Subscriber> DdsFactory::create_subscriber(uint8_t type, con
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "sub");
   const auto& reader_qos = get_qos_ext(conf.qos_ext, "reader");
+
   if VUNLIKELY (!part) {
     VLOG_E("DdsFactory: Cannot create subscriber without participant.");
     return nullptr;
@@ -418,6 +424,7 @@ std::shared_ptr<dds::Subscriber> DdsFactory::create_subscriber(uint8_t type, con
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.subscriber_map_.find(id);
+
         if (iter != factory.subscriber_map_.end() && iter->second.expired()) {
           factory.subscriber_map_.erase(iter);
         }
@@ -559,12 +566,14 @@ bool DdsFactory::write_cdr_data(dds::DataWriter* writer, const Bytes& bytes, rtp
   }
 
 #ifdef VLINK_SUPPORT_DDS_V3
+
   if (params) {
     return writer->write(bytes.to_ptr(), *params) == dds::RETCODE_OK;
   }
 
   return writer->write(bytes.to_ptr()) == dds::RETCODE_OK;
 #else
+
   if (params) {
     return writer->write(bytes.to_ptr(), *params);
   }
@@ -577,6 +586,7 @@ bool DdsFactory::take_data(dds::DataReader* reader, ReadMessage& msg) {
   auto ret = reader->take_next_sample(&msg.raw, &msg.info);
 
 #ifdef VLINK_SUPPORT_DDS_V3
+
   if (ret == dds::RETCODE_NO_DATA) {
     return false;
   }
@@ -586,6 +596,7 @@ bool DdsFactory::take_data(dds::DataReader* reader, ReadMessage& msg) {
     return false;
   }
 #else
+
   if (ret == ReturnCode_t::RETCODE_NO_DATA) {
     return false;
   }
@@ -611,6 +622,7 @@ bool DdsFactory::take_cdr_data(dds::DataReader* reader, ReadCdrMessage& msg) {
   auto ret = reader->take_next_sample(msg.sample, &msg.info);
 
 #ifdef VLINK_SUPPORT_DDS_V3
+
   if (ret == dds::RETCODE_NO_DATA) {
     return false;
   }
@@ -620,6 +632,7 @@ bool DdsFactory::take_cdr_data(dds::DataReader* reader, ReadCdrMessage& msg) {
     return false;
   }
 #else
+
   if (ret == ReturnCode_t::RETCODE_NO_DATA) {
     return false;
   }
@@ -759,6 +772,7 @@ void DdsFactory::set_participant_qos(dds::DomainParticipantQos& dds_qos, const C
   }
 
 #if !defined(__ANDROID__) && !defined(_WIN32)
+
   if (prop_enable_shm) {
     auto shm_descriptor = std::make_shared<rtps2::SharedMemTransportDescriptor>();
     dds_qos.transport().user_transports.emplace_back(std::move(shm_descriptor));

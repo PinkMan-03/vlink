@@ -78,7 +78,7 @@ inline Getter<ValueT, SecT>::Getter(const ConfT& conf, InitType type) {
     this->impl_->is_security_type = true;
   }
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -180,7 +180,7 @@ inline bool Getter<ValueT, SecT>::get_change_reporting() const {
 
 template <typename ValueT, SecurityType SecT>
 inline bool Getter<ValueT, SecT>::init() {
-  if (!Node<GetterImpl, SecT>::init()) {
+  if VUNLIKELY (!Node<GetterImpl, SecT>::init()) {
     return false;
   }
 
@@ -191,6 +191,7 @@ inline bool Getter<ValueT, SecT>::init() {
 
     {
       std::lock_guard lock(mtx_);
+
       if (change_reporting_) {
         if (value_.has_value() && last_cache_ == data) {
           return;
@@ -201,7 +202,7 @@ inline bool Getter<ValueT, SecT>::init() {
     }
 
     if constexpr (std::is_same_v<ValueT, Bytes>) {
-      if (callback_) {
+      if VLIKELY (callback_) {
         callback_(data);
       }
 
@@ -223,7 +224,7 @@ inline bool Getter<ValueT, SecT>::init() {
         return;
       }
 
-      if (callback_) {
+      if VLIKELY (callback_) {
         callback_(value);
       }
 
@@ -316,7 +317,7 @@ inline SecurityGetter<ValueT>::SecurityGetter(const ConfT& conf, SecurityConfigT
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -330,7 +331,7 @@ inline SecurityGetter<ValueT>::SecurityGetter(const std::string& url_str, Securi
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }

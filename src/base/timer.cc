@@ -108,7 +108,7 @@ Timer::~Timer() {
 }
 
 bool Timer::call_once(MessageLoop* message_loop, uint32_t interval_ms, Callback&& callback, uint16_t priority) {
-  if (!callback) {
+  if VUNLIKELY (!callback) {
     VLOG_E("Timer: Callback is null for call_once.");
     return false;
   }

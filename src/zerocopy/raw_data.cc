@@ -122,7 +122,7 @@ bool RawData::operator>>(Bytes& bytes) const noexcept {
   // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
   std::memcpy(bytes.data() + kMagicNumberBeginSize, this, sizeof(RawData));
 
-  if (data_ != nullptr && size_ != 0) {
+  if VLIKELY (data_ != nullptr && size_ != 0) {
     std::memcpy(bytes.data() + kMagicNumberBeginSize + sizeof(RawData), data_, size_);
   }
 
@@ -185,7 +185,7 @@ bool RawData::shallow_copy(const RawData& target) noexcept {
 }
 
 bool RawData::deep_copy(const RawData& target) noexcept {
-  if (data_ && is_owner_ && target.data_ && size_ != 0 && size_ == target.size_) {
+  if VLIKELY (data_ && is_owner_ && target.data_ && size_ != 0 && size_ == target.size_) {
     if VUNLIKELY (this == &target) {
       return false;
     }

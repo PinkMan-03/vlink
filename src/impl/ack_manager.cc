@@ -77,7 +77,7 @@ bool AckManager::process(RequestPtr request, int ms, ProcessCallback&& process_c
       return is_interrupted_ || request->generation != generation_ || request_set_.count(request) == 0;
     };
 
-    if (ms < 0) {
+    if VUNLIKELY (ms < 0) {
       request->cv.wait(lock, predicate);
     } else {
       ret = request->cv.wait_for(lock, std::chrono::milliseconds(ms), predicate);

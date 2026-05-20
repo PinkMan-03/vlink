@@ -468,11 +468,11 @@ inline constexpr bool has_endwith(std::string_view str, std::string_view target)
 }
 
 inline constexpr bool contains_substring(std::string_view sv, std::string_view needle) noexcept {
-  if (needle.empty()) {
+  if VUNLIKELY (needle.empty()) {
     return true;
   }
 
-  if (sv.size() < needle.size()) {
+  if VUNLIKELY (sv.size() < needle.size()) {
     return false;
   }
 

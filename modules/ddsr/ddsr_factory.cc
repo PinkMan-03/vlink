@@ -126,6 +126,7 @@ std::shared_ptr<ddsr::DomainParticipant> DdsrFactory::create_participant(uint8_t
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.part_map_.find(id);
+
         if (iter != factory.part_map_.end() && iter->second.expired()) {
           factory.part_map_.erase(iter);
         }
@@ -186,6 +187,7 @@ std::shared_ptr<ddsr::Topic> DdsrFactory::create_topic(uint8_t type, const DdsrC
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.topic_map_.find(id);
+
         if (iter != factory.topic_map_.end() && iter->second.expired()) {
           factory.topic_map_.erase(iter);
         }
@@ -233,6 +235,7 @@ std::shared_ptr<ddsr::Publisher> DdsrFactory::create_publisher(uint8_t type, con
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "pub");
   const auto& writer_qos = get_qos_ext(conf.qos_ext, "writer");
+
   if VUNLIKELY (!part || !part->entity) {
     VLOG_E("DdsrFactory: Cannot create publisher without participant.");
     return nullptr;
@@ -258,6 +261,7 @@ std::shared_ptr<ddsr::Publisher> DdsrFactory::create_publisher(uint8_t type, con
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.publisher_map_.find(id);
+
         if (iter != factory.publisher_map_.end() && iter->second.expired()) {
           factory.publisher_map_.erase(iter);
         }
@@ -290,6 +294,7 @@ std::shared_ptr<ddsr::Subscriber> DdsrFactory::create_subscriber(uint8_t type, c
 
   const auto& dds_qos_ext = get_qos_ext(conf.qos_ext, "sub");
   const auto& reader_qos = get_qos_ext(conf.qos_ext, "reader");
+
   if VUNLIKELY (!part || !part->entity) {
     VLOG_E("DdsrFactory: Cannot create subscriber without participant.");
     return nullptr;
@@ -315,6 +320,7 @@ std::shared_ptr<ddsr::Subscriber> DdsrFactory::create_subscriber(uint8_t type, c
       {
         std::lock_guard lock(factory.mtx_);
         auto iter = factory.subscriber_map_.find(id);
+
         if (iter != factory.subscriber_map_.end() && iter->second.expired()) {
           factory.subscriber_map_.erase(iter);
         }
@@ -579,6 +585,7 @@ void DdsrFactory::set_participant_qos(DDS_DomainParticipantQos& dds_qos, const C
   dds_qos.transport_builtin.mask = DDS_TRANSPORTBUILTIN_UDPv4;
 
 #if !defined(__ANDROID__) && !defined(_WIN32)
+
   if (prop_enable_shm) {
     dds_qos.transport_builtin.mask = DDS_TRANSPORTBUILTIN_UDPv4 | DDS_TRANSPORTBUILTIN_SHMEM;
   }
@@ -622,6 +629,7 @@ void DdsrFactory::set_participant_qos(DDS_DomainParticipantQos& dds_qos, const C
 
 std::string DdsrFactory::get_qos_ext(const Conf::PropertiesMap& ext, const std::string& key) {
   auto iter = ext.find(key);
+
   if (iter == ext.end()) {
     return "";
   }

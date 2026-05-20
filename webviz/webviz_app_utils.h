@@ -43,11 +43,11 @@ namespace vlink {
 namespace webviz {
 
 inline std::string resolve_relative_path(const std::filesystem::path& config_dir, const std::string& path) {
-  if (path.empty()) {
+  if VUNLIKELY (path.empty()) {
     return {};
   }
 
-  if (std::filesystem::path(path).is_absolute()) {
+  if VUNLIKELY (std::filesystem::path(path).is_absolute()) {
     return path;
   }
 
@@ -56,18 +56,18 @@ inline std::string resolve_relative_path(const std::filesystem::path& config_dir
 
 inline bool append_config_paths(const nlohmann::json& root, const char* key, const std::filesystem::path& config_dir,
                                 std::vector<std::string>& out) {
-  if (!root.contains(key) || !root[key].is_array()) {
+  if VUNLIKELY (!root.contains(key) || !root[key].is_array()) {
     return !root.contains(key);
   }
 
   for (const auto& item : root[key]) {
-    if (!item.is_string()) {
+    if VUNLIKELY (!item.is_string()) {
       return false;
     }
 
     auto path = item.get<std::string>();
 
-    if (!path.empty()) {
+    if VLIKELY (!path.empty()) {
       path = resolve_relative_path(config_dir, path);
     }
 
@@ -85,14 +85,14 @@ inline std::string normalize_token(std::string_view value) {
 }
 
 inline void append_filter_patterns(std::vector<std::string>& out, std::string_view value) {
-  if (value.empty()) {
+  if VUNLIKELY (value.empty()) {
     return;
   }
 
   for (const auto& item : Helpers::get_split_string(std::string(value), ' ')) {
     auto normalized = normalize_token(item);
 
-    if (normalized.empty()) {
+    if VUNLIKELY (normalized.empty()) {
       continue;
     }
 
@@ -110,7 +110,7 @@ inline void normalize_filter_patterns(std::vector<std::string>& filters) {
     append_filter_patterns(split_tokens, item);
 
     for (auto& token : split_tokens) {
-      if (seen.insert(token).second) {
+      if VLIKELY (seen.insert(token).second) {
         normalized.emplace_back(std::move(token));
       }
     }
@@ -125,11 +125,11 @@ inline void normalize_exact_filters(std::vector<std::string>& filters) {
   normalized.reserve(filters.size());
 
   for (auto& item : filters) {
-    if (item.empty()) {
+    if VUNLIKELY (item.empty()) {
       continue;
     }
 
-    if (seen.insert(item).second) {
+    if VLIKELY (seen.insert(item).second) {
       normalized.emplace_back(std::move(item));
     }
   }
@@ -139,23 +139,23 @@ inline void normalize_exact_filters(std::vector<std::string>& filters) {
 
 inline bool append_json_filter_value(const nlohmann::json& root, const char* key, std::vector<std::string>& exact_out,
                                      std::vector<std::string>& pattern_out) {
-  if (!root.contains(key)) {
+  if VUNLIKELY (!root.contains(key)) {
     return true;
   }
 
   const auto& value = root[key];
 
-  if (value.is_string()) {
+  if VLIKELY (value.is_string()) {
     append_filter_patterns(pattern_out, value.get<std::string>());
     return true;
   }
 
-  if (!value.is_array()) {
+  if VUNLIKELY (!value.is_array()) {
     return false;
   }
 
   for (const auto& item : value) {
-    if (!item.is_string()) {
+    if VUNLIKELY (!item.is_string()) {
       return false;
     }
 
@@ -166,7 +166,7 @@ inline bool append_json_filter_value(const nlohmann::json& root, const char* key
 }
 
 inline bool match_filter_patterns(std::string_view value, const std::vector<std::string>& filters) {
-  if (filters.empty()) {
+  if VUNLIKELY (filters.empty()) {
     return false;
   }
 
@@ -178,7 +178,7 @@ inline bool match_filter_patterns(std::string_view value, const std::vector<std:
   thread_local NormalizeCache cache;
   const std::string* normalized = nullptr;
 
-  if (cache.value == value) {
+  if VLIKELY (cache.value == value) {
     normalized = &cache.normalized;
   } else {
     cache.value.assign(value.data(), value.size());
@@ -187,11 +187,11 @@ inline bool match_filter_patterns(std::string_view value, const std::vector<std:
   }
 
   for (const auto& filter : filters) {
-    if (filter.empty()) {
+    if VUNLIKELY (filter.empty()) {
       continue;
     }
 
-    if (normalized->find(filter) != std::string::npos) {
+    if VLIKELY (normalized->find(filter) != std::string::npos) {
       return true;
     }
   }
@@ -200,16 +200,16 @@ inline bool match_filter_patterns(std::string_view value, const std::vector<std:
 }
 
 inline bool match_exact_filters(std::string_view value, const std::vector<std::string>& filters) {
-  if (filters.empty()) {
+  if VUNLIKELY (filters.empty()) {
     return false;
   }
 
   for (const auto& filter : filters) {
-    if (filter.empty()) {
+    if VUNLIKELY (filter.empty()) {
       continue;
     }
 
-    if (value == filter) {
+    if VLIKELY (value == filter) {
       return true;
     }
   }
@@ -224,15 +224,15 @@ inline bool matches_any_filter(std::string_view value, const std::vector<std::st
 
 inline int score_filter_group(std::string_view value, const std::vector<std::string>& exact_filters,
                               const std::vector<std::string>& pattern_filters) {
-  if (match_exact_filters(value, exact_filters)) {
+  if VLIKELY (match_exact_filters(value, exact_filters)) {
     return 3;
   }
 
-  if (match_filter_patterns(value, pattern_filters)) {
+  if VLIKELY (match_filter_patterns(value, pattern_filters)) {
     return 2;
   }
 
-  if (exact_filters.empty() && pattern_filters.empty()) {
+  if VUNLIKELY (exact_filters.empty() && pattern_filters.empty()) {
     return 1;
   }
 
@@ -243,12 +243,13 @@ inline bool is_allowed_by_filters(std::string_view value, const std::vector<std:
                                   const std::vector<std::string>& whitelist_patterns,
                                   const std::vector<std::string>& blacklist_exact,
                                   const std::vector<std::string>& blacklist_patterns) {
-  if (whitelist_exact.empty() && whitelist_patterns.empty() && blacklist_exact.empty() && blacklist_patterns.empty()) {
+  if VUNLIKELY (whitelist_exact.empty() && whitelist_patterns.empty() && blacklist_exact.empty() &&
+                blacklist_patterns.empty()) {
     return true;
   }
 
-  if ((!whitelist_exact.empty() || !whitelist_patterns.empty()) &&
-      !matches_any_filter(value, whitelist_exact, whitelist_patterns)) {
+  if VLIKELY ((!whitelist_exact.empty() || !whitelist_patterns.empty()) &&
+              !matches_any_filter(value, whitelist_exact, whitelist_patterns)) {
     return false;
   }
 
@@ -272,7 +273,7 @@ inline bool is_allowed_by_filters_cached(const Owner* owner, std::string_view va
   const auto hash = std::hash<std::string_view>{}(value);
   auto& cache_entry = cache_entries[hash % cache_entries.size()];
 
-  if (cache_entry.owner == owner && cache_entry.hash == hash && cache_entry.value == value) {
+  if VLIKELY (cache_entry.owner == owner && cache_entry.hash == hash && cache_entry.value == value) {
     return cache_entry.allowed;
   }
 
@@ -297,7 +298,7 @@ inline bool is_static_url_selector(const UrlSelector& selector) {
 }
 
 inline bool matches_url_selector(std::string_view url, const UrlSelector& selector) {
-  if (!selector.configured) {
+  if VUNLIKELY (!selector.configured) {
     return true;
   }
 
@@ -306,17 +307,17 @@ inline bool matches_url_selector(std::string_view url, const UrlSelector& select
 }
 
 inline int score_url_selector(std::string_view url, const UrlSelector& selector) {
-  if (!selector.configured) {
+  if VUNLIKELY (!selector.configured) {
     return 0;
   }
 
   const auto whitelist_score = score_filter_group(url, selector.whitelist_exact, selector.whitelist_patterns);
 
-  if (whitelist_score < 0) {
+  if VUNLIKELY (whitelist_score < 0) {
     return -1;
   }
 
-  if (matches_any_filter(url, selector.blacklist_exact, selector.blacklist_patterns)) {
+  if VUNLIKELY (matches_any_filter(url, selector.blacklist_exact, selector.blacklist_patterns)) {
     return -1;
   }
 
@@ -324,7 +325,7 @@ inline int score_url_selector(std::string_view url, const UrlSelector& selector)
 }
 
 inline std::string resolve_arg_or_env(const std::string& value, const char* env_name) {
-  if (!value.empty()) {
+  if VLIKELY (!value.empty()) {
     return value;
   }
 
@@ -332,7 +333,7 @@ inline std::string resolve_arg_or_env(const std::string& value, const char* env_
 }
 
 inline bool validate_port(int port, std::string_view option_name, std::string& error) {
-  if (port <= 0 || port > 65535) {
+  if VUNLIKELY (port <= 0 || port > 65535) {
     error = std::string(option_name) + " must be in [1, 65535]";
     return false;
   }
@@ -343,7 +344,7 @@ inline bool validate_port(int port, std::string_view option_name, std::string& e
 inline bool ensure_parent_directory(const std::string& file_path) {
   auto parent_path = std::filesystem::path(file_path).parent_path();
 
-  if (parent_path.empty()) {
+  if VUNLIKELY (parent_path.empty()) {
     return true;
   }
 
@@ -354,14 +355,14 @@ inline bool ensure_parent_directory(const std::string& file_path) {
 
 #ifdef _WIN32
 inline void normalize_path(std::string& path) {
-  if (path.empty()) {
+  if VUNLIKELY (path.empty()) {
     return;
   }
 
   path = Helpers::path_to_string(std::filesystem::path(path));
   std::replace(path.begin(), path.end(), '\\', '/');
 
-  if (!path.empty() && path.back() == '/') {
+  if VUNLIKELY (!path.empty() && path.back() == '/') {
     path.pop_back();
   }
 }

@@ -79,7 +79,7 @@ BagReaderProcessor::~BagReaderProcessor() {
   impl_->cv.notify_all();
   impl_->wait_cv.notify_all();
 
-  if (impl_->thread.joinable()) {
+  if VLIKELY (impl_->thread.joinable()) {
     impl_->thread.join();
   }
 }

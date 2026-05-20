@@ -291,6 +291,7 @@ McapWriter::McapWriter(const std::string& path, const Config& config)
       impl_->split_index = 0;
 
 #ifdef _WIN32
+
       if (parent_path.empty()) {
         impl_->base_dir.clear();
         impl_->base_name = Helpers::path_to_string(file_path.stem());
@@ -299,6 +300,7 @@ McapWriter::McapWriter(const std::string& path, const Config& config)
         impl_->base_name = Helpers::path_to_string(std::filesystem::path(parent_path / file_path.stem()));
       }
 #else
+
       if (parent_path.empty()) {
         impl_->base_dir.clear();
         impl_->base_name = file_path.stem().string();
@@ -546,6 +548,7 @@ bool McapWriter::push_schema(const SchemaData& schema_data, bool immediate) {
 
   bool posted = post_task([this, stored_schema = std::move(stored_schema)]() mutable {
     std::lock_guard lock(impl_->write_mtx);
+
     if VUNLIKELY (!merge_schema(stored_schema)) {
       CLOG_E("McapWriter: Deferred merge_schema failed for [%s] in async push_schema path.",
              stored_schema.name.c_str());
@@ -569,6 +572,7 @@ int64_t McapWriter::push(const std::string& url, const std::string& ser_type, Sc
 
   if (immediate) {
     std::lock_guard lock(impl_->write_mtx);
+
     if VUNLIKELY (!write(url, ser_type, schema_type, action_type, data, target_timestamp)) {
       return -1;
     }
@@ -588,6 +592,7 @@ int64_t McapWriter::push(const std::string& url, const std::string& ser_type, Sc
     Bytes queued_data = data;
 
     // NOLINTNEXTLINE(readability-container-size-empty)
+
     if VUNLIKELY (queued_data.size() != data.size() || (queued_data.size() > 0 && !queued_data.data())) {
       CLOG_E("McapWriter: Failed to create an owned copy for async write.");
       return -1;
@@ -775,6 +780,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
     impl_->split_first = true;
 
     std::lock_guard split_lock(impl_->split_mtx);
+
     if (!impl_->split_before && impl_->split_callback && impl_->split_index == 0) {
       impl_->split_callback(0, impl_->split_filename);
     }
@@ -785,6 +791,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
   bool do_split = false;
 
   // split
+
   if (impl_->is_split_mode && !impl_->url_map.empty()) {
     if (impl_->config.split_by_time > 0 &&
         (microseconds_timestamp - impl_->config.begin_time * 1000) >
@@ -968,6 +975,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
     } else {
       impl_->write_url_type = "Unknown";
     }
+
     mcap::SchemaId schema_id = 0;
 
     if (impl_->write_url_type != "Method" && !next_ser_type.empty()) {
@@ -983,6 +991,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
     channel.schemaId = schema_id;
     channel.topic = url;
     channel.metadata["action"] = std::string(convert_action(action_type));
+
     if (impl_->write_url_type != "Method") {
       if (!schema_data.encoding.empty()) {
         channel.messageEncoding = schema_data.encoding;
@@ -990,6 +999,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
         channel.messageEncoding = SchemaData::convert_type(next_schema_type);
       }
     }
+
     url_msg_info.index = channel.id - 1;
 
     impl_->writer->addChannel(channel);
@@ -1002,6 +1012,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
       url_msg_info.ser_type = next_ser_type;
       total_url_msg_info.ser_type = next_ser_type;
     }
+
     url_msg_info.schema_type = next_schema_type;
     total_url_msg_info.schema_type = next_schema_type;
     url_msg_info.action_type = action_type;
@@ -1053,6 +1064,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
   }
 
   // insert data
+
   if VUNLIKELY (impl_->last_timestamp > microseconds_timestamp) {
     if (impl_->last_timestamp - microseconds_timestamp < 1000'00U) {
       microseconds_timestamp = impl_->last_timestamp + 1;
@@ -1150,6 +1162,7 @@ bool McapWriter::write_filex(bool complete) {
     json["VLinkFiles"] = std::move(files_json);
 
     std::ofstream filex(file_path);
+
     if VLIKELY (filex.is_open()) {
       filex << json.dump(4);
       filex.close();

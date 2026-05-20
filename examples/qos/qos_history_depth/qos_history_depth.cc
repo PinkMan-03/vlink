@@ -150,7 +150,10 @@ int main() {
     std::atomic<int> count{0};
     sub.listen([&count](const std::string& msg) {
       count++;
-      if (count <= 3) VLOG_I("Received: ", msg);
+
+      if (count <= 3) {
+        VLOG_I("Received: ", msg);
+      }
     });
 
     pub.wait_for_subscribers(2s);

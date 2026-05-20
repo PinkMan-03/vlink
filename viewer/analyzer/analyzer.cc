@@ -120,6 +120,7 @@ int main(int argc, char* argv[]) {
   }
 
   bool enable_timeline = false;
+
   if (app.arguments().size() >= 3) {
     enable_timeline = true;
   }

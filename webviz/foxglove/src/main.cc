@@ -183,7 +183,7 @@ int main(int argc, char* argv[]) {
   config.rpc_msgs = std::move(rpc_msgs);
   config.parameters.url = program.get<std::string>("--parameters_url");
 
-  if (program.is_used("--parameters_encoding")) {
+  if VUNLIKELY (program.is_used("--parameters_encoding")) {
     config.parameters.encoding = program.get<std::string>("--parameters_encoding");
   }
 
@@ -193,7 +193,7 @@ int main(int argc, char* argv[]) {
 
   std::error_code config_ec;
 
-  if (!config_file.empty() && std::filesystem::exists(config_file, config_ec) && !config_ec) {
+  if VLIKELY (!config_file.empty() && std::filesystem::exists(config_file, config_ec) && !config_ec) {
     std::ifstream ifs(config_file);
 
     if VUNLIKELY (!ifs.is_open()) {
@@ -231,7 +231,7 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      if (root.contains("filter") && root["filter"].is_object()) {
+      if VLIKELY (root.contains("filter") && root["filter"].is_object()) {
         const auto& filter = root["filter"];
         config.whitelist_exact.clear();
         config.whitelist_patterns.clear();
@@ -252,19 +252,19 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      if (root.contains("capabilities") && root["capabilities"].is_object()) {
+      if VLIKELY (root.contains("capabilities") && root["capabilities"].is_object()) {
         const auto& capabilities = root["capabilities"];
         config.capabilities.time = capabilities.value("time", config.capabilities.time);
         config.capabilities.connection_graph =
             capabilities.value("connection_graph", config.capabilities.connection_graph);
         config.capabilities.assets = capabilities.value("assets", config.capabilities.assets);
 
-        if (capabilities.contains("publish")) {
+        if VLIKELY (capabilities.contains("publish")) {
           config.capabilities.publish = capabilities["publish"].get<bool>();
           publish_configured = true;
         }
 
-        if (capabilities.contains("rpcs")) {
+        if VLIKELY (capabilities.contains("rpcs")) {
           config.capabilities.rpcs = capabilities["rpcs"].get<bool>();
           rpcs_configured = true;
         }
@@ -275,10 +275,10 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      if (root.contains("parameters") && root["parameters"].is_object()) {
+      if VLIKELY (root.contains("parameters") && root["parameters"].is_object()) {
         const auto& parameters = root["parameters"];
 
-        if (!program.is_used("--parameters_url") && parameters.contains("url")) {
+        if VLIKELY (!program.is_used("--parameters_url") && parameters.contains("url")) {
           if VUNLIKELY (!parameters["url"].is_string()) {
             std::cerr << "Invalid config file " << config_file << ": parameters.url must be a string" << std::endl;
             return 1;
@@ -287,7 +287,7 @@ int main(int argc, char* argv[]) {
           config.parameters.url = parameters["url"].get<std::string>();
         }
 
-        if (!program.is_used("--parameters_encoding") && parameters.contains("encoding")) {
+        if VLIKELY (!program.is_used("--parameters_encoding") && parameters.contains("encoding")) {
           if VUNLIKELY (!parameters["encoding"].is_string()) {
             std::cerr << "Invalid config file " << config_file << ": parameters.encoding must be a string" << std::endl;
             return 1;
@@ -305,26 +305,28 @@ int main(int argc, char* argv[]) {
         }
       }
 
-      if (!program.is_used("--proto_dir") && proto_dir.empty() && root.contains("proto_dir")) {
+      if VLIKELY (!program.is_used("--proto_dir") && proto_dir.empty() && root.contains("proto_dir")) {
         config.proto_dir = vlink::webviz::resolve_relative_path(config_dir, root["proto_dir"].get<std::string>());
       }
 
-      if (!program.is_used("--fbs_dir") && fbs_dir.empty() && root.contains("fbs_dir")) {
+      if VLIKELY (!program.is_used("--fbs_dir") && fbs_dir.empty() && root.contains("fbs_dir")) {
         config.fbs_dir = vlink::webviz::resolve_relative_path(config_dir, root["fbs_dir"].get<std::string>());
       }
 
-      if (!program.is_used("--schema_plugin") && schema_plugin_path.empty() && root.contains("schema_plugin_path")) {
+      if VLIKELY (!program.is_used("--schema_plugin") && schema_plugin_path.empty() &&
+                  root.contains("schema_plugin_path")) {
         config.schema_plugin_path =
             vlink::webviz::resolve_relative_path(config_dir, root["schema_plugin_path"].get<std::string>());
       }
 
-      if (!program.is_used("--convert_plugin") && convert_plugin_path.empty() && root.contains("convert_plugin_path")) {
+      if VLIKELY (!program.is_used("--convert_plugin") && convert_plugin_path.empty() &&
+                  root.contains("convert_plugin_path")) {
         config.convert_plugin_path =
             vlink::webviz::resolve_relative_path(config_dir, root["convert_plugin_path"].get<std::string>());
       }
 
-      if (!program.is_used("--convert_plugin_config") && convert_plugin_config.empty() &&
-          root.contains("convert_plugin_config")) {
+      if VLIKELY (!program.is_used("--convert_plugin_config") && convert_plugin_config.empty() &&
+                  root.contains("convert_plugin_config")) {
         config.convert_plugin_config = root["convert_plugin_config"].get<std::string>();
       }
 
@@ -334,11 +336,11 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      if (!program.is_used("--send_time") && root.contains("send_time")) {
+      if VLIKELY (!program.is_used("--send_time") && root.contains("send_time")) {
         config.send_time = root["send_time"].get<bool>();
       }
 
-      if (!program.is_used("--vlink_msgs")) {
+      if VLIKELY (!program.is_used("--vlink_msgs")) {
         config.vlink_msgs.clear();
         if VUNLIKELY (!vlink::webviz::append_config_paths(root, "vlink_msgs", config_dir, config.vlink_msgs)) {
           std::cerr << "Invalid config file " << config_file << ": vlink_msgs must be an array of strings" << std::endl;
@@ -346,7 +348,7 @@ int main(int argc, char* argv[]) {
         }
       }
 
-      if (!program.is_used("--foxglove_msgs")) {
+      if VLIKELY (!program.is_used("--foxglove_msgs")) {
         config.foxglove_msgs.clear();
         if VUNLIKELY (!vlink::webviz::append_config_paths(root, "foxglove_msgs", config_dir, config.foxglove_msgs)) {
           std::cerr << "Invalid config file " << config_file << ": foxglove_msgs must be an array of strings"
@@ -355,7 +357,7 @@ int main(int argc, char* argv[]) {
         }
       }
 
-      if (!program.is_used("--rpc_msgs")) {
+      if VLIKELY (!program.is_used("--rpc_msgs")) {
         config.rpc_msgs.clear();
         if VUNLIKELY (!vlink::webviz::append_config_paths(root, "rpc_msgs", config_dir, config.rpc_msgs)) {
           std::cerr << "Invalid config file " << config_file << ": rpc_msgs must be an array of strings" << std::endl;
@@ -368,7 +370,7 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      if (root.contains("asset_dirs") && root["asset_dirs"].is_array()) {
+      if VLIKELY (root.contains("asset_dirs") && root["asset_dirs"].is_array()) {
         config.asset_dirs.clear();
         if VUNLIKELY (!vlink::webviz::append_config_paths(root, "asset_dirs", config_dir, config.asset_dirs)) {
           std::cerr << "Invalid config file " << config_file << ": asset_dirs must be an array of strings" << std::endl;
@@ -391,15 +393,15 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  if (program.is_used("--send_time")) {
+  if VUNLIKELY (program.is_used("--send_time")) {
     config.send_time = program.get<bool>("--send_time");
   }
 
-  if (program.is_used("--filter")) {
+  if VUNLIKELY (program.is_used("--filter")) {
     auto cli_filter_tokens = std::vector<std::string>{};
     vlink::webviz::append_filter_patterns(cli_filter_tokens, program.get<std::string>("--filter"));
 
-    if (!cli_filter_tokens.empty()) {
+    if VLIKELY (!cli_filter_tokens.empty()) {
       auto& target_filters = program.get<bool>("--black") ? config.blacklist_patterns : config.whitelist_patterns;
       target_filters.insert(target_filters.end(), std::make_move_iterator(cli_filter_tokens.begin()),
                             std::make_move_iterator(cli_filter_tokens.end()));
@@ -494,6 +496,7 @@ int main(int argc, char* argv[]) {
 
   vlink::webviz::FoxgloveServer server(config);
   vlink::Utils::register_terminate_signal([&server](int) { server.stop(); });
+
   if VUNLIKELY (!server.start()) {
     return 1;
   }

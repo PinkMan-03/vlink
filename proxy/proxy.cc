@@ -105,6 +105,7 @@ int main(int argc, char* argv[]) {
   }
 
   // check singleton
+
   if VUNLIKELY (!vlink::Utils::check_singleton("vlink-proxy")) {
     std::cerr << "Program has started." << std::endl;
     return 1;
@@ -133,7 +134,7 @@ int main(int argc, char* argv[]) {
 
   proxy_config.runnable_list = program.get<std::vector<std::string>>("--runnable");
 
-  if (proxy_config.domain_id < 0 || proxy_config.domain_id > 255) {
+  if VUNLIKELY (proxy_config.domain_id < 0 || proxy_config.domain_id > 255) {
     std::cerr << "Invalid domain id." << std::endl;
     std::cerr << program << std::endl;
     return 1;
@@ -149,7 +150,8 @@ int main(int argc, char* argv[]) {
 #endif
 
 #ifdef VLINK_SUPPORT_SHM
-  if (iox_monitoring == "on" || iox_monitoring == "ON" || iox_monitoring == "On") {
+
+  if VLIKELY (iox_monitoring == "on" || iox_monitoring == "ON" || iox_monitoring == "On") {
     proxy_config.iox_monitoring = true;
   } else if (iox_monitoring == "off" || iox_monitoring == "OFF" || iox_monitoring == "Off") {
     proxy_config.iox_monitoring = false;
@@ -161,7 +163,7 @@ int main(int argc, char* argv[]) {
 #else
   (void)iox_monitoring;
 
-  if (proxy_config.use_iox) {
+  if VUNLIKELY (proxy_config.use_iox) {
     std::cerr << "RouDi for shm is not supported." << std::endl;
     return 1;
   }

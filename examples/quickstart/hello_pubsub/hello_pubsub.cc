@@ -98,6 +98,7 @@ int main() {
     VLOG_I("[Subscriber] sensor_id=", reading.sensor_id, " seq=#", reading.sequence, " temp=", reading.temperature,
            " ts=", reading.timestamp_ms);
     int count = received_count.fetch_add(1) + 1;
+
     if (kMaxMessages > 0 && count >= kMaxMessages) {
       running = false;
     }

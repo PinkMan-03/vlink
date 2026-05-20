@@ -84,6 +84,7 @@ static uint8_t* pool_alloc_buffer(size_t size) noexcept {
   }
 
   void* raw = vlink::MemoryPool::global_instance().allocate(kPoolBufferHeaderSize + size);
+
   if VUNLIKELY (raw == nullptr) {
     return nullptr;
   }
@@ -94,7 +95,7 @@ static uint8_t* pool_alloc_buffer(size_t size) noexcept {
 }
 
 static void pool_free_buffer(uint8_t* ptr) noexcept {
-  if (ptr == nullptr) {
+  if VUNLIKELY (ptr == nullptr) {
     return;
   }
 
@@ -118,7 +119,7 @@ template <typename T>
 static std::shared_ptr<T> shared_state_get(void* slot) {
   auto* holder = static_cast<std::shared_ptr<T>*>(slot);
 
-  if (!holder) {
+  if VUNLIKELY (!holder) {
     return {};
   }
 
@@ -202,7 +203,7 @@ static vlink::Security::Config build_security_config(const vlink_security_config
         const int rc = enc(in.data(), in.size(), &buf, &size, user);
 
         if VUNLIKELY (rc != 0 || !buf) {
-          if (buf) {
+          if VUNLIKELY (buf) {
             std::free(buf);  // NOLINT(cppcoreguidelines-no-malloc)
           }
 
@@ -228,7 +229,7 @@ static vlink::Security::Config build_security_config(const vlink_security_config
         const int rc = dec(in.data(), in.size(), &buf, &size, user);
 
         if VUNLIKELY (rc != 0 || !buf) {
-          if (buf) {
+          if VUNLIKELY (buf) {
             std::free(buf);  // NOLINT(cppcoreguidelines-no-malloc)
           }
 
@@ -388,6 +389,7 @@ static int create_publisher_impl(const char* url, const vlink_schema_info_t* sch
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
@@ -438,6 +440,7 @@ static int create_secure_publisher_impl(const char* url, const vlink_schema_info
       shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       shared_state_delete(state_holder);
@@ -634,6 +637,7 @@ static int create_subscriber_impl(const char* url, const vlink_schema_info_t* sc
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
@@ -696,6 +700,7 @@ static int create_secure_subscriber_impl(const char* url, const vlink_schema_inf
       shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       shared_state_delete(state_holder);
@@ -802,6 +807,7 @@ static int create_server_impl(const char* url, const vlink_schema_info_t* schema
       shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       shared_state_delete(state_holder);
@@ -915,6 +921,7 @@ static int create_secure_server_impl(const char* url, const vlink_schema_info_t*
       shared_state_delete(sec_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       shared_state_delete(state_holder);
@@ -1099,6 +1106,7 @@ static int create_client_impl(const char* url, const vlink_schema_info_t* schema
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
@@ -1149,6 +1157,7 @@ static int create_secure_client_impl(const char* url, const vlink_schema_info_t*
       shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       shared_state_delete(state_holder);
@@ -1324,6 +1333,7 @@ static int create_setter_impl(const char* url, const vlink_schema_info_t* schema
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
@@ -1438,6 +1448,7 @@ static int create_secure_setter_impl(const char* url, const vlink_schema_info_t*
       shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       shared_state_delete(state_holder);
@@ -1541,6 +1552,7 @@ static int create_getter_impl(const char* url, const vlink_schema_info_t* schema
     if VUNLIKELY (!ptr) {
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       return VLINK_RET_INVALID_ERROR;
@@ -1606,6 +1618,7 @@ static int create_secure_getter_impl(const char* url, const vlink_schema_info_t*
       shared_state_delete(state_holder);
       return VLINK_RET_MEMORY_ERROR;
     }
+
     if VUNLIKELY (!apply_create_options(*ptr, schema_info, ssl_opt)) {
       pool_delete(ptr);
       shared_state_delete(state_holder);

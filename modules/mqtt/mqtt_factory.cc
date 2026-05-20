@@ -97,6 +97,7 @@ void MqttFactory::deinit() {
   }
 
   message_loop_.quit();
+
   if VLIKELY (!in_loop) {
     message_loop_.wait_for_quit();
   }
@@ -392,7 +393,7 @@ void MqttFactory::schedule_reconnect(uint32_t delay_ms) {
     posted = Timer::call_once(&message_loop_, delay_ms, std::move(reconnect_task));
   }
 
-  if (!posted) {
+  if VUNLIKELY (!posted) {
     reconnect_scheduled_.store(false, std::memory_order_release);
   }
 }

@@ -106,6 +106,7 @@ int main() {
       running = false;
       return;
     }
+
     int seq = publish_count.fetch_add(1) + 1;
     SensorData data{};  // Value-initialization: all members zeroed
     data.id = seq;

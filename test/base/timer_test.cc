@@ -177,6 +177,7 @@ TEST_SUITE("base-Timer") {
 
     Timer t(&loop, 50, 3, [&fire_count, &gate]() {
       fire_count.fetch_add(1);
+
       if (fire_count.load() == 1) {
         gate.store(true);
       }

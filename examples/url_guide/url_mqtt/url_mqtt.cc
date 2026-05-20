@@ -149,6 +149,7 @@ int main() {
     //   Publisher<std::string> pub("mqtt://home/temp");  // connects to mqtt.example.com
 
     // Restore
+
     if (saved.empty()) {
       vlink::Utils::unset_env("VLINK_MQTT_BROKER");
     } else {

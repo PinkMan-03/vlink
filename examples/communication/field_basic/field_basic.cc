@@ -82,6 +82,7 @@ int main() {
   // immediately. Timeout default is Timeout::kDefaultInterval (5s).
   // ---------------------------------------------------------------
   VLOG_I("[Getter] Waiting for initial value...");
+
   if (getter.wait_for_value(2000ms)) {
     VLOG_I("[Getter] wait_for_value() succeeded");
   } else {
@@ -94,6 +95,7 @@ int main() {
   // Returns std::optional<GearState>. Empty if no value received yet.
   // ---------------------------------------------------------------
   auto current = getter.get();
+
   if (current.has_value()) {
     VLOG_I("[Getter] Current gear: ", current->gear, " engaged: ", current->engaged);
   } else {
@@ -140,6 +142,7 @@ int main() {
   loop.wait_for_idle(1000);
 
   auto final_val = getter.get();
+
   if (final_val.has_value()) {
     VLOG_I("[Getter] Final gear: ", final_val->gear, " engaged: ", final_val->engaged);
   }

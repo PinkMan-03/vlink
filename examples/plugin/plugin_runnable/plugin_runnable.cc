@@ -50,6 +50,7 @@ int main() {
   plugin.set_log_level(vlink::Logger::kInfo);
 
   auto monitor = plugin.load<vlink::RunablePluginInterface>("monitor_plugin", 1, 0);
+
   if (!monitor) {
     VLOG_E("Failed to load monitor_plugin. Ensure libmonitor_plugin.so is accessible.");
     return 1;

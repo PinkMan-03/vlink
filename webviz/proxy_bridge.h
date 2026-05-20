@@ -86,11 +86,11 @@ class ProxyBridge {
     ServerConfig server;
   };
 
-  using ConnectCallback = vlink::MoveFunction<void(bool connected)>;
-  using ErrorCallback = vlink::MoveFunction<void(ProxyAPI::Error error)>;
-  using TimeCallback = vlink::MoveFunction<void(uint64_t sys_time, uint64_t boot_time)>;
-  using InfoCallback = vlink::MoveFunction<void(const std::vector<ProxyAPI::Info>& info_list)>;
-  using DataCallback = vlink::MoveFunction<void(const ProxyAPI::Data& data)>;
+  using ConnectCallback = MoveFunction<void(bool connected)>;
+  using ErrorCallback = MoveFunction<void(ProxyAPI::Error error)>;
+  using TimeCallback = MoveFunction<void(uint64_t sys_time, uint64_t boot_time)>;
+  using InfoCallback = MoveFunction<void(const std::vector<ProxyAPI::Info>& info_list)>;
+  using DataCallback = MoveFunction<void(const ProxyAPI::Data& data)>;
 
   ProxyBridge(const Config& config, MessageLoop* data_callback_loop);
 
@@ -118,21 +118,21 @@ class ProxyBridge {
       return;
     }
 
-    if (config.native) {
+    if VUNLIKELY (config.native) {
       node.set_property("dds.ip", "127.0.0.1");
-    } else if (!config.bind_ip.empty()) {
+    } else if VLIKELY (!config.bind_ip.empty()) {
       node.set_property("dds.ip", config.bind_ip);
     }
 
-    if (!config.peer_ip.empty()) {
+    if VLIKELY (!config.peer_ip.empty()) {
       node.set_property("dds.peer", config.peer_ip);
     }
 
-    if (config.buf_size > 0) {
+    if VLIKELY (config.buf_size > 0) {
       node.set_property("dds.buf", std::to_string(config.buf_size));
     }
 
-    if (config.mtu_size > 0) {
+    if VLIKELY (config.mtu_size > 0) {
       node.set_property("dds.mtu", std::to_string(config.mtu_size));
     }
 

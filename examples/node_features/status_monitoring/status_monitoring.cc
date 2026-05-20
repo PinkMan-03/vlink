@@ -47,6 +47,7 @@ int main() {
     // NOTE: CpuProfiler may not be available in all builds.
     double cpu_usage = pub.get_cpu_usage();
     std::cout << "  get_cpu_usage() = " << cpu_usage << std::endl;
+
     if (cpu_usage < 0) {
       std::cout << "  (Profiler disabled. Enable with: export VLINK_PROFILER_ENABLE=1)" << std::endl;
     }

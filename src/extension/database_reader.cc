@@ -219,6 +219,7 @@ void DatabaseReader::register_output_callback(OutputCallback&& output_callback) 
 
 void DatabaseReader::play(const Config& config) {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (is_busy()) {
     VLOG_W("DatabaseReader: Is busy.");
     // return;
@@ -302,6 +303,7 @@ void DatabaseReader::pause_to_next() {
 
 void DatabaseReader::jump(int64_t begin_time, double rate, int times, bool force_to_play) {
 #ifdef VLINK_ENABLE_SQLITE
+
   if (begin_time < 0) {
     begin_time = 0;
   } else if (begin_time > impl_->info.total_duration) {
@@ -360,6 +362,7 @@ void DatabaseReader::jump(int64_t begin_time, double rate, int times, bool force
 
 std::future<bool> DatabaseReader::check() {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (is_busy()) {
     VLOG_W("DatabaseReader: Is busy.");
     // return std::future<bool>();
@@ -538,6 +541,7 @@ std::future<bool> DatabaseReader::check() {
 
 std::future<bool> DatabaseReader::reindex() {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (is_busy()) {
     VLOG_W("DatabaseReader: Is busy.");
     // return std::future<bool>();
@@ -674,6 +678,7 @@ std::future<bool> DatabaseReader::reindex() {
 
 std::future<bool> DatabaseReader::fix(bool rebuild) {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (is_busy()) {
     VLOG_W("DatabaseReader: Is busy.");
     // return std::future<bool>();
@@ -934,6 +939,7 @@ std::future<bool> DatabaseReader::fix(bool rebuild) {
 
 void DatabaseReader::tag(const std::string& tag_name) {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (is_busy()) {
     VLOG_W("DatabaseReader: Is busy.");
     // return;
@@ -980,6 +986,7 @@ void DatabaseReader::tag(const std::string& tag_name) {
       update_tag_stmt_guard.reset();
 
       ret = ::sqlite3_prepare_v2(wrapper_file.db, "SELECT * FROM VLinkDatas;", -1, &wrapper_file.stmt, nullptr);
+
       if VUNLIKELY (ret != SQLITE_OK) {
         CLOG_W("Failed to prepare datas table: %s.", ::sqlite3_errmsg(wrapper_file.db));
         return;
@@ -1200,7 +1207,7 @@ void DatabaseReader::update_status(Status status) {
   }
 
   if (has_changed) {
-    if (impl_->status_callback) {
+    if VLIKELY (impl_->status_callback) {
       impl_->status_callback(impl_->status);
     }
   }
@@ -1242,6 +1249,7 @@ void DatabaseReader::do_pause() {
     {
       std::lock_guard time_lock(impl_->time_mtx);
       impl_->real_timer.restart();
+
       if (impl_->offset_elapsed > 0) {
         impl_->real_elapsed +=
             (impl_->offset_timer.get() - impl_->pause_elapsed_timer.get() - impl_->extra_elapsed) * impl_->rate;
@@ -1290,10 +1298,12 @@ void DatabaseReader::prepare_file(void* file) {
 
     if VUNLIKELY (ret != SQLITE_OK) {
       wrapper_file->has_completed = false;
+
       if (!impl_->try_to_fix || impl_->read_only) {
         CLOG_F("Failed to search header table: %s.", ::sqlite3_errmsg(wrapper_file->db));
         return;
       }
+
       need_rebuild_header = true;
     } else {
       const char* expected_columns[] = {
@@ -1624,6 +1634,7 @@ void DatabaseReader::prepare_file(void* file) {
 
     ::sqlite3_stmt* datas_info_stmt = nullptr;
     ret = ::sqlite3_prepare_v2(wrapper_file->db, "PRAGMA table_info(VLinkDatas);", -1, &datas_info_stmt, nullptr);
+
     if VUNLIKELY (ret != SQLITE_OK) {
       wrapper_file->has_completed = false;
       CLOG_F("Failed to search datas table: %s.", ::sqlite3_errmsg(wrapper_file->db));
@@ -1710,14 +1721,17 @@ void DatabaseReader::prepare_file(void* file) {
       "SELECT major, minor, patch, count, duration, accuracy, compress, process, date, tag, complete, timezone, "
       "start_timestamp FROM VLinkHeader LIMIT 1;",
       -1, &header_stmt, nullptr);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     wrapper_file->has_completed = false;
     CLOG_F("Failed to prepare header table: %s.", ::sqlite3_errmsg(wrapper_file->db));
     return;
   }
+
   SqliteStmtPtr header_stmt_guard(header_stmt);
 
   ret = ::sqlite3_step(header_stmt);
+
   if VUNLIKELY (ret != SQLITE_ROW) {
     wrapper_file->has_completed = false;
     CLOG_F("Failed to get header table: %s.", ::sqlite3_errmsg(wrapper_file->db));
@@ -1744,6 +1758,7 @@ void DatabaseReader::prepare_file(void* file) {
   impl_->info.date_time = sqlite_column_text_or_empty(header_stmt, get_column(8));
 
   const char* tag_name_str = reinterpret_cast<const char*>(::sqlite3_column_text(header_stmt, get_column(9)));
+
   if (tag_name_str) {
     impl_->info.tag_name = tag_name_str;
   } else {
@@ -1820,6 +1835,7 @@ void DatabaseReader::prepare_file(void* file) {
   ret = ::sqlite3_prepare_v2(wrapper_file->db,
                              "SELECT id, url, type, ser, encoding, count, loss, size, freq FROM VLinkUrls;", -1,
                              &urls_stmt, nullptr);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     wrapper_file->has_completed = false;
     CLOG_F("Failed to prepare urls table: %s.", ::sqlite3_errmsg(wrapper_file->db));
@@ -1912,6 +1928,7 @@ void DatabaseReader::prepare_file(void* file) {
   impl_->info.has_schema = wrapper_file->has_schema;
 
   // prepare datas
+
   if (wrapper_file->has_idx_elapsed) {
     ret = ::sqlite3_prepare_v2(wrapper_file->db, "SELECT * FROM VLinkDatas ORDER BY elapsed LIMIT 1;", -1,
                                &wrapper_file->stmt, nullptr);
@@ -1939,6 +1956,7 @@ void DatabaseReader::prepare_file(void* file) {
   }
 
   // update duration
+
   if (wrapper_file->has_idx_elapsed && impl_->info.has_completed) {
     ret = ::sqlite3_prepare_v2(wrapper_file->db, "SELECT * FROM VLinkDatas ORDER BY elapsed DESC LIMIT 1;", -1,
                                &wrapper_file->stmt, nullptr);
@@ -2066,12 +2084,14 @@ void DatabaseReader::open(const std::string& path) {
 
         for (const auto& file_info : files_json) {
 #ifdef _WIN32
+
           if (parent_path.empty()) {
             file_db = std::filesystem::path(Helpers::string_to_wstring(file_info));
           } else {
             file_db = parent_path / std::filesystem::path(Helpers::string_to_wstring(file_info));
           }
 #else
+
           if (parent_path.empty()) {
             file_db = std::filesystem::path(file_info);
           } else {
@@ -2184,6 +2204,7 @@ void DatabaseReader::open(const std::string& path) {
         if (header_json.contains("split_by_size")) {
           impl_->info.split_by_size = header_json["split_by_size"];
         }
+
         if (header_json.contains("split_by_time")) {
           impl_->info.split_by_time = header_json["split_by_time"];
         }
@@ -2291,13 +2312,14 @@ void DatabaseReader::open(const std::string& path) {
 void DatabaseReader::close() {
 #ifdef VLINK_ENABLE_SQLITE
   for (auto& wrapper_file : impl_->file_list) {
-    if (wrapper_file.stmt) {
+    if VLIKELY (wrapper_file.stmt) {
       ::sqlite3_finalize(wrapper_file.stmt);
       wrapper_file.stmt = nullptr;
     }
 
-    if (wrapper_file.db) {
+    if VLIKELY (wrapper_file.db) {
       int ret = ::sqlite3_close_v2(wrapper_file.db);
+
       if VUNLIKELY (ret != SQLITE_OK) {
         CLOG_W("Failed to close database: %s.", ::sqlite3_errmsg(wrapper_file.db));
         return;
@@ -2387,12 +2409,14 @@ int DatabaseReader::get_reset_index(const Config& config) {
     }
 
     // VLOG_W(select_sql);
+
     if VLIKELY (!select_sql) {
       VLOG_E("DatabaseReader: Failed to prepare select sql str.");
       break;
     }
 
     ret = ::sqlite3_prepare_v2(wrapper_file.db, select_sql->c_str(), -1, &wrapper_file.stmt, nullptr);
+
     if VUNLIKELY (ret != SQLITE_OK) {
       CLOG_W("Failed to prepare datas table: %s.", ::sqlite3_errmsg(wrapper_file.db));
 

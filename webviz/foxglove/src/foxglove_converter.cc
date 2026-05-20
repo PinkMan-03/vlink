@@ -209,13 +209,14 @@ bool FoxgloveConverter::init_proto_resolver() {
 
   auto& mgr = SchemaPluginManager::get(config_.schema_plugin_path);
 
-  if (mgr.is_valid()) {
+  if VLIKELY (mgr.is_valid()) {
     schema_interface_ = mgr.get_interface();
     has_resolver = true;
   }
 
 #ifdef VLINK_HAS_PROTO_COMPILER
-  if (!config_.proto_dir.empty()) {
+
+  if VLIKELY (!config_.proto_dir.empty()) {
     auto proto_path = std::filesystem::path(config_.proto_dir);
     std::error_code ec;
 
@@ -281,12 +282,13 @@ std::unique_ptr<google::protobuf::Message> FoxgloveConverter::deserialize_proto_
   const google::protobuf::Message* prototype = nullptr;
 
 #ifdef VLINK_HAS_PROTO_COMPILER
-  if (disk_factory_ && imported_proto_descriptors_.find(ser) != imported_proto_descriptors_.end()) {
+
+  if VLIKELY (disk_factory_ && imported_proto_descriptors_.find(ser) != imported_proto_descriptors_.end()) {
     prototype = disk_factory_->GetPrototype(desc);
   }
 #endif
 
-  if (!prototype && schema_interface_) {
+  if VUNLIKELY (!prototype && schema_interface_) {
     prototype = proto_factory_.GetPrototype(desc);
   }
 
@@ -327,7 +329,7 @@ std::unique_ptr<google::protobuf::Message> FoxgloveConverter::deserialize_proto_
 bool FoxgloveConverter::init_fbs_resolver() {
   bool has_resolver = schema_interface_ != nullptr;
 
-  if (config_.fbs_dir.empty()) {
+  if VUNLIKELY (config_.fbs_dir.empty()) {
     return has_resolver;
   }
 
@@ -361,7 +363,7 @@ bool FoxgloveConverter::init_fbs_resolver() {
     auto parser = std::make_unique<flatbuffers::Parser>();
     std::string sub_dir_str = Helpers::path_to_string(fbs_file.parent_path());
 
-    if (sub_dir_str == root_dir_str) {
+    if VLIKELY (sub_dir_str == root_dir_str) {
       if VUNLIKELY (!parser->Parse(schema_file.c_str(), include_dirs)) {
         MLOG_W("Failed to parse FBS: {}: {}", Helpers::path_to_string(fbs_file), parser->error_);
         continue;
@@ -384,7 +386,7 @@ bool FoxgloveConverter::init_fbs_resolver() {
 
       auto type_name = def->name;
 
-      if (fbs_parsers_.find(type_name) == fbs_parsers_.end()) {
+      if VLIKELY (fbs_parsers_.find(type_name) == fbs_parsers_.end()) {
         type_names.emplace_back(type_name);
       }
     }
@@ -405,15 +407,15 @@ bool FoxgloveConverter::init_fbs_resolver() {
 }
 
 bool FoxgloveConverter::find_fbs_parser_locked(const std::string& fbs_ser) {
-  if (fbs_parsers_.find(fbs_ser) != fbs_parsers_.end()) {
+  if VLIKELY (fbs_parsers_.find(fbs_ser) != fbs_parsers_.end()) {
     return true;
   }
 
-  if (fbs_not_found_.find(fbs_ser) != fbs_not_found_.end()) {
+  if VUNLIKELY (fbs_not_found_.find(fbs_ser) != fbs_not_found_.end()) {
     return false;
   }
 
-  if (schema_interface_) {
+  if VLIKELY (schema_interface_) {
     auto schema = schema_interface_->search_schema(fbs_ser, SchemaType::kFlatbuffers);
     if VLIKELY (schema.schema_type == SchemaType::kFlatbuffers && !schema.data.empty()) {
       auto parser = std::make_unique<flatbuffers::Parser>();
@@ -428,7 +430,7 @@ bool FoxgloveConverter::find_fbs_parser_locked(const std::string& fbs_ser) {
     }
   }
 
-  if (config_.fbs_dir.empty()) {
+  if VUNLIKELY (config_.fbs_dir.empty()) {
     fbs_not_found_.insert(fbs_ser);
     return false;
   }
@@ -457,19 +459,19 @@ bool FoxgloveConverter::find_fbs_parser_locked(const std::string& fbs_ser) {
     auto parser = std::make_unique<flatbuffers::Parser>();
     std::string sub_dir_str = Helpers::path_to_string(fbs_file.parent_path());
 
-    if (sub_dir_str == root_dir_str) {
-      if (!parser->Parse(schema_file.c_str(), include_dirs)) {
+    if VLIKELY (sub_dir_str == root_dir_str) {
+      if VUNLIKELY (!parser->Parse(schema_file.c_str(), include_dirs)) {
         continue;
       }
     } else {
       const char* full_dirs[] = {root_dir_str.c_str(), sub_dir_str.c_str(), nullptr};
 
-      if (!parser->Parse(schema_file.c_str(), full_dirs)) {
+      if VUNLIKELY (!parser->Parse(schema_file.c_str(), full_dirs)) {
         continue;
       }
     }
 
-    if (parser->LookupStruct(fbs_ser)) {
+    if VLIKELY (parser->LookupStruct(fbs_ser)) {
       parser->SetRootType(fbs_ser.c_str());
       const size_t parser_index = fbs_parser_vec_.size();
       fbs_parser_vec_.emplace_back(std::move(parser));
@@ -493,11 +495,12 @@ bool FoxgloveConverter::resolve_custom_fbs_schema(const std::string& fbs_ser, st
     return true;
   }
 
-  if (!schema_interface_) {
+  if VUNLIKELY (!schema_interface_) {
     return false;
   }
 
   auto schema = schema_interface_->search_schema(fbs_ser, SchemaType::kFlatbuffers);
+
   if VUNLIKELY (schema.schema_type != SchemaType::kFlatbuffers || schema.data.empty()) {
     return false;
   }
@@ -592,18 +595,18 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
 
   int64_t fbs_timestamp_ns = -1;
 
-  if (!mapping.timestamp_field.empty()) {
+  if VLIKELY (!mapping.timestamp_field.empty()) {
     fbs_timestamp_ns =
         extract_fbs_timestamp_ns(*root_table, obj, *schema, mapping.timestamp_field, mapping.timestamp_unit);
   }
 
   auto fbs_get_double = [schema](const flatbuffers::Table& tbl, const reflection::Object& o, const std::string& src,
                                  const std::string& expr = {}) -> double {
-    if (!expr.empty()) {
+    if VUNLIKELY (!expr.empty()) {
       return evaluate_expression_with_fbs(expr, tbl, o, *schema);
     }
 
-    if (has_nested_field_path(src)) {
+    if VUNLIKELY (has_nested_field_path(src)) {
       return safe_nested_fbs_double(tbl, o, *schema, src);
     }
 
@@ -613,7 +616,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
 
   auto fbs_get_string = [schema](const flatbuffers::Table& tbl, const reflection::Object& o, const std::string& src,
                                  const std::string& def) -> std::string {
-    if (has_nested_field_path(src)) {
+    if VUNLIKELY (has_nested_field_path(src)) {
       bool found = false;
       auto val = resolve_nested_fbs_string(tbl, o, *schema, src, &found);
       return found ? val : def;
@@ -973,18 +976,18 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
       const reflection::Object* entities_parent_obj = nullptr;
       std::string entities_field_name;
 
-      if (!resolve_fbs_parent_field_path(*root_table, obj, *schema, fm.source, entities_parent, entities_parent_obj,
-                                         entities_field_name)) {
+      if VUNLIKELY (!resolve_fbs_parent_field_path(*root_table, obj, *schema, fm.source, entities_parent,
+                                                   entities_parent_obj, entities_field_name)) {
         continue;
       }
 
-      if (!entities_parent || !entities_parent_obj) {
+      if VUNLIKELY (!entities_parent || !entities_parent_obj) {
         continue;
       }
 
       const auto* vec_field = find_fbs_field(*entities_parent_obj, entities_field_name);
 
-      if (!vec_field || vec_field->type()->base_type() != reflection::Vector) {
+      if VUNLIKELY (!vec_field || vec_field->type()->base_type() != reflection::Vector) {
         continue;
       }
 
@@ -994,26 +997,26 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
 
       const auto* vec = flatbuffers::GetFieldV<flatbuffers::Offset<flatbuffers::Table>>(*entities_parent, *vec_field);
 
-      if (!vec) {
+      if VUNLIKELY (!vec) {
         continue;
       }
 
       auto sub_obj_idx = vec_field->type()->index();
 
-      if (sub_obj_idx < 0 || !schema->objects()) {
+      if VUNLIKELY (sub_obj_idx < 0 || !schema->objects()) {
         continue;
       }
 
       const auto* sub_obj = schema->objects()->Get(static_cast<uint32_t>(sub_obj_idx));
 
-      if (!sub_obj) {
+      if VUNLIKELY (!sub_obj) {
         continue;
       }
 
       for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
         const auto* item = vec->Get(i);
 
-        if (!item) {
+        if VUNLIKELY (!item) {
           continue;
         }
 
@@ -1244,7 +1247,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
 
       const auto* field = find_fbs_field(obj, src);
 
-      if (!field || field->type()->base_type() != reflection::Vector) {
+      if VUNLIKELY (!field || field->type()->base_type() != reflection::Vector) {
         return out;
       }
 
@@ -1419,6 +1422,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
+
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -1531,8 +1535,8 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
       const reflection::Object* vec_parent_obj = nullptr;
       std::string vec_field_name;
 
-      if (!resolve_fbs_parent_field_path(*root_table, obj, *schema, poses_src, vec_parent, vec_parent_obj,
-                                         vec_field_name)) {
+      if VUNLIKELY (!resolve_fbs_parent_field_path(*root_table, obj, *schema, poses_src, vec_parent, vec_parent_obj,
+                                                   vec_field_name)) {
         vec_parent = nullptr;
       }
 
@@ -1550,7 +1554,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
               for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
                 const auto* item = vec->Get(i);
 
-                if (!item) {
+                if VUNLIKELY (!item) {
                   continue;
                 }
 
@@ -1694,7 +1698,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -1843,7 +1847,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -1953,7 +1957,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
 
       const auto* field = find_fbs_field(obj, src);
 
-      if (!field || field->type()->base_type() != reflection::Vector) {
+      if VUNLIKELY (!field || field->type()->base_type() != reflection::Vector) {
         return out;
       }
 
@@ -2042,6 +2046,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
+
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2119,7 +2124,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -2145,6 +2150,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
+
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2213,7 +2219,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -2250,7 +2256,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -2286,7 +2292,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -2373,7 +2379,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -2491,6 +2497,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
+
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2576,7 +2583,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
             for (flatbuffers::uoffset_t i = 0; i < vec->size(); ++i) {
               const auto* item = vec->Get(i);
 
-              if (!item) {
+              if VUNLIKELY (!item) {
                 continue;
               }
 
@@ -2602,6 +2609,7 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
+
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2639,7 +2647,7 @@ void FoxgloveConverter::load_mappings() {
   mapping_index_.clear();
 
   for (const auto& file : config_.vlink_msgs) {
-    if (!load_mapping_file(file)) {
+    if VUNLIKELY (!load_mapping_file(file)) {
       MLOG_W("Failed to load mapping: {}", file);
     }
   }
@@ -2661,9 +2669,11 @@ bool FoxgloveConverter::load_mapping_file(const std::string& path) {
 
           FoxgloveMapping mapping;
           mapping.ser = obj.value("ser", std::string());
+
           if VUNLIKELY (!parse_url_selector(obj, path, "mapping", mapping.url_selector)) {
             return false;
           }
+
           mapping.schema = obj.value("schema", std::string());
           mapping.encoding = obj.value("encoding", std::string(kFoxgloveFlatbufferEncoding));
           mapping.schema_encoding = obj.value("schema_encoding", std::string(kFoxgloveFlatbufferEncoding));
@@ -2694,7 +2704,7 @@ bool FoxgloveConverter::load_mapping_file(const std::string& path) {
               mapping.schema = mapping.ser;
             }
 
-            if (!obj.contains("schema_encoding")) {
+            if VUNLIKELY (!obj.contains("schema_encoding")) {
               mapping.schema_encoding = mapping.encoding;
             }
 
@@ -2852,7 +2862,7 @@ bool FoxgloveConverter::resolve_proto_schema(const std::string& proto_name, std:
         std::unordered_set<std::string> seen;
 #endif
 
-        vlink::MoveFunction<void(const google::protobuf::FileDescriptor*)> dfs;
+        MoveFunction<void(const google::protobuf::FileDescriptor*)> dfs;
 
         dfs = [&ordered, &seen, &dfs](const google::protobuf::FileDescriptor* fd) {
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
@@ -2968,7 +2978,7 @@ FoxgloveMessage FoxgloveConverter::convert_proto_mapping(const FoxgloveMapping& 
   }
 
   auto extract_ts = [&mapping, &msg](FoxgloveMessage& result) {
-    if (!mapping.timestamp_field.empty() && result.success) {
+    if VLIKELY (!mapping.timestamp_field.empty() && result.success) {
       result.timestamp_ns = extract_proto_timestamp_ns(*msg, mapping.timestamp_field, mapping.timestamp_unit);
     }
 
@@ -3118,7 +3128,7 @@ FoxgloveMessage FoxgloveConverter::convert_pose_in_frame(const FoxgloveMapping& 
     auto get_field = [&orientation_msg](const char* name) -> double {
       const auto* f = find_proto_field_cached(*orientation_msg->GetDescriptor(), name);
 
-      if (!f || !is_proto_numeric_type(f->cpp_type())) {
+      if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
         return 0.0;
       }
 
@@ -3141,7 +3151,7 @@ FoxgloveMessage FoxgloveConverter::convert_pose_in_frame(const FoxgloveMapping& 
     auto get_euler = [&euler_msg](const char* name) -> double {
       const auto* f = find_proto_field_cached(*euler_msg->GetDescriptor(), name);
 
-      if (!f || !is_proto_numeric_type(f->cpp_type())) {
+      if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
         return 0.0;
       }
 
@@ -3263,7 +3273,7 @@ FoxgloveMessage FoxgloveConverter::convert_scene_update(const FoxgloveMapping& m
     const auto* d = m.GetDescriptor();
     const auto* f = find_proto_field_cached(*d, name);
 
-    if (!f) {
+    if VUNLIKELY (!f) {
       return 0.0;
     }
 
@@ -3329,7 +3339,7 @@ FoxgloveMessage FoxgloveConverter::convert_scene_update(const FoxgloveMapping& m
       auto direct_get = [&sub](const char* name) -> double {
         const auto* f = find_proto_field_cached(*sub.GetDescriptor(), name);
 
-        if (!f || !is_proto_numeric_type(f->cpp_type())) {
+        if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
           return 0.0;
         }
 
@@ -3354,7 +3364,7 @@ FoxgloveMessage FoxgloveConverter::convert_scene_update(const FoxgloveMapping& m
           auto pos_get = [&pos_msg](const char* name) -> double {
             const auto* f = find_proto_field_cached(*pos_msg.GetDescriptor(), name);
 
-            if (!f || !is_proto_numeric_type(f->cpp_type())) {
+            if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
               return 0.0;
             }
 
@@ -3420,11 +3430,11 @@ FoxgloveMessage FoxgloveConverter::convert_scene_update(const FoxgloveMapping& m
     const google::protobuf::Message* entities_parent = nullptr;
     std::string entities_field_name;
 
-    if (!resolve_proto_parent_field_path(msg, fm.source, entities_parent, entities_field_name)) {
+    if VUNLIKELY (!resolve_proto_parent_field_path(msg, fm.source, entities_parent, entities_field_name)) {
       continue;
     }
 
-    if (!entities_parent) {
+    if VUNLIKELY (!entities_parent) {
       continue;
     }
 
@@ -3432,7 +3442,7 @@ FoxgloveMessage FoxgloveConverter::convert_scene_update(const FoxgloveMapping& m
     const auto* ref = entities_parent->GetReflection();
     const auto* field = find_proto_field_cached(*desc, entities_field_name);
 
-    if (!field || !field->is_repeated()) {
+    if VUNLIKELY (!field || !field->is_repeated()) {
       continue;
     }
 
@@ -3665,7 +3675,7 @@ FoxgloveMessage FoxgloveConverter::convert_laser_scan(const FoxgloveMapping& map
     const auto* ref = msg.GetReflection();
     const auto* field = find_proto_field_cached(*desc, field_name);
 
-    if (!field || !field->is_repeated()) {
+    if VUNLIKELY (!field || !field->is_repeated()) {
       return out;
     }
 
@@ -3766,7 +3776,7 @@ FoxgloveMessage FoxgloveConverter::convert_raw_image(const FoxgloveMapping& mapp
         std::string scratch;
         const auto& raw_bytes = ref->GetStringReference(msg, field, &scratch);
 
-        if (!raw_bytes.empty()) {
+        if VLIKELY (!raw_bytes.empty()) {
           data_vec = builder.CreateVector(reinterpret_cast<const uint8_t*>(raw_bytes.data()), raw_bytes.size());
         }
       } else if (field->is_repeated()) {
@@ -3868,7 +3878,7 @@ FoxgloveMessage FoxgloveConverter::convert_poses_in_frame(const FoxgloveMapping&
     const google::protobuf::Message* poses_parent = nullptr;
     std::string poses_field_name;
 
-    if (!resolve_proto_parent_field_path(msg, poses_src, poses_parent, poses_field_name)) {
+    if VUNLIKELY (!resolve_proto_parent_field_path(msg, poses_src, poses_parent, poses_field_name)) {
       poses_parent = nullptr;
     }
 
@@ -3894,7 +3904,7 @@ FoxgloveMessage FoxgloveConverter::convert_poses_in_frame(const FoxgloveMapping&
 
             const auto* f = find_proto_field_cached(*item.GetDescriptor(), name);
 
-            if (!f || !is_proto_numeric_type(f->cpp_type())) {
+            if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
               return 0.0;
             }
 
@@ -4002,7 +4012,7 @@ FoxgloveMessage FoxgloveConverter::convert_frame_transforms(const FoxgloveMappin
 
           const auto* f = find_proto_field_cached(*item.GetDescriptor(), name);
 
-          if (!f || !is_proto_numeric_type(f->cpp_type())) {
+          if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
             return 0.0;
           }
 
@@ -4020,7 +4030,7 @@ FoxgloveMessage FoxgloveConverter::convert_frame_transforms(const FoxgloveMappin
 
           const auto* f = find_proto_field_cached(*item.GetDescriptor(), name);
 
-          if (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
+          if VUNLIKELY (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
             return {};
           }
 
@@ -4119,7 +4129,7 @@ FoxgloveMessage FoxgloveConverter::convert_location_fixes(const FoxgloveMapping&
 
           const auto* f = find_proto_field_cached(*item.GetDescriptor(), name);
 
-          if (!f || !is_proto_numeric_type(f->cpp_type())) {
+          if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
             return 0.0;
           }
 
@@ -4137,7 +4147,7 @@ FoxgloveMessage FoxgloveConverter::convert_location_fixes(const FoxgloveMapping&
 
           const auto* f = find_proto_field_cached(*item.GetDescriptor(), name);
 
-          if (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
+          if VUNLIKELY (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
             return {};
           }
 
@@ -4223,7 +4233,7 @@ FoxgloveMessage FoxgloveConverter::convert_camera_calibration(const FoxgloveMapp
     const auto* ref = msg.GetReflection();
     const auto* field = find_proto_field_cached(*desc, field_name);
 
-    if (!field || !field->is_repeated()) {
+    if VUNLIKELY (!field || !field->is_repeated()) {
       return out;
     }
 
@@ -4320,7 +4330,7 @@ FoxgloveMessage FoxgloveConverter::convert_compressed_video(const FoxgloveMappin
         std::string scratch;
         const auto& raw_bytes = ref->GetStringReference(msg, field, &scratch);
 
-        if (!raw_bytes.empty()) {
+        if VLIKELY (!raw_bytes.empty()) {
           data_vec = builder.CreateVector(reinterpret_cast<const uint8_t*>(raw_bytes.data()), raw_bytes.size());
         }
       } else if (field->is_repeated()) {
@@ -4444,7 +4454,7 @@ FoxgloveMessage FoxgloveConverter::convert_grid(const FoxgloveMapping& mapping, 
         std::string scratch;
         const auto& raw_bytes = ref->GetStringReference(msg, field, &scratch);
 
-        if (!raw_bytes.empty()) {
+        if VLIKELY (!raw_bytes.empty()) {
           data_vec = builder.CreateVector(reinterpret_cast<const uint8_t*>(raw_bytes.data()), raw_bytes.size());
         }
       } else if (field->is_repeated()) {
@@ -4511,7 +4521,7 @@ FoxgloveMessage FoxgloveConverter::convert_image_annotations(const FoxgloveMappi
     const auto* ref = msg.GetReflection();
     const auto* field = find_proto_field_cached(*desc, field_name);
 
-    if (!field || !field->is_repeated()) {
+    if VUNLIKELY (!field || !field->is_repeated()) {
       return out;
     }
 
@@ -4527,7 +4537,7 @@ FoxgloveMessage FoxgloveConverter::convert_image_annotations(const FoxgloveMappi
   auto get_sub_double = [](const google::protobuf::Message& m, const char* name) -> double {
     const auto* f = find_proto_field_cached(*m.GetDescriptor(), name);
 
-    if (!f || !is_proto_numeric_type(f->cpp_type())) {
+    if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
       return 0.0;
     }
 
@@ -4537,7 +4547,7 @@ FoxgloveMessage FoxgloveConverter::convert_image_annotations(const FoxgloveMappi
   auto get_sub_string = [](const google::protobuf::Message& m, const char* name) -> std::string {
     const auto* f = find_proto_field_cached(*m.GetDescriptor(), name);
 
-    if (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
+    if VUNLIKELY (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
       return {};
     }
 
@@ -4662,7 +4672,7 @@ FoxgloveMessage FoxgloveConverter::convert_joint_states(const FoxgloveMapping& m
 
           const auto* f = find_proto_field_cached(*item.GetDescriptor(), name);
 
-          if (!f || !is_proto_numeric_type(f->cpp_type())) {
+          if VUNLIKELY (!f || !is_proto_numeric_type(f->cpp_type())) {
             return 0.0;
           }
 
@@ -4682,7 +4692,7 @@ FoxgloveMessage FoxgloveConverter::convert_joint_states(const FoxgloveMapping& m
 
           const auto* f = find_proto_field_cached(*item.GetDescriptor(), name);
 
-          if (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
+          if VUNLIKELY (!f || f->cpp_type() != google::protobuf::FieldDescriptor::CPPTYPE_STRING) {
             return {};
           }
 
@@ -4805,7 +4815,7 @@ FoxgloveMessage FoxgloveConverter::convert_raw_audio(const FoxgloveMapping& mapp
         std::string scratch;
         const auto& raw_bytes = ref->GetStringReference(msg, field, &scratch);
 
-        if (!raw_bytes.empty()) {
+        if VLIKELY (!raw_bytes.empty()) {
           data_vec = builder.CreateVector(reinterpret_cast<const uint8_t*>(raw_bytes.data()), raw_bytes.size());
         }
       } else if (field->is_repeated()) {
@@ -4938,7 +4948,7 @@ FoxgloveMessage FoxgloveConverter::convert_voxel_grid(const FoxgloveMapping& map
         std::string scratch;
         const auto& raw_bytes = ref->GetStringReference(msg, field, &scratch);
 
-        if (!raw_bytes.empty()) {
+        if VLIKELY (!raw_bytes.empty()) {
           data_vec = builder.CreateVector(reinterpret_cast<const uint8_t*>(raw_bytes.data()), raw_bytes.size());
         }
       } else if (field->is_repeated()) {
@@ -5248,6 +5258,7 @@ bool FoxgloveConverter::get_schema_info(std::string_view url, SchemaType schema_
     }
 
 #ifdef VLINK_HAS_FBS_PARSER
+
     if (schema_type == SchemaType::kFlatbuffers && is_flatbuffers_schema_encoding(mapping->encoding)) {
       if (resolve_custom_fbs_schema(ser, schema_data)) {
         schema_name = ser;

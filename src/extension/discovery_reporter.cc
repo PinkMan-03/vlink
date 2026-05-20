@@ -160,6 +160,7 @@ DiscoveryReporter::DiscoveryReporter() : impl_(std::make_unique<Impl>()) {
 
 #ifdef _WIN32
   ::WSADATA wsa_data;
+
   if VUNLIKELY (::WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
     VLOG_F("DiscoveryReporter: Failed to initialize winsock.");
     return;
@@ -173,6 +174,7 @@ DiscoveryReporter::DiscoveryReporter() : impl_(std::make_unique<Impl>()) {
   }
 
 #ifdef IP_TTL
+
   if VUNLIKELY (::setsockopt(impl_->sock, IPPROTO_IP, IP_TTL, reinterpret_cast<const char*>(&kSendTTL),
                              sizeof(kSendTTL)) < 0) {
     VLOG_F("DiscoveryReporter: Failed to set TTL option.");
@@ -182,6 +184,7 @@ DiscoveryReporter::DiscoveryReporter() : impl_(std::make_unique<Impl>()) {
 
 #if !VLINK_DISCOVERY_MULTICAST
   int enable_broadcast = 1;
+
   if VUNLIKELY (::setsockopt(impl_->sock, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&enable_broadcast),
                              sizeof(enable_broadcast)) < 0) {
     VLOG_F("DiscoveryReporter: Failed to enable broadcast.");

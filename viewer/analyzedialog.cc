@@ -79,6 +79,7 @@ void AnalyzeDialog::init(Type type) {
   ui->widget_number->update();
 
   current_type_ = type;
+
   if (current_type_ == kNumberType) {
     ui->stackedWidget->setCurrentIndex(0);
   } else if (current_type_ == kStringType) {

@@ -121,6 +121,7 @@ uint64_t ElapsedTimer::get_sys_timestamp(Accuracy accuracy, bool high_resolution
       return 0;
   }
 #else
+
   if (high_resolution) {
     switch (accuracy) {
       case kMilli:
@@ -162,6 +163,7 @@ uint64_t ElapsedTimer::get_cpu_timestamp(Accuracy accuracy, bool high_resolution
       return 0;
   }
 #else
+
   if (high_resolution) {
     switch (accuracy) {
       case kMilli:
@@ -219,6 +221,7 @@ uint64_t ElapsedTimer::get_cpu_active_time(Accuracy accuracy) noexcept {
   }
 #else
   struct rusage usage;
+
   if VUNLIKELY (::getrusage(RUSAGE_SELF, &usage) != 0) {
     return 0;
   }

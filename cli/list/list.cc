@@ -385,7 +385,7 @@ int main(int argc, char* argv[]) {
 
   int ret = start_viewer(native_mode, check_process_count);
 
-  if (ret != 0) {
+  if VUNLIKELY (ret != 0) {
     return ret;
   }
 

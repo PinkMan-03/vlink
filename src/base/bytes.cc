@@ -796,6 +796,7 @@ bool Bytes::resize(size_t size) noexcept {
 
   if (size <= capacity_) {
 #if VLINK_BYTES_MEM_RESET
+
     if (size > size_ && data_) {
       size_t available_space = capacity_;
       size_t new_end_offset = size;
@@ -889,6 +890,7 @@ void Bytes::process_type(Type type, uint8_t* data, size_t size, uint8_t offset, 
 
       if (total_size > kStackSize) {
         new_data = bytes_malloc(total_size);
+
         if VUNLIKELY (!new_data) {
           VLOG_E("Bytes: Failed to allocate memory.");
           clear();
@@ -990,14 +992,19 @@ void Bytes::process_type(Type type, uint8_t* data, size_t size, uint8_t offset, 
         if (total_size > kStackSize) {
           if (capacity_ + offset_ != total_size || data_ == stack_data_) {
             data_ = bytes_malloc(total_size);
+
             if VUNLIKELY (!data_) {
               VLOG_E("Bytes: Failed to allocate memory.");
+
               if (deferred_free_buffer) {
                 bytes_free(deferred_free_buffer, deferred_free_size);
               }
+
               clear();
+
               return;
             }
+
 #if VLINK_BYTES_MEM_RESET
             std::memset(data_, 0, total_size);
 #endif

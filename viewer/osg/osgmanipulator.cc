@@ -124,9 +124,11 @@ void OsgManipulator::moveToPoint(const osg::Vec3d& moveEye, const osg::Vec3d& mo
   baseRotation.makeRotate(osg::Vec3d(0, 0, -1), viewDir);
 
   osg::Vec3d side = viewDir ^ moveUp;
+
   if (side.length2() < 1e-6) {
     side = viewDir ^ osg::Vec3d(0, 0, 1);
   }
+
   side.normalize();
 
   osg::Vec3d up = side ^ viewDir;

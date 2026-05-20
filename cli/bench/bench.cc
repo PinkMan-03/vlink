@@ -301,6 +301,7 @@ void print_run_line(std::string_view text, const char* color = nullptr) {
 
   std::string out;
   out.reserve(line.size() + 32);
+
   if (is_tty && color != nullptr) {
     out.append(color);
     out.append(line);
@@ -308,6 +309,7 @@ void print_run_line(std::string_view text, const char* color = nullptr) {
   } else {
     out.append(line);
   }
+
   out.push_back('\n');
   VLINK_TERM_OUT.write_raw(out.data(), out.size());
   VLINK_TERM_OUT.flush();
@@ -410,6 +412,7 @@ std::string format_duration_short(int64_t ms) {
   const int secs = static_cast<int>((ms % (1000 * 60)) / 1000);
   const int millis = static_cast<int>(ms % 1000);
   char buf[32];
+
   if (hours > 0) {
     std::snprintf(buf, sizeof(buf), "%dh%02dm%02ds", hours, mins, secs);
   } else if (mins > 0) {
@@ -435,6 +438,7 @@ int64_t plan_remaining_ms(const std::vector<Bench::Scenario>& scenarios, size_t 
   int64_t total = 0;
   for (size_t i = from_index; i < scenarios.size(); ++i) {
     total += plan_case_estimate_ms(scenarios[i]);
+
     if (i + 1 < scenarios.size()) {
       total += kRunCooldownMs;
     }
@@ -463,6 +467,7 @@ std::string make_run_eta_line(size_t done, size_t total, int64_t elapsed_ms, int
 
   if (done < total) {
     int64_t eta_ms = plan_left_ms;
+
     if (done > 0) {
       const auto actual_left = static_cast<int64_t>(static_cast<double>(elapsed_ms) *
                                                     static_cast<double>(total - done) / static_cast<double>(done));
@@ -535,6 +540,7 @@ std::string make_run_progress_line(int elapsed_ms, int warmup_ms, int duration_m
     const int lo = std::min(from_px, filled);
     const int hi = std::min(to_px, filled);
     std::string seg;
+
     if (hi > lo) {
       seg.reserve(static_cast<size_t>(hi - lo) * 3);
       for (int i = lo; i < hi; ++i) seg.append("\xE2\x96\x88");
@@ -868,6 +874,7 @@ bool sleep_for_or_stop(DurationT duration, std::string& error) {
 
   while (true) {
     const uint64_t now_ns = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
+
     if (now_ns >= deadline_ns) {
       break;
     }
@@ -878,6 +885,7 @@ bool sleep_for_or_stop(DurationT duration, std::string& error) {
 
     const uint64_t remaining_ns = deadline_ns - now_ns;
     const uint64_t sleep_ms = std::min<uint64_t>(remaining_ns / 1000000ULL, 50ULL);
+
     if (sleep_ms > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
@@ -889,6 +897,7 @@ bool sleep_for_or_stop(DurationT duration, std::string& error) {
 bool sleep_until_or_stop(uint64_t deadline_ns, std::string& error) {
   while (true) {
     const uint64_t now_ns = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
+
     if (now_ns >= deadline_ns) {
       break;
     }
@@ -899,6 +908,7 @@ bool sleep_until_or_stop(uint64_t deadline_ns, std::string& error) {
 
     const uint64_t remaining_ns = deadline_ns - now_ns;
     const uint64_t sleep_ms = std::min<uint64_t>(remaining_ns / 1000000ULL, 50ULL);
+
     if (sleep_ms > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(sleep_ms));
     }
@@ -910,12 +920,14 @@ bool sleep_until_or_stop(uint64_t deadline_ns, std::string& error) {
 void sleep_until_or_stop_unchecked(uint64_t deadline_ns) {
   while (!Bench::stop_requested()) {
     const uint64_t now_ns = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
+
     if (now_ns >= deadline_ns) {
       break;
     }
 
     const uint64_t remaining_ns = deadline_ns - now_ns;
     const uint64_t sleep_ms = std::min<uint64_t>(remaining_ns / 1000000ULL, 50ULL);
+
     if (sleep_ms == 0) {
       break;
     }
@@ -1418,6 +1430,7 @@ class ResourceSampler final {
     FILETIME exit_time;
     FILETIME kernel_time;
     FILETIME user_time;
+
     if VUNLIKELY (!::GetProcessTimes(::GetCurrentProcess(), &creation_time, &exit_time, &kernel_time, &user_time)) {
       return 0;
     }
@@ -1431,6 +1444,7 @@ class ResourceSampler final {
     return (kernel.QuadPart + user.QuadPart) / 10ULL;
 #elif defined(_POSIX_VERSION)
     struct rusage usage{};
+
     if VUNLIKELY (::getrusage(RUSAGE_SELF, &usage) != 0) {
       return 0;
     }
@@ -1446,6 +1460,7 @@ class ResourceSampler final {
   static double get_process_rss_mb() noexcept {
 #ifdef _WIN32
     PROCESS_MEMORY_COUNTERS_EX counters{};
+
     if VUNLIKELY (!::GetProcessMemoryInfo(::GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
                                           sizeof(counters))) {
       return 0.0;
@@ -1455,6 +1470,7 @@ class ResourceSampler final {
 #elif defined(__APPLE__)
     mach_task_basic_info info{};
     mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+
     if VUNLIKELY (::task_info(mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) !=
                   KERN_SUCCESS) {
       return 0.0;
@@ -1465,6 +1481,7 @@ class ResourceSampler final {
     std::ifstream statm("/proc/self/statm");
     int64_t total_pages = 0;
     int64_t rss_pages = 0;
+
     if (statm.is_open() && (statm >> total_pages >> rss_pages) && rss_pages > 0) {
       const auto page_size = static_cast<int64_t>(::sysconf(_SC_PAGESIZE));
 
@@ -2160,6 +2177,7 @@ bool run_pub_worker_impl(const Bench::WorkerOptions& options, Bench::ScenarioRes
       const bool published = publisher.publish(message);
       const uint64_t after_publish_ns = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
       const bool in_measure_window = send_ns >= measure_begin_ns && send_ns <= measure_end_ns;
+
       if (published && in_measure_window) {
         ++measured_sent;
         measured_bytes += result.wire_size;
@@ -2224,6 +2242,7 @@ bool run_sub_worker_impl(const Bench::WorkerOptions& options, Bench::ScenarioRes
   }
 
   const int sub_sleep_us = options.subscriber_sleep_us;
+
   if (!subscriber.listen([&collector, sub_sleep_us](const MsgT& message) {
         uint64_t send_ns = 0;
 
@@ -2424,6 +2443,7 @@ void append_worker_result_error(const std::string& file_path, std::string& error
   }
 
   std::error_code exists_ec;
+
   if (!std::filesystem::exists(file_path, exists_ec) || exists_ec) {
     return;
   }
@@ -2612,6 +2632,7 @@ int split_publisher_workload(int total, int publishers, int publisher_index) noe
   }
 
   const int safe_publishers = std::max(publishers, 1);
+
   if (safe_publishers == 1) {
     return total;
   }
@@ -2794,6 +2815,7 @@ bool run_process_pubsub_case(const Bench::RunOptions& options, const Bench::Scen
     append_worker_args(args, scenario, false, sub_result_paths.back(), index);
 
     std::unique_ptr<Process> process;
+
     if VUNLIKELY (!start_worker_process(options, args, "sub", process, error)) {
       append_worker_result_error(sub_result_paths.back(), error);
       stop_processes(sub_processes);
@@ -2830,6 +2852,7 @@ bool run_process_pubsub_case(const Bench::RunOptions& options, const Bench::Scen
     append_worker_args(args, scenario, true, pub_result_paths.back(), index);
 
     std::unique_ptr<Process> process;
+
     if VUNLIKELY (!start_worker_process(options, args, "pub", process, error)) {
       append_worker_result_error(pub_result_paths.back(), error);
       stop_processes(pub_processes);
@@ -2846,6 +2869,7 @@ bool run_process_pubsub_case(const Bench::RunOptions& options, const Bench::Scen
 
   for (size_t index = 0; index < sub_processes.size(); ++index) {
     auto& process = sub_processes[index];
+
     if (process->write(start_signal) != start_signal.size()) {
       error = format_process_failure(*process, "sub worker start signal failed");
       append_worker_result_error(sub_result_paths[index], error);
@@ -2858,6 +2882,7 @@ bool run_process_pubsub_case(const Bench::RunOptions& options, const Bench::Scen
 
   for (size_t index = 0; index < pub_processes.size(); ++index) {
     auto& process = pub_processes[index];
+
     if (process->write(start_signal) != start_signal.size()) {
       error = format_process_failure(*process, "pub worker start signal failed");
       append_worker_result_error(pub_result_paths[index], error);
@@ -2875,6 +2900,7 @@ bool run_process_pubsub_case(const Bench::RunOptions& options, const Bench::Scen
 
   for (size_t index = 0; index < pub_processes.size(); ++index) {
     auto& process = pub_processes[index];
+
     if (!wait_process_finished(*process, finish_deadline_ns, error)) {
       append_worker_result_error(pub_result_paths[index], error);
       stop_processes(pub_processes);
@@ -2886,6 +2912,7 @@ bool run_process_pubsub_case(const Bench::RunOptions& options, const Bench::Scen
 
   for (size_t index = 0; index < sub_processes.size(); ++index) {
     auto& process = sub_processes[index];
+
     if (!wait_process_finished(*process, finish_deadline_ns, error)) {
       append_worker_result_error(sub_result_paths[index], error);
       stop_processes(sub_processes);
@@ -3511,6 +3538,7 @@ const char* Bench::payload_to_string(PayloadKind payload) noexcept {
 
 bool Bench::parse_suite(const std::string& value, Suite& suite) noexcept {
   auto lower = to_lower_copy(value);
+
   if (lower == "throughput") {
     suite = kThroughputSuite;
     return true;
@@ -3541,6 +3569,7 @@ bool Bench::parse_suite(const std::string& value, Suite& suite) noexcept {
 
 bool Bench::parse_mode(const std::string& value, Mode& mode) noexcept {
   auto lower = to_lower_copy(value);
+
   if (lower == "local" || lower == "local-loop" || lower == "loop") {
     mode = kLocalLoopMode;
     return true;
@@ -3561,6 +3590,7 @@ bool Bench::parse_mode(const std::string& value, Mode& mode) noexcept {
 
 bool Bench::parse_topology(const std::string& value, Topology& topology) noexcept {
   auto lower = to_lower_copy(value);
+
   if (lower == "1:1" || lower == "1x1" || lower == "one-to-one") {
     topology = kOneToOneTopology;
     return true;
@@ -3586,6 +3616,7 @@ bool Bench::parse_topology(const std::string& value, Topology& topology) noexcep
 
 bool Bench::parse_rate_pattern(const std::string& value, RatePattern& pattern) noexcept {
   auto lower = to_lower_copy(value);
+
   if (lower == "max" || lower == "unlimited") {
     pattern = kMaxRatePattern;
     return true;
@@ -3606,6 +3637,7 @@ bool Bench::parse_rate_pattern(const std::string& value, RatePattern& pattern) n
 
 bool Bench::parse_payload(const std::string& value, PayloadKind& payload) noexcept {
   auto lower = to_lower_copy(value);
+
   if (lower == "bytes" || lower == "raw") {
     payload = kBytesPayload;
     return true;
@@ -3671,6 +3703,7 @@ bool Bench::run(const RunOptions& options, Result& result, std::string& error) {
     if (is_intra && scenario.mode == kProcessMode) {
       if (has_local_mode) {
         ++skipped_count;
+
         if (!intra_skipped_logged) {
           result.skip_messages.emplace_back(
               "intra:// process-mode scenarios skipped (local modes are enabled; intra cannot run across processes)");
@@ -3683,6 +3716,7 @@ bool Bench::run(const RunOptions& options, Result& result, std::string& error) {
       Scenario rewritten = scenario;
       rewritten.mode = kLocalDirectMode;
       runnable_scenarios.emplace_back(std::move(rewritten));
+
       if (!intra_rewritten_logged) {
         result.skip_messages.emplace_back(
             "intra:// process-mode scenarios rewritten to local-direct (intra is in-process only)");

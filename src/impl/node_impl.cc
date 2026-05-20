@@ -195,10 +195,10 @@ void NodeImpl::call_status(Status::BasePtr ptr) {
 
     auto* message_loop = helper_->message_loop.load(std::memory_order_acquire);
 
-    if (message_loop) {
+    if VLIKELY (message_loop) {
       message_loop->post_task([this, ptr]() mutable {
         std::shared_lock lock(helper_->status_mtx);
-        if (helper_->status_callback) {
+        if VLIKELY (helper_->status_callback) {
           helper_->status_callback(std::move(ptr));
         }
       });
@@ -207,7 +207,8 @@ void NodeImpl::call_status(Status::BasePtr ptr) {
   }
 
   std::shared_lock lock(helper_->status_mtx);
-  if (helper_->status_callback) {
+
+  if VLIKELY (helper_->status_callback) {
     helper_->status_callback(std::move(ptr));
   }
 }
@@ -222,7 +223,7 @@ std::string NodeImpl::get_property(const std::string& prop) const {
 
   auto iter = helper_->property_map.find(prop);
 
-  if (iter != helper_->property_map.end()) {
+  if VLIKELY (iter != helper_->property_map.end()) {
     return iter->second;
   }
 
@@ -268,7 +269,7 @@ bool NodeImpl::enable_security(Security::Config&& cfg) {
     return false;
   }
 
-  if (cfg.advanced.aad_context.empty()) {
+  if VLIKELY (cfg.advanced.aad_context.empty()) {
     cfg.advanced.aad_context = url;
     cfg.advanced.aad_context += "|";
     cfg.advanced.aad_context += ser_type;

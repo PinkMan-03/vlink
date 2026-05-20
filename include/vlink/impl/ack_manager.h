@@ -213,7 +213,7 @@ class VLINK_EXPORT AckManager final {
 
     struct Compare final {
       bool operator()(const RequestPtr& left, const RequestPtr& right) const noexcept {
-        if (!left || !right) {
+        if VUNLIKELY (!left || !right) {
           return left < right;
         }
 

@@ -66,10 +66,12 @@ RsaKeyPair generate_rsa_keypair(int bits) {
   RsaKeyPair kp;
 
   EVP_PKEY_CTX* gctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
+
   if (gctx == nullptr) {
     VLOG_W("EVP_PKEY_CTX_new_id failed");
     return kp;
   }
+
   std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> gctx_guard(gctx, &EVP_PKEY_CTX_free);
 
   if (EVP_PKEY_keygen_init(gctx) <= 0 || EVP_PKEY_CTX_set_rsa_keygen_bits(gctx, bits) <= 0) {
@@ -78,48 +80,62 @@ RsaKeyPair generate_rsa_keypair(int bits) {
   }
 
   EVP_PKEY* pkey = nullptr;
+
   if (EVP_PKEY_keygen(gctx, &pkey) <= 0 || pkey == nullptr) {
     VLOG_W("RSA keygen failed");
     return kp;
   }
+
   std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> pkey_guard(pkey, &EVP_PKEY_free);
 
   {
     BIO* bio = BIO_new(BIO_s_mem());
+
     if (bio == nullptr) {
       VLOG_W("BIO_new(public) failed");
       return RsaKeyPair{};
     }
+
     std::unique_ptr<BIO, decltype(&BIO_free)> bio_guard(bio, &BIO_free);
+
     if (PEM_write_bio_PUBKEY(bio, pkey) != 1) {
       VLOG_W("PEM_write_bio_PUBKEY failed");
       return RsaKeyPair{};
     }
+
     char* buf = nullptr;
     const auto len = BIO_get_mem_data(bio, &buf);  // NOLINT(runtime/int, google-runtime-int)
+
     if (buf == nullptr || len <= 0) {
       VLOG_W("BIO_get_mem_data(public) returned empty");
       return RsaKeyPair{};
     }
+
     kp.public_pem.assign(buf, static_cast<size_t>(len));
   }
   {
     BIO* bio = BIO_new(BIO_s_mem());
+
     if (bio == nullptr) {
       VLOG_W("BIO_new(private) failed");
       return RsaKeyPair{};
     }
+
     std::unique_ptr<BIO, decltype(&BIO_free)> bio_guard(bio, &BIO_free);
+
     if (PEM_write_bio_PrivateKey(bio, pkey, nullptr, nullptr, 0, nullptr, nullptr) != 1) {
       VLOG_W("PEM_write_bio_PrivateKey failed");
       return RsaKeyPair{};
     }
+
     char* buf = nullptr;
     const auto len = BIO_get_mem_data(bio, &buf);  // NOLINT(runtime/int, google-runtime-int)
+
     if (buf == nullptr || len <= 0) {
       VLOG_W("BIO_get_mem_data(private) returned empty");
       return RsaKeyPair{};
     }
+
     kp.private_pem.assign(buf, static_cast<size_t>(len));
   }
 
@@ -132,6 +148,7 @@ int main() {
   VLOG_I("Generating ephemeral RSA-2048 key pairs (receiver + signing)");
   const RsaKeyPair recv_kp = generate_rsa_keypair(2048);
   const RsaKeyPair sign_kp = generate_rsa_keypair(2048);
+
   if (recv_kp.public_pem.empty() || sign_kp.public_pem.empty()) {
     VLOG_W("RSA key generation failed -- aborting example.");
     return 1;

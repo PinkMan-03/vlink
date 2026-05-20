@@ -124,7 +124,7 @@ bool CameraFrame::operator>>(Bytes& bytes) const noexcept {
   // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
   std::memcpy(bytes.data() + kMagicNumberBeginSize, this, sizeof(CameraFrame));
 
-  if (data_ != nullptr && size_ != 0) {
+  if VLIKELY (data_ != nullptr && size_ != 0) {
     std::memcpy(bytes.data() + kMagicNumberBeginSize + sizeof(CameraFrame), data_, size_);
   }
 
@@ -193,7 +193,7 @@ bool CameraFrame::shallow_copy(const CameraFrame& target) noexcept {
 }
 
 bool CameraFrame::deep_copy(const CameraFrame& target) noexcept {
-  if (data_ && is_owner_ && target.data_ && size_ != 0 && size_ == target.size_) {
+  if VLIKELY (data_ && is_owner_ && target.data_ && size_ != 0 && size_ == target.size_) {
     if VUNLIKELY (this == &target) {
       return false;
     }

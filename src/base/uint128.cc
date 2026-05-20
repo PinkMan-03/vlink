@@ -63,6 +63,7 @@ int Uint128::clz64(uint64_t x) noexcept {
 
   return 64;
 #else
+
   if (x == 0) {
     return 64;
   }

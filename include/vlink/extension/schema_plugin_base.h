@@ -232,7 +232,7 @@ inline SchemaData SchemaPluginBase::search_schema(const std::string& name, Schem
 
   auto iter = schema_map_.find(name);
 
-  if (iter != schema_map_.end()) {
+  if VLIKELY (iter != schema_map_.end()) {
     if (schema_type != SchemaType::kUnknown) {
       for (const auto& schema : iter->second) {
         if (schema.schema_type == schema_type) {
@@ -260,7 +260,7 @@ inline SchemaData SchemaPluginBase::search_schema(const std::string& name, Schem
     [[maybe_unused]] bool has_cached_flatbuffers = false;
     [[maybe_unused]] bool has_cached_zerocopy = false;
 
-    if (iter != schema_map_.end()) {
+    if VLIKELY (iter != schema_map_.end()) {
       for (const auto& cached_schema : iter->second) {
         switch (cached_schema.schema_type) {
           case SchemaType::kProtobuf:
@@ -281,12 +281,13 @@ inline SchemaData SchemaPluginBase::search_schema(const std::string& name, Schem
     }
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF
-    if (!has_cached_protobuf) {
+
+    if VUNLIKELY (!has_cached_protobuf) {
       if (auto* desc_ptr = find_protobuf_descriptor_locked(name); desc_ptr != nullptr) {
         auto* desc = reinterpret_cast<google::protobuf::Descriptor*>(desc_ptr);
         auto proto_schema = build_protobuf_schema_data(*desc);
 
-        if (!proto_schema.encoding.empty()) {
+        if VLIKELY (!proto_schema.encoding.empty()) {
           (void)cache_schema_data_locked(proto_schema);
           matches.emplace_back(std::move(proto_schema));
         }
@@ -295,7 +296,8 @@ inline SchemaData SchemaPluginBase::search_schema(const std::string& name, Schem
 #endif
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
-    if (!has_cached_flatbuffers) {
+
+    if VUNLIKELY (!has_cached_flatbuffers) {
       if (const auto* cached_schema = find_cached_flatbuffers_schema_locked(name)) {
         matches.emplace_back(*cached_schema);
       }
@@ -319,6 +321,7 @@ inline SchemaData SchemaPluginBase::search_schema(const std::string& name, Schem
   }
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF
+
   if (schema_type == SchemaType::kProtobuf) {
     auto* desc_ptr = find_protobuf_descriptor_locked(name);
 
@@ -326,7 +329,7 @@ inline SchemaData SchemaPluginBase::search_schema(const std::string& name, Schem
       auto* desc = reinterpret_cast<google::protobuf::Descriptor*>(desc_ptr);
       schema = build_protobuf_schema_data(*desc);
 
-      if (!schema.encoding.empty()) {
+      if VLIKELY (!schema.encoding.empty()) {
         (void)cache_schema_data_locked(schema);
         return schema;
       }
@@ -335,6 +338,7 @@ inline SchemaData SchemaPluginBase::search_schema(const std::string& name, Schem
 #endif
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
+
   if (schema_type == SchemaType::kFlatbuffers) {
     if (const auto* cached_schema = find_cached_flatbuffers_schema_locked(name)) {
       return *cached_schema;
@@ -349,6 +353,7 @@ inline std::vector<SchemaData> SchemaPluginBase::get_all_schemas(SchemaType sche
   std::lock_guard lock(mtx_);
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
+
   if (schema_type == SchemaType::kUnknown || schema_type == SchemaType::kFlatbuffers) {
     import_all_flatbuffers_schema_data_locked();
   }
@@ -396,7 +401,7 @@ inline SchemaPluginInterface::ProtobufMessagePtr SchemaPluginBase::create_protob
 
   auto iter = protobuf_message_map_.find(name);
 
-  if (iter != protobuf_message_map_.end()) {
+  if VLIKELY (iter != protobuf_message_map_.end()) {
     return iter->second;
   }
 
@@ -429,7 +434,7 @@ inline SchemaPluginInterface::FlatbuffersSchemaPtr SchemaPluginBase::search_flat
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
   const auto* schema = find_cached_flatbuffers_schema_locked(name);
 
-  if (!schema) {
+  if VUNLIKELY (!schema) {
     return nullptr;
   }
 
@@ -456,7 +461,7 @@ inline SchemaPluginInterface::FlatbuffersSchemaPtr SchemaPluginBase::search_flat
 
   const auto* snapshot_data = snapshot->data();
 
-  if (snapshot_iter != flatbuffers_schema_snapshots_.end()) {
+  if VLIKELY (snapshot_iter != flatbuffers_schema_snapshots_.end()) {
     if VLIKELY (snapshot_iter->second) {
       retired_flatbuffers_schema_snapshots_.emplace_back(std::move(snapshot_iter->second));
     }
@@ -480,7 +485,7 @@ inline SchemaPluginInterface::FlatbuffersParserPtr SchemaPluginBase::create_flat
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
   const auto* schema = find_cached_flatbuffers_schema_locked(name);
 
-  if (!schema) {
+  if VUNLIKELY (!schema) {
     return nullptr;
   }
 
@@ -532,6 +537,7 @@ inline bool SchemaPluginBase::cache_schema_data_locked(const SchemaData& schema)
   }
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
+
   if (is_flatbuffers_schema_type(schema.encoding)) {
     flatbuffers::Verifier verifier(schema.data.data(), schema.data.size());
 
@@ -567,7 +573,7 @@ inline SchemaPluginInterface::ProtobufDescriptorPtr SchemaPluginBase::find_proto
     const std::string& name) {
   auto iter = protobuf_descriptor_map_.find(name);
 
-  if (iter != protobuf_descriptor_map_.end()) {
+  if VLIKELY (iter != protobuf_descriptor_map_.end()) {
     return iter->second;
   }
 

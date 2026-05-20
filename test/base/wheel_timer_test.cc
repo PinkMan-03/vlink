@@ -150,6 +150,7 @@ TEST_SUITE("base-WheelTimer") {
         20,
         [&](WheelTimer::Key k) {
           fire_count.fetch_add(1, std::memory_order_relaxed);
+
           if (stored_key == -1) {
             stored_key = k;
           } else if (stored_key != k) {

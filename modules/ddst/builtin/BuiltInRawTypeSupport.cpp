@@ -50,19 +50,25 @@ unsigned int vlink::BuiltInRawTypeSupport::get_max_serialized_data_size(void* da
 int vlink::BuiltInRawTypeSupport::serialize_data(void* data, CdrSerializer* cdr, int endian) {
   vlink::BuiltInRaw* structData = static_cast<vlink::BuiltInRaw*>(data);
   uint32_t tmpLength = 0;
+
   if (!cdr->serializeBaseType(structData->id)) {
     fprintf(stderr, "Serialization failed for field: structData->id\n");
     return -1;
   }
+
   tmpLength = static_cast<uint32_t>(structData->data.size());
+
   if (!cdr->serializeBaseType(tmpLength)) {
     fprintf(stderr, "Serialization length failed for field: structData->data\n");
     return -1;
   }
+
+
   if (!cdr->serializeBaseTypeArray(structData->data.data(), structData->data.size())) {
     fprintf(stderr, "Serialization failed for field: structData->data\n");
     return -1;
   }
+
   return 0;
 }
 
@@ -72,20 +78,26 @@ int vlink::BuiltInRawTypeSupport::deserialize_data(void* data, CdrDeserializer* 
   char tmpCharEnum = 0;
   short tmpShortEnum = 0;
   int tmpIntEnum = 0;
+
   if (!cdr->deserializeBaseType(structData->id)) {
     fprintf(stderr, "Deserialization failed for field: structData->id\n");
     return -1;
   }
+
+
   if (!cdr->deserializeBaseType(tmpLength)) {
     fprintf(stderr, "Deserialization length failed for field: structData->data\n");
     return -1;
   }
+
   auto* cur_msg = access_private::curProcessMsgBlock_(*cdr);
   static constexpr size_t skip_size = sizeof(unsigned long long) + sizeof(unsigned int);
+
   if (cur_msg->buffer_size < skip_size) {
     fprintf(stderr, "Deserialization skip_size failed for field: structData->data\n");
     return -1;
   }
+
   structData->data =
       Bytes::shallow_copy(reinterpret_cast<uint8_t*>(cur_msg->buffer) + skip_size, cur_msg->buffer_size - skip_size);
   return 0;
@@ -116,15 +128,20 @@ ReturnCode_t vlink::BuiltInRawTypeSupport::get_instancehandle(void* data, CdrSer
     iHandle = HANDLE_NIL;
     return RETCODE_OK;
   }
+
   int ret = serialize_key(data, cdr, forceMd5);
+
   if (ret != 0) {
     fprintf(stderr, "Failed to serialize key.\n");
     return RETCODE_ERROR;
   }
+
+
   if (!cdr->getKeyHash((char*)&iHandle, forceMd5)) {
     fprintf(stderr, "Failed to get key hash\n");
     return RETCODE_ERROR;
   }
+
   return RETCODE_OK;
 }
 

@@ -43,6 +43,7 @@ namespace vlink {
   }
 
   // reliability
+
   if (qos.reliability.kind == Qos::Reliability::kBestEffort) {
     dds_qset_reliability(dds_qos, DDS_RELIABILITY_BEST_EFFORT, get_dds_duration(qos.reliability.block_time));
   } else {
@@ -50,6 +51,7 @@ namespace vlink {
   }
 
   // history
+
   if (depth == 0) {
     depth = qos.history.depth;
   }
@@ -61,6 +63,7 @@ namespace vlink {
   }
 
   // durability
+
   if (qos.durability.kind == Qos::Durability::kVolatile) {
     dds_qset_durability(dds_qos, DDS_DURABILITY_VOLATILE);
   } else if (qos.durability.kind == Qos::Durability::kTransientLocal) {
@@ -74,6 +77,7 @@ namespace vlink {
   // publish_mode
 
   // liveliness
+
   if (qos.liveliness.kind == Qos::Liveliness::kAutomatic) {
     dds_qset_liveliness(dds_qos, DDS_LIVELINESS_AUTOMATIC, get_dds_duration(qos.liveliness.duration));
   } else if (qos.liveliness.kind == Qos::Liveliness::kManualParticipant) {
@@ -83,6 +87,7 @@ namespace vlink {
   }
 
   // destination_order
+
   if (qos.destination_order.kind == Qos::DestinationOrder::kReceptionTimestamp) {
     dds_qset_destination_order(dds_qos, DDS_DESTINATIONORDER_BY_RECEPTION_TIMESTAMP);
   } else {
@@ -90,6 +95,7 @@ namespace vlink {
   }
 
   // ownership
+
   if (qos.ownership.kind == Qos::Ownership::kShared) {
     dds_qset_ownership(dds_qos, DDS_OWNERSHIP_SHARED);
   } else {
@@ -106,6 +112,7 @@ namespace vlink {
   dds_qset_latency_budget(dds_qos, get_dds_duration(qos.latency_budget.duration));
 
   // resource_limits
+
   if (qos.resource_limits.max_samples > 0 && qos.resource_limits.max_instances > 0 &&
       qos.resource_limits.max_samples_per_instance > 0) {
     dds_qset_resource_limits(dds_qos, qos.resource_limits.max_samples, qos.resource_limits.max_instances,

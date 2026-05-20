@@ -60,6 +60,7 @@ static void demo_direct_load() {
   VLOG_I("SchemaPluginInterface plugin_id: ", std::string(vlink::SchemaPluginInterface::get_plugin_id()));
 
   auto schema_plugin = plugin.load<vlink::SchemaPluginInterface>(lib_name, 1, 0);
+
   if (!schema_plugin) {
     VLOG_W("Schema plugin not available (protobuf dependency required).");
     VLOG_I("Set VLINK_SCHEMA_PLUGIN=<path_to_so> to enable this demo.");
@@ -79,6 +80,7 @@ static void demo_direct_load() {
   std::string type_name = "example.SensorData";
   VLOG_I("  search_protobuf_descriptor(\"", type_name, "\")...");
   vlink::SchemaPluginInterface::ProtobufDescriptorPtr desc = schema_plugin->search_protobuf_descriptor(type_name);
+
   if (desc) {
     VLOG_I("    found descriptor at ", desc);
   } else {
@@ -88,6 +90,7 @@ static void demo_direct_load() {
   // --- Schema serialisation ---
   VLOG_I("  search_schema(\"", type_name, "\", kProtobuf)...");
   vlink::SchemaData schema = schema_plugin->search_schema(type_name, vlink::SchemaType::kProtobuf);
+
   if (!schema.data.empty()) {
     VLOG_I("    schema.name: ", schema.name);
     VLOG_I("    schema.encoding: ", schema.encoding);
@@ -100,6 +103,7 @@ static void demo_direct_load() {
   // --- Dynamic message creation ---
   VLOG_I("  create_protobuf_message(\"", type_name, "\")...");
   vlink::SchemaPluginInterface::ProtobufMessagePtr msg = schema_plugin->create_protobuf_message(type_name);
+
   if (msg) {
     VLOG_I("    created message prototype at ", msg);
   } else {
@@ -132,6 +136,7 @@ static void demo_manager() {
   }
 
   std::shared_ptr<vlink::SchemaPluginInterface> iface = mgr.get_interface();
+
   if (!iface) {
     VLOG_E("SchemaPluginManager::get_interface() returned nullptr.");
     return;

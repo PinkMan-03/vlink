@@ -726,12 +726,15 @@ TEST_SUITE("base-MemoryPool - clear") {
       for (int i = 0; i < kIterations && !stop.load(std::memory_order_relaxed); ++i) {
         const size_t bytes = size_dist(rng);
         void* p = pool.allocate(bytes);
+
         if (p == nullptr) {
           error.store(true);
           return;
         }
+
         std::memset(p, static_cast<int>(seed & 0xFF), bytes);
         live.emplace_back(p, bytes);
+
         if (live.size() > 32 || (rng() & 1u)) {
           auto [ptr, sz] = live.back();
           live.pop_back();

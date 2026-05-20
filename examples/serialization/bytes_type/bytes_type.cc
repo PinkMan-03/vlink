@@ -63,6 +63,7 @@ int main() {
     // Display hex representation for binary data
 
     // NOLINTNEXTLINE(readability-container-size-empty)
+
     if (msg.size() > 0) {
       std::cout << "      Hex: " << vlink::Bytes::convert_to_hex_str(msg.data(), msg.size()) << std::endl;
     }

@@ -275,7 +275,9 @@ int main() {
 
     int terminal = 0;
     for (auto& h : handles) {
-      if (h.is_done()) ++terminal;
+      if (h.is_done()) {
+        ++terminal;
+      }
     }
     VLOG_I("all 8 workers reached terminal state=", terminal);
 

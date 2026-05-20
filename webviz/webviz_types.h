@@ -55,12 +55,12 @@ inline bool try_parse_numeric_default(const FieldMapping& mapping, double& value
   }
 
   if VUNLIKELY (!mapping.default_value_is_string) {
-    if (mapping.default_value == "true") {
+    if VUNLIKELY (mapping.default_value == "true") {
       value = 1.0;
       return true;
     }
 
-    if (mapping.default_value == "false" || mapping.default_value == "null") {
+    if VUNLIKELY (mapping.default_value == "false" || mapping.default_value == "null") {
       value = 0.0;
       return true;
     }

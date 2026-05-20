@@ -226,6 +226,7 @@ inline void TimeRollingFile<MutexT>::rotate_now() {
 template <typename MutexT>
 inline void TimeRollingFile<MutexT>::set_max_size(size_t max_size) {
   std::lock_guard<MutexT> lock(spdlog::sinks::base_sink<MutexT>::mutex_);
+
   if VUNLIKELY (max_size == 0) {
     spdlog::throw_spdlog_ex("custom rolling sink set_max_size: max_size argument cannot be zero");
   }
@@ -242,6 +243,7 @@ inline size_t TimeRollingFile<MutexT>::get_max_size() {
 template <typename MutexT>
 inline void TimeRollingFile<MutexT>::set_max_files(size_t max_files) {
   std::lock_guard<MutexT> lock(spdlog::sinks::base_sink<MutexT>::mutex_);
+
   if VUNLIKELY (max_files == 0) {
     spdlog::throw_spdlog_ex("custom rolling sink set_max_files: max_files argument cannot be zero");
   }

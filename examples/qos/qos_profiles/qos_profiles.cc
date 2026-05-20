@@ -87,6 +87,7 @@ int main() {
 
     // Look up a specific profile by name
     auto it = qos_map.find("sensor");
+
     if (it != qos_map.end()) {
       std::cout << "\n  Found 'sensor' profile:" << std::endl;
       print_profile_summary("sensor", it->second);
@@ -94,6 +95,7 @@ int main() {
 
     // Look up a non-existent profile
     auto it2 = qos_map.find("nonexistent");
+
     if (it2 == qos_map.end()) {
       std::cout << "  Profile 'nonexistent' not found (expected)." << std::endl;
     }
@@ -178,6 +180,7 @@ int main() {
     std::cout << "\n[5] VLINK_QOS_CONFIG Environment Variable" << std::endl;
 
     const char* qos_config = std::getenv("VLINK_QOS_CONFIG");
+
     if (qos_config != nullptr) {
       VLOG_I("VLINK_QOS_CONFIG is set to:", qos_config);
       VLOG_I("Custom QoS profiles from this file are merged into the map.");

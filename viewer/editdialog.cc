@@ -40,8 +40,14 @@
 #include "./ui_mainwindow.h"
 
 [[maybe_unused]] static QString fbs_default_for_type(reflection::BaseType t) {
-  if (t == reflection::Bool) return "false";
-  if (t == reflection::String) return "";
+  if (t == reflection::Bool) {
+    return "false";
+  }
+
+  if (t == reflection::String) {
+    return "";
+  }
+
   return "0";
 }
 
@@ -124,6 +130,7 @@ class EditItemDelegate : public QItemDelegate {
         if (value_kind != static_cast<int>(EditDialog::EditValueKind::kString)) {
           break;
         }
+
         edit = new QLineEdit(parent);
         edit->setValidator(MainWindow::get_instance()->validator_string_);
         break;
@@ -136,6 +143,7 @@ class EditItemDelegate : public QItemDelegate {
 
   void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override {
     QLineEdit* edit = qobject_cast<QLineEdit*>(editor);
+
     if (!edit) {
       return;
     }
@@ -219,6 +227,7 @@ EditDialog::EditDialog(QWidget* parent) : QDialog(parent), ui(new Ui::EditDialog
 
   connect(ui->treeWidget_property, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
     auto* item = ui->treeWidget_property->itemAt(pos);
+
     if (!item) {
       return;
     }
@@ -255,6 +264,7 @@ EditDialog::EditDialog(QWidget* parent) : QDialog(parent), ui(new Ui::EditDialog
   } else {
     ui->pushButton_send->setEnabled(true);
   }
+
   ui->pushButton_stop->setEnabled(false);
 
   ui->treeWidget_property->expandAll();
@@ -564,6 +574,7 @@ void EditDialog::update_status() {
 
 void EditDialog::init_fbs_tree() {
   const auto* root_object = fbs_context_->root_object;
+
   if (!root_object) {
     return;
   }
@@ -571,6 +582,7 @@ void EditDialog::init_fbs_tree() {
   FlatbuffersObjectView root_view;
   bool has_initial_data = false;
   auto iter = window_->last_data_map_.find(window_->current_url_);
+
   if (iter != window_->last_data_map_.end() && !iter->second.empty()) {
     has_initial_data = make_root_view(*fbs_context_, iter->second, root_view);
   }
@@ -588,6 +600,7 @@ void EditDialog::init_fbs_tree_object(QTreeWidgetItem* parent_item, const std::s
   ordered_fields.reserve(object->fields()->size());
   for (unsigned i = 0; i < object->fields()->size(); ++i) {
     const auto* field = object->fields()->Get(i);
+
     if (field) {
       ordered_fields.push_back(field);
     }
@@ -676,6 +689,7 @@ void EditDialog::init_fbs_tree_object(QTreeWidgetItem* parent_item, const std::s
     }
 
     auto* item = new QTreeWidgetItem;
+
     if (parent_item) {
       parent_item->addChild(item);
     } else {
@@ -787,6 +801,7 @@ std::string EditDialog::build_fbs_json() {
   for (int i = 0; i < ui->treeWidget_property->topLevelItemCount(); ++i) {
     auto* item = ui->treeWidget_property->topLevelItem(i);
     const auto* field = item_to_fbs_field_map_[item];
+
     if (!field || !field->name()) {
       continue;
     }
@@ -794,6 +809,7 @@ std::string EditDialog::build_fbs_json() {
     if (!first) {
       json += ",";
     }
+
     first = false;
     json += "\"" + field->name()->str() + "\":";
     json += build_fbs_json_value(item);
@@ -810,6 +826,7 @@ std::string EditDialog::build_fbs_json_object(QTreeWidgetItem* item) {
   for (int i = 0; i < item->childCount(); ++i) {
     auto* child = item->child(i);
     const auto* field = item_to_fbs_field_map_[child];
+
     if (!field || !field->name()) {
       continue;
     }
@@ -817,6 +834,7 @@ std::string EditDialog::build_fbs_json_object(QTreeWidgetItem* item) {
     if (!first) {
       json += ",";
     }
+
     first = false;
     json += "\"" + field->name()->str() + "\":";
     json += build_fbs_json_value(child);

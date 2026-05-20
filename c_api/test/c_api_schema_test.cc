@@ -89,6 +89,7 @@ extern "C" int test_ssl_create_options_properties(void) {
   vlink_publisher_handle_t pub_handle{};
   int rc =
       vlink_create_publisher_with_ssl_options("intra://c_interface/ssl_properties", &schema_info, &pub_handle, &opt);
+
   if (rc != VLINK_RET_NO_ERROR) {
     std::printf("FAIL: create_publisher_with_ssl_options rc=%d\n", rc);
     return 1;

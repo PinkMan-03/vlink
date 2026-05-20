@@ -48,6 +48,7 @@ std::shared_mutex ZenohConf::mtx_;
 // ZenohConf
 void ZenohConf::register_qos(const std::string& name, const Qos& qos) {
   std::lock_guard lock(mtx_);
+
   if VUNLIKELY (qos_map_.find(name) != qos_map_.end() || name == "part" || name == "topic" || name == "pub" ||
                 name == "sub" || name == "writer" || name == "reader") {
     VLOG_F("ZenohConf: Invalid qos name: '", name, "' (reserved or already registered).");
@@ -132,21 +133,27 @@ std::ostream& operator<<(std::ostream& ostream, const ZenohConf& conf) noexcept 
   ostream << "ZenohConf:"
           << "[type]" << +conf.get_impl_type() << "[address]" << conf.address << "[event]" << conf.event << "[domain]"
           << conf.domain << "[depth]" << conf.depth << "[qos]" << conf.qos << "[fragment]" << conf.fragment;
+
   if (!conf.shm.empty()) {
     ostream << "[shm]" << conf.shm;
   }
+
   if (!conf.shm_mode.empty()) {
     ostream << "[shm_mode]" << conf.shm_mode;
   }
+
   if (!conf.shm_size.empty()) {
     ostream << "[shm_size]" << conf.shm_size;
   }
+
   if (!conf.shm_threshold.empty()) {
     ostream << "[shm_threshold]" << conf.shm_threshold;
   }
+
   if (!conf.shm_loan_threshold.empty()) {
     ostream << "[shm_loan_threshold]" << conf.shm_loan_threshold;
   }
+
   if (!conf.shm_blocking.empty()) {
     ostream << "[shm_blocking]" << conf.shm_blocking;
   }

@@ -468,6 +468,7 @@ PlayerWindow::~PlayerWindow() {
 
   if (proxy_process_.state() != QProcess::NotRunning) {
 #if defined(VLINK_SUPPORT_SHM)
+
     if (vlink::ShmConf::has_runtime_inited()) {
       vlink::ShmConf::deinit_runtime();
       proxy_process_.waitForFinished(100);
@@ -890,6 +891,7 @@ void PlayerWindow::on_toolButton_cmd_clicked() {
   (void)ret;
 
 #ifdef __linux__
+
   if (!lib_env.empty()) {
     vlink::Utils::set_env("LD_LIBRARY_PATH", lib_env);
   }
@@ -955,6 +957,7 @@ void PlayerWindow::on_toolButton_play_clicked() {
   }
 
 #ifdef VLINK_SUPPORT_SHM
+
   if (check_has_shm()) {
     bool has_roudi_running = false;
 
@@ -1144,6 +1147,7 @@ void PlayerWindow::on_toolButton_time_clicked() {
       if (point_dialog_->isVisible()) {
         point_dialog_->set_date_time(date_timestamp_.load() + timeoffset);
       }
+
       break;
     case TimeMethod::kTimeLocal:
       time_method_ = TimeMethod::kTimeUtc;
@@ -1154,6 +1158,7 @@ void PlayerWindow::on_toolButton_time_clicked() {
       if (player_ && point_dialog_->isVisible()) {
         point_dialog_->set_date_time(date_timestamp_.load());
       }
+
       break;
     case TimeMethod::kTimeUtc:
       time_method_ = TimeMethod::kTimeRel;
@@ -1164,6 +1169,7 @@ void PlayerWindow::on_toolButton_time_clicked() {
       if (player_ && point_dialog_->isVisible()) {
         point_dialog_->set_date_time(0);
       }
+
       break;
     default:
       break;
@@ -1297,6 +1303,7 @@ void PlayerWindow::on_toolButton_proxy_clicked(bool checked) {
       }
 
 #if defined(VLINK_SUPPORT_SHM)
+
       if (vlink::ShmConf::has_runtime_inited()) {
         vlink::ShmConf::deinit_runtime();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1371,6 +1378,7 @@ void PlayerWindow::on_toolButton_proxy_clicked(bool checked) {
     }
 
 #if defined(VLINK_SUPPORT_SHM)
+
     if (vlink::ShmConf::has_runtime_inited()) {
       vlink::ShmConf::deinit_runtime();
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -1738,6 +1746,7 @@ void PlayerWindow::update_status() {
     ui->label_bytes->setText("0B/s  ");
 
     ui->horizontalSlider_progress->setEnabled(true);
+
     if (player_) {
       update_timestamp(player_->get_info().blank_duration);
     }
@@ -1938,6 +1947,7 @@ bool PlayerWindow::load_bag(const QString& path) {
         {
           std::shared_lock lock(urls_mtx_);
           auto iter = pub_urls_map_.find(url);
+
           if (iter == pub_urls_map_.end()) {
             if (pause_to_next_flag_) {
               player_->pause_to_next();

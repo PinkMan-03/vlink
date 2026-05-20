@@ -119,6 +119,7 @@ void WheelTimer::start() {
 
   {
     std::lock_guard lock(impl_->mtx);
+
     if VUNLIKELY (impl_->is_running) {
       VLOG_W("WheelTimer: Timer is already running.");
       return;
@@ -354,7 +355,7 @@ void WheelTimer::Impl::run() {
 
     constexpr int64_t kStaleTickResetIntervals = 10;
 
-    if (next_tick + interval * kStaleTickResetIntervals < now) {
+    if VUNLIKELY (next_tick + interval * kStaleTickResetIntervals < now) {
       next_tick = now + interval;
     }
 
@@ -424,7 +425,7 @@ void WheelTimer::Impl::run() {
 
     now = std::chrono::steady_clock::now();
 
-    if (next_tick + interval * kStaleTickResetIntervals < now) {
+    if VUNLIKELY (next_tick + interval * kStaleTickResetIntervals < now) {
       next_tick = now + interval;
     }
 

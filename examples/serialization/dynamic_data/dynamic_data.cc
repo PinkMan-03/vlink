@@ -105,6 +105,7 @@ int main() {
     std::cout << "  [Sub] #" << msg_count << " type=\"" << type_name << "\"";
 
     // Dispatch based on the runtime type tag
+
     if (type_name == "Temperature") {
       auto t = dd.as<Temperature>();
       std::cout << " celsius=" << t.celsius << " sensor=" << t.sensor_id;
@@ -115,6 +116,7 @@ int main() {
       auto s = dd.as<std::string>();
       std::cout << " status=\"" << s << "\"";
     }
+
     std::cout << std::endl;
   });
 

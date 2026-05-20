@@ -540,72 +540,84 @@ inline void Url::global_init(uint16_t transport_enable_flags) {
 #ifndef VLINK_ENABLE_C_INTERFACE
 
 #ifdef VLINK_SUPPORT_INTRA
+
   if (transport_enable_flags & kEnableIntra) {
     IntraConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_SHM
+
   if (transport_enable_flags & kEnableShm) {
     ShmConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_SHM2
+
   if (transport_enable_flags & kEnableShm2) {
     Shm2Conf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_ZENOH
+
   if (transport_enable_flags & kEnableZenoh) {
     ZenohConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_DDS
+
   if (transport_enable_flags & kEnableDds) {
     DdsConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_DDSC
+
   if (transport_enable_flags & kEnableDdsc) {
     DdscConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_DDSR
+
   if (transport_enable_flags & kEnableDdsr) {
     DdsrConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_DDST
+
   if (transport_enable_flags & kEnableDdst) {
     DdstConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_SOMEIP
+
   if (transport_enable_flags & kEnableSomeip) {
     SomeipConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_MQTT
+
   if (transport_enable_flags & kEnableMqtt) {
     MqttConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_FDBUS
+
   if (transport_enable_flags & kEnableFdbus) {
     FdbusConf::global_init();
   }
 #endif
 
 #ifdef VLINK_SUPPORT_QNX
+
   if (transport_enable_flags & kEnableQnx) {
     QnxConf::global_init();
   }
@@ -752,7 +764,7 @@ inline void Url::init_target_internal(const Protocol& protocol, std::unique_ptr<
   }
   // NOLINTEND
 
-  if (!target) {
+  if VUNLIKELY (!target) {
     target = Url::load_for_plugin(protocol.transport);
   }
 

@@ -203,7 +203,7 @@ static bool compile_expressions() {
 
     exprtk::parser<double> parser;
 
-    if (!parser.compile(expr_strings[e], ctx.expr)) {
+    if VUNLIKELY (!parser.compile(expr_strings[e], ctx.expr)) {
       std::cerr << "Failed to compile expression: " << expr_strings[e] << std::endl;
       return false;
     }
@@ -233,7 +233,7 @@ static std::vector<double> evaluate_expressions(const std::vector<VariantType>& 
   results.reserve(expr_contexts.size());
 
   for (auto& ctx : expr_contexts) {
-    if (!ctx.compiled) {
+    if VUNLIKELY (!ctx.compiled) {
       results.emplace_back(0.0);
       continue;
     }
@@ -281,7 +281,7 @@ static bool check_rate_limit() {
     int64_t now = main_elapsed_timer.get();
     auto min_interval = static_cast<int64_t>(1000000.0 / max_hz);
 
-    if (now - last_output_us < min_interval) {
+    if VUNLIKELY (now - last_output_us < min_interval) {
       return false;
     }
 
@@ -328,7 +328,7 @@ static void start_print() {
       }
 
       if (dump_for_bag) {
-        if (bag_player->get_status() == vlink::BagReader::kPlaying) {
+        if VLIKELY (bag_player->get_status() == vlink::BagReader::kPlaying) {
           std::cout << "\033[2K\r";
           std::cout << "Progress: ";
           const auto duration = real_end_time - real_begin_time;
@@ -368,7 +368,7 @@ static void stop_print() {
 
   std::unique_lock lock(print_mtx);
 
-  if (!quit_flag) {
+  if VLIKELY (!quit_flag) {
     quit_flag = true;
     lock.unlock();
     quit_cv.notify_all();
@@ -408,7 +408,8 @@ static void import_protos(google::protobuf::compiler::Importer* importer, const 
 #else
         auto relative_path = std::filesystem::relative(file.path(), root_dir).string();
 #endif
-        if (importer->Import(relative_path)) {
+
+        if VLIKELY (importer->Import(relative_path)) {
           has_import = true;
         }
       } else if (file.is_directory()) {
@@ -437,7 +438,7 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
   if VUNLIKELY (bracket_pos != std::string::npos) {
     auto close_pos = field_name.find(']', bracket_pos);
 
-    if (close_pos != std::string::npos && close_pos > bracket_pos) {
+    if VLIKELY (close_pos != std::string::npos && close_pos > bracket_pos) {
       std::from_chars(field_name.data() + bracket_pos + 1, field_name.data() + close_pos, array_index);
       field_name = field_name.substr(0, bracket_pos);
     }
@@ -461,7 +462,7 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
   };
 
   if (field->is_repeated()) {
-    if (array_index < 0 || array_index >= reflection->FieldSize(message, field)) {
+    if VUNLIKELY (array_index < 0 || array_index >= reflection->FieldSize(message, field)) {
       return false;
     }
 
@@ -512,6 +513,7 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
           if (field->type() == FieldDescriptor::TYPE_BYTES) {
             return vlink::Bytes::from_string(reflection->GetRepeatedString(message, field, array_index));
           }
+
           return reflection->GetRepeatedString(message, field, array_index);
         default:
           return int64_t{0};
@@ -566,6 +568,7 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
         if (field->type() == FieldDescriptor::TYPE_BYTES) {
           return vlink::Bytes::from_string(reflection->GetString(message, field));
         }
+
         return reflection->GetString(message, field);
       default:
         return int64_t{0};
@@ -578,7 +581,7 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
 static void import_fbs(std::shared_ptr<flatbuffers::Parser>& parser, const std::string& target_ser,
                        const std::filesystem::path& root_dir, const std::filesystem::path& sub_dir, bool& has_import,
                        int depth = 0) {
-  if (parser || depth >= 100) {
+  if VUNLIKELY (parser || depth >= 100) {
     return;
   }
 
@@ -608,18 +611,18 @@ static void import_fbs(std::shared_ptr<flatbuffers::Parser>& parser, const std::
   for (const auto& file : file_list) {
     try {
       if (file.is_regular_file() && file.path().extension() == ".fbs") {
-        if (!flatbuffers::LoadFile(file.path().string().c_str(), false, &schema_file)) {
+        if VUNLIKELY (!flatbuffers::LoadFile(file.path().string().c_str(), false, &schema_file)) {
           continue;
         }
 
         bool ret = (root_dir == sub_dir) ? target_parser->Parse(schema_file.c_str(), include_root_dirs)
                                          : target_parser->Parse(schema_file.c_str(), include_dirs);
 
-        if (!ret) {
+        if VUNLIKELY (!ret) {
           continue;
         }
 
-        if (target_parser->LookupStruct(target_ser)) {
+        if VLIKELY (target_parser->LookupStruct(target_ser)) {
           target_parser->SetRootType(target_ser.c_str());
           parser = std::move(target_parser);
           has_import = true;
@@ -998,6 +1001,7 @@ static bool write_pcd_file(const std::string& file_path, const vlink::zerocopy::
         } else {
           type_str += "U";
         }
+
         break;
     }
   }
@@ -1471,6 +1475,7 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
 
         std::vector<double> expr_results;
 #ifdef VLINK_HAS_EXPRTK
+
         if (!expr_contexts.empty()) {
           expr_results = evaluate_expressions(values);
         }
@@ -1578,6 +1583,7 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
       }
 
 #ifdef VLINK_HAS_EXPRTK
+
       if (!expr_contexts.empty()) {
         record.expr_results = evaluate_expressions(record.values);
       }
@@ -1927,6 +1933,7 @@ int main(int argc, char* argv[]) {
   }
 
 #ifdef _WIN32
+
   if (program.is_used("-d")) {
     try {
       proto_dir = vlink::Helpers::path_to_string(std::filesystem::path(proto_dir));
@@ -2038,10 +2045,12 @@ int main(int argc, char* argv[]) {
   }
 
 #ifdef VLINK_HAS_EXPRTK
+
   if (!compile_expressions()) {
     return -1;
   }
 #else
+
   if (!expr_strings.empty()) {
     std::cerr << "Expression support requires exprtk library." << std::endl;
     return -1;

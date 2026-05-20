@@ -200,6 +200,7 @@ int main() {
     client.wait_for_connected();
 
     auto result = client.invoke("hello RPC");
+
     if (result.has_value()) {
       VLOG_I("[rpc] Response:", result.value());
     }
@@ -216,6 +217,7 @@ int main() {
     std::this_thread::sleep_for(50ms);
 
     auto val = getter.get();
+
     if (val.has_value()) {
       VLOG_I("[field] Brightness:", val.value());
     }

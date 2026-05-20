@@ -277,6 +277,7 @@ void ProxyServer::on_end() {
 
 void ProxyServer::init_shm_roudi() {
 #ifdef VLINK_SUPPORT_SHM
+
   if (impl_->config.use_iox) {
     // VLOG_I("IOX Strategy: ", iox_strategy);
 
@@ -427,7 +428,7 @@ void ProxyServer::init_server() {
   impl_->info_timer.start();
 
   impl_->info_pub->detect_subscribers([this](bool connected) {
-    if (impl_->mode != pb::proxy::OFFLINE && !connected && !impl_->info_pub->has_subscribers()) {
+    if VUNLIKELY (impl_->mode != pb::proxy::OFFLINE && !connected && !impl_->info_pub->has_subscribers()) {
       impl_->discovery_viewer->post_task([this]() {
         pb::proxy::Control control;
         control.set_control_id(impl_->control_id);
@@ -592,7 +593,7 @@ void ProxyServer::init_runnable() {
 }
 
 void ProxyServer::send_time() {
-  if (!impl_->time_pub->has_subscribers()) {
+  if VUNLIKELY (!impl_->time_pub->has_subscribers()) {
     return;
   }
 
@@ -848,7 +849,7 @@ void ProxyServer::send_control(const void* control_data) {
 }
 
 void ProxyServer::update_all() {
-  if (!impl_->info_pub->has_subscribers()) {
+  if VUNLIKELY (!impl_->info_pub->has_subscribers()) {
     // control_id = 0;
 
     // mode = pb::proxy::OFFLINE;
@@ -928,6 +929,7 @@ void ProxyServer::update_all() {
     bool has_stream_meta = false;
 
 #if VLINK_PROXY_ENABLE_FILTER
+
     if (impl_->mode == pb::proxy::OBSERVE_ONE || impl_->mode == pb::proxy::OBSERVE_ALL ||
         impl_->mode == pb::proxy::AUTO || impl_->mode == pb::proxy::AUTO_AND_OBSERVE_ALL) {
       if (!impl_->filter_list.empty()) {
@@ -991,61 +993,73 @@ void ProxyServer::update_all() {
           if (!(info.type & kPublisher && info.type & kSubscriber)) {
             continue;
           }
+
           break;
         case 2:
           if (!(info.type & kServer && info.type & kClient)) {
             continue;
           }
+
           break;
         case 3:
           if (!(info.type & kSetter && info.type & kGetter)) {
             continue;
           }
+
           break;
         case 4:
           if (!((info.type & kPublisher) || (info.type & kSubscriber))) {
             continue;
           }
+
           break;
         case 5:
           if (!((info.type & kServer) || (info.type & kClient))) {
             continue;
           }
+
           break;
         case 6:
           if (!((info.type & kSetter) || (info.type & kGetter))) {
             continue;
           }
+
           break;
         case 7:
           if (!(info.type & kPublisher)) {
             continue;
           }
+
           break;
         case 8:
           if (!(info.type & kSubscriber)) {
             continue;
           }
+
           break;
         case 9:
           if (!(info.type & kServer)) {
             continue;
           }
+
           break;
         case 10:
           if (!(info.type & kClient)) {
             continue;
           }
+
           break;
         case 11:
           if (!(info.type & kSetter)) {
             continue;
           }
+
           break;
         case 12:
           if (!(info.type & kGetter)) {
             continue;
           }
+
           break;
         default:
           break;
@@ -1114,7 +1128,7 @@ void ProxyServer::update_all() {
 
     std::unique_lock subs_lock(impl_->subs_mtx);
 
-    if (impl_->sub_error_url_set.count(info.url) != 0) {
+    if VUNLIKELY (impl_->sub_error_url_set.count(info.url) != 0) {
       continue;
     }
 
@@ -1187,6 +1201,7 @@ void ProxyServer::update_all() {
         sub = std::make_shared<RawSub>(info.url, InitType::kWithoutInit);
 
         // A setter is the field data source; the proxy must observe it as a getter.
+
         if (info.type & kSetter) {
           sub->mark_as_getter();
         }
@@ -1222,7 +1237,7 @@ void ProxyServer::update_all() {
             {
               std::shared_lock control_lock(impl_->control_mtx);
 
-              if (!impl_->data_pub->has_subscribers()) {
+              if VUNLIKELY (!impl_->data_pub->has_subscribers()) {
                 return;
               }
 
@@ -1237,6 +1252,7 @@ void ProxyServer::update_all() {
               Bytes queued_bytes = bytes;
 
               // NOLINTNEXTLINE(readability-container-size-empty)
+
               if VUNLIKELY (queued_bytes.size() != bytes.size() || (queued_bytes.size() > 0 && !queued_bytes.data())) {
                 VLOG_E("ProxyServer: Failed to create an owned copy for async forwarding.");
                 return;
@@ -1374,7 +1390,7 @@ void ProxyServer::update_all() {
       lost_buffer.pop_front();
     }
 
-    if (seq <= 0) {
+    if VUNLIKELY (seq <= 0) {
       lat_buffer.emplace_back(lat);
     } else {
       lat_buffer.emplace_back(static_cast<double>(lat) / seq);

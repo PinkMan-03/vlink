@@ -303,6 +303,7 @@ DatabaseWriter::DatabaseWriter(const std::string& path, const Config& config)
       impl_->split_index = 0;
 
 #ifdef _WIN32
+
       if (parent_path.empty()) {
         impl_->base_dir.clear();
         impl_->base_name = Helpers::path_to_string(file_path.stem());
@@ -311,6 +312,7 @@ DatabaseWriter::DatabaseWriter(const std::string& path, const Config& config)
         impl_->base_name = Helpers::path_to_string(std::filesystem::path(parent_path / file_path.stem()));
       }
 #else
+
       if (parent_path.empty()) {
         impl_->base_dir.clear();
         impl_->base_name = file_path.stem().string();
@@ -380,6 +382,7 @@ DatabaseWriter::~DatabaseWriter() {
   }
 
 #ifdef VLINK_ENABLE_SQLITE
+
   if VLIKELY (impl_->db) {
     ::sqlite3_interrupt(impl_->db);
   }
@@ -603,6 +606,7 @@ bool DatabaseWriter::push_schema(const SchemaData& schema_data, bool immediate) 
 
   bool posted = post_task([this, stored_schema = std::move(stored_schema)]() mutable {
     std::lock_guard lock(impl_->write_mtx);
+
     if VUNLIKELY (!merge_schema(stored_schema)) {
       CLOG_E("DatabaseWriter: Deferred merge_schema failed for [%s] in async push_schema path.",
              stored_schema.name.c_str());
@@ -616,6 +620,7 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
                              ActionType action_type, const Bytes& data, int64_t* microseconds_timestamp,
                              bool immediate) {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (url.empty()) {
     return -1;
   }
@@ -628,6 +633,7 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
 
   if (immediate) {
     std::lock_guard lock(impl_->write_mtx);
+
     if VUNLIKELY (!write(url, ser_type, schema_type, action_type, data, target_timestamp)) {
       return -1;
     }
@@ -647,6 +653,7 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
     Bytes queued_data = data;
 
     // NOLINTNEXTLINE(readability-container-size-empty)
+
     if VUNLIKELY (queued_data.size() != data.size() || (queued_data.size() > 0 && !queued_data.data())) {
       CLOG_E("DatabaseWriter: Failed to create an owned copy for async write.");
       return -1;
@@ -792,6 +799,7 @@ void DatabaseWriter::open(const std::string& path) {
 
   // open db
   ret = ::sqlite3_open_v2(path.c_str(), &impl_->db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nullptr);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to open database [%s].", path.c_str());
     close_db();
@@ -803,6 +811,7 @@ void DatabaseWriter::open(const std::string& path) {
 
   // opt sqlite temp_store
   ret = ::sqlite3_exec(impl_->db, "PRAGMA temp_store = MEMORY;", nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set temp_store: %s.", err_msg);
 
@@ -814,6 +823,7 @@ void DatabaseWriter::open(const std::string& path) {
 
   // opt sqlite page_size
   ret = ::sqlite3_exec(impl_->db, "PRAGMA page_size = 16384;", nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set page_size: %s.", err_msg);
 
@@ -825,6 +835,7 @@ void DatabaseWriter::open(const std::string& path) {
 
   // opt sqlite cache_size
   ret = ::sqlite3_exec(impl_->db, "PRAGMA cache_size = 8192;", nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set cache_size: %s.", err_msg);
 
@@ -836,6 +847,7 @@ void DatabaseWriter::open(const std::string& path) {
 
   // opt sqlite synchronous
   ret = ::sqlite3_exec(impl_->db, "PRAGMA synchronous = OFF;", nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set synchronous: %s.", err_msg);
 
@@ -846,6 +858,7 @@ void DatabaseWriter::open(const std::string& path) {
   }
 
   // opt sqlite journal_mode
+
   if (impl_->config.wal_mode) {
     ret = ::sqlite3_exec(impl_->db, "PRAGMA journal_mode = WAL;", nullptr, nullptr, &err_msg);
     if VUNLIKELY (ret != SQLITE_OK) {
@@ -870,6 +883,7 @@ void DatabaseWriter::open(const std::string& path) {
 
   // opt sqlite automatic_index
   ret = ::sqlite3_exec(impl_->db, "PRAGMA automatic_index = OFF;", nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set automatic_index: %s.", err_msg);
 
@@ -881,6 +895,7 @@ void DatabaseWriter::open(const std::string& path) {
 
   // opt sqlite locking_mode
   ret = ::sqlite3_exec(impl_->db, "PRAGMA locking_mode = EXCLUSIVE;", nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to set locking_mode: %s.", err_msg);
 
@@ -901,6 +916,7 @@ void DatabaseWriter::open(const std::string& path) {
                        "count INTEGER, duration INTEGER, accuracy TEXT, compress TEXT, process TEXT, date TEXT, "
                        "tag TEXT, complete INTEGER, timezone INTEGER, start_timestamp INTEGER);",
                        nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create header table: %s.", err_msg);
 
@@ -963,6 +979,7 @@ void DatabaseWriter::open(const std::string& path) {
   // create schema table
   ret = ::sqlite3_exec(impl_->db, "CREATE TABLE IF NOT EXISTS VLinkSchemas(ser TEXT, encoding TEXT, data BLOB);",
                        nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create schema table: %s.", err_msg);
 
@@ -990,6 +1007,7 @@ void DatabaseWriter::open(const std::string& path) {
                        "CREATE TABLE IF NOT EXISTS VLinkUrls(id INTEGER, url TEXT, type TEXT, ser TEXT, encoding TEXT, "
                        "count INTEGER, loss REAL, size INTEGER, freq REAL);",
                        nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create urls table: %s.", err_msg);
 
@@ -1004,6 +1022,7 @@ void DatabaseWriter::open(const std::string& path) {
                              "INSERT INTO VLinkUrls (id, url, type, ser, encoding, count, loss, size, freq) VALUES "
                              "(?, ?, ?, ?, ?, ?, ?, ?, ?);",
                              -1, &impl_->urls_stmt, nullptr);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare urls table: %s.", ::sqlite3_errmsg(impl_->db));
 
@@ -1017,6 +1036,7 @@ void DatabaseWriter::open(const std::string& path) {
   ret = ::sqlite3_exec(impl_->db,
                        "CREATE TABLE IF NOT EXISTS VLinkDatas(elapsed INTEGER, url INTEGER, action TEXT, data BLOB);",
                        nullptr, nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create datas table: %s.", err_msg);
 
@@ -1029,6 +1049,7 @@ void DatabaseWriter::open(const std::string& path) {
   // prepare data table
   ret = ::sqlite3_prepare_v2(impl_->db, "INSERT INTO VLinkDatas (elapsed, url, action, data) VALUES (?, ?, ?, ?);", -1,
                              &impl_->datas_stmt, nullptr);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to prepare datas table: %s.", ::sqlite3_errmsg(impl_->db));
 
@@ -1067,6 +1088,7 @@ void DatabaseWriter::open(const std::string& path) {
   // create idx_elapsed_url
   ret = ::sqlite3_exec(impl_->db, "CREATE INDEX IF NOT EXISTS idx_elapsed_url ON VLinkDatas(elapsed, url);", nullptr,
                        nullptr, &err_msg);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_F("Failed to create datas idx_elapsed_url: %s.", err_msg);
 
@@ -1126,6 +1148,7 @@ void DatabaseWriter::open(const std::string& path) {
 
 void DatabaseWriter::close() {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (!impl_->db) {
     VLOG_W("DatabaseWriter: Sqlite not open.");
     return;
@@ -1329,6 +1352,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
     impl_->split_first = true;
 
     std::lock_guard split_lock(impl_->split_mtx);
+
     if (!impl_->split_before && impl_->split_callback && impl_->split_index == 0) {
       impl_->split_callback(0, impl_->split_filename);
     }
@@ -1365,6 +1389,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
     ::sqlite3_stmt* delete_row_stmt = nullptr;
     ret = ::sqlite3_prepare_v2(impl_->db, "SELECT rowid, length(data) FROM VLinkDatas ORDER BY rowid LIMIT 1;", -1,
                                &delete_stmt, nullptr);
+
     if VLIKELY (ret == SQLITE_OK) {
       ret = ::sqlite3_step(delete_stmt);
 
@@ -1414,6 +1439,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
   }
 
   // split
+
   if (impl_->is_split_mode && !impl_->url_map.empty()) {
     if (impl_->config.split_by_time > 0 &&
         (microseconds_timestamp - impl_->config.begin_time * 1000) >
@@ -1773,6 +1799,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
   }
 
   ret = ::sqlite3_reset(impl_->datas_stmt);
+
   if VUNLIKELY (ret != SQLITE_OK) {
     CLOG_W("Failed to reset datas table: %s.", ::sqlite3_errmsg(impl_->db));
     rollback_cache();
@@ -1780,6 +1807,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
   }
 
   // update on wal_mode
+
   if (impl_->sync_timer.get() > kSyncWriteInterval) {
     impl_->sync_timer.restart();
 
@@ -1901,6 +1929,7 @@ bool DatabaseWriter::write_filex(bool complete) {
     json["VLinkFiles"] = std::move(files_json);
 
     std::ofstream filex(file_path);
+
     if VLIKELY (filex.is_open()) {
       filex << json.dump(4);
       filex.close();
@@ -1915,6 +1944,7 @@ bool DatabaseWriter::write_filex(bool complete) {
 
 bool DatabaseWriter::begin_cache() {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (!impl_->db) {
     VLOG_W("DatabaseWriter: Sqlite not open.");
     return false;
@@ -1945,6 +1975,7 @@ bool DatabaseWriter::begin_cache() {
 
 bool DatabaseWriter::sync_cache() {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (!impl_->db) {
     VLOG_W("DatabaseWriter: Sqlite not open.");
     return false;
@@ -1975,6 +2006,7 @@ bool DatabaseWriter::sync_cache() {
 
 bool DatabaseWriter::rollback_cache() {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (!impl_->db) {
     VLOG_W("DatabaseWriter: Sqlite not open.");
     return false;
@@ -2000,6 +2032,7 @@ bool DatabaseWriter::rollback_cache() {
 
 bool DatabaseWriter::insert_schema(const SchemaData& schema_data) {
 #ifdef VLINK_ENABLE_SQLITE
+
   if VUNLIKELY (!impl_->db) {
     VLOG_W("DatabaseWriter: Sqlite not open.");
     return false;

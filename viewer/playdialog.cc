@@ -139,6 +139,7 @@ void PlayDialog::on_pushButton_all_clicked() {
   for (int i = 0; i < ui->listWidget->count(); ++i) {
     auto* item = ui->listWidget->item(i);
     auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
     if (!item->isHidden()) {
       checkbox->setChecked(true);
     }
@@ -151,6 +152,7 @@ void PlayDialog::on_pushButton_unall_clicked() {
   for (int i = 0; i < ui->listWidget->count(); ++i) {
     auto* item = ui->listWidget->item(i);
     auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
     if (!item->isHidden()) {
       checkbox->setChecked(false);
     }
@@ -221,6 +223,7 @@ void PlayDialog::on_pushButton_select_clicked() {
 
         {
           std::shared_lock lock(url_mtx_);
+
           if (url_list_.count(url) == 0) {
             return;
           }
@@ -390,6 +393,7 @@ void PlayDialog::on_pushButton_start_clicked() {
     for (int i = 0; i < ui->listWidget->count(); ++i) {
       auto* item = ui->listWidget->item(i);
       auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
       if (!item->isHidden()) {
         if (checkbox->isChecked()) {
           const auto& url = item->data(Qt::UserRole).toString().toStdString();
@@ -491,6 +495,7 @@ void PlayDialog::update_time_label() {
       ui->label_systime2->setStyleSheet("QLabel { color: red; }");
     }
   }
+
   if (status_ == kPlaying || status_ == kPaused) {
     ui->label_systime2->setText(
         QString::fromStdString(vlink::Helpers::format_milliseconds(player_->get_timestamp(), true) + "/" +
@@ -536,6 +541,7 @@ void PlayDialog::update_status() {
   for (int i = 0; i < ui->listWidget->count(); ++i) {
     auto* item = ui->listWidget->item(i);
     auto* checkbox = qobject_cast<QCheckBox*>(ui->listWidget->itemWidget(item));
+
     if (!item->isHidden() && checkbox->isChecked()) {
       has_url = true;
       break;

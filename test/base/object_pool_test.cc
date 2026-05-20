@@ -658,6 +658,7 @@ TEST_SUITE("base-ObjectPool - edge cases") {
           if (calls++ == 0) {
             throw 1;
           }
+
           return std::make_unique<Widget>();
         },
         0u, 1u);

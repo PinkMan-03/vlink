@@ -101,6 +101,7 @@ int main() {
   // written a value before we connected, we will receive it.
   // ---------------------------------------------------------------
   VLOG_I("[Getter] Waiting for initial value...");
+
   if (getter.wait_for_value(std::chrono::milliseconds(3000))) {
     VLOG_I("[Getter] wait_for_value() succeeded");
   } else {
@@ -115,6 +116,7 @@ int main() {
   // no value has been received yet.
   // ---------------------------------------------------------------
   auto current = getter.get();
+
   if (current.has_value()) {
     print_config("[Getter] Current config:", current.value());
   } else {
@@ -134,6 +136,7 @@ int main() {
   // Step 8: Final read
   // ---------------------------------------------------------------
   auto final_val = getter.get();
+
   if (final_val.has_value()) {
     print_config("[Getter] Final config:", final_val.value());
   }

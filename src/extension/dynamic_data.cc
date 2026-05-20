@@ -40,7 +40,7 @@ DynamicData::DynamicData(DynamicData&& target) noexcept : data_(std::move(target
 }
 
 DynamicData& DynamicData::operator=(const DynamicData& target) {
-  if (this == &target) {
+  if VUNLIKELY (this == &target) {
     return *this;
   }
 
@@ -50,7 +50,7 @@ DynamicData& DynamicData::operator=(const DynamicData& target) {
 }
 
 DynamicData& DynamicData::operator=(DynamicData&& target) noexcept {
-  if (this == &target) {
+  if VUNLIKELY (this == &target) {
     return *this;
   }
 

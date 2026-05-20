@@ -329,6 +329,7 @@ class CustomFieldValuePrinter final : public google::protobuf::TextFormat::FastF
   }
 
   std::ifstream file(filename);
+
   if (!file) {
     return false;
   }
@@ -684,6 +685,7 @@ int start_eproto_pub(const std::string& url, const std::string& proto_dir, const
   }
 
 #ifndef VLINK_HAS_PROTOBUF_JSON_UTIL
+
   if VUNLIKELY (use_json_format && target_schema_type == vlink::SchemaType::kProtobuf) {
     std::cerr << "Current protobuf does not support JSON conversion." << std::endl;
     has_quit = true;
@@ -1042,6 +1044,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
     if (discovery_viewer) {
       discovery_viewer->quit(true);
     }
+
     parser_loop->quit(true);
   };
 
@@ -1124,6 +1127,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
   const bool is_zerocopy_type = target_schema_type == vlink::SchemaType::kZeroCopy;
 
 #ifndef VLINK_HAS_PROTOBUF_JSON_UTIL
+
   if VUNLIKELY (use_json_format && target_schema_type == vlink::SchemaType::kProtobuf) {
     std::cerr << "Current protobuf does not support JSON conversion." << std::endl;
     has_quit = true;
@@ -1136,6 +1140,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
     has_quit = true;
     return -1;
   }
+
   if (target_schema_type == vlink::SchemaType::kZeroCopy) {
     is_proto_type = false;
   } else if (target_schema_type == vlink::SchemaType::kRaw) {
@@ -1416,6 +1421,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
               std::string right_str = f;
               std::transform(right_str.begin(), right_str.end(), right_str.begin(),
                              [](char& c) { return std::tolower(c); });
+
               if (left_str.find(right_str) != std::string::npos) {
                 skip = black_mode ? true : false;
                 break;
@@ -1488,6 +1494,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
             print_str += "\n";
 
             pos += line_chars;
+
             if (pos < hex_str.size() && hex_str[pos] == ' ') {
               ++pos;
             }
@@ -2127,6 +2134,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
     }
 
     std::lock_guard lock(bytes_mtx);
+
     if VLIKELY (!is_paused) {
       current_bytes = bytes;
       has_new_data = true;
@@ -2177,6 +2185,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
     frame_seq_buffer.clear();
     current_frame_rate = 0.0;
     current_rate_color = 33;
+
     if (last_frame_timestamp_ms.load() == 0) {
       last_frame_timestamp_ms.store(vlink::ElapsedTimer::get_cpu_timestamp(vlink::ElapsedTimer::kMilli));
     }
@@ -2373,6 +2382,7 @@ int start_eproto_sub(const std::string& url, const std::string& proto_dir, const
   if (discovery_viewer) {
     discovery_viewer->wait_for_quit();
   }
+
   parser_loop->wait_for_quit();
 
   has_quit = true;
@@ -2545,6 +2555,7 @@ int main(int argc, char* argv[]) {
     program.parse_args(argc, argv);
   } catch (const std::exception& e) {
     std::cerr << e.what() << std::endl;
+
     if (program.is_subcommand_used("pub")) {
       std::cerr << pub_command << std::endl;
     } else if (program.is_subcommand_used("sub")) {
@@ -2561,20 +2572,24 @@ int main(int argc, char* argv[]) {
     const auto& url = pub_command.get<std::string>("url");
     proto_dir = pub_command.get<std::string>("-d");
     auto schema_plugin_path = pub_command.get<std::string>("--schema_plugin");
+
     if (proto_dir.empty()) {
       proto_dir = vlink::Utils::get_env("VLINK_PROTO_DIR");
     }
+
     if (schema_plugin_path.empty()) {
       schema_plugin_path = vlink::Utils::get_env("VLINK_SCHEMA_PLUGIN");
     }
 
 #ifdef _WIN32
+
     if (pub_command.is_used("-d")) {
       try {
         proto_dir = vlink::Helpers::path_to_string(std::filesystem::path(proto_dir));
       } catch (std::filesystem::filesystem_error&) {
       }
     }
+
     if (pub_command.is_used("--schema_plugin")) {
       try {
         schema_plugin_path = vlink::Helpers::path_to_string(std::filesystem::path(schema_plugin_path));
@@ -2612,6 +2627,7 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     std::replace(proto_dir.begin(), proto_dir.end(), '\\', '/');
     std::replace(schema_plugin_path.begin(), schema_plugin_path.end(), '\\', '/');
+
     if (!prototxt_file.empty()) {
       std::replace(prototxt_file.begin(), prototxt_file.end(), '\\', '/');
     }
@@ -2620,6 +2636,7 @@ int main(int argc, char* argv[]) {
     if (!proto_dir.empty() && proto_dir.back() == '/') {
       proto_dir.pop_back();
     }
+
     if (!schema_plugin_path.empty() && schema_plugin_path.back() == '/') {
       schema_plugin_path.pop_back();
     }
@@ -2646,20 +2663,24 @@ int main(int argc, char* argv[]) {
     auto schema_type = vlink::SchemaData::convert_encoding(encoding);
     proto_dir = sub_command.get<std::string>("-d");
     auto schema_plugin_path = sub_command.get<std::string>("--schema_plugin");
+
     if (proto_dir.empty()) {
       proto_dir = vlink::Utils::get_env("VLINK_PROTO_DIR");
     }
+
     if (schema_plugin_path.empty()) {
       schema_plugin_path = vlink::Utils::get_env("VLINK_SCHEMA_PLUGIN");
     }
 
 #ifdef _WIN32
+
     if (sub_command.is_used("-d")) {
       try {
         proto_dir = vlink::Helpers::path_to_string(std::filesystem::path(proto_dir));
       } catch (std::filesystem::filesystem_error&) {
       }
     }
+
     if (sub_command.is_used("--schema_plugin")) {
       try {
         schema_plugin_path = vlink::Helpers::path_to_string(std::filesystem::path(schema_plugin_path));
@@ -2702,6 +2723,7 @@ int main(int argc, char* argv[]) {
     if (!proto_dir.empty() && proto_dir.back() == '/') {
       proto_dir.pop_back();
     }
+
     if (!schema_plugin_path.empty() && schema_plugin_path.back() == '/') {
       schema_plugin_path.pop_back();
     }

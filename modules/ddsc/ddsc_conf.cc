@@ -48,6 +48,7 @@ std::shared_mutex DdscConf::mtx_;
 // DdscConf
 void DdscConf::register_qos(const std::string& name, const Qos& qos) {
   std::lock_guard lock(mtx_);
+
   if VUNLIKELY (qos_map_.find(name) != qos_map_.end() || name == "part" || name == "topic" || name == "pub" ||
                 name == "sub" || name == "writer" || name == "reader" || name == "depth") {
     VLOG_F("DdscConf: Invalid qos name: '", name, "' (reserved or already registered).");

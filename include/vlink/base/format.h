@@ -413,12 +413,12 @@ class FormatWriter {
         continue;
       }
 
-      if (c != '{') {
+      if VLIKELY (c != '{') {
         writer_.write(c);
         continue;
       }
 
-      if (p == end) {
+      if VUNLIKELY (p == end) {
         writer_.write('{');
         break;
       }
@@ -429,8 +429,8 @@ class FormatWriter {
         continue;
       }
 
-      if (*p == '}') {
-        if (arg_id < args.size()) {
+      if VLIKELY (*p == '}') {
+        if VLIKELY (arg_id < args.size()) {
           write_arg(args.get(arg_id++));
         }
 
@@ -455,12 +455,12 @@ class FormatWriter {
         ++p;
       }
 
-      if (p != end) {
-        if (index < args.size()) {
+      if VLIKELY (p != end) {
+        if VLIKELY (index < args.size()) {
           write_arg(args.get(index));
         }
 
-        if (!has_explicit_index) {
+        if VLIKELY (!has_explicit_index) {
           ++arg_id;
         }
 

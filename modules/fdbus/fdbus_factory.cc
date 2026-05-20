@@ -124,6 +124,7 @@ void FdbusServer::onSubscribe(fdbus::CBaseJob::Ptr& msg_ref) {
 
     traverse_sub_connect_callback([this, sub_item](NodeImpl* impl, const auto& callback) {
       const auto* conf_ptr = impl->get_target_conf<FdbusConf>();
+
       if (static_cast<int32_t>(conf_ptr->hash_code) != sub_item->msg_code() || conf_ptr->event != sub_item->topic()) {
         return;
       }
@@ -147,7 +148,7 @@ void FdbusServer::onInvoke(fdbus::CBaseJob::Ptr& msg_ref) {
   traverse_req_resp_callback([this, &msg, &msg_ref, &req_data](NodeImpl* impl, const auto& callback) {
     const auto* conf_ptr = impl->get_target_conf<FdbusConf>();
 
-    if (static_cast<int32_t>(conf_ptr->hash_code) != msg->code() || impl->has_suspend) {
+    if VUNLIKELY (static_cast<int32_t>(conf_ptr->hash_code) != msg->code() || impl->has_suspend) {
       ignore_called();
       return;
     }
@@ -213,7 +214,7 @@ bool FdbusClient::call(uint32_t channel, const Bytes& req_data, NodeImpl::MsgCal
       [channel, callback = std::move(callback)](fdbus::CBaseJob::Ptr& msg_ref, fdbus::CFdbBaseObject*) {
         auto* msg = fdbus::castToMessage<fdbus::CBaseMessage*>(msg_ref);
 
-        if (msg->code() != static_cast<int32_t>(channel)) {
+        if VUNLIKELY (msg->code() != static_cast<int32_t>(channel)) {
           return;
         }
 
@@ -232,6 +233,7 @@ void FdbusClient::start_timer() {
   }
 
   bool expected = false;
+
   if (!timer_started_.compare_exchange_strong(expected, true)) {
     return;
   }
@@ -287,8 +289,8 @@ void FdbusClient::onBroadcast(fdbus::CBaseJob::Ptr& msg_ref) {
   traverse_msg_callback([msg, &msg_data](NodeImpl* impl, const auto& callback) {
     const auto* conf_ptr = impl->get_target_conf<FdbusConf>();
 
-    if (static_cast<int32_t>(conf_ptr->hash_code) != msg->code() || impl->has_suspend ||
-        conf_ptr->event != msg->topic()) {
+    if VUNLIKELY (static_cast<int32_t>(conf_ptr->hash_code) != msg->code() || impl->has_suspend ||
+                  conf_ptr->event != msg->topic()) {
       return;
     }
 

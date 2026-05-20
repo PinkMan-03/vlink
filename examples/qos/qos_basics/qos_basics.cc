@@ -176,6 +176,7 @@ int main() {
     });
 
     vlink::Client<std::string, std::string> client("dds://control/brake?qos=command");
+
     if (client.wait_for_connected(2s)) {
       auto resp = client.invoke("emergency_stop");
       if (resp.has_value()) {

@@ -446,6 +446,7 @@ std::vector<AggregatedCase> aggregate_cases(const Bench::Result& result) {
 
         const double cpu_ms = item.pub_cpu_ms.average() + item.sub_cpu_ms.average();
         const double recv = item.received.average();
+
         if (cpu_ms > 0.001 && recv > 0.0) {
           const double eff = recv / cpu_ms;
           item.efficiency_score = std::clamp(std::log1p(eff) * 100.0 / std::log1p(1000.0), 0.0, 100.0);
@@ -488,6 +489,7 @@ std::vector<AggregatedCase> aggregate_cases(const Bench::Result& result) {
       {
         const double loss_pct = compute_loss_ratio_percent(item);
         const double drop_pct = compute_latency_drop_ratio_percent(item);
+
         if (item.speed_score > 0.0) {
           item.speed_score *= per_case_speed_loss_factor(loss_pct, drop_pct);
         }
@@ -502,6 +504,7 @@ std::vector<AggregatedCase> aggregate_cases(const Bench::Result& result) {
         const double c = item.capacity_score > 0 ? item.capacity_score : 0.0;
         const auto& cfg = score_config();
         const auto* w = &cfg.default_suite_sort;
+
         if (item.scenario.suite == Bench::kLatencySuite) {
           w = &cfg.latency_suite_sort;
         } else if (item.scenario.suite == Bench::kThroughputSuite || item.scenario.suite == Bench::kTopologySuite) {
@@ -509,6 +512,7 @@ std::vector<AggregatedCase> aggregate_cases(const Bench::Result& result) {
         } else if (item.scenario.suite == Bench::kBackpressureSuite) {
           w = &cfg.backpressure_suite_sort;
         }
+
         item.sort_score = w->speed * s + w->capacity * c;
       }
 

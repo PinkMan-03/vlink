@@ -154,7 +154,9 @@ TEST_SUITE("base-Function - MemoryPool heap fallback") {
       LargeFunctor& operator=(const LargeFunctor&) = default;
       LargeFunctor& operator=(LargeFunctor&&) noexcept = default;
       ~LargeFunctor() {
-        if (count) count->fetch_add(1, std::memory_order_relaxed);
+        if (count) {
+          count->fetch_add(1, std::memory_order_relaxed);
+        }
       }
 
       void operator()() const {}
@@ -519,7 +521,9 @@ TEST_SUITE("base-Function - destruction tracking") {
       LargePayload& operator=(const LargePayload&) = default;
       LargePayload& operator=(LargePayload&&) noexcept = default;
       ~LargePayload() {
-        if (count) count->fetch_add(1, std::memory_order_relaxed);
+        if (count) {
+          count->fetch_add(1, std::memory_order_relaxed);
+        }
       }
 
       void operator()() const {}
@@ -1408,7 +1412,9 @@ TEST_SUITE("base-MoveFunction - custom SBO size") {
       HeavyMoveOnly(HeavyMoveOnly&&) noexcept = default;
       HeavyMoveOnly& operator=(HeavyMoveOnly&&) noexcept = default;
       ~HeavyMoveOnly() {
-        if (destructions) destructions->fetch_add(1, std::memory_order_relaxed);
+        if (destructions) {
+          destructions->fetch_add(1, std::memory_order_relaxed);
+        }
       }
 
       int operator()() const noexcept { return marker + static_cast<int>(payload[0]); }

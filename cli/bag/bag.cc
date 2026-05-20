@@ -176,6 +176,7 @@ vlink::ElapsedTimer total_size_timer;
       }
 
       std::cout << "\033[2K\r";
+
       if VUNLIKELY (is_paused) {
         std::cout << "\033[33m";
       } else {
@@ -342,6 +343,7 @@ vlink::ElapsedTimer total_size_timer;
   progress = std::max(0.0, std::min(1.0, progress));
 
   int filled = static_cast<int>(std::lround(progress * kProgressTotalCount));
+
   if (filled > kProgressTotalCount) {
     filled = kProgressTotalCount;
   }
@@ -954,6 +956,7 @@ int bag_record(const std::string& path, const std::vector<std::string>& urls, co
           std::string right_str = f;
           std::transform(right_str.begin(), right_str.end(), right_str.begin(),
                          [](char& c) { return std::tolower(c); });
+
           if (left_str.find(right_str) != std::string::npos) {
             skip = black_mode ? true : false;
             break;
@@ -1029,6 +1032,7 @@ int bag_record(const std::string& path, const std::vector<std::string>& urls, co
   };
 
   vlink::Timer duration_timer;
+
   if (duration > 0) {
     duration_timer.set_interval(duration * 1000);
     duration_timer.set_loop_count(1);
@@ -1395,6 +1399,7 @@ int bag_play(const std::string& path, const std::vector<std::string>& urls, cons
         }
 
         auto iter = pub_map.find(url);
+
         if (iter == pub_map.end()) {
           if (pause_to_next_flag) {
             player_ptr->pause_to_next();
@@ -1778,6 +1783,7 @@ int bag_clone(const std::string& source_path, const std::string& target_path, co
 
         std::string right_str = f;
         std::transform(right_str.begin(), right_str.end(), right_str.begin(), [](char& c) { return std::tolower(c); });
+
         if (left_str.find(right_str) != std::string::npos) {
           skip = black_mode ? true : false;
           break;
@@ -2718,6 +2724,7 @@ int main(int argc, char* argv[]) {
     program.parse_args(argc, argv);
   } catch (const std::exception& e) {
     std::cerr << e.what() << std::endl;
+
     if (program.is_subcommand_used("info")) {
       std::cerr << info_command << std::endl;
     } else if (program.is_subcommand_used("record")) {

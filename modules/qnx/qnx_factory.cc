@@ -43,6 +43,7 @@ static void wake_channel(name_attach_t* fd) {
   }
 
   int coid = ::ConnectAttach(0, 0, fd->chid, _NTO_SIDE_CHANNEL, 0);
+
   if VLIKELY (coid >= 0) {
     (void)::MsgSendPulse(coid, SIGEV_PULSE_PRIO_INHERIT, _PULSE_CODE_CUSTOM_HEARTBEAT, 0);
     ::ConnectDetach(coid);
@@ -153,6 +154,7 @@ QnxServer::~QnxServer() {
   }
 
   fd = fd_.exchange(nullptr);
+
   if VLIKELY (fd) {
     ::name_detach(fd, 0);
   }
@@ -252,6 +254,7 @@ void QnxServer::process_message() {
 
   while (!quit_flag_) {
     auto* fd = fd_.load();
+
     if VUNLIKELY (!fd) {
       break;
     }
@@ -617,6 +620,7 @@ bool QnxClient::listen() {
 
     while (!quit_flag_ && coid_ >= 0) {
       auto* back_fd = back_fd_.load();
+
       if VUNLIKELY (!back_fd) {
         break;
       }
@@ -687,6 +691,7 @@ bool QnxClient::listen() {
 
 void QnxClient::start_timer() {
   bool expected = false;
+
   if (!timer_started_.compare_exchange_strong(expected, true)) {
     return;
   }
@@ -777,6 +782,7 @@ void QnxClient::try_detect() {
 
   do {
     ret = ::MsgSendPulse(coid_, SIGEV_PULSE_PRIO_INHERIT, _PULSE_CODE_CUSTOM_HEARTBEAT, 0);
+
     if VUNLIKELY (ret < 0) {
       std::this_thread::sleep_for(std::chrono::microseconds(10));
 
@@ -795,6 +801,7 @@ void QnxClient::try_detect() {
 
 void QnxClient::disconnect() {
   int coid = coid_.exchange(-1);
+
   if (coid > 0) {
     ::name_close(coid);
   }
@@ -807,6 +814,7 @@ void QnxClient::disconnect() {
   }
 
   back_fd = back_fd_.exchange(nullptr);
+
   if (back_fd) {
     ::name_detach(back_fd, 0);
   }

@@ -44,14 +44,17 @@ inline bool validate_frame(const vlink::zerocopy::CameraFrame& frame) {
     std::cout << "  [Consumer] Frame is invalid" << std::endl;
     return false;
   }
+
   if (frame.width() == 0 || frame.height() == 0) {
     std::cout << "  [Consumer] Frame has zero dimensions" << std::endl;
     return false;
   }
+
   if (frame.size() == 0) {
     std::cout << "  [Consumer] Frame has no pixel data" << std::endl;
     return false;
   }
+
   return true;
 }
 

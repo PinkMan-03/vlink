@@ -126,6 +126,7 @@ void TrafficWidget::paintEvent(QPaintEvent* event) {
   double frame_height = rect().height();
 
   QRadialGradient gradient(rect().center(), frame_width / 2);
+
   if (!isEnabled()) {
     gradient.setColorAt(0, QColor(200, 200, 200));
     gradient.setColorAt(1, QColor(180, 180, 180));

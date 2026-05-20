@@ -117,6 +117,7 @@ int main(int argc, char* argv[]) {
   //   }
 
   // settings
+
   if (!SettingsDialog::do_select()) {
     return 0;
   }

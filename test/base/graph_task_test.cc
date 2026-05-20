@@ -335,7 +335,9 @@ TEST_SUITE("base-GraphTask - execution") {
 
     auto task = GraphTask::create("tracked", [] { std::this_thread::sleep_for(std::chrono::milliseconds(5)); });
     task->register_status_callback([has_done](const std::string&, GraphTask::Status s) {
-      if (s == GraphTask::kStatusDone) has_done->store(true);
+      if (s == GraphTask::kStatusDone) {
+        has_done->store(true);
+      }
     });
 
     run_graph(task);
@@ -597,8 +599,13 @@ TEST_SUITE("base-GraphTask - execution") {
     bool has_running = false;
     bool has_done = false;
     for (auto s : *statuses) {
-      if (s == GraphTask::kStatusRunning) has_running = true;
-      if (s == GraphTask::kStatusDone) has_done = true;
+      if (s == GraphTask::kStatusRunning) {
+        has_running = true;
+      }
+
+      if (s == GraphTask::kStatusDone) {
+        has_done = true;
+      }
     }
     CHECK(has_running);
     CHECK(has_done);

@@ -447,6 +447,7 @@ TEST_SUITE("impl-UrlParser - edge cases") {
       if (i > 0) {
         long_path += "/";
       }
+
       long_path += "segment" + std::to_string(i);
     }
     UrlParser p("dds://host/" + long_path);

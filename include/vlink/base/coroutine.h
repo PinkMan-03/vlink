@@ -1468,6 +1468,7 @@ inline Task<TypeT>& Task<TypeT>::operator=(Task&& other) noexcept {
     }
     handle_ = std::exchange(other.handle_, {});
   }
+
   return *this;
 }
 
@@ -1534,6 +1535,7 @@ struct FutureAwaiter<TypeT>::State final {
 
   void set_handle(std::coroutine_handle<> h) {
     std::lock_guard lock(mtx);
+
     if (!abandoned.load(std::memory_order_acquire)) {
       handle = h;
     }
@@ -1551,6 +1553,7 @@ struct FutureAwaiter<TypeT>::State final {
 
   void resume_ready() {
     auto h = take_handle();
+
     if (h) {
       h.resume();
     }
@@ -1559,6 +1562,7 @@ struct FutureAwaiter<TypeT>::State final {
   void cancel_and_resume() {
     target_closed.store(true, std::memory_order_release);
     auto h = take_handle();
+
     if (h) {
       h.resume();
     }
@@ -1612,9 +1616,11 @@ inline void FutureAwaiter<TypeT>::await_suspend(std::coroutine_handle<> handle) 
                 if (!state->abandoned.load(std::memory_order_acquire)) {
                   state->cancel_and_resume();
                 }
+
                 return true;
               }));
             }));
+
         if (result == detail::ResumePostResult::kPosted) {
           return true;
         }
@@ -1641,6 +1647,7 @@ template <typename TypeT>
 inline TypeT FutureAwaiter<TypeT>::await_resume() {
   state_->abandoned.store(true, std::memory_order_release);
   state_->clear_handle();
+
   if VUNLIKELY (state_->target_closed.load(std::memory_order_acquire)) {
     throw Exception::OperationCancelled{};
   }

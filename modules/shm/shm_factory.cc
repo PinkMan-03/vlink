@@ -196,6 +196,7 @@ bool ShmFactory::auto_init_roudi(bool same_process_from_roudi) {
 
       if (!roudi_running) {
 #ifdef _WIN32
+
         if (same_process_from_roudi) {
           status_ = false;
           return;
@@ -256,6 +257,7 @@ void ShmFactory::init_log_level(bool wait_roudi) {
     log_manager.SetDefaultLogLevel(shm::log::LogLevel::kFatal, shm::log::LogLevelOutput::kHideLogLevel);
   }
 #else
+
   if (wait_roudi) {
     shm::log::Logger::setLogLevel(shm::log::LogLevel::Warn);
     return;
@@ -421,6 +423,7 @@ void ShmFactory::deinit_runtime() {
     }
 
 #if SHM_USE_RUNTIME_IMPL
+
     if (global_instance.shm_runtime) {
       global_instance.shm_runtime->shutdown();
       global_instance.shm_runtime.reset();
@@ -545,6 +548,7 @@ ShmServer::ShmServer(const ShmID& id) {
   }
 
   std::string event = "method";
+
   if (domain != 0) {
     event += ("_" + std::to_string(domain));
   }
@@ -725,20 +729,24 @@ void ShmServer::on_request_received(shm::popo::UntypedServer*, ShmServer* target
   }
 
   auto* impl = target->get_first_impl();
+
   if VUNLIKELY (!impl) {
     return;
   }
 
   auto* message_loop = impl->get_message_loop();
+
   if (message_loop) {
     std::weak_ptr<ShmServer> weak_target = target->weak_from_this();
     message_loop->post_task([weak_target]() {
       auto target = weak_target.lock();
+
       if VUNLIKELY (!target) {
         return;
       }
 
       auto* impl = target->get_first_impl();
+
       if VUNLIKELY (!impl || !impl->get_message_loop()) {
         return;
       }
@@ -768,6 +776,7 @@ ShmClient::ShmClient(const ShmID& id) {
   }
 
   std::string event = "method";
+
   if (domain != 0) {
     event += ("_" + std::to_string(domain));
   }
@@ -869,6 +878,7 @@ Bytes ShmClient::loan(uint64_t channel, int64_t size) {
   }
 
   auto write_req_result = client_->loan(size + ShmFactory::get_loaned_offset(), ShmFactory::get_loaned_alignment());
+
   if VUNLIKELY (write_req_result.has_error()) {
     VLOG_E("ShmFactory: Failed to loan buffer, size: ", size + ShmFactory::get_loaned_offset(),
            ", error: ", write_req_result.get_error(), ".");
@@ -917,9 +927,11 @@ bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallb
         callback(bytes);
       };
       write_header->setSequenceId(response_seq);
+
       if (seq_out) {
         *seq_out = response_seq;
       }
+
       ++seq_;
     }
 
@@ -958,9 +970,11 @@ bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallb
         callback(bytes);
       };
       write_header->setSequenceId(response_seq);
+
       if (seq_out) {
         *seq_out = response_seq;
       }
+
       ++seq_;
     }
 
@@ -970,6 +984,7 @@ bool ShmClient::call(uint64_t channel, const Bytes& req_data, NodeImpl::MsgCallb
 
     if VUNLIKELY (send_result.has_error()) {
       VLOG_E("ShmFactory: Failed to send, error: ", send_result.get_error(), ".");
+
       if (has_response_callback) {
         callbacks_.erase(response_seq);
       }
@@ -1009,20 +1024,24 @@ void ShmClient::discovery_server(bool connect) {
 
 void ShmClient::on_response_received(shm::popo::UntypedClient*, ShmClient* target) {
   auto* impl = target->get_first_impl();
+
   if VUNLIKELY (!impl) {
     return;
   }
 
   auto* message_loop = impl->get_message_loop();
+
   if (message_loop) {
     std::weak_ptr<ShmClient> weak_target = target->weak_from_this();
     message_loop->post_task([weak_target]() {
       auto target = weak_target.lock();
+
       if VUNLIKELY (!target) {
         return;
       }
 
       auto* impl = target->get_first_impl();
+
       if VUNLIKELY (!impl || !impl->get_message_loop()) {
         return;
       }
@@ -1048,6 +1067,7 @@ ShmPublisher::ShmPublisher(const ShmID& id) {
   options.historyCapacity = history;
 
   std::string event = "event";
+
   if (domain != 0) {
     event += ("_" + std::to_string(domain));
   }
@@ -1221,6 +1241,7 @@ ShmSubscriber::ShmSubscriber(const ShmID& id) {
   }
 
   std::string event = "event";
+
   if (domain != 0) {
     event += ("_" + std::to_string(domain));
   }
@@ -1367,20 +1388,24 @@ void ShmSubscriber::on_msg_received(shm::popo::UntypedSubscriber*, ShmSubscriber
   }
 
   auto* impl = target->get_first_impl();
+
   if VUNLIKELY (!impl) {
     return;
   }
 
   auto* message_loop = impl->get_message_loop();
+
   if (message_loop) {
     std::weak_ptr<ShmSubscriber> weak_target = target->weak_from_this();
     message_loop->post_task([weak_target]() {
       auto target = weak_target.lock();
+
       if VUNLIKELY (!target) {
         return;
       }
 
       auto* impl = target->get_first_impl();
+
       if VUNLIKELY (!impl || !impl->get_message_loop()) {
         return;
       }

@@ -325,6 +325,7 @@ TEST_SUITE("base-MpmcQueue") {
     } else {
       CHECK(true);
     }
+
     // Timeout should have fired within a reasonable bound.
     CHECK(elapsed >= 40ms);
   }

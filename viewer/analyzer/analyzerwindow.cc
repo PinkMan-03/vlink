@@ -68,6 +68,7 @@ QString global_fbs_dir_config = QStandardPaths::writableLocation(QStandardPaths:
   if (count <= 0) {
     return QColor();
   }
+
   if (index < 0 || index >= count) {
     return QColor();
   }
@@ -324,6 +325,7 @@ QString global_fbs_dir_config = QStandardPaths::writableLocation(QStandardPaths:
   }
 
   const auto* field = find_field(*view.object, token_name);
+
   if (!field) {
     return false;
   }
@@ -426,6 +428,7 @@ QString global_fbs_dir_config = QStandardPaths::writableLocation(QStandardPaths:
   }
 
   const auto numeric = get_numeric(view, *field);
+
   if (!numeric.has_value()) {
     return false;
   }
@@ -644,6 +647,7 @@ AnalyzerWindow::AnalyzerWindow(const QString& bag_path, bool enable_timeline, QW
       }
 
       auto* target_item = static_cast<QCPItemText*>(item);
+
       if (target_item) {
         if (text_items_.removeOne(target_item)) {
           ui->plot_widget->removeItem(item);
@@ -660,6 +664,7 @@ AnalyzerWindow::AnalyzerWindow(const QString& bag_path, bool enable_timeline, QW
               }
 
               QCPGraph* graph = qobject_cast<QCPGraph*>(plottable);
+
               if (!graph) {
                 return;
               }
@@ -738,6 +743,7 @@ AnalyzerWindow::AnalyzerWindow(const QString& bag_path, bool enable_timeline, QW
     connect(ui->plot_widget, &QCustomPlot::legendClick, this,
             [this](QCPLegend*, QCPAbstractLegendItem* item, QMouseEvent*) {
               QCPPlottableLegendItem* legend_item = qobject_cast<QCPPlottableLegendItem*>(item);
+
               if (legend_item) {
                 QCPGraph* graph = qobject_cast<QCPGraph*>(legend_item->plottable());
                 if (graph) {
@@ -813,6 +819,7 @@ AnalyzerWindow::AnalyzerWindow(const QString& bag_path, bool enable_timeline, QW
       }
 
       QString tooltip_text;
+
       if (type_ == kFrequencyType) {
         tooltip_text = QString(" %1s ").arg(QString::number(x, 'f', 3));
       } else if (type_ == kValueType) {
@@ -1155,6 +1162,7 @@ void AnalyzerWindow::on_toolButton_proto_clicked() {
   ui->lineEdit_proto->setText(proto_dir_);
 
   QFile file(global_proto_dir_config);
+
   if (file.open(QFile::WriteOnly | QFile::Truncate)) {
     file.write(proto_dir_.toUtf8());
     file.close();
@@ -1189,6 +1197,7 @@ void AnalyzerWindow::on_toolButton_fbs_clicked() {
   ui->lineEdit_fbs->setText(fbs_dir_);
 
   QFile file(global_fbs_dir_config);
+
   if (file.open(QFile::WriteOnly | QFile::Truncate)) {
     file.write(fbs_dir_.toUtf8());
     file.close();
@@ -2447,6 +2456,7 @@ bool AnalyzerWindow::load_fbs(const QString& fbs_dir) {
   }
 
   std::string error;
+
   if (!flatbuffers_runtime_.load_dir(fbs_dir.toStdString(), &error)) {
     QMessageBox::warning(this, tr("FlatBuffers Error"),
                          error.empty() ? tr("Load flatbuffers directory failed.") : QString::fromStdString(error));

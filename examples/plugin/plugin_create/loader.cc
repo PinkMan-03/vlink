@@ -51,6 +51,7 @@ int main() {
   plugin.set_log_level(vlink::Logger::kInfo);
 
   auto calc = plugin.load<CalculatorInterface>("calculator_plugin", 1, 0);
+
   if (!calc) {
     VLOG_E("Failed to load calculator_plugin.");
     VLOG_I("Make sure libcalculator_plugin.so is in a search path.");

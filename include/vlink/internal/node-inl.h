@@ -206,7 +206,7 @@ inline void Node<ImplT, SecT>::set_ser_type(const std::string& ser_type, SchemaT
   } else {
     const auto inferred_schema_type = SchemaData::infer_ser_type(ser_type);
 
-    if (inferred_schema_type != SchemaType::kUnknown) {
+    if VLIKELY (inferred_schema_type != SchemaType::kUnknown) {
       next_schema_type = inferred_schema_type;
     } else if (impl_->schema_type == SchemaType::kRaw || impl_->schema_type == SchemaType::kZeroCopy) {
       next_schema_type = SchemaType::kUnknown;
@@ -275,7 +275,7 @@ inline void Node<ImplT, SecT>::bind_proto_arena(void* proto_arena) {
 
 template <typename ImplT, SecurityType SecT>
 inline double Node<ImplT, SecT>::get_cpu_usage() const {
-  if (impl_->profiler) {
+  if VUNLIKELY (impl_->profiler) {
     return impl_->profiler->get();
   } else {
     return -1;
@@ -289,7 +289,7 @@ inline bool Node<ImplT, SecT>::get_safety_quit() const {
 
 template <typename ImplT, SecurityType SecT>
 inline void Node<ImplT, SecT>::set_safety_quit(bool safety_quit) {
-  if (safety_quit) {
+  if VUNLIKELY (safety_quit) {
     if (!quit_mtx_.has_value()) {
       quit_mtx_.emplace();
     }

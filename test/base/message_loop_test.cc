@@ -1317,6 +1317,7 @@ TEST_SUITE("base-MessageLoop") {
         observers.emplace_back([&] {
           while (!stop.load(std::memory_order_acquire)) {
             std::lock_guard lk((*state_ptr)->mtx);
+
             if ((*state_ptr)->alive.load(std::memory_order_acquire)) {
               observed_alive.fetch_add(1, std::memory_order_acq_rel);
             } else {

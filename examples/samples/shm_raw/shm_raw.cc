@@ -64,6 +64,7 @@ int main() {
 
   // Synchronous call: send a request and wait for the response (returns std::optional)
   auto resp = client.invoke(Bytes{0x1, 0x2, 0x3});
+
   if (resp.has_value()) {
     VLOG_I("Client invoke size:", resp.value().size());
     VLOG_I("Client invoke first:", +resp.value().data()[0]);

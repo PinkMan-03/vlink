@@ -151,6 +151,7 @@ int main() {
     reader->register_output_callback(
         [&msg_count](int64_t timestamp, const std::string& url, vlink::ActionType, const vlink::Bytes& data) {
           ++msg_count;
+
           if (msg_count <= 3) {
             VLOG_I("  Read: ts:", timestamp, "url:", url, "size:", data.size());
           }

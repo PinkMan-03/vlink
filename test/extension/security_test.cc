@@ -443,12 +443,14 @@ TEST_SUITE("extension-Security - AES built-in") {
           }
 
           Bytes cipher;
+
           if (!sec.encrypt(plain, cipher)) {
             ++failures;
             continue;
           }
 
           Bytes recovered;
+
           if (!sec.decrypt(cipher, recovered) || recovered.size() != plain.size() ||
               std::memcmp(recovered.data(), plain.data(), plain.size()) != 0) {
             ++failures;

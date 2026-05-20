@@ -75,6 +75,7 @@ void AboutDialog::on_pushButton_open_clicked() {
   QDesktopServices::openUrl(QUrl::fromLocalFile(QApplication::applicationDirPath()));
 
 #ifdef __linux__
+
   if (!lib_env.empty()) {
     vlink::Utils::set_env("LD_LIBRARY_PATH", lib_env);
   }

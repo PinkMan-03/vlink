@@ -217,6 +217,7 @@ namespace vlink {
   }
 
   auto iter = properties.find("zenoh.shm_loan_threshold");
+
   if (iter != properties.end() && parse_size_value(iter->second, &parsed, true)) {
     threshold = parsed;
   }
@@ -248,6 +249,7 @@ struct ZenohPayloadView final {
     }
 
 #if defined(Z_FEATURE_UNSTABLE_API)
+
     if (z_bytes_get_contiguous_view(payload, &view) == Z_OK) {
       data = z_slice_data(z_view_slice_loan(&view));
       size = z_slice_len(z_view_slice_loan(&view));
@@ -513,6 +515,7 @@ bool ZenohShmSupport::build_payload(z_owned_bytes_t* payload, const Bytes& bytes
     }
 
     static std::atomic_bool warned_foreign_loan{false};
+
     if (!warned_foreign_loan.exchange(true, std::memory_order_relaxed)) {
       VLOG_W("ZenohFactory: Copying a loaned Bytes buffer that was not created by this Zenoh endpoint.");
     }
@@ -582,6 +585,7 @@ void ZenohFactory::init() {
 
   ret = z_config_default(&global_config_);
 #endif
+
   if VUNLIKELY (ret != Z_OK) {
     VLOG_F("ZenohFactory: Failed to invoke [z_config_default].");
     return;
@@ -631,6 +635,7 @@ void ZenohFactory::deinit() {
   }
 
   message_loop_.quit();
+
   if VLIKELY (!in_loop) {
     message_loop_.wait_for_quit();
   }
@@ -772,6 +777,7 @@ ZenohSessionPtr ZenohFactory::get_session(int32_t domain, int32_t depth, const s
   [[maybe_unused]] std::string prop_mcast_ttl_str = env_mcast_ttl_str;
   [[maybe_unused]] std::string prop_tx_queue_data_str = env_tx_queue_data_str;
   [[maybe_unused]] std::string prop_tx_queue_rt_str = env_tx_queue_rt_str;
+
   if (depth > 0) {
     const std::string depth_str = std::to_string(depth);
     if (prop_tx_queue_data_str.empty()) {
@@ -781,6 +787,7 @@ ZenohSessionPtr ZenohFactory::get_session(int32_t domain, int32_t depth, const s
       prop_tx_queue_rt_str = depth_str;
     }
   }
+
   [[maybe_unused]] bool prop_shm = zenoh_shm_enabled_from(fragment, {});
   [[maybe_unused]] std::string prop_shm_mode = env_shm_mode;
   [[maybe_unused]] std::string prop_shm_size_str = env_shm_size_str;
@@ -867,6 +874,7 @@ ZenohSessionPtr ZenohFactory::get_session(int32_t domain, int32_t depth, const s
   z_config_clone(&config, z_loan(global_config_));
 
 #ifdef VLINK_ENABLE_ZENOH_PICO
+
   if (ssl_cfg_valid) {
     VLOG_W("ZenohFactory: zenoh-pico does not support TLS, ssl.* properties will be ignored.");
   }
@@ -1398,6 +1406,7 @@ void ZenohServer::process_message(uint64_t channel, uint64_t seq, MessageLoop* m
       }
 
       auto* first_impl = self->get_first_impl();
+
       if VUNLIKELY (!first_impl || !first_impl->get_message_loop()) {
         self->drop_query(seq);
         return;
@@ -1661,6 +1670,7 @@ bool ZenohClient::call(NodeImpl* owner, uint64_t channel, const Bytes& req_data,
   ZenohHeader header{guid_, 0, channel, seq_guid};
 
   z_owned_bytes_t attachment;
+
   if VUNLIKELY (!ZenohFactory::write_header(header, &attachment)) {
     VLOG_E("ZenohFactory: Failed to build client attachment header.");
     return false;
@@ -1680,6 +1690,7 @@ bool ZenohClient::call(NodeImpl* owner, uint64_t channel, const Bytes& req_data,
   opts.is_express = is_express_;
   opts.attachment = z_move(attachment);
   opts.payload = z_move(payload);
+
   if (timeout_ms < 0) {
     opts.timeout_ms = std::numeric_limits<uint64_t>::max();
   } else {
@@ -2015,6 +2026,7 @@ bool ZenohPublisher::publish(uint64_t channel, const Bytes& bytes) {
   ZenohHeader header{guid_, ElapsedTimer::get_sys_timestamp(ElapsedTimer::kNano, false), channel, ++seq_};
 
   z_owned_bytes_t attachment;
+
   if VUNLIKELY (!ZenohFactory::write_header(header, &attachment)) {
     VLOG_E("ZenohFactory: Failed to build publisher attachment header.");
     return false;
@@ -2188,6 +2200,7 @@ void ZenohSubscriber::process_message(uint64_t channel, uint64_t seq, uint64_t g
       }
 
       auto* first_impl = self->get_first_impl();
+
       if VUNLIKELY (!first_impl || !first_impl->get_message_loop()) {
         return;
       }

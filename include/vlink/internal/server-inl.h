@@ -98,7 +98,7 @@ inline Server<ReqT, RespT, SecT>::Server(const ConfT& conf, InitType type) {
     this->impl_->is_security_type = true;
   }
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -295,6 +295,7 @@ inline bool Server<ReqT, RespT, SecT>::listen_bytes(NodeImpl::ReqRespCallback&& 
       [this, callback = std::move(callback)](uint64_t req_id, const Bytes& req_data, Bytes* resp_data) {
         if constexpr (SecT == SecurityType::kWithSecurity) {
           Bytes sec_req_data;
+
           if VUNLIKELY (!this->impl_->security || !this->impl_->security->decrypt(req_data, sec_req_data)) {
             VLOG_T("Server decrypt failed, url: ", this->impl_->url, ".");
             return;
@@ -375,7 +376,7 @@ inline SecurityServer<ReqT, RespT>::SecurityServer(const ConfT& conf, SecurityCo
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }
@@ -389,7 +390,7 @@ inline SecurityServer<ReqT, RespT>::SecurityServer(const std::string& url_str, S
 
   this->enable_security(std::forward<SecurityConfigT>(sec_cfg));
 
-  if (type == InitType::kWithInit) {
+  if VLIKELY (type == InitType::kWithInit) {
     this->init();  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
   }
 }

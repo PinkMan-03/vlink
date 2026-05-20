@@ -401,7 +401,7 @@ struct VLINK_EXPORT Version final {
 
 constexpr SchemaType SchemaData::infer_ser_type(std::string_view ser_type) noexcept {
   constexpr auto kHasPrefixFunction = [](std::string_view value, std::string_view prefix) noexcept {
-    if (prefix.size() > value.size()) {
+    if VUNLIKELY (prefix.size() > value.size()) {
       return false;
     }
 

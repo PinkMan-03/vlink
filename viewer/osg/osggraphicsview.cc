@@ -452,9 +452,11 @@ void OsgGraphicsView::setKeyboardModifiers(QInputEvent* event) {
   if (modkey & Qt::ShiftModifier) {
     mask |= osgGA::GUIEventAdapter::MODKEY_SHIFT;
   }
+
   if (modkey & Qt::ControlModifier) {
     mask |= osgGA::GUIEventAdapter::MODKEY_CTRL;
   }
+
   if (modkey & Qt::AltModifier) {
     mask |= osgGA::GUIEventAdapter::MODKEY_ALT;
   }

@@ -1244,6 +1244,7 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
 
       std::string out;
       out.reserve(fitted.size() + 32);
+
       if (colorize && color != nullptr) {
         out.append(color);
         out.append(fitted);
@@ -1251,6 +1252,7 @@ bool print_terminal(const Bench::Result& result, const TerminalOptions& options,
       } else {
         out.append(fitted);
       }
+
       out.push_back('\n');
       VLINK_TERM_OUT.write_raw(out.data(), out.size());
       VLINK_TERM_OUT.flush();

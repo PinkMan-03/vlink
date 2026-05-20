@@ -248,7 +248,7 @@ int main(int argc, char* argv[]) {
   std::string proxy_error;
   std::error_code config_ec;
 
-  if (!config_file.empty() && std::filesystem::exists(config_file, config_ec) && !config_ec) {
+  if VLIKELY (!config_file.empty() && std::filesystem::exists(config_file, config_ec) && !config_ec) {
     std::ifstream ifs(config_file);
 
     if VUNLIKELY (!ifs.is_open()) {
@@ -261,7 +261,7 @@ int main(int argc, char* argv[]) {
       ifs >> root;
       const auto config_dir = std::filesystem::path(config_file).parent_path();
 
-      if (!program.is_used("--mode") && root.contains("mode")) {
+      if VLIKELY (!program.is_used("--mode") && root.contains("mode")) {
         const auto normalized_mode = vlink::webviz::normalize_token(root["mode"].get<std::string>());
 
         if VLIKELY (normalized_mode == "spawn") {
@@ -279,27 +279,27 @@ int main(int argc, char* argv[]) {
         }
       }
 
-      if (!program.is_used("--address") && root.contains("address")) {
+      if VLIKELY (!program.is_used("--address") && root.contains("address")) {
         config.address = root["address"].get<std::string>();
       }
 
-      if (!program.is_used("--bind_ip") && root.contains("bind_ip")) {
+      if VLIKELY (!program.is_used("--bind_ip") && root.contains("bind_ip")) {
         config.bind_ip = root["bind_ip"].get<std::string>();
       }
 
-      if (!program.is_used("--port") && root.contains("port")) {
+      if VLIKELY (!program.is_used("--port") && root.contains("port")) {
         config_port = root["port"].get<int>();
       }
 
-      if (!program.is_used("--save_path") && root.contains("save_path")) {
+      if VLIKELY (!program.is_used("--save_path") && root.contains("save_path")) {
         config.save_path = vlink::webviz::resolve_relative_path(config_dir, root["save_path"].get<std::string>());
       }
 
-      if (!program.is_used("--name") && root.contains("name")) {
+      if VLIKELY (!program.is_used("--name") && root.contains("name")) {
         config.name = root["name"].get<std::string>();
       }
 
-      if (!program.is_used("--recording_id") && root.contains("recording_id")) {
+      if VLIKELY (!program.is_used("--recording_id") && root.contains("recording_id")) {
         config.recording_id = root["recording_id"].get<std::string>();
       }
 
@@ -308,7 +308,7 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      if (root.contains("filter") && root["filter"].is_object()) {
+      if VLIKELY (root.contains("filter") && root["filter"].is_object()) {
         const auto& filter = root["filter"];
         config.whitelist_exact.clear();
         config.whitelist_patterns.clear();
@@ -324,26 +324,28 @@ int main(int argc, char* argv[]) {
         }
       }
 
-      if (!program.is_used("--proto_dir") && proto_dir.empty() && root.contains("proto_dir")) {
+      if VLIKELY (!program.is_used("--proto_dir") && proto_dir.empty() && root.contains("proto_dir")) {
         config.proto_dir = vlink::webviz::resolve_relative_path(config_dir, root["proto_dir"].get<std::string>());
       }
 
-      if (!program.is_used("--fbs_dir") && fbs_dir.empty() && root.contains("fbs_dir")) {
+      if VLIKELY (!program.is_used("--fbs_dir") && fbs_dir.empty() && root.contains("fbs_dir")) {
         config.fbs_dir = vlink::webviz::resolve_relative_path(config_dir, root["fbs_dir"].get<std::string>());
       }
 
-      if (!program.is_used("--schema_plugin") && schema_plugin_path.empty() && root.contains("schema_plugin_path")) {
+      if VLIKELY (!program.is_used("--schema_plugin") && schema_plugin_path.empty() &&
+                  root.contains("schema_plugin_path")) {
         config.schema_plugin_path =
             vlink::webviz::resolve_relative_path(config_dir, root["schema_plugin_path"].get<std::string>());
       }
 
-      if (!program.is_used("--convert_plugin") && convert_plugin_path.empty() && root.contains("convert_plugin_path")) {
+      if VLIKELY (!program.is_used("--convert_plugin") && convert_plugin_path.empty() &&
+                  root.contains("convert_plugin_path")) {
         config.convert_plugin_path =
             vlink::webviz::resolve_relative_path(config_dir, root["convert_plugin_path"].get<std::string>());
       }
 
-      if (!program.is_used("--convert_plugin_config") && convert_plugin_config.empty() &&
-          root.contains("convert_plugin_config")) {
+      if VLIKELY (!program.is_used("--convert_plugin_config") && convert_plugin_config.empty() &&
+                  root.contains("convert_plugin_config")) {
         config.convert_plugin_config = root["convert_plugin_config"].get<std::string>();
       }
 
@@ -353,7 +355,7 @@ int main(int argc, char* argv[]) {
         return 1;
       }
 
-      if (!program.is_used("--vlink_msgs")) {
+      if VLIKELY (!program.is_used("--vlink_msgs")) {
         config.vlink_msgs.clear();
         if VUNLIKELY (!vlink::webviz::append_config_paths(root, "vlink_msgs", config_dir, config.vlink_msgs)) {
           std::cerr << "Invalid config file " << config_file << ": vlink_msgs must be an array of strings" << std::endl;
@@ -361,52 +363,52 @@ int main(int argc, char* argv[]) {
         }
       }
 
-      if (!program.is_used("--spawn_memory_limit") && root.contains("spawn_memory_limit")) {
+      if VLIKELY (!program.is_used("--spawn_memory_limit") && root.contains("spawn_memory_limit")) {
         config.spawn_memory_limit = root["spawn_memory_limit"].get<std::string>();
       }
 
-      if (!program.is_used("--spawn_server_memory_limit") && root.contains("spawn_server_memory_limit")) {
+      if VLIKELY (!program.is_used("--spawn_server_memory_limit") && root.contains("spawn_server_memory_limit")) {
         config.spawn_server_memory_limit = root["spawn_server_memory_limit"].get<std::string>();
       }
 
-      if (!program.is_used("--spawn_hide_welcome_screen") && root.contains("spawn_hide_welcome_screen")) {
+      if VLIKELY (!program.is_used("--spawn_hide_welcome_screen") && root.contains("spawn_hide_welcome_screen")) {
         config.spawn_hide_welcome_screen = root["spawn_hide_welcome_screen"].get<bool>();
       }
 
-      if (!program.is_used("--spawn_no_detach") && root.contains("spawn_detach_process")) {
+      if VLIKELY (!program.is_used("--spawn_no_detach") && root.contains("spawn_detach_process")) {
         config.spawn_detach_process = root["spawn_detach_process"].get<bool>();
       }
 
-      if (!program.is_used("--spawn_executable_name") && root.contains("spawn_executable_name")) {
+      if VLIKELY (!program.is_used("--spawn_executable_name") && root.contains("spawn_executable_name")) {
         config.spawn_executable_name = root["spawn_executable_name"].get<std::string>();
       }
 
-      if (!program.is_used("--spawn_executable_path") && root.contains("spawn_executable_path")) {
+      if VLIKELY (!program.is_used("--spawn_executable_path") && root.contains("spawn_executable_path")) {
         config.spawn_executable_path =
             vlink::webviz::resolve_relative_path(config_dir, root["spawn_executable_path"].get<std::string>());
       }
 
-      if (!program.is_used("--serve_memory_limit") && root.contains("serve_memory_limit")) {
+      if VLIKELY (!program.is_used("--serve_memory_limit") && root.contains("serve_memory_limit")) {
         config.serve_memory_limit = root["serve_memory_limit"].get<std::string>();
       }
 
-      if (!program.is_used("--playback_behavior") && root.contains("playback_behavior")) {
+      if VLIKELY (!program.is_used("--playback_behavior") && root.contains("playback_behavior")) {
         config.playback_behavior = root["playback_behavior"].get<std::string>();
       }
 
-      if (!program.is_used("--sequence_timeline") && root.contains("sequence_timeline")) {
+      if VLIKELY (!program.is_used("--sequence_timeline") && root.contains("sequence_timeline")) {
         config.sequence_timeline = root["sequence_timeline"].get<std::string>();
       }
 
-      if (!program.is_used("--timestamp_timeline") && root.contains("timestamp_timeline")) {
+      if VLIKELY (!program.is_used("--timestamp_timeline") && root.contains("timestamp_timeline")) {
         config.timestamp_timeline = root["timestamp_timeline"].get<std::string>();
       }
 
-      if (!program.is_used("--disable_sequence_timeline") && root.contains("use_sequence_timeline")) {
+      if VLIKELY (!program.is_used("--disable_sequence_timeline") && root.contains("use_sequence_timeline")) {
         config.use_sequence_timeline = root["use_sequence_timeline"].get<bool>();
       }
 
-      if (!program.is_used("--disable_timestamp_timeline") && root.contains("use_timestamp_timeline")) {
+      if VLIKELY (!program.is_used("--disable_timestamp_timeline") && root.contains("use_timestamp_timeline")) {
         config.use_timestamp_timeline = root["use_timestamp_timeline"].get<bool>();
       }
     } catch (const std::exception& e) {
@@ -425,11 +427,11 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  if (program.is_used("--filter")) {
+  if VUNLIKELY (program.is_used("--filter")) {
     auto cli_filter_tokens = std::vector<std::string>{};
     vlink::webviz::append_filter_patterns(cli_filter_tokens, program.get<std::string>("--filter"));
 
-    if (!cli_filter_tokens.empty()) {
+    if VLIKELY (!cli_filter_tokens.empty()) {
       auto& target_filters = program.get<bool>("--black") ? config.blacklist_patterns : config.whitelist_patterns;
       target_filters.insert(target_filters.end(), std::make_move_iterator(cli_filter_tokens.begin()),
                             std::make_move_iterator(cli_filter_tokens.end()));
@@ -454,7 +456,7 @@ int main(int argc, char* argv[]) {
 
   config.playback_behavior = vlink::webviz::normalize_token(config.playback_behavior);
 
-  if (config.mode == vlink::webviz::RerunServer::kSpawn || config.mode == vlink::webviz::RerunServer::kServe) {
+  if VLIKELY (config.mode == vlink::webviz::RerunServer::kSpawn || config.mode == vlink::webviz::RerunServer::kServe) {
     if VUNLIKELY (!vlink::webviz::validate_port(config_port, "--port", config_error)) {
       std::cerr << config_error << std::endl;
       return 1;
@@ -485,7 +487,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  if (config.mode == vlink::webviz::RerunServer::kSpawn) {
+  if VLIKELY (config.mode == vlink::webviz::RerunServer::kSpawn) {
     if VUNLIKELY (config.spawn_executable_name.empty() && config.spawn_executable_path.empty()) {
       std::cerr << "spawn mode requires --spawn_executable_name or --spawn_executable_path" << std::endl;
       return 1;
@@ -511,6 +513,7 @@ int main(int argc, char* argv[]) {
 
   vlink::webviz::RerunServer server(config);
   vlink::Utils::register_terminate_signal([&server](int) { server.stop(); });
+
   if VUNLIKELY (!server.start()) {
     return 1;
   }

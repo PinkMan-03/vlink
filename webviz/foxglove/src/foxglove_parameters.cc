@@ -46,14 +46,14 @@ using ProtoSnapshot = ::vlink::webviz::foxglove::pb::ParameterSnapshot;
 using FbsEntry = ::vlink::webviz::foxglove::fbs::ParameterEntry;
 
 FoxgloveParameters::FoxgloveParameters(const Config& config) : config_(config) {
-  if (parse_backend_encoding(config_.encoding, backend_encoding_)) {
+  if VLIKELY (parse_backend_encoding(config_.encoding, backend_encoding_)) {
     config_.encoding = to_string(backend_encoding_);
   }
 
   std::unique_lock lock(state_mtx_);
 
   for (const auto& entry : config_.values) {
-    if (entry.has_value && !entry.name.empty()) {
+    if VLIKELY (entry.has_value && !entry.name.empty()) {
       state_[entry.name] = entry;
     }
   }
@@ -76,7 +76,7 @@ bool FoxgloveParameters::start() {
     return false;
   }
 
-  if (!config_.url.empty()) {
+  if VLIKELY (!config_.url.empty()) {
     setter_ = Setter<Bytes>::create_shared(config_.url, InitType::kWithoutInit);
 
     if VUNLIKELY (!setter_) {
@@ -88,9 +88,9 @@ bool FoxgloveParameters::start() {
     const auto ser = backend_ser(backend_encoding_);
     auto schema_type = SchemaType::kRaw;
 
-    if (backend_encoding_ == FoxgloveParameters::kProtobuf) {
+    if VLIKELY (backend_encoding_ == FoxgloveParameters::kProtobuf) {
       schema_type = SchemaType::kProtobuf;
-    } else if (backend_encoding_ == FoxgloveParameters::kFlatbuffers) {
+    } else if VLIKELY (backend_encoding_ == FoxgloveParameters::kFlatbuffers) {
       schema_type = SchemaType::kFlatbuffers;
     }
 
@@ -128,7 +128,7 @@ void FoxgloveParameters::stop() {
     return;
   }
 
-  if (setter_) {
+  if VLIKELY (setter_) {
     setter_->deinit();
     setter_.reset();
   }
@@ -187,7 +187,7 @@ Json FoxgloveParameters::build_parameter_values(const std::vector<std::string>& 
   {
     std::shared_lock lock(state_mtx_);
 
-    if (names.empty()) {
+    if VUNLIKELY (names.empty()) {
       for (const auto& state_entry : state_) {
         msg["parameters"].emplace_back(make_parameter_json(state_entry.second));
       }
@@ -195,14 +195,14 @@ Json FoxgloveParameters::build_parameter_values(const std::vector<std::string>& 
       for (const auto& name : names) {
         auto state_iter = state_.find(name);
 
-        if (state_iter != state_.end()) {
+        if VLIKELY (state_iter != state_.end()) {
           msg["parameters"].emplace_back(make_parameter_json(state_iter->second));
         }
       }
     }
   }
 
-  if (!id.empty()) {
+  if VLIKELY (!id.empty()) {
     msg["id"] = std::string(id);
   }
 
@@ -235,7 +235,7 @@ bool FoxgloveParameters::apply_set_parameters(const Json& request, Json& respons
     for (const auto& entry : requested) {
       requested_names.emplace_back(entry.name);
 
-      if (entry.has_value) {
+      if VLIKELY (entry.has_value) {
         new_state[entry.name] = entry;
       } else {
         new_state.erase(entry.name);
@@ -245,7 +245,7 @@ bool FoxgloveParameters::apply_set_parameters(const Json& request, Json& respons
     state_ = new_state;
   }
 
-  if (setter_) {
+  if VLIKELY (setter_) {
     Bytes payload;
 
     if VUNLIKELY (!encode_snapshot(new_state, payload)) {
@@ -267,7 +267,7 @@ bool FoxgloveParameters::apply_set_parameters(const Json& request, Json& respons
 
   std::string response_id;
 
-  if (request.contains("id") && request["id"].is_string()) {
+  if VLIKELY (request.contains("id") && request["id"].is_string()) {
     response_id = request["id"].get<std::string>();
   }
 
@@ -276,17 +276,17 @@ bool FoxgloveParameters::apply_set_parameters(const Json& request, Json& respons
 }
 
 bool FoxgloveParameters::parse_backend_encoding(std::string_view encoding, BackendEncoding& out) {
-  if (encoding == "json") {
+  if VLIKELY (encoding == "json") {
     out = FoxgloveParameters::kJson;
     return true;
   }
 
-  if (encoding == "protobuf") {
+  if VLIKELY (encoding == "protobuf") {
     out = FoxgloveParameters::kProtobuf;
     return true;
   }
 
-  if (encoding == "flatbuffer" || encoding == "flatbuffers") {
+  if VLIKELY (encoding == "flatbuffer" || encoding == "flatbuffers") {
     out = FoxgloveParameters::kFlatbuffers;
     return true;
   }
@@ -329,11 +329,11 @@ bool FoxgloveParameters::is_supported_parameter_value(const Json& value) {
     return false;
   }
 
-  if (value.is_boolean() || value.is_number() || value.is_string()) {
+  if VLIKELY (value.is_boolean() || value.is_number() || value.is_string()) {
     return true;
   }
 
-  if (value.is_array()) {
+  if VLIKELY (value.is_array()) {
     for (const auto& item : value) {
       if VUNLIKELY (!is_supported_parameter_value(item)) {
         return false;
@@ -343,9 +343,10 @@ bool FoxgloveParameters::is_supported_parameter_value(const Json& value) {
     return true;
   }
 
-  if (value.is_object()) {
+  if VLIKELY (value.is_object()) {
     for (const auto& kv : value.items()) {
       const auto& item = kv.value();
+
       if VUNLIKELY (!is_supported_parameter_value(item)) {
         return false;
       }
@@ -369,7 +370,7 @@ bool FoxgloveParameters::validate_parameter_value(const Json& value, std::string
   }
 
   if VUNLIKELY (type == "byte_array") {
-    if (value.is_string()) {
+    if VLIKELY (value.is_string()) {
       return true;
     }
 
@@ -378,7 +379,7 @@ bool FoxgloveParameters::validate_parameter_value(const Json& value, std::string
   }
 
   if VUNLIKELY (type == "float64") {
-    if (value.is_number()) {
+    if VLIKELY (value.is_number()) {
       return true;
     }
 
@@ -402,7 +403,7 @@ bool FoxgloveParameters::validate_parameter_value(const Json& value, std::string
     return true;
   }
 
-  if (is_supported_parameter_value(value)) {
+  if VLIKELY (is_supported_parameter_value(value)) {
     return true;
   }
 
@@ -429,7 +430,7 @@ bool FoxgloveParameters::parse_parameter_entry(const Json& item, ParameterEntry&
     return false;
   }
 
-  if (item.contains("type")) {
+  if VLIKELY (item.contains("type")) {
     if VUNLIKELY (!item["type"].is_string()) {
       error = "parameter type must be a string";
       return false;
@@ -452,7 +453,7 @@ bool FoxgloveParameters::parse_parameter_entry(const Json& item, ParameterEntry&
   out.value = item["value"];
 
   if VUNLIKELY (!validate_parameter_value(out.value, out.type, error)) {
-    if (!error.empty()) {
+    if VLIKELY (!error.empty()) {
       error = "parameter '" + out.name + "': " + error;
     }
 
@@ -489,10 +490,10 @@ Json FoxgloveParameters::make_parameter_json(const ParameterEntry& entry) {
   Json item;
   item["name"] = entry.name;
 
-  if (entry.has_value) {
+  if VLIKELY (entry.has_value) {
     item["value"] = entry.value;
 
-    if (!entry.type.empty()) {
+    if VLIKELY (!entry.type.empty()) {
       item["type"] = entry.type;
     }
   }
@@ -533,7 +534,7 @@ std::vector<FoxgloveParameters::ParameterEntry> FoxgloveParameters::diff_states(
   }
 
   for (const auto& old_entry : old_state) {
-    if (new_state.find(old_entry.first) != new_state.end()) {
+    if VLIKELY (new_state.find(old_entry.first) != new_state.end()) {
       continue;
     }
 
@@ -547,7 +548,7 @@ std::vector<FoxgloveParameters::ParameterEntry> FoxgloveParameters::diff_states(
 }
 
 bool FoxgloveParameters::encode_snapshot(const ParameterMap& state, Bytes& payload) const {
-  if (backend_encoding_ == FoxgloveParameters::kJson) {
+  if VLIKELY (backend_encoding_ == FoxgloveParameters::kJson) {
     return encode_json_payload(state, payload);
   }
 
@@ -559,15 +560,17 @@ bool FoxgloveParameters::encode_snapshot(const ParameterMap& state, Bytes& paylo
       auto* parameter = snapshot.add_parameters();
       parameter->set_name(entry.name);
       parameter->set_has_value(entry.has_value);
-      if (entry.type == "byte_array") {
+
+      if VLIKELY (entry.type == "byte_array") {
         parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_BYTE_ARRAY);
-      } else if (entry.type == "float64") {
+      } else if VLIKELY (entry.type == "float64") {
         parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_FLOAT64);
-      } else if (entry.type == "float64_array") {
+      } else if VLIKELY (entry.type == "float64_array") {
         parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_FLOAT64_ARRAY);
       } else {
         parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_UNSPECIFIED);
       }
+
       parameter->set_json_value(encode_json_fragment(entry.value));
     }
 
@@ -592,11 +595,11 @@ bool FoxgloveParameters::encode_snapshot(const ParameterMap& state, Bytes& paylo
     auto json_offset = builder.CreateString(encode_json_fragment(entry.value));
     ::vlink::webviz::foxglove::fbs::ParameterType fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::Unspecified;
 
-    if (entry.type == "byte_array") {
+    if VLIKELY (entry.type == "byte_array") {
       fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::ByteArray;
-    } else if (entry.type == "float64") {
+    } else if VLIKELY (entry.type == "float64") {
       fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::Float64;
-    } else if (entry.type == "float64_array") {
+    } else if VLIKELY (entry.type == "float64_array") {
       fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::Float64Array;
     }
 

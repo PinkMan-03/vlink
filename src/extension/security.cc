@@ -1194,6 +1194,7 @@ Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
     }
   }
 #else
+
   if (!impl_->config.key.empty() || !impl_->config.passphrase.empty() || !impl_->config.public_key_pem.empty() ||
       !impl_->config.private_key_pem.empty() || !impl_->config.advanced.signing_key_pem.empty() ||
       !impl_->config.advanced.verify_key_pem.empty()) {
@@ -1243,6 +1244,7 @@ bool Security::is_configured() const noexcept {
   std::lock_guard lock(impl_->mtx);
 
 #ifdef VLINK_ENABLE_SECURITY
+
   if (impl_->aad_context_valid) {
     if (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
       return true;
@@ -1269,6 +1271,7 @@ bool Security::can_encrypt() const noexcept {
   }
 
 #ifdef VLINK_ENABLE_SECURITY
+
   if VUNLIKELY (!impl_->aad_context_valid) {
     return false;
   }
@@ -1293,6 +1296,7 @@ bool Security::can_decrypt() const noexcept {
   }
 
 #ifdef VLINK_ENABLE_SECURITY
+
   if VUNLIKELY (!impl_->aad_context_valid) {
     return false;
   }
@@ -1328,6 +1332,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
   }
 
 #ifdef VLINK_ENABLE_SECURITY
+
   if VUNLIKELY (!impl_->aad_context_valid) {
     VLOG_W("Security::encrypt aad_context exceeds 65535 bytes");
     return false;
@@ -1405,6 +1410,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
 
     if (impl_->signing_key) {
       Bytes signed_range = Bytes::create(aad.size() + body_size);
+
       if VUNLIKELY (signed_range.data() == nullptr) {
         return false;
       }
@@ -1517,6 +1523,7 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
   }
 
 #ifdef VLINK_ENABLE_SECURITY
+
   if VUNLIKELY (!impl_->aad_context_valid) {
     VLOG_W("Security::decrypt aad_context exceeds 65535 bytes");
     return false;

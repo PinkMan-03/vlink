@@ -65,7 +65,7 @@ void ClientImpl::detect_connected(ConnectCallback&& callback) {
 }
 
 bool ClientImpl::wait_for_connected(std::chrono::milliseconds timeout) {
-  if (is_connected()) {
+  if VLIKELY (is_connected()) {
     return true;
   }
 
@@ -77,7 +77,7 @@ bool ClientImpl::wait_for_connected(std::chrono::milliseconds timeout) {
 
   auto predicate = [this]() -> bool { return is_connected() || is_interrupted(); };
 
-  if (timeout.count() < 0) {
+  if VUNLIKELY (timeout.count() < 0) {
     helper_->connected_cv.wait(lock, std::move(predicate));
     return is_connected();
   } else {

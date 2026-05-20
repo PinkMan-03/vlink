@@ -44,6 +44,7 @@ template <typename T>
   }
 
   // reliability
+
   if (qos.reliability.kind == Qos::Reliability::kBestEffort) {
     dds_qos.reliability.kind = ddst::BEST_EFFORT_RELIABILITY_QOS;
   } else {
@@ -53,6 +54,7 @@ template <typename T>
   dds_qos.reliability.max_blocking_time = get_dds_duration(qos.reliability.block_time);
 
   // history
+
   if (qos.history.kind == Qos::History::kKeepLast) {
     dds_qos.history.kind = ddst::KEEP_LAST_HISTORY_QOS;
   } else {
@@ -66,6 +68,7 @@ template <typename T>
   }
 
   // durability
+
   if (qos.durability.kind == Qos::Durability::kVolatile) {
     dds_qos.durability.kind = ddst::VOLATILE_DURABILITY_QOS;
   } else if (qos.durability.kind == Qos::Durability::kTransientLocal) {
@@ -77,6 +80,7 @@ template <typename T>
   }
 
   // liveliness
+
   if (qos.liveliness.kind == Qos::Liveliness::kAutomatic) {
     dds_qos.liveliness.kind = ddst::AUTOMATIC_LIVELINESS_QOS;
   } else if (qos.liveliness.kind == Qos::Liveliness::kManualParticipant) {
@@ -84,9 +88,11 @@ template <typename T>
   } else {
     dds_qos.liveliness.kind = ddst::MANUAL_BY_TOPIC_LIVELINESS_QOS;
   }
+
   dds_qos.liveliness.lease_duration = get_dds_duration(qos.liveliness.duration);
 
   // destination_order
+
   if (qos.destination_order.kind == Qos::DestinationOrder::kReceptionTimestamp) {
     dds_qos.destination_order.kind = ddst::BY_RECEPTION_TIMESTAMP_DESTINATIONORDER_QOS;
   } else {
@@ -94,6 +100,7 @@ template <typename T>
   }
 
   // ownership
+
   if (qos.ownership.kind == Qos::Ownership::kShared) {
     dds_qos.ownership.kind = ddst::SHARED_OWNERSHIP_QOS;
   } else {
@@ -112,6 +119,7 @@ template <typename T>
   dds_qos.latency_budget.duration = get_dds_duration(qos.latency_budget.duration);
 
   // resource_limits
+
   if (qos.resource_limits.max_samples > 0 && qos.resource_limits.max_instances > 0 &&
       qos.resource_limits.max_samples_per_instance > 0) {
     dds_qos.resource_limits.max_samples = qos.resource_limits.max_samples;

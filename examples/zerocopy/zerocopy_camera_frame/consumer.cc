@@ -64,6 +64,7 @@ int main() {
     received++;
 
     // Validate the frame
+
     if (!frame_consumer::validate_frame(frame)) {
       return;
     }
@@ -79,7 +80,10 @@ int main() {
   // Wait for messages (timeout after 15 seconds)
   for (int i = 0; i < 150; ++i) {
     std::this_thread::sleep_for(100ms);
-    if (received >= 10) break;
+
+    if (received >= 10) {
+      break;
+    }
   }
 
   VLOG_I("Total frames received: ", received.load());

@@ -61,9 +61,11 @@ inline bool xor_transform(const vlink::Bytes& in, vlink::Bytes& out, const uint8
 // Signature: bool(const Bytes& in, Bytes& out)
 inline bool encrypt(const vlink::Bytes& in, vlink::Bytes& out) {
   bool ok = xor_transform(in, out, kDefaultKey, kDefaultKeyLen);
+
   if (ok && !in.empty()) {
     VLOG_I("[XOR Encrypt] Encrypted ", in.size(), " bytes");
   }
+
   return ok;
 }
 
@@ -71,9 +73,11 @@ inline bool encrypt(const vlink::Bytes& in, vlink::Bytes& out) {
 // XOR is symmetric: decryption is the same operation as encryption.
 inline bool decrypt(const vlink::Bytes& in, vlink::Bytes& out) {
   bool ok = xor_transform(in, out, kDefaultKey, kDefaultKeyLen);
+
   if (ok && !in.empty()) {
     VLOG_I("[XOR Decrypt] Decrypted ", in.size(), " bytes");
   }
+
   return ok;
 }
 

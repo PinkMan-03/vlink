@@ -91,7 +91,7 @@ bool RerunServer::start() {
     return false;
   }
 
-  if (config_.mode == RerunServer::kSpawn || config_.mode == RerunServer::kConnect) {
+  if VLIKELY (config_.mode == RerunServer::kSpawn || config_.mode == RerunServer::kConnect) {
     if VUNLIKELY (!probe_timer_.attach(this)) {
       MLOG_E("Failed to attach Rerun probe timer");
       stop();
@@ -146,13 +146,13 @@ void RerunServer::stop() {
   probe_timer_.stop();
   probe_timer_.detach();
 
-  if (bridge_) {
+  if VLIKELY (bridge_) {
     bridge_->stop();
   }
 
   quit(false);
 
-  if (!is_in_same_thread()) {
+  if VLIKELY (!is_in_same_thread()) {
     wait_for_quit();
   }
 
@@ -180,13 +180,13 @@ void RerunServer::flush_recording() {
     rec = rec_;
   }
 
-  if (!rec) {
+  if VUNLIKELY (!rec) {
     return;
   }
 
   auto err = rec->flush_blocking();
 
-  if (err.is_err()) {
+  if VUNLIKELY (err.is_err()) {
     MLOG_W("Failed to flush: {}", err.description);
   }
 }
@@ -239,7 +239,7 @@ bool RerunServer::open_recording(std::shared_ptr<::rerun::RecordingStream>& rec)
 
       auto err = rec->spawn(options);
 
-      if (err.is_err()) {
+      if VUNLIKELY (err.is_err()) {
         MLOG_E("Failed to spawn Rerun viewer: {}", err.description);
         return false;
       }
@@ -251,7 +251,7 @@ bool RerunServer::open_recording(std::shared_ptr<::rerun::RecordingStream>& rec)
     case RerunServer::kConnect: {
       auto err = rec->connect_grpc(config_.address);
 
-      if (err.is_err()) {
+      if VUNLIKELY (err.is_err()) {
         MLOG_E("Failed to connect to Rerun viewer at {}: {}", config_.address, err.description);
         return false;
       }
@@ -263,9 +263,9 @@ bool RerunServer::open_recording(std::shared_ptr<::rerun::RecordingStream>& rec)
     case RerunServer::kServe: {
       ::rerun::PlaybackBehavior playback{};
 
-      if (config_.playback_behavior == "oldest_first") {
+      if VLIKELY (config_.playback_behavior == "oldest_first") {
         playback = ::rerun::PlaybackBehavior::OldestFirst;
-      } else if (config_.playback_behavior == "newest_first") {
+      } else if VLIKELY (config_.playback_behavior == "newest_first") {
         playback = ::rerun::PlaybackBehavior::NewestFirst;
       } else {
         MLOG_E("Invalid playback behavior: {}", config_.playback_behavior);
@@ -274,7 +274,7 @@ bool RerunServer::open_recording(std::shared_ptr<::rerun::RecordingStream>& rec)
 
       auto result = rec->serve_grpc(config_.bind_ip, config_.port, config_.serve_memory_limit, playback);
 
-      if (result.is_err()) {
+      if VUNLIKELY (result.is_err()) {
         MLOG_E("Failed to start gRPC server on {}:{}: {}", config_.bind_ip, config_.port, result.error.description);
         return false;
       }
@@ -292,7 +292,7 @@ bool RerunServer::open_recording(std::shared_ptr<::rerun::RecordingStream>& rec)
 
       auto err = rec->save(config_.save_path);
 
-      if (err.is_err()) {
+      if VUNLIKELY (err.is_err()) {
         MLOG_E("Failed to save to {}: {}", config_.save_path, err.description);
         return false;
       }
@@ -346,7 +346,7 @@ void RerunServer::probe_recording() {
   }
 
   if VUNLIKELY (!rec) {
-    if (reconnect_recording()) {
+    if VLIKELY (reconnect_recording()) {
       MLOG_I("Rerun reconnect succeeded");
     }
 
@@ -355,13 +355,13 @@ void RerunServer::probe_recording() {
 
   auto err = rec->flush_blocking();
 
-  if (!err.is_err()) {
+  if VLIKELY (!err.is_err()) {
     return;
   }
 
   MLOG_W("Rerun probe failed: {}; reconnecting", err.description);
 
-  if (reconnect_recording()) {
+  if VLIKELY (reconnect_recording()) {
     MLOG_I("Rerun reconnect succeeded");
   } else {
     MLOG_W("Rerun reconnect failed");
@@ -429,7 +429,7 @@ void RerunServer::on_bridge_connected(bool connected) {
     return;
   }
 
-  if (connected) {
+  if VLIKELY (connected) {
     MLOG_I("Connected to proxy bridge in {} mode", ProxyBridge::to_string(config_.proxy_config.interface_mode));
     update_bridge_control();
   } else {
@@ -454,7 +454,7 @@ void RerunServer::on_bridge_connected(bool connected) {
       subscribed_urls_generation_.fetch_add(1);
     }
 
-    if (!urls_to_clear.empty()) {
+    if VLIKELY (!urls_to_clear.empty()) {
       std::shared_ptr<::rerun::RecordingStream> rec;
 
       {
@@ -462,7 +462,7 @@ void RerunServer::on_bridge_connected(bool connected) {
         rec = rec_;
       }
 
-      if (rec) {
+      if VLIKELY (rec) {
         rec->reset_time();
 
         for (const auto& url : urls_to_clear) {
@@ -490,13 +490,13 @@ void RerunServer::on_bridge_info(const std::vector<ProxyAPI::Info>& info_list) {
     std::unordered_set<std::string> current_valid_urls;
 
     for (const auto& info : info_list) {
-      if (info.status != ProxyAPI::kInvalid && is_publisher_info(info) && is_url_allowed(info.url)) {
+      if VLIKELY (info.status != ProxyAPI::kInvalid && is_publisher_info(info) && is_url_allowed(info.url)) {
         current_valid_urls.insert(info.url);
       }
     }
 
     for (auto url_iter = subscribed_urls_.begin(); url_iter != subscribed_urls_.end();) {
-      if (current_valid_urls.find(*url_iter) == current_valid_urls.end()) {
+      if VUNLIKELY (current_valid_urls.find(*url_iter) == current_valid_urls.end()) {
         urls_to_clear.emplace_back(*url_iter);
         last_info_map_.erase(*url_iter);
         url_iter = subscribed_urls_.erase(url_iter);
@@ -532,7 +532,7 @@ void RerunServer::on_bridge_info(const std::vector<ProxyAPI::Info>& info_list) {
     subscribed_urls_generation_.fetch_add(1);
   }
 
-  if (!urls_to_clear.empty()) {
+  if VUNLIKELY (!urls_to_clear.empty()) {
     std::shared_ptr<::rerun::RecordingStream> rec;
 
     {
@@ -540,7 +540,7 @@ void RerunServer::on_bridge_info(const std::vector<ProxyAPI::Info>& info_list) {
       rec = rec_;
     }
 
-    if (rec) {
+    if VLIKELY (rec) {
       rec->reset_time();
 
       for (const auto& url : urls_to_clear) {
@@ -568,11 +568,11 @@ void RerunServer::on_bridge_data(const ProxyAPI::Data& data) {
   auto generation = subscribed_urls_generation_.load();
   bool known_url = cache.owner == this && cache.generation == generation && cache.known && cache.url == data.url;
 
-  if (!known_url) {
+  if VUNLIKELY (!known_url) {
     {
       std::shared_lock lock(info_mtx_);
 
-      if (subscribed_urls_.find(data.url) != subscribed_urls_.end()) {
+      if VLIKELY (subscribed_urls_.find(data.url) != subscribed_urls_.end()) {
         cache.owner = this;
         cache.generation = generation;
         cache.url.assign(data.url);
@@ -582,7 +582,7 @@ void RerunServer::on_bridge_data(const ProxyAPI::Data& data) {
     }
   }
 
-  if (!known_url) {
+  if VUNLIKELY (!known_url) {
     std::unique_lock lock(info_mtx_);
 
     if VUNLIKELY (subscribed_urls_.find(data.url) == subscribed_urls_.end()) {
@@ -698,7 +698,7 @@ std::string RerunServer::url_to_entity_path(const std::string& url) {
   // Convert transport: "dds://camera/front" -> "dds/camera/front"
   auto pos = url.find("://");
 
-  if (pos != std::string::npos) {
+  if VLIKELY (pos != std::string::npos) {
     cache.url = url;
     cache.entity_path.clear();
     cache.entity_path.reserve(url.size() - 2);

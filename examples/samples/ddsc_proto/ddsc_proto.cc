@@ -53,6 +53,7 @@ int main() {
   req.set_type(10086);
 
   auto resp = client.invoke(req);
+
   if (resp.has_value()) {
     VLOG_I("status:", resp.value().value());
   }

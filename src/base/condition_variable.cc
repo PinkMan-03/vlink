@@ -59,7 +59,7 @@ ConditionVariable::native_handle_type ConditionVariable::native_handle() noexcep
 
 std::cv_status ConditionVariable::wait_until_steady(std::unique_lock<std::mutex>& lock,
                                                     const std::chrono::steady_clock::time_point& atime) noexcept {
-  if (std::chrono::steady_clock::now() >= atime) {
+  if VUNLIKELY (std::chrono::steady_clock::now() >= atime) {
     return std::cv_status::timeout;
   }
 

@@ -524,13 +524,13 @@ inline void GraphTask::execute(GraphEngineT* graph_engine) {
     }
 
     auto task_func = [self, task]() {
-      if (task.get() != self.get()) {
+      if VLIKELY (task.get() != self.get()) {
         task->wait();
       }
 
       int ret = task->invoke(true);
 
-      if (ret >= 0) {
+      if VLIKELY (ret >= 0) {
         task->notify(ret);
       }
     };

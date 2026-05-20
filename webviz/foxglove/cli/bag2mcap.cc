@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
   auto output_path = program.get<std::string>("--output");
   std::error_code input_ec;
 
-  if (!std::filesystem::exists(input_path, input_ec) || input_ec) {
+  if VUNLIKELY (!std::filesystem::exists(input_path, input_ec) || input_ec) {
     std::cerr << "Input file not found: " << input_path << std::endl;
     return 1;
   }
@@ -144,7 +144,7 @@ int main(int argc, char* argv[]) {
 
   auto reader = vlink::BagReader::create(input_path);
 
-  if (!reader) {
+  if VUNLIKELY (!reader) {
     std::cerr << "Failed to open bag file: " << input_path << std::endl;
     return 1;
   }
@@ -172,9 +172,9 @@ int main(int argc, char* argv[]) {
 
   mcap::Compression compression = mcap::Compression::Zstd;
 
-  if (compression_str == "none") {
+  if VUNLIKELY (compression_str == "none") {
     compression = mcap::Compression::None;
-  } else if (compression_str == "lz4") {
+  } else if VUNLIKELY (compression_str == "lz4") {
     compression = mcap::Compression::Lz4;
   }
 
@@ -184,7 +184,7 @@ int main(int argc, char* argv[]) {
   mcap::McapWriter mcap_writer;
   auto status = mcap_writer.open(output_path, options);
 
-  if (!status.ok()) {
+  if VUNLIKELY (!status.ok()) {
     std::cerr << "Failed to open MCAP output: " << status.message << std::endl;
     return 1;
   }
@@ -264,8 +264,8 @@ int main(int argc, char* argv[]) {
     std::string schema_encoding;
     std::string schema_data;
 
-    if (converter.get_schema_info(meta.url, meta.schema_type, meta.ser_type, schema_name, encoding, schema_encoding,
-                                  schema_data)) {
+    if VLIKELY (converter.get_schema_info(meta.url, meta.schema_type, meta.ser_type, schema_name, encoding,
+                                          schema_encoding, schema_data)) {
       if VUNLIKELY (encoding == "send_time") {
         internal_time_urls.insert(meta.url);
         continue;
@@ -283,160 +283,161 @@ int main(int argc, char* argv[]) {
   std::atomic<uint64_t> msg_skipped{0};
   std::atomic<uint32_t> seq_counter{0};
 
-  reader->register_output_callback([&channel_map, &converter, &ensure_schema_id, &ensure_url_channel, &info,
-                                    &internal_time_urls, &invalid_payload_urls, &mcap_writer, &msg_converted,
-                                    &msg_failed, &msg_skipped, reader, &seq_counter, &recording_start_ns,
-                                    &url_schema_map, &url_ser_map](int64_t timestamp_us, const std::string& url,
-                                                                   vlink::ActionType, const vlink::Bytes& data) {
-    std::string ser_type;
-    auto schema_type = vlink::SchemaType::kUnknown;
-    auto ser_iter = url_ser_map.find(url);
-    auto schema_iter = url_schema_map.find(url);
+  reader->register_output_callback(
+      [&channel_map, &converter, &ensure_schema_id, &ensure_url_channel, &info, &internal_time_urls,
+       &invalid_payload_urls, &mcap_writer, &msg_converted, &msg_failed, &msg_skipped, reader, &seq_counter,
+       &recording_start_ns, &url_schema_map,
+       &url_ser_map](int64_t timestamp_us, const std::string& url, vlink::ActionType, const vlink::Bytes& data) {
+        std::string ser_type;
+        auto schema_type = vlink::SchemaType::kUnknown;
+        auto ser_iter = url_ser_map.find(url);
+        auto schema_iter = url_schema_map.find(url);
 
-    if VLIKELY (ser_iter != url_ser_map.end()) {
-      ser_type = ser_iter->second;
-    } else {
-      ser_type = reader->get_ser_type(url);
-      url_ser_map[url] = ser_type;
-    }
+        if VLIKELY (ser_iter != url_ser_map.end()) {
+          ser_type = ser_iter->second;
+        } else {
+          ser_type = reader->get_ser_type(url);
+          url_ser_map[url] = ser_type;
+        }
 
-    if VLIKELY (schema_iter != url_schema_map.end()) {
-      schema_type = schema_iter->second;
-    } else {
-      schema_type = reader->get_schema_type(url);
-      url_schema_map[url] = schema_type;
-    }
+        if VLIKELY (schema_iter != url_schema_map.end()) {
+          schema_type = schema_iter->second;
+        } else {
+          schema_type = reader->get_schema_type(url);
+          url_schema_map[url] = schema_type;
+        }
 
-    auto channel_iter = channel_map.find(url);
+        auto channel_iter = channel_map.find(url);
 
-    if VUNLIKELY (channel_iter == channel_map.end()) {
-      std::string schema_name;
-      std::string encoding;
-      std::string schema_encoding;
-      std::string schema_data;
+        if VUNLIKELY (channel_iter == channel_map.end()) {
+          std::string schema_name;
+          std::string encoding;
+          std::string schema_encoding;
+          std::string schema_data;
 
-      if (converter.get_schema_info(url, schema_type, ser_type, schema_name, encoding, schema_encoding, schema_data)) {
-        if VUNLIKELY (encoding == "send_time") {
-          internal_time_urls.insert(url);
+          if VLIKELY (converter.get_schema_info(url, schema_type, ser_type, schema_name, encoding, schema_encoding,
+                                                schema_data)) {
+            if VUNLIKELY (encoding == "send_time") {
+              internal_time_urls.insert(url);
+              ++msg_skipped;
+              return;
+            }
+
+            auto schema_id = ensure_schema_id(schema_name, schema_encoding, schema_data);
+            ensure_url_channel(url, encoding, schema_id, false);
+          } else {
+            ensure_url_channel(url, "raw", 0, true);
+          }
+
+          channel_iter = channel_map.find(url);
+        }
+
+        auto result = converter.convert(url, schema_type, ser_type, data);
+
+        if VUNLIKELY (internal_time_urls.count(url) != 0) {
           ++msg_skipped;
           return;
         }
 
-        auto schema_id = ensure_schema_id(schema_name, schema_encoding, schema_data);
-        ensure_url_channel(url, encoding, schema_id, false);
-      } else {
-        ensure_url_channel(url, "raw", 0, true);
-      }
+        uint64_t timestamp_ns = 0;
 
-      channel_iter = channel_map.find(url);
-    }
-
-    auto result = converter.convert(url, schema_type, ser_type, data);
-
-    if VUNLIKELY (internal_time_urls.count(url) != 0) {
-      ++msg_skipped;
-      return;
-    }
-
-    uint64_t timestamp_ns = 0;
-
-    if VLIKELY (timestamp_us >= 0) {
-      auto relative_timestamp_ns = vlink::webviz::micros_to_nanos_saturated(static_cast<uint64_t>(timestamp_us));
-      timestamp_ns = vlink::webviz::add_nanos_saturated(recording_start_ns, relative_timestamp_ns);
-    }
-
-    if VLIKELY (result.success && result.timestamp_ns >= 0) {
-      timestamp_ns = static_cast<uint64_t>(result.timestamp_ns);
-    }
-
-    if VLIKELY (result.success && !result.schema_name.empty()) {
-      std::string schema_data;
-
-      if VUNLIKELY (!converter.resolve_schema_by_name(result.schema_name, result.schema_encoding, schema_data)) {
-        if VLIKELY (invalid_payload_urls.emplace(url).second) {
-          MLOG_W("Skip message for {}: failed to resolve schema {} ({})", url, result.schema_name,
-                 result.schema_encoding);
+        if VLIKELY (timestamp_us >= 0) {
+          auto relative_timestamp_ns = vlink::webviz::micros_to_nanos_saturated(static_cast<uint64_t>(timestamp_us));
+          timestamp_ns = vlink::webviz::add_nanos_saturated(recording_start_ns, relative_timestamp_ns);
         }
 
-        ++msg_failed;
-        return;
-      }
-
-      auto schema_id = ensure_schema_id(result.schema_name, result.schema_encoding, schema_data);
-      auto current_signature = url + "|" + result.encoding + "|" + std::to_string(schema_id);
-
-      if VUNLIKELY (channel_iter->second.signature != current_signature) {
-        ensure_url_channel(url, result.encoding, schema_id, false);
-        channel_iter = channel_map.find(url);
-      }
-    }
-
-    if VUNLIKELY (result.success && result.schema_name.empty()) {
-      if VLIKELY (invalid_payload_urls.emplace(url).second) {
-        MLOG_W("Skip message for {}: converter returned transformed payload without schema metadata", url);
-      }
-
-      ++msg_failed;
-      return;
-    }
-
-    if (!result.success) {
-      if VUNLIKELY (!channel_iter->second.allow_raw_fallback) {
-        if VLIKELY (invalid_payload_urls.emplace(url).second) {
-          MLOG_W("Skip message for {}: channel is registered with converted schema, but payload conversion failed",
-                 url);
+        if VLIKELY (result.success && result.timestamp_ns >= 0) {
+          timestamp_ns = static_cast<uint64_t>(result.timestamp_ns);
         }
 
-        ++msg_failed;
-        return;
-      }
+        if VLIKELY (result.success && !result.schema_name.empty()) {
+          std::string schema_data;
 
-      mcap::Message msg;
-      msg.channelId = channel_iter->second.id;
-      msg.sequence = ++seq_counter;
-      msg.logTime = timestamp_ns;
-      msg.publishTime = timestamp_ns;
-      msg.dataSize = data.size();
-      msg.data = reinterpret_cast<const std::byte*>(data.data());
-      auto raw_status = mcap_writer.write(msg);
+          if VUNLIKELY (!converter.resolve_schema_by_name(result.schema_name, result.schema_encoding, schema_data)) {
+            if VLIKELY (invalid_payload_urls.emplace(url).second) {
+              MLOG_W("Skip message for {}: failed to resolve schema {} ({})", url, result.schema_name,
+                     result.schema_encoding);
+            }
 
-      if VUNLIKELY (!raw_status.ok()) {
-        MLOG_W("Failed to write raw message for {}: {}", url, raw_status.message);
-        ++msg_failed;
-        return;
-      }
+            ++msg_failed;
+            return;
+          }
 
-      ++msg_skipped;
-      return;
-    }
+          auto schema_id = ensure_schema_id(result.schema_name, result.schema_encoding, schema_data);
+          auto current_signature = url + "|" + result.encoding + "|" + std::to_string(schema_id);
 
-    mcap::Message msg;
-    msg.channelId = channel_iter->second.id;
-    msg.sequence = ++seq_counter;
-    msg.logTime = timestamp_ns;
-    msg.publishTime = timestamp_ns;
-    msg.dataSize = result.payload.size();
-    msg.data = reinterpret_cast<const std::byte*>(result.payload.data());
+          if VUNLIKELY (channel_iter->second.signature != current_signature) {
+            ensure_url_channel(url, result.encoding, schema_id, false);
+            channel_iter = channel_map.find(url);
+          }
+        }
 
-    auto write_status = mcap_writer.write(msg);
+        if VUNLIKELY (result.success && result.schema_name.empty()) {
+          if VLIKELY (invalid_payload_urls.emplace(url).second) {
+            MLOG_W("Skip message for {}: converter returned transformed payload without schema metadata", url);
+          }
 
-    if VUNLIKELY (!write_status.ok()) {
-      MLOG_W("Failed to write message for {}: {}", url, write_status.message);
-      ++msg_failed;
-      return;
-    }
+          ++msg_failed;
+          return;
+        }
 
-    ++msg_converted;
+        if VUNLIKELY (!result.success) {
+          if VUNLIKELY (!channel_iter->second.allow_raw_fallback) {
+            if VLIKELY (invalid_payload_urls.emplace(url).second) {
+              MLOG_W("Skip message for {}: channel is registered with converted schema, but payload conversion failed",
+                     url);
+            }
 
-    auto total = msg_converted.load() + msg_failed.load() + msg_skipped.load();
+            ++msg_failed;
+            return;
+          }
 
-    if (total % 1000 == 0 && info.message_count > 0) {
-      double progress = static_cast<double>(total) / static_cast<double>(info.message_count) * 100.0;
+          mcap::Message msg;
+          msg.channelId = channel_iter->second.id;
+          msg.sequence = ++seq_counter;
+          msg.logTime = timestamp_ns;
+          msg.publishTime = timestamp_ns;
+          msg.dataSize = data.size();
+          msg.data = reinterpret_cast<const std::byte*>(data.data());
+          auto raw_status = mcap_writer.write(msg);
 
-      std::cerr << "\rProgress: " << std::fixed << std::setprecision(1) << progress << "% (" << total << "/"
-                << info.message_count << " messages)" << std::flush;
-    }
-  });
+          if VUNLIKELY (!raw_status.ok()) {
+            MLOG_W("Failed to write raw message for {}: {}", url, raw_status.message);
+            ++msg_failed;
+            return;
+          }
+
+          ++msg_skipped;
+          return;
+        }
+
+        mcap::Message msg;
+        msg.channelId = channel_iter->second.id;
+        msg.sequence = ++seq_counter;
+        msg.logTime = timestamp_ns;
+        msg.publishTime = timestamp_ns;
+        msg.dataSize = result.payload.size();
+        msg.data = reinterpret_cast<const std::byte*>(result.payload.data());
+
+        auto write_status = mcap_writer.write(msg);
+
+        if VUNLIKELY (!write_status.ok()) {
+          MLOG_W("Failed to write message for {}: {}", url, write_status.message);
+          ++msg_failed;
+          return;
+        }
+
+        ++msg_converted;
+
+        auto total = msg_converted.load() + msg_failed.load() + msg_skipped.load();
+
+        if VUNLIKELY (total % 1000 == 0 && info.message_count > 0) {
+          double progress = static_cast<double>(total) / static_cast<double>(info.message_count) * 100.0;
+
+          std::cerr << "\rProgress: " << std::fixed << std::setprecision(1) << progress << "% (" << total << "/"
+                    << info.message_count << " messages)" << std::flush;
+        }
+      });
 
   reader->register_finish_callback([&reader](bool) { reader->quit(); });
 
@@ -459,10 +460,10 @@ int main(int argc, char* argv[]) {
 
   std::error_code output_ec;
 
-  if (std::filesystem::exists(output_path, output_ec) && !output_ec) {
+  if VLIKELY (std::filesystem::exists(output_path, output_ec) && !output_ec) {
     auto output_size = std::filesystem::file_size(output_path, output_ec);
 
-    if (!output_ec) {
+    if VLIKELY (!output_ec) {
       std::cerr << "  File size: " << output_size << " bytes" << std::endl;
     }
   }

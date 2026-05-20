@@ -757,6 +757,7 @@ bool Process::wait_for_finished(int msecs) {
   }
 
 #ifdef _WIN32
+
   if (impl_->process == INVALID_HANDLE_VALUE) {
     return true;
   }
@@ -926,6 +927,7 @@ bool Process::wait_for_ready_read(int msecs) {
 
 void Process::terminate() {
 #ifdef _WIN32
+
   if VLIKELY (impl_->process != INVALID_HANDLE_VALUE) {
     if (::WaitForSingleObject(impl_->process, 0) == WAIT_OBJECT_0) {
       DWORD exit_code_win = 0;
@@ -956,6 +958,7 @@ void Process::terminate() {
     }
   }
 #else
+
   if VLIKELY (impl_->process_id > 0) {
     ::kill(impl_->process_id, SIGTERM);
 
@@ -990,6 +993,7 @@ void Process::terminate() {
 
 void Process::kill() {
 #ifdef _WIN32
+
   if VLIKELY (impl_->process != INVALID_HANDLE_VALUE) {
     if (::WaitForSingleObject(impl_->process, 0) == WAIT_OBJECT_0) {
       DWORD exit_code_win = 0;
@@ -1020,6 +1024,7 @@ void Process::kill() {
     }
   }
 #else
+
   if VLIKELY (impl_->process_id > 0) {
     ::kill(impl_->process_id, SIGKILL);
 
@@ -1461,10 +1466,12 @@ size_t Process::write(const std::string& str, int timeout_ms) {
 
 void Process::close_write_channel() {
 #ifdef _WIN32
+
   if VLIKELY (impl_->stdin_write != INVALID_HANDLE_VALUE) {
     close_handle_if_valid(impl_->stdin_write);
   }
 #else
+
   if VLIKELY (impl_->stdin_pipe[1] >= 0) {
     ::close(impl_->stdin_pipe[1]);
     impl_->stdin_pipe[1] = -1;
@@ -1669,6 +1676,7 @@ void Process::cleanup() {
   stop_monitor_thread();
 
 #ifdef _WIN32
+
   if (impl_->process != INVALID_HANDLE_VALUE && !impl_->exit_processed.load(std::memory_order_acquire)) {
     DWORD wait_ret = ::WaitForSingleObject(impl_->process, 0);
 
@@ -1709,6 +1717,7 @@ void Process::cleanup() {
 
   impl_->process_id = 0;
 #else
+
   if (impl_->process_id > 0 && !impl_->exit_processed.load(std::memory_order_acquire)) {
     int status;
     pid_t r;
@@ -2003,6 +2012,7 @@ bool Process::setup_pipes() {
       impl_->stderr_closed.store(true, std::memory_order_release);
     }
 #else
+
     if VUNLIKELY (pipe(impl_->stdin_pipe) != 0) {
       set_error(kStartError);
       return false;
@@ -2133,6 +2143,7 @@ bool Process::setup_pipes() {
 
   return true;
 #else
+
   if VUNLIKELY (pipe(impl_->stdin_pipe) != 0) {
     set_error(kStartError);
 

@@ -41,7 +41,7 @@ DeadlineTimer::DeadlineTimer(DeadlineTimer&& other) noexcept
 DeadlineTimer::~DeadlineTimer() noexcept = default;
 
 DeadlineTimer& DeadlineTimer::operator=(const DeadlineTimer& other) noexcept {
-  if (this == &other) {
+  if VUNLIKELY (this == &other) {
     return *this;
   }
 
@@ -52,14 +52,18 @@ DeadlineTimer& DeadlineTimer::operator=(const DeadlineTimer& other) noexcept {
 }
 
 DeadlineTimer& DeadlineTimer::operator=(DeadlineTimer&& other) noexcept {
-  if (this == &other) return *this;
+  if VUNLIKELY (this == &other) {
+    return *this;
+  }
+
   accuracy_ = other.accuracy_;
   deadline_.store(other.deadline_.load(std::memory_order_acquire), std::memory_order_release);
+
   return *this;
 }
 
 void DeadlineTimer::set_deadline(int64_t interval) noexcept {
-  if (interval <= 0) {
+  if VUNLIKELY (interval <= 0) {
     deadline_.store(0, std::memory_order_release);
     return;
   }

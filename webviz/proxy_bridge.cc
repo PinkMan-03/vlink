@@ -81,12 +81,12 @@ bool ProxyBridge::parse_data_callback_mode(std::string_view value, DataCallbackM
   std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-  if (normalized == "direct") {
+  if VLIKELY (normalized == "direct") {
     mode = ProxyBridge::kDirect;
     return true;
   }
 
-  if (normalized == "queued" || normalized == "queue") {
+  if VLIKELY (normalized == "queued" || normalized == "queue") {
     mode = ProxyBridge::kQueued;
     return true;
   }
@@ -114,7 +114,7 @@ void ProxyBridge::dispatch_data_callback(const ProxyAPI::Data& data) {
     }
   }
 
-  if (impl_->data_callback_mode == ProxyBridge::kDirect || impl_->data_callback_loop == nullptr) {
+  if VLIKELY (impl_->data_callback_mode == ProxyBridge::kDirect || impl_->data_callback_loop == nullptr) {
     std::shared_lock lock(impl_->data_callback_mtx);
 
     if VLIKELY (impl_->data_callback) {
@@ -242,7 +242,7 @@ class ProxyServerBridge final : public ProxyBridge {
     proxy_hostnames_.emplace(current_hostname_);
     has_intra_bind_ = !Utils::get_env("VLINK_INTRA_BIND").empty();
 
-    if (config_.server.max_packet_size > 0.0) {
+    if VLIKELY (config_.server.max_packet_size > 0.0) {
       max_packet_size_bytes_ = static_cast<size_t>(config_.server.max_packet_size * 1024.0 * 1024.0);
     }
   }
@@ -263,7 +263,8 @@ class ProxyServerBridge final : public ProxyBridge {
       discovery_viewer_.reset();
       started_.store(false);
 #ifdef VLINK_SUPPORT_SHM
-      if (shm_runtime_inited_) {
+
+      if VLIKELY (shm_runtime_inited_) {
         ShmConf::deinit_runtime();
         shm_runtime_inited_ = false;
       }
@@ -273,7 +274,8 @@ class ProxyServerBridge final : public ProxyBridge {
 
     try {
 #ifdef VLINK_SUPPORT_SHM
-      if (config_.server.use_iox) {
+
+      if VLIKELY (config_.server.use_iox) {
         const auto runtime_name = Utils::get_app_name() + "_" + Utils::get_pid_str();
         ShmConf::init_roudi(config_.server.iox_config, config_.server.iox_strategy, config_.server.iox_monitoring);
         ShmConf::init_runtime(runtime_name, true);
@@ -281,6 +283,7 @@ class ProxyServerBridge final : public ProxyBridge {
         shm_runtime_inited_ = true;
       }
 #else
+
       if VUNLIKELY (config_.server.use_iox) {
         MLOG_E("proxy_server mode requested use_iox, but SHM support is not enabled");
         dispatch_error(ProxyAPI::kUnknownError);
@@ -370,14 +373,15 @@ class ProxyServerBridge final : public ProxyBridge {
       pub_map_.clear();
     }
 
-    if (discovery_viewer_) {
+    if VLIKELY (discovery_viewer_) {
       discovery_viewer_->quit(true);
       discovery_viewer_->wait_for_quit();
       discovery_viewer_.reset();
     }
 
 #ifdef VLINK_SUPPORT_SHM
-    if (shm_runtime_inited_) {
+
+    if VLIKELY (shm_runtime_inited_) {
       ShmConf::deinit_runtime();
       shm_runtime_inited_ = false;
     }
@@ -395,7 +399,7 @@ class ProxyServerBridge final : public ProxyBridge {
       fire_now = connect_callback_ && connected_.load();
     }
 
-    if (fire_now) {
+    if VUNLIKELY (fire_now) {
       std::shared_lock lock(callback_mtx_);
 
       if VLIKELY (connect_callback_) {
@@ -415,7 +419,7 @@ class ProxyServerBridge final : public ProxyBridge {
       fire_now = error_callback_ && error != ProxyAPI::kNoError;
     }
 
-    if (fire_now) {
+    if VUNLIKELY (fire_now) {
       std::shared_lock lock(callback_mtx_);
 
       if VLIKELY (error_callback_) {
@@ -433,7 +437,7 @@ class ProxyServerBridge final : public ProxyBridge {
       fire_now = time_callback_ && connected_.load();
     }
 
-    if (fire_now) {
+    if VUNLIKELY (fire_now) {
       std::shared_lock lock(callback_mtx_);
 
       if VLIKELY (time_callback_) {
@@ -454,7 +458,7 @@ class ProxyServerBridge final : public ProxyBridge {
       return false;
     }
 
-    if (!async) {
+    if VUNLIKELY (!async) {
       apply_control(control);
       dispatch_time();
       return true;
@@ -535,7 +539,7 @@ class ProxyServerBridge final : public ProxyBridge {
   void dispatch_connected(bool connected) {
     std::shared_lock lock(callback_mtx_);
 
-    if (connect_callback_) {
+    if VLIKELY (connect_callback_) {
       connect_callback_(connected);
     }
   }
@@ -547,7 +551,7 @@ class ProxyServerBridge final : public ProxyBridge {
 
     std::shared_lock lock(callback_mtx_);
 
-    if (error_callback_) {
+    if VLIKELY (error_callback_) {
       error_callback_(error);
     }
   }
@@ -569,7 +573,7 @@ class ProxyServerBridge final : public ProxyBridge {
   void dispatch_info(const std::vector<ProxyAPI::Info>& info_list) {
     std::shared_lock lock(callback_mtx_);
 
-    if (info_callback_) {
+    if VLIKELY (info_callback_) {
       info_callback_(info_list);
     }
   }
@@ -588,7 +592,7 @@ class ProxyServerBridge final : public ProxyBridge {
     discovery_viewer_->post_task([this]() {
       refresh_pending_.store(false);
 
-      if (started_.load()) {
+      if VLIKELY (started_.load()) {
         refresh_info();
       }
     });
@@ -602,7 +606,7 @@ class ProxyServerBridge final : public ProxyBridge {
       filter_terms_.clear();
 
       for (const auto& meta : control.url_meta_list) {
-        if (meta.type == kPublisher) {
+        if VLIKELY (meta.type == kPublisher) {
           auto normalized_meta = meta;
           normalized_meta.schema = SchemaData::is_valid_type(meta.schema) ? meta.schema : SchemaType::kUnknown;
           publish_meta_map_[meta.url] = std::move(normalized_meta);
@@ -610,7 +614,7 @@ class ProxyServerBridge final : public ProxyBridge {
           auto normalized_meta = meta;
           normalized_meta.schema = SchemaData::is_valid_type(meta.schema) ? meta.schema : SchemaType::kUnknown;
 
-          if (!normalized_meta.ser.empty() && normalized_meta.schema != SchemaType::kUnknown) {
+          if VLIKELY (!normalized_meta.ser.empty() && normalized_meta.schema != SchemaType::kUnknown) {
             subscribe_meta_map_[meta.url] = std::move(normalized_meta);
           }
         }
@@ -654,7 +658,7 @@ class ProxyServerBridge final : public ProxyBridge {
   bool passes_filter(const DiscoveryViewer::Info& info) const {
     std::shared_lock lock(control_mtx_);
 
-    if (filter_terms_.empty()) {
+    if VLIKELY (filter_terms_.empty()) {
       return passes_filter_type_unlocked(info.type);
     }
 
@@ -667,13 +671,13 @@ class ProxyServerBridge final : public ProxyBridge {
             continue;
           }
 
-          if (ProxyServerBridge::contains_lower_ascii(process.name, filter)) {
+          if VLIKELY (ProxyServerBridge::contains_lower_ascii(process.name, filter)) {
             contains = true;
             break;
           }
         }
 
-        if (contains) {
+        if VLIKELY (contains) {
           break;
         }
       }
@@ -683,7 +687,7 @@ class ProxyServerBridge final : public ProxyBridge {
           continue;
         }
 
-        if (ProxyServerBridge::contains_lower_ascii(info.url, filter)) {
+        if VLIKELY (ProxyServerBridge::contains_lower_ascii(info.url, filter)) {
           contains = true;
           break;
         }
@@ -739,7 +743,7 @@ class ProxyServerBridge final : public ProxyBridge {
       return false;
     }
 
-    if (mode == ProxyAPI::kObserveAll || mode == ProxyAPI::kAutoAndObserveAll) {
+    if VUNLIKELY (mode == ProxyAPI::kObserveAll || mode == ProxyAPI::kAutoAndObserveAll) {
       return true;
     }
 
@@ -752,8 +756,8 @@ class ProxyServerBridge final : public ProxyBridge {
     std::vector<ProxyAPI::UrlMeta> to_create;
     auto mode = mode_.load();
 
-    if (can_inject() && (mode == ProxyAPI::kPlay || mode == ProxyAPI::kEdit || mode == ProxyAPI::kAuto ||
-                         mode == ProxyAPI::kAutoAndObserveAll)) {
+    if VLIKELY (can_inject() && (mode == ProxyAPI::kPlay || mode == ProxyAPI::kEdit || mode == ProxyAPI::kAuto ||
+                                 mode == ProxyAPI::kAutoAndObserveAll)) {
       std::shared_lock lock(control_mtx_);
       desired_pubs = publish_meta_map_;
     }
@@ -777,9 +781,9 @@ class ProxyServerBridge final : public ProxyBridge {
         auto pub_iter = pub_map_.find(url);
         const auto normalized_schema_type = SchemaData::is_valid_type(meta.schema) ? meta.schema : SchemaType::kUnknown;
 
-        if (pub_iter != pub_map_.end() && pub_iter->second) {
-          if (pub_iter->second->get_ser_type() == meta.ser &&
-              pub_iter->second->get_schema_type() == normalized_schema_type) {
+        if VLIKELY (pub_iter != pub_map_.end() && pub_iter->second) {
+          if VLIKELY (pub_iter->second->get_ser_type() == meta.ser &&
+                      pub_iter->second->get_schema_type() == normalized_schema_type) {
             continue;
           }
 
@@ -804,8 +808,8 @@ class ProxyServerBridge final : public ProxyBridge {
         std::unique_lock lock(pub_mtx_);
         auto pub_iter = pub_map_.find(meta.url);
 
-        if (pub_iter != pub_map_.end() && pub_iter->second && pub_iter->second->get_ser_type() == meta.ser &&
-            pub_iter->second->get_schema_type() == normalized_schema_type) {
+        if VUNLIKELY (pub_iter != pub_map_.end() && pub_iter->second && pub_iter->second->get_ser_type() == meta.ser &&
+                      pub_iter->second->get_schema_type() == normalized_schema_type) {
           continue;
         }
 
@@ -826,11 +830,11 @@ class ProxyServerBridge final : public ProxyBridge {
     SchemaType target_schema = SchemaType::kUnknown;
     bool valid_wire_meta = false;
 
-    if (can_stream_info(info) && passes_filter(info)) {
+    if VLIKELY (can_stream_info(info) && passes_filter(info)) {
       want_subscribe = should_subscribe(info.url);
     }
 
-    if (mode == ProxyAPI::kObserveAll || mode == ProxyAPI::kAutoAndObserveAll) {
+    if VUNLIKELY (mode == ProxyAPI::kObserveAll || mode == ProxyAPI::kAutoAndObserveAll) {
       target_ser = info.ser_type;
       target_schema = discovered_schema;
       valid_wire_meta = !target_ser.empty() && target_schema != SchemaType::kUnknown;
@@ -838,7 +842,7 @@ class ProxyServerBridge final : public ProxyBridge {
       std::shared_lock control_lock(control_mtx_);
       auto meta_iter = subscribe_meta_map_.find(info.url);
 
-      if (meta_iter != subscribe_meta_map_.end()) {
+      if VLIKELY (meta_iter != subscribe_meta_map_.end()) {
         target_ser = meta_iter->second.ser;
         target_schema = meta_iter->second.schema;
         valid_wire_meta = !target_ser.empty() && target_schema != SchemaType::kUnknown && !info.ser_type.empty() &&
@@ -859,7 +863,7 @@ class ProxyServerBridge final : public ProxyBridge {
     }
 
     if VUNLIKELY (!want_subscribe || !valid_wire_meta) {
-      if (has_sub) {
+      if VLIKELY (has_sub) {
         std::unique_lock lock(state.state_mtx);
         state.sub.reset();
         state.ser.clear();
@@ -875,7 +879,7 @@ class ProxyServerBridge final : public ProxyBridge {
       std::unique_lock lock(state.state_mtx);
       has_sub = state.sub != nullptr;
 
-      if (has_sub && (state.ser != target_ser || state.schema != target_schema)) {
+      if VUNLIKELY (has_sub && (state.ser != target_ser || state.schema != target_schema)) {
         state.sub.reset();
         state.ser.clear();
         state.schema = SchemaType::kUnknown;
@@ -989,7 +993,7 @@ class ProxyServerBridge final : public ProxyBridge {
       std::unique_lock lock(url_state_mtx_);
 
       for (auto& entry : url_states_) {
-        if (current_urls.count(entry.first) != 0) {
+        if VLIKELY (current_urls.count(entry.first) != 0) {
           continue;
         }
 
@@ -1006,7 +1010,7 @@ class ProxyServerBridge final : public ProxyBridge {
         auto now_us = ProxyServerBridge::steady_now_us();
         auto [state_iter, inserted] = url_states_.try_emplace(info->url);
 
-        if (!inserted) {
+        if VLIKELY (!inserted) {
           continue;
         }
 
@@ -1079,12 +1083,12 @@ class ProxyServerBridge final : public ProxyBridge {
         std::unique_lock state_lock(state.state_mtx);
         auto* sub = state.sub.get();
 
-        if (sub) {
+        if VLIKELY (sub) {
           const auto sample_info = sub->get_lost();
           auto total_delta = sample_info.total - state.last_sample_info.total;
           auto lost_delta = sample_info.lost - state.last_sample_info.lost;
 
-          if (total_delta > 0 && lost_delta > 0) {
+          if VUNLIKELY (total_delta > 0 && lost_delta > 0) {
             current_loss = static_cast<double>(lost_delta) / static_cast<double>(total_delta);
           }
 
@@ -1101,9 +1105,9 @@ class ProxyServerBridge final : public ProxyBridge {
         proxy_info.rate = static_cast<uint64_t>(weighted_rate);
         proxy_info.loss = static_cast<float>(weighted_loss);
 
-        if (weighted_latency > 5000'000'000.0 || weighted_latency < -500'000.0) {
+        if VUNLIKELY (weighted_latency > 5000'000'000.0 || weighted_latency < -500'000.0) {
           proxy_info.latency = -2.0F;
-        } else if (weighted_latency < 0.0) {
+        } else if VUNLIKELY (weighted_latency < 0.0) {
           proxy_info.latency = 0.0F;
         } else {
           proxy_info.latency = static_cast<float>(weighted_latency / 1000.0);
@@ -1112,7 +1116,7 @@ class ProxyServerBridge final : public ProxyBridge {
         auto last_activity_us = state.last_activity_us.load();
         auto first_seen_us = state.first_seen_us.load();
 
-        if (current_seq > 0 || state.previous_seq > 0) {
+        if VLIKELY (current_seq > 0 || state.previous_seq > 0) {
           proxy_info.status = ProxyAPI::kActive;
         } else if VUNLIKELY (((last_activity_us > 0 && now_us - last_activity_us >= 2000U * 1000U) ||
                               (last_activity_us == 0 && now_us - first_seen_us >= 2000U * 1000U))) {
@@ -1176,7 +1180,7 @@ class ProxyServerBridge final : public ProxyBridge {
 };
 
 std::unique_ptr<ProxyBridge> ProxyBridge::create(const Config& config, MessageLoop* data_callback_loop) {
-  if (config.interface_mode == ProxyBridge::kProxyApi) {
+  if VLIKELY (config.interface_mode == ProxyBridge::kProxyApi) {
     return std::make_unique<ProxyApiBridge>(config, data_callback_loop);
   }
 
@@ -1199,12 +1203,12 @@ bool ProxyBridge::parse_interface_mode(std::string_view value, InterfaceMode& mo
   std::transform(normalized.begin(), normalized.end(), normalized.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-  if (normalized == "proxy_api") {
+  if VLIKELY (normalized == "proxy_api") {
     mode = ProxyBridge::kProxyApi;
     return true;
   }
 
-  if (normalized == "proxy_server") {
+  if VLIKELY (normalized == "proxy_server") {
     mode = ProxyBridge::kProxyServer;
     return true;
   }

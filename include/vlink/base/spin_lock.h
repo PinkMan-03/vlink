@@ -235,6 +235,7 @@ inline void SpinLock::lock() noexcept {
         if (backoff < kMaxBackoff) {
           backoff = static_cast<uint16_t>(backoff * 2U);
         }
+
         spin_count = 0;
       }
     } while (flag_.load(std::memory_order_relaxed));
@@ -242,7 +243,7 @@ inline void SpinLock::lock() noexcept {
 }
 
 inline bool SpinLock::try_lock() noexcept {
-  if (flag_.load(std::memory_order_relaxed)) {
+  if VUNLIKELY (flag_.load(std::memory_order_relaxed)) {
     return false;
   }
 

@@ -383,7 +383,7 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
         if constexpr (VLINK_HAS_MEMBER(RealType, getCdrSerializedSize(deref(src)))) {
           size_t target_size = RealType::getCdrSerializedSize(deref(src));
 
-          if (des.size() != target_size) {
+          if VUNLIKELY (des.size() != target_size) {
             des = Bytes::create(target_size, offset);
           }
         } else {
@@ -406,13 +406,13 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
       if constexpr (VLINK_HAS_MEMBER(RealType, ByteSizeLong())) {
         size_t target_size = deref(src).ByteSizeLong();
 
-        if (des.size() != target_size) {
+        if VUNLIKELY (des.size() != target_size) {
           des = Bytes::create(target_size, offset);
         }
       } else {
         size_t target_size = deref(src).ByteSize();
 
-        if (des.size() != target_size) {
+        if VUNLIKELY (des.size() != target_size) {
           des = Bytes::create(target_size, offset);
         }
       }
@@ -427,13 +427,13 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
       if constexpr (VLINK_HAS_MEMBER(std::remove_pointer_t<T>, ByteSizeLong())) {
         size_t target_size = src->ByteSizeLong();
 
-        if (des.size() != target_size) {
+        if VUNLIKELY (des.size() != target_size) {
           des = Bytes::create(target_size, offset);
         }
       } else {
         size_t target_size = src->ByteSize();
 
-        if (des.size() != target_size) {
+        if VUNLIKELY (des.size() != target_size) {
           des = Bytes::create(target_size, offset);
         }
       }
@@ -497,6 +497,7 @@ inline bool serialize(const T& src, Bytes& des, [[maybe_unused]] TransportType t
       VLOG_T("Serializer: Standard ptr does not support offset.");
       return false;
     }
+
     const auto* src_ptr = reinterpret_cast<const uint8_t*>(src);
     constexpr size_t kSize = sizeof(std::remove_pointer_t<T>);
 

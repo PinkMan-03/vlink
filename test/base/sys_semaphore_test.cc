@@ -236,6 +236,7 @@ TEST_SUITE("base-SysSemaphore") {
     SysSemaphore sem2(1);
     bool ok = sem2.attach(name);
     CHECK(ok);
+
     if (ok) {
       CHECK(sem2.get_count() == 0);
       sem2.detach(true);

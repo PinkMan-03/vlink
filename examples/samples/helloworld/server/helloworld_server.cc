@@ -54,6 +54,7 @@ int main(int argc, char* argv[]) {
   (void)argv;
 
   // Singleton check: ensure the same program is not running more than once
+
   if (!Utils::check_singleton("helloworld_server")) {
     std::cerr << "Program has started." << std::endl;
     return 1;

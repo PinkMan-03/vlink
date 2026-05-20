@@ -153,6 +153,7 @@ static bool resolve_flatbuffers_field_path(const FlatbuffersObjectView& root_vie
     }
 
     FlatbuffersObjectView child_view;
+
     if (!get_child_view(current_view, *field, schema, child_view)) {
       return false;
     }
@@ -242,9 +243,11 @@ class CameraLabel : public QLabel {
                                 Qt::AlignLeft | Qt::AlignVCenter, "Projection");
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+
         if (pixmap().width() > 0 && pixmap().height() > 0) {
           double aspect_ratio_pixmap = static_cast<double>(pixmap().width()) / pixmap().height();
 #else
+
         if (pixmap()->width() > 0 && pixmap()->height() > 0) {
           double aspect_ratio_pixmap = static_cast<double>(pixmap()->width()) / pixmap()->height();
 #endif
@@ -356,6 +359,7 @@ class CameraLabel : public QLabel {
 #else
       QAction* selected_action = menu.exec(event->globalPos());
 #endif
+
       if (selected_action == save_only_action || selected_action == save_whole_action) {
         QSettings settings(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/settings.ini",
                            QSettings::IniFormat);
@@ -485,6 +489,7 @@ CameraDialog::CameraDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Camera
     std::lock_guard lock(window_->data_mutex_);
 
     select_urls_.clear();
+
     if (selected_items.count() == 1) {
       QString url = selected_items.at(0)->text(1);
       QString ser = selected_items.at(0)->data(1, Qt::UserRole).toString();
@@ -675,6 +680,7 @@ CameraDialog::CameraDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Camera
     if (target_msg_) {
       for (int i = 0; i < target_msg_->GetDescriptor()->field_count(); ++i) {
         const auto* field = target_msg_->GetDescriptor()->field(i);
+
         if (!field->is_repeated() && field->type() == google::protobuf::FieldDescriptor::TYPE_BYTES) {
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
           ui->comboBox_proto->addItem(field->name().data());
@@ -686,6 +692,7 @@ CameraDialog::CameraDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Camera
           auto* sub_msg = &target_msg_->GetReflection()->GetMessage(*target_msg_, field);
           for (int j = 0; j < sub_msg->GetDescriptor()->field_count(); ++j) {
             const auto* sub_field = sub_msg->GetDescriptor()->field(j);
+
             if (!sub_field->is_repeated() && sub_field->type() == google::protobuf::FieldDescriptor::TYPE_BYTES) {
 #if GOOGLE_PROTOBUF_VERSION >= 6030000
               ui->comboBox_proto->addItem(sub_field->name().data());
@@ -783,10 +790,13 @@ CameraDialog::CameraDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Camera
       }
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+
       if (!detail.label->pixmap().isNull()) {
 #elif QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+
     if (!detail.label->pixmap(Qt::ReturnByValue).isNull()) {
 #else
+
     if (detail.label->pixmap()) {
 #endif
         if (detail.frame_count != 0) {
@@ -865,6 +875,7 @@ CameraDialog::CameraDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Camera
           [this](int index) {
             QSettings settings(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/settings.ini",
                                QSettings::IniFormat);
+
             if (this->parent()) {
               settings.beginGroup("CameraDialog_ext");
             } else {
@@ -930,6 +941,7 @@ CameraDialog::CameraDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Camera
 
   QSettings settings(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/settings.ini",
                      QSettings::IniFormat);
+
   if (this->parent()) {
     settings.beginGroup("CameraDialog_ext");
   } else {
@@ -953,6 +965,7 @@ CameraDialog::~CameraDialog() {
   {
     QSettings settings(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/settings.ini",
                        QSettings::IniFormat);
+
     if (this->parent()) {
       settings.beginGroup("CameraDialog_ext");
     } else {
@@ -1148,6 +1161,7 @@ void CameraDialog::update_ui_for_flatbuffers(const QVariant& variant, const QEla
   }
 
   FlatbuffersObjectView root_view;
+
   if (!make_root_view(*target_fbs_context_, proxy_data.raw, root_view)) {
     if (detail.state != kParseFailed) {
       if (!multi_mode_) {
@@ -1185,6 +1199,7 @@ void CameraDialog::update_ui_for_flatbuffers(const QVariant& variant, const QEla
   }
 
   vlink::Bytes raw_data;
+
   if (!get_bytes(parent_view, *field, raw_data) || raw_data.empty()) {
     if (detail.state != kParseFailed) {
       if (!multi_mode_) {

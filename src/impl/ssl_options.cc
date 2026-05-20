@@ -55,7 +55,7 @@ SslOptions SslOptions::parse_from(const Conf::PropertiesMap& properties) noexcep
   options.ciphers = env_ciphers;
 
   for (const auto& [prop, value] : properties) {
-    if (!Helpers::has_startwith(prop, "ssl.")) {
+    if VLIKELY (!Helpers::has_startwith(prop, "ssl.")) {
       continue;
     }
 

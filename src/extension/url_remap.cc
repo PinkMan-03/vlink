@@ -143,7 +143,7 @@ const std::string& UrlRemap::convert(const std::string& url) noexcept {
 
   auto iter = cache_map_.find(url);
 
-  if (iter != cache_map_.end()) {
+  if VLIKELY (iter != cache_map_.end()) {
     return iter->second;
   }
 

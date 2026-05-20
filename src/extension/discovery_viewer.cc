@@ -478,6 +478,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
 
 #ifdef _WIN32
   ::WSADATA wsa_data;
+
   if VUNLIKELY (::WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
     VLOG_F("DiscoveryViewer: Failed to initialize winsock.");
     return;
@@ -511,6 +512,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
   }
 
   int enable_reuse_addr = 1;
+
   if VUNLIKELY (::setsockopt(impl_->sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&enable_reuse_addr),
                              sizeof(enable_reuse_addr)) < 0) {
     VLOG_F("DiscoveryViewer: Failed to set reuse address option.");
@@ -519,6 +521,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
 
 #ifdef SO_REUSEPORT
   int enable_reuse_port = 1;
+
   if VUNLIKELY (::setsockopt(impl_->sock, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<const char*>(&enable_reuse_port),
                              sizeof(enable_reuse_port)) < 0) {
     VLOG_F("DiscoveryViewer: Failed to set reuse port option.");
@@ -577,6 +580,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
 
 #else
   int enable_broadcast = 1;
+
   if VUNLIKELY (::setsockopt(impl_->sock, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&enable_broadcast),
                              sizeof(enable_broadcast)) < 0) {
     VLOG_F("DiscoveryViewer: Failed to enable broadcast.");
@@ -603,6 +607,7 @@ DiscoveryViewer::DiscoveryViewer(FilterType type) : impl_(std::make_unique<Impl>
     for (;;) {
       int size = ::recvfrom(impl_->sock, reinterpret_cast<char*>(impl_->buffer.data()), impl_->buffer.size(), 0,
                             reinterpret_cast<sockaddr*>(&target_address), &target_address_len);
+
       if VUNLIKELY (is_ready_to_quit()) {
         break;
       }

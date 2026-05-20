@@ -128,6 +128,7 @@ class ShmFactory final : public AbstractFactory<ShmID> {
   static void read_data(const uint8_t* loaned_ptr, uint64_t payload_size, uint64_t& channel, uint64_t& seq,
                         Bytes& data) {
 #if SHM_USE_CUSTOM_SEQ
+
     if VUNLIKELY (payload_size < sizeof(uint64_t) + sizeof(uint64_t)) {
       return;
     }

@@ -60,7 +60,7 @@ struct SysSharemem::Impl final {
 SysSharemem::SysSharemem() : impl_(std::make_unique<Impl>()) {}
 
 SysSharemem::~SysSharemem() {
-  if (is_attached()) {
+  if VLIKELY (is_attached()) {
     detach(false);
 #if defined(_WIN32) || defined(__CYGWIN__)
   } else if VUNLIKELY (impl_->handle != nullptr) {
@@ -112,7 +112,7 @@ bool SysSharemem::create(const std::string& name, size_t size, Mode mode) {
 
   int fd = ::shm_open(name.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
 
-  if (fd == -1) {
+  if VUNLIKELY (fd == -1) {
     return false;
   }
 
@@ -194,7 +194,7 @@ bool SysSharemem::attach(const std::string& name, Mode mode) {
 
   impl_->handle = ::shm_open(name.c_str(), oflag | O_CLOEXEC, omode);
 
-  if (impl_->handle == -1) {
+  if VUNLIKELY (impl_->handle == -1) {
     return false;
   }
 
@@ -255,6 +255,7 @@ bool SysSharemem::detach(bool force) {
   impl_->mode = kReadWrite;
 
   // NOLINTNEXTLINE(readability-implicit-bool-conversion)
+
   if VUNLIKELY (!::CloseHandle(impl_->handle)) {
     VLOG_E("SysSharemem: CloseHandle failed.");
     ok = false;
@@ -280,6 +281,7 @@ bool SysSharemem::detach(bool force) {
 
 #ifdef __QNX__
   struct stat st;
+
   if (::fstat(impl_->handle, &st) == 0) {
     shm_nattch = st.st_nlink - 2;
   }

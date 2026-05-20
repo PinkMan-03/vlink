@@ -146,7 +146,7 @@ bool ProxyData::operator>>(Bytes& bytes) const noexcept {
   // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
   std::memcpy(bytes.data() + kMagicNumberBeginSize, this, sizeof(ProxyData));
 
-  if (data_ != nullptr && size_ != 0) {
+  if VLIKELY (data_ != nullptr && size_ != 0) {
     std::memcpy(bytes.data() + kMagicNumberBeginSize + sizeof(ProxyData), data_, size_);
   }
 
@@ -240,19 +240,19 @@ size_t ProxyData::get_serialized_size() const noexcept {
 }
 
 bool ProxyData::is_valid() const noexcept {
-  if (static_cast<uint64_t>(data_pos_) + data_size_ != url_pos_) {
+  if VUNLIKELY (static_cast<uint64_t>(data_pos_) + data_size_ != url_pos_) {
     return false;
   }
 
-  if (static_cast<uint64_t>(url_pos_) + url_size_ != ser_pos_) {
+  if VUNLIKELY (static_cast<uint64_t>(url_pos_) + url_size_ != ser_pos_) {
     return false;
   }
 
-  if (static_cast<uint64_t>(ser_pos_) + ser_size_ != hostname_pos_) {
+  if VUNLIKELY (static_cast<uint64_t>(ser_pos_) + ser_size_ != hostname_pos_) {
     return false;
   }
 
-  if (static_cast<uint64_t>(hostname_pos_) + hostname_size_ != size_) {
+  if VUNLIKELY (static_cast<uint64_t>(hostname_pos_) + hostname_size_ != size_) {
     return false;
   }
 
@@ -295,7 +295,7 @@ bool ProxyData::shallow_copy(const ProxyData& target) noexcept {
 }
 
 bool ProxyData::deep_copy(const ProxyData& target) noexcept {
-  if (data_ && is_owner_ && target.data_ && size_ != 0 && size_ == target.size_) {
+  if VLIKELY (data_ && is_owner_ && target.data_ && size_ != 0 && size_ == target.size_) {
     if VUNLIKELY (this == &target) {
       return false;
     }
@@ -407,7 +407,7 @@ void ProxyData::create(const Bytes& raw, std::string_view url, std::string_view 
   size_ = total;
   data_ = Bytes::bytes_malloc(size_);
 
-  if (data_size_ > 0) {
+  if VLIKELY (data_size_ > 0) {
     std::memcpy(data_ + data_pos_, raw.data(), data_size_);
   }
 

@@ -58,6 +58,7 @@ std::string wrap_status_brief_html(const AggregatedCase& item) {
     const std::string_view token{tokens[index]};
 
     // NOLINTNEXTLINE(modernize-use-starts-ends-with)
+
     if (brief.compare(0, token.size(), token) == 0) {
       std::string out = "<span data-i18n=\"";
       out += keys[index];
@@ -80,6 +81,7 @@ std::string summarize_config_html(const AggregatedCase& item) {
          << escape_html(make_topology_label(item.scenario)) << "</code></div>";
   stream << "<div><strong data-i18n=\"insight_pattern_label\">pattern</strong>: <code>"
          << escape_html(Bench::rate_pattern_to_string(item.scenario.rate_pattern)) << "</code></div>";
+
   if (!item.scenario.properties.empty()) {
     stream << "<div><strong data-i18n=\"config_node_label\">node</strong>: <code>"
            << escape_html(join_strings(item.scenario.properties, " ; ")) << "</code></div>";
@@ -101,6 +103,7 @@ std::string summarize_config_html(const AggregatedCase& item) {
 std::string summarize_endpoint_text(const AggregatedCase& item) {
   std::ostringstream stream;
   stream << Bench::mode_to_string(item.scenario.mode) << " | " << item.scenario.url;
+
   if VUNLIKELY (!item.scenario.qos_profile.empty()) {
     stream << " | qos=" << item.scenario.qos_profile;
   }
@@ -160,6 +163,7 @@ std::string make_series_key(const AggregatedCase& item, SeriesRateLabelMode rate
   std::ostringstream stream;
   stream << item.transport;
   stream << " | " << Bench::payload_to_string(item.scenario.payload);
+
   if (include_payload_size) {
     stream << " | size=" << format_size_label(item.scenario.payload_size);
   }
@@ -167,6 +171,7 @@ std::string make_series_key(const AggregatedCase& item, SeriesRateLabelMode rate
   stream << " | " << Bench::mode_to_string(item.scenario.mode);
   stream << " | " << make_topology_label(item.scenario);
   stream << " | url=" << item.scenario.url;
+
   if VUNLIKELY (!item.scenario.qos_profile.empty()) {
     stream << " | qos=" << item.scenario.qos_profile;
   }
@@ -197,6 +202,7 @@ std::string make_series_label(const AggregatedCase& item, SeriesRateLabelMode ra
   std::ostringstream stream;
   stream << item.transport;
   stream << " | " << Bench::payload_to_string(item.scenario.payload);
+
   if (include_payload_size) {
     stream << " | " << format_size_label(item.scenario.payload_size);
   }
@@ -310,11 +316,13 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
 
     double x = x_fn(item);
     double y = y_fn(item);
+
     if (y < 0.0) {
       continue;
     }
 
     max_y = std::max(max_y, y);
+
     if (y > 0.0) {
       min_y_positive = std::min(min_y_positive, y);
     }
@@ -325,9 +333,11 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
     auto& series = series_map[key];
     series.label = make_series_label(item, rate_label_mode, include_payload_size);
     series.detail = key;
+
     if (item.url_order_index >= 0 && item.url_order_index < series.url_order_index) {
       series.url_order_index = item.url_order_index;
     }
+
     series.points[x].add(y);
   }
 
@@ -396,6 +406,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
     }
 
     double mapped;
+
     if (y_use_log) {
       const double axis = to_y_axis(value);
       mapped = kTop + plot_height * (1.0 - (axis - y_axis_min) / y_axis_span);
@@ -435,6 +446,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
       << R"(" height=")" << (plot_height + 1.0) << R"(" fill="#ffffff" opacity="0.55"/>)";
 
   svg << R"(<text x="72" y="20" font-size="16" font-weight="700" fill="#0f172a" letter-spacing="0.01em")";
+
   if (i18n_keys.title_key) {
     svg << R"( data-i18n=")" << i18n_keys.title_key << R"(")";
   }
@@ -446,6 +458,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
     const double t = static_cast<double>(index) / static_cast<double>(y_tick_count);
     const double y = kTop + plot_height * t;
     double value;
+
     if (y_use_log) {
       value = std::pow(10.0, y_axis_max - y_axis_span * t);
     } else {
@@ -500,11 +513,13 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
         << (kTop + plot_height + 4) << R"(" stroke="#475569"/>)";
 
     const bool show_label = tick_index % label_stride == 0 || tick_index + 1 == tick_count;
+
     if (!show_label) {
       continue;
     }
 
     std::string label = format_decimal(x_value, 0);
+
     if (x_label.find("Payload") != std::string::npos) {
       label = format_size_label(static_cast<size_t>(std::llround(x_value)));
     }
@@ -529,6 +544,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
     }
 
     std::ostringstream polyline;
+
     if (pts.size() == 1) {
       constexpr double kSingletonTick = 10.0;
       const auto [x, y] = pts.front();
@@ -544,6 +560,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
     svg << R"(<polyline class="chart-line" data-series-id=")" << escape_html(series.id) << R"(" filter="url(#chart-)"
         << chart_id << R"RAW(-shadow)" fill="none" stroke=")RAW" << color
         << R"(" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.95")";
+
     if (!series.dash.empty()) {
       svg << " stroke-dasharray=\"" << series.dash << "\"";
     }
@@ -563,6 +580,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
 
   svg << R"(<text x=")" << (kLeft + plot_width / 2.0) << R"(" y=")" << (kHeight - 18.0)
       << R"(" font-size="12" text-anchor="middle" fill="#334155")";
+
   if (i18n_keys.x_label_key) {
     svg << R"( data-i18n=")" << i18n_keys.x_label_key << R"(")";
   }
@@ -571,6 +589,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
   svg << R"(<text x="18" y=")" << (kTop + plot_height / 2.0)
       << R"(" font-size="12" text-anchor="middle" fill="#334155" transform="rotate(-90 18 )"
       << (kTop + plot_height / 2.0) << R"DELIM()")DELIM";
+
   if (i18n_keys.y_label_key) {
     svg << R"( data-i18n=")" << i18n_keys.y_label_key << R"(")";
   }
@@ -597,6 +616,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
   bool first_series = true;
   for (const auto* series_ptr : series_order) {
     const auto& series = *series_ptr;
+
     if (!first_series) {
       data_json << ",";
     }
@@ -647,6 +667,7 @@ std::string build_line_chart(const std::vector<AggregatedCase>& items, std::stri
          << R"(viewBox="0 0 24 12" xmlns="http://www.w3.org/2000/svg"><line x1="1" y1="6" )"
          << R"(x2="23" y2="6" stroke=")" << escape_html(series.color)
          << R"(" stroke-width="2.0" stroke-linecap="round")";
+
     if (!series.dash.empty()) {
       body << " stroke-dasharray=\"" << escape_html(series.dash) << "\"";
     }
@@ -764,6 +785,7 @@ const AggregatedCase* find_max_case(const std::vector<AggregatedCase>& items, Fi
     }
 
     const double score = score_fn(item);
+
     if (best == nullptr || score > best_score) {
       best = &item;
       best_score = score;
@@ -785,6 +807,7 @@ const AggregatedCase* find_min_case(const std::vector<AggregatedCase>& items, Fi
     }
 
     const double score = score_fn(item);
+
     if (best == nullptr || score < best_score) {
       best = &item;
       best_score = score;
@@ -812,6 +835,7 @@ std::string build_case_insight_html(const AggregatedCase& item, const char* metr
 
 std::string format_loss_insight_suffix(const AggregatedCase& item) {
   const double loss_percent = compute_loss_ratio_percent(item);
+
   if (!should_report_delivery_loss(loss_percent)) {
     return std::string();
   }
@@ -989,6 +1013,7 @@ double compute_serialization_balance(double encode_mb_per_sec, double decode_mb_
   }
 
   const double max_value = std::max(encode_mb_per_sec, decode_mb_per_sec);
+
   if (max_value <= 0.0) {
     return 0.0;
   }
@@ -1016,6 +1041,7 @@ std::vector<double> collect_peer_values(const std::vector<RowT*>& rows, FnT&& va
 
   for (const auto* row : rows) {
     const auto [valid, value] = value_fn(*row);
+
     if (valid) {
       peers.emplace_back(value);
     }
@@ -1097,9 +1123,11 @@ std::vector<TransportScoreRow> build_transport_score_rows(const std::vector<Aggr
     row.endpoint_detail = summarize_endpoint_text(item);
     row.mode = Bench::mode_to_string(item.scenario.mode);
     row.suite = Bench::suite_to_string(item.scenario.suite);
+
     if (item.url_order_index >= 0 && item.url_order_index < row.url_order_index) {
       row.url_order_index = item.url_order_index;
     }
+
     ++row.case_count;
     row.repeat_total += item.sample_count;
     row.repeat_success += item.success_count;
@@ -1330,6 +1358,7 @@ std::vector<SerializationScoreRow> build_serialization_score_rows(const std::vec
 
     if (item.all_success()) {
       ++row.passing_case_count;
+
       if (item.serialize_msgs_per_sec.count != 0) {
         row.serialize_msgs_per_sec.add(item.serialize_msgs_per_sec.average());
       }
@@ -1656,6 +1685,7 @@ std::string build_insight_panel(const std::vector<AggregatedCase>& items) {
           std::to_string(items.size()) + "; " +
           "<span data-i18n=\"executive_coverage_unstable\">problem cases:</span> " + std::to_string(unstable_cases) +
           ".</div>";
+
   if (!passing_matrix.empty()) {
     const auto best_iter = std::max_element(passing_matrix.begin(), passing_matrix.end(),
                                             [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; });
@@ -1718,13 +1748,16 @@ std::string build_url_summary_table(const std::vector<AggregatedCase>& items) {
 
   for (const auto& item : items) {
     auto& entry = summary[{item.transport, item.scenario.url}];
+
     if (entry.transport.empty()) {
       entry.transport = item.transport;
       entry.url = item.scenario.url;
     }
+
     if (item.url_order_index >= 0 && item.url_order_index < entry.url_order_index) {
       entry.url_order_index = item.url_order_index;
     }
+
     append_unique(entry.modes, Bench::mode_to_string(item.scenario.mode));
 
     if (item.all_success() && !has_delivery_loss(item)) {
@@ -1806,14 +1839,18 @@ std::string build_failure_panel(const std::vector<AggregatedCase>& items) {
 
   for (const auto& item : items) {
     auto& entry = summary[{item.transport, Bench::mode_to_string(item.scenario.mode)}];
+
     if (entry.transport.empty()) {
       entry.transport = item.transport;
       entry.mode = Bench::mode_to_string(item.scenario.mode);
     }
+
     if (item.url_order_index >= 0 && item.url_order_index < entry.url_order_index) {
       entry.url_order_index = item.url_order_index;
     }
+
     ++entry.total_count;
+
     if (!item.all_success() || has_delivery_loss(item)) {
       ++entry.failure_count;
     }
@@ -1877,9 +1914,11 @@ std::string build_unstable_case_table(const std::vector<AggregatedCase>& items) 
          << item.success_count << '/' << item.sample_count
          << R"(</td><td data-i18n-label="th_status" data-label="Status" class=")" << (failed ? "fail" : "warn") << "\">"
          << wrap_status_brief_html(item);
+
     if (item.latency_samples_dropped != 0) {
       html << R"( | <span data-i18n="status_drop_label">drop</span> )" << item.latency_samples_dropped;
     }
+
     html << R"(</td><td data-i18n-label="th_errors" data-label="Errors">)"
          << escape_html(join_strings(item.errors, " | ")) << "</td></tr>";
   }
@@ -1900,6 +1939,7 @@ std::string build_suite_score_summary_panel(const std::vector<TransportScoreRow>
 
     const auto key = std::make_pair(row.mode, row.suite);
     const auto iter = transport_best.find(key);
+
     if (iter == transport_best.end() || row.score > iter->second->score) {
       transport_best[key] = &row;
     }
@@ -1911,6 +1951,7 @@ std::string build_suite_score_summary_panel(const std::vector<TransportScoreRow>
     }
 
     const auto iter = serialization_best.find(row.mode);
+
     if (iter == serialization_best.end() || row.score > iter->second->score) {
       serialization_best[row.mode] = &row;
     }
@@ -1952,6 +1993,7 @@ std::string build_suite_score_summary_panel(const std::vector<TransportScoreRow>
            << escape_html(format_metric_cell(row->p99_latency_us)) << " us, P99.9 "
            << escape_html(format_metric_cell(row->p999_latency_us)) << " us, P99.99 "
            << escape_html(format_metric_cell(row->p9999_latency_us)) << " us";
+
       if (should_report_delivery_loss(loss_percent)) {
         html << ", <span data-i18n=\"conclusion_loss_label\">loss</span> "
              << escape_html(format_decimal(loss_percent, 3)) << "%";
@@ -1964,6 +2006,7 @@ std::string build_suite_score_summary_panel(const std::vector<TransportScoreRow>
            << escape_html(format_metric_cell(row->recv_mb_per_sec))
            << " MB/s, <span data-i18n=\"conclusion_topology_scale\">scale efficiency</span> "
            << escape_html(format_metric_cell(row->scale_efficiency_mb_per_sec)) << " MB/s";
+
       if (should_report_delivery_loss(loss_percent)) {
         html << ", <span data-i18n=\"conclusion_loss_label\">loss</span> "
              << escape_html(format_decimal(loss_percent, 3)) << "%";
@@ -1976,6 +2019,7 @@ std::string build_suite_score_summary_panel(const std::vector<TransportScoreRow>
            << escape_html(format_metric_cell(row->recv_mb_per_sec))
            << " MB/s, <span data-i18n=\"conclusion_throughput_first_msg\">first message</span> "
            << escape_html(format_metric_cell(row->first_message_ms)) << " ms";
+
       if (should_report_delivery_loss(loss_percent)) {
         html << ", <span data-i18n=\"conclusion_loss_label\">loss</span> "
              << escape_html(format_decimal(loss_percent, 3)) << "%";
@@ -2012,6 +2056,7 @@ std::string build_suite_score_summary_panel(const std::vector<TransportScoreRow>
 
 std::string build_transport_overview_panel(const std::vector<AggregatedCase>& items) {
   const auto rows = build_transport_score_rows(items);
+
   if (rows.empty()) {
     return std::string();
   }
@@ -2059,6 +2104,7 @@ std::string build_transport_overview_panel(const std::vector<AggregatedCase>& it
 
 std::string build_serialization_overview_panel(const std::vector<AggregatedCase>& items) {
   const auto rows = build_serialization_score_rows(items);
+
   if (rows.empty()) {
     return std::string();
   }
@@ -2426,6 +2472,7 @@ inline std::vector<TransportSummary> summarize_by_endpoint(const std::vector<Agg
     s.expected_sum += item.expected.sum;
     s.lost_sum += item.lost.sum;
     ++s.cases;
+
     if (item.success_count == 0 || item.failure_count != 0) {
       ++s.failed_cases;
     } else {
@@ -2465,6 +2512,7 @@ inline std::vector<TransportSummary> summarize_by_endpoint(const std::vector<Agg
 
       return std::clamp(std::expm1(log_sum / weight), 0.0, 100.0);
     };
+
     if (s.latency_score_count > 0) {
       s.avg_speed = weighted_geometric_score(s.latency_score_sum, s.latency_score_weight_sum);
     } else if (s.latency_fallback_count > 0) {
@@ -2501,6 +2549,7 @@ inline std::vector<TransportSummary> summarize_by_endpoint(const std::vector<Agg
 
     {
       const auto& cfg_conf = score_config();
+
       if (s.success_case_count == 0) {
         s.confidence = "unknown";
       } else if (s.solo_case_count == s.cases) {
@@ -2599,6 +2648,7 @@ inline int compute_heatmap_fill_percent(HeatmapMetric metric, int quality_score)
 inline const char* get_heatmap_color_class(HeatmapMetric metric, int quality_score) {
   if (metric == HeatmapMetric::kLatency) {
     const int heat = std::clamp(100 - quality_score, 0, 100);
+
     if (heat >= 70) {
       return "heat-weak";
     }
@@ -2668,6 +2718,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
 
     double value = 0.0;
     double score = 0.0;
+
     if (collect_heatmap_metric(item, metric, value, score)) {
       if (metric == HeatmapMetric::kThroughput) {
         throughput_values[key].push_back(value);
@@ -2677,6 +2728,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
         cell.score_sum += score;
         cell.value_sum += value;
         ++cell.metric_count;
+
         if (item.p50_latency_us.count > 0) {
           cell.p50_sum += item.p50_latency_us.average();
           ++cell.p50_count;
@@ -2711,6 +2763,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
 
       const double col_max = column_max_value.count(key.second) ? column_max_value[key.second] : 0.0;
       const double col_min = column_min_value.count(key.second) ? column_min_value[key.second] : 0.0;
+
       if (col_max <= 0.0) {
         cell.score_sum = 0.0;
         continue;
@@ -2720,12 +2773,14 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
       double sum = 0.0;
       for (double v : throughput_values[key]) {
         double relative = 100.0;
+
         if (v > 0.0 && col_min > 0.0 && std::isfinite(v)) {
           const double t = std::log(std::max(v, 1e-9) / std::max(col_min, 1e-9)) / log_span;
           relative = std::clamp(t * 100.0, 0.0, 100.0);
         } else if (v <= 0.0) {
           relative = 0.0;
         }
+
         const double absolute = compute_absolute_throughput_score(v);
         sum += blend_absolute_relative_score(absolute, relative, 0.50);
       }
@@ -2766,6 +2821,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
         double col_max = 0.0;
         for (const auto& r : rows) {
           const double v = getter(r);
+
           if (v > 0.0 && std::isfinite(v)) {
             col_min = std::min(col_min, v);
             col_max = std::max(col_max, v);
@@ -2773,6 +2829,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
         }
 
         std::map<std::string, double> out;
+
         if (!std::isfinite(col_min) || col_max <= 0.0) {
           for (const auto& r : rows) {
             out[r.endpoint] = -1.0;
@@ -2783,10 +2840,12 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
         const double log_span = std::log(std::max(col_max / std::max(col_min, 1e-9), 1.0 + 1e-6));
         for (const auto& r : rows) {
           const double v = getter(r);
+
           if (v <= 0.0 || !std::isfinite(v)) {
             out[r.endpoint] = -1.0;
             continue;
           }
+
           const double t = std::log(std::max(v, 1e-9) / std::max(col_min, 1e-9)) / log_span;
           out[r.endpoint] = std::clamp(t * 100.0, 0.0, 100.0);
         }
@@ -2833,6 +2892,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
 
   auto endpoint_avg_score = [&endpoint_score_count, &endpoint_score_sum](const std::string& endpoint) {
     const auto count_iter = endpoint_score_count.find(endpoint);
+
     if (count_iter == endpoint_score_count.end() || count_iter->second == 0) {
       return -1.0;
     }
@@ -2860,6 +2920,7 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
 
   std::string out;
   out.reserve(2048);
+
   if (metric == HeatmapMetric::kLatency) {
     out +=
         R"(<div class="heatmap-block"><h3 data-i18n="heatmap_title">Latency by Message Size (P50 / P90 / P99, lower is better)</h3>)";
@@ -2951,12 +3012,15 @@ inline std::string build_metric_heatmap_block(const std::vector<AggregatedCase>&
           if (rel_h >= 0.0 && abs_h >= 0.0) {
             return static_cast<int>(std::round(0.55 * rel_h + 0.45 * abs_h));
           }
+
           if (rel_h >= 0.0) {
             return static_cast<int>(std::round(rel_h));
           }
+
           if (abs_h >= 0.0) {
             return static_cast<int>(std::round(abs_h));
           }
+
           return 100;
         };
 
@@ -3148,6 +3212,7 @@ inline std::string build_transport_profile_cards(const std::vector<AggregatedCas
     }
 
     const double cpu = item.cpu_usage.average();
+
     if (cpu > 0.0) {
       if (t.avg_cpu_pct < 0.0) {
         t.avg_cpu_pct = cpu;
@@ -3224,6 +3289,7 @@ inline std::string build_transport_profile_cards(const std::vector<AggregatedCas
     const char* layer_key = deployment_layer_i18n_key(ts.layer);
     const std::string confidence_i18n_key = "confidence_" + ts.confidence;
     const char* medal_glyph = medal_glyph_for_rank(rank);
+
     if (medal_glyph[0] != '\0') {
       format::format_to(std::back_inserter(out), R"HTML(<span class="medal-glyph" aria-hidden="true">{}</span>)HTML",
                         medal_glyph);
@@ -3315,11 +3381,13 @@ inline std::string build_transport_profile_cards(const std::vector<AggregatedCas
     {
       const double loss_percent = transport_summary_loss_percent(ts);
       const char* num_class = "num-val";
+
       if (loss_percent >= 20.0) {
         num_class = "num-val fail";
       } else if (loss_percent >= 5.0) {
         num_class = "num-val warn";
       }
+
       format::format_to(std::back_inserter(out),
                         R"(<div class="num-row"><span class="num-label" data-i18n="profile_num_loss">loss rate</span>)"
                         R"(<span class="{}">{}%</span>)"
@@ -3424,6 +3492,7 @@ bool save_html(const Bench::Result& result, const std::string& file_path, std::s
     append_pill("is-pass", passed_cases, "summary_pill_pass", "passing");
     append_pill("is-warn", warning_cases, "summary_pill_warn", "warning");
     append_pill("is-fail", failed_cases, "summary_pill_fail", "failing");
+
     if (result.skipped_case_count > 0) {
       append_pill("is-neutral", result.skipped_case_count, "summary_pill_skipped", "skipped");
     }
@@ -3433,6 +3502,7 @@ bool save_html(const Bench::Result& result, const std::string& file_path, std::s
     strip += "</div>";
     const std::string marker = "</header>";
     auto pos = html.rfind(marker);
+
     if (pos != std::string::npos) {
       html.insert(pos, strip);
     }
@@ -3455,12 +3525,14 @@ bool save_html(const Bench::Result& result, const std::string& file_path, std::s
                         "<span data-i18n=\"{}\">{}</span></a>",
                         href, is_first ? R"( aria-current="true" class="is-active")" : "", i18n_key, fallback);
     };
+
     if (!recommendation_panel.empty()) {
       add_nav("#decision", "nav_recommendation", "Recommended Targets");
     }
 
     add_nav("#overview", "nav_overview", "Run Overview");
     add_nav("#health", "nav_health", "Transport Health");
+
     if (!heatmap_panel.empty()) {
       add_nav("#heatmap", "nav_heatmap", "Latency / Throughput");
     }
@@ -3587,6 +3659,7 @@ bool save_html(const Bench::Result& result, const std::string& file_path, std::s
         "><summary><h2 id=\"health-h\" style=\"display:inline-flex\">"
         "<span class=\"h-anchor\" aria-hidden=\"true\">03</span>"
         "<span data-i18n=\"nav_health\">Transport Health</span></h2>";
+
     if (has_failures) {
       html += R"( <span class="health-badge health-attention" data-i18n="health_badge_failures">failures</span>)";
     } else if (has_warnings) {
@@ -3626,6 +3699,7 @@ bool save_html(const Bench::Result& result, const std::string& file_path, std::s
 
   if (!suite_score_summary_panel.empty() || !insight_panel.empty()) {
     html += R"(<section id="suite-score" class="panel" aria-labelledby="suite-score-h">)";
+
     if (!suite_score_summary_panel.empty()) {
       format::format_to(
           std::back_inserter(html),

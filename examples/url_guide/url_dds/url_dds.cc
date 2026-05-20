@@ -89,6 +89,7 @@ int main() {
 
     const auto& dict = parser.get_query_dictionary();
     auto it = dict.find("domain");
+
     if (it != dict.end()) {
       VLOG_I("  domain ID:", it->second);
     }
@@ -118,6 +119,7 @@ int main() {
     //   Publisher<int> pub("dds://vehicle/speed?domain=99");  // domain=99, NOT 10
 
     // Restore
+
     if (saved.empty()) {
       vlink::Utils::unset_env("VLINK_DDS_DOMAIN");
     } else {

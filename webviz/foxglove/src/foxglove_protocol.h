@@ -66,6 +66,7 @@ inline Bytes build_message_data(uint32_t subscription_id, uint64_t timestamp_ns,
   if VUNLIKELY (payload_len > std::numeric_limits<size_t>::max() - 13) {
     return {};
   }
+
   auto buf = Bytes::create(1 + 4 + 8 + payload_len);
   auto* ptr = buf.data();
 
@@ -96,6 +97,7 @@ inline Bytes build_service_call_response(uint32_t service_id, uint32_t call_id, 
                 payload_len > std::numeric_limits<uint32_t>::max()) {
     return {};
   }
+
   auto enc_len = static_cast<uint32_t>(encoding.size());
   auto buf = Bytes::create(1 + 4 + 4 + 4 + enc_len + payload_len);
   auto* ptr = buf.data();
@@ -128,6 +130,7 @@ inline Bytes build_fetch_asset_response(uint32_t request_id, uint8_t status, std
                 data_len > std::numeric_limits<uint32_t>::max()) {
     return {};
   }
+
   auto err_len = static_cast<uint32_t>(error_msg.size());
   auto buf = Bytes::create(1 + 4 + 1 + 4 + err_len + data_len);
   auto* ptr = buf.data();
@@ -143,7 +146,7 @@ inline Bytes build_fetch_asset_response(uint32_t request_id, uint8_t status, std
   std::memcpy(ptr + offset, &err_len, 4);
   offset += 4;
 
-  if (err_len > 0) {
+  if VUNLIKELY (err_len > 0) {
     std::memcpy(ptr + offset, error_msg.data(), err_len);
     offset += err_len;
   }
@@ -182,7 +185,7 @@ inline bool parse_client_binary(const uint8_t* data, size_t len, ClientBinaryMes
     return true;
   }
 
-  if (out.opcode == ClientBinaryOpcode::kServiceCallRequest) {
+  if VLIKELY (out.opcode == ClientBinaryOpcode::kServiceCallRequest) {
     if VUNLIKELY (len < 13) {
       return false;
     }
