@@ -66,22 +66,32 @@
  * | kMultiProxyError      |   7   | Multiple proxy servers detected on the network.   |
  * | kVersionCompError     |   8   | VLink version mismatch between client and server. |
  * | kUnknownError         |   9   | Unknown error.                                    |
+ * | kTokenError           |  10   | Authentication token mismatch with the server.    |
  *
- * @par Connectivity and Heartbeat
+ * @par Connectivity, Handshake, and Heartbeat
  * Internally the API subscribes to a 1-second Time heartbeat published by
- * @c ProxyServer over a security-authenticated DDS channel.  If no heartbeat is
+ * @c ProxyServer over a security-authenticated DDS channel.  When
+ * @c VLINK_PROXY_ENABLE_HANDSHAKE is non-zero (default), the API performs an
+ * RPC handshake against the server's security-authenticated handshake service
+ * before any Control message can be published; the server replies with a
+ * per-process @em token that the API caches under a dedicated mutex and stamps
+ * onto every outgoing @c Control.  Each incoming Time heartbeat must carry the
+ * same token or the cached token is cleared and @c kTokenError is raised.  The
+ * 1-second heartbeat then automatically re-runs the handshake until it
+ * succeeds, recovering transparently from server restarts.  If no heartbeat is
  * received for 5 consecutive seconds the connection is declared lost and
  * @c ConnectCallback is invoked with @c connected = @c false.  A @c kController
  * client also sends an initial @c Control message at construction and re-sends
- * the last control automatically when the server reconnects.
+ * the last control automatically when the server reconnects.  When the macro
+ * is 0 the handshake is bypassed and Controls flow without a token field.
  *
  * @par Communication Channels
  * The transport channels are determined by @c Config::direct:
  *
- * | direct | Data path                   | Control/Info/Time path     |
- * | ------ | --------------------------- | -------------------------- |
- * | false  | DDS (reliable or best-effort) | DDS (security-enabled)   |
- * | true   | SHM (Iceoryx)               | DDS (security-enabled)     |
+ * | direct | Data path                   | Control/Info/Time/Handshake path |
+ * | ------ | --------------------------- | -------------------------------- |
+ * | false  | DDS (reliable or best-effort) | DDS (security-enabled)         |
+ * | true   | SHM (Iceoryx)               | DDS (security-enabled)           |
  *
  * @par Version Matching
  * When @c Config::match_version is @c true (default) the client checks that
@@ -206,6 +216,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
     kMultiProxyError = 7,    ///< Multiple proxy servers detected on the same domain.
     kVersionCompError = 8,   ///< VLINK_VERSION string differs between client and server.
     kUnknownError = 9,       ///< Unknown or unclassified error.
+    kTokenError = 10,        ///< Authentication token does not match the server's token.
   };
 
   /**
@@ -739,6 +750,8 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
   bool send_control_sync(const Control& control);
 
   void sync_direct_maps(const Control& control);
+
+  bool do_handshake(Error& out_err);  ///< No-op (returns true) when @c VLINK_PROXY_ENABLE_HANDSHAKE is 0.
 
   void reset_handle();
 

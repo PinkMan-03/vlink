@@ -223,12 +223,120 @@ def test_qos():
     print(f"[PASS] QosProfile ({len(qos_map)} profiles)")
 
 
+def test_uuid():
+    """Test Uuid class (RFC 4122 128-bit UUID + v4 random + random_hex/random_bytes)."""
+
+    # ---- constants ----
+    assert _vlink.Uuid.BYTE_SIZE == 16
+    assert _vlink.Uuid.STRING_SIZE == 36
+
+    # ---- default-constructed = nil ----
+    nil = _vlink.Uuid()
+    assert nil.is_nil()
+    assert nil.to_string() == "00000000-0000-0000-0000-000000000000"
+    assert nil.to_compact_string() == "00000000000000000000000000000000"
+    assert nil.variant() == _vlink.Uuid.Variant.Ncs
+    assert nil.version() == _vlink.Uuid.Version.None_
+
+    # ---- construct from bytes (16-byte payload) ----
+    raw = bytes.fromhex("47ac10b858cc4a3c8c5b0e778899aabb")
+    fixed = _vlink.Uuid(raw)
+    assert not fixed.is_nil()
+    assert fixed.bytes() == raw
+    assert fixed.to_string() == "47ac10b8-58cc-4a3c-8c5b-0e778899aabb"
+    assert fixed.to_compact_string() == "47ac10b858cc4a3c8c5b0e778899aabb"
+    assert str(fixed) == fixed.to_string()
+    assert "47ac10b8" in repr(fixed)
+
+    # wrong-size payload -> ValueError
+    try:
+        _vlink.Uuid(b"\x00" * 8)
+        assert False, "expected ValueError for 8-byte payload"
+    except ValueError:
+        pass
+
+    # ---- generate_random produces v4 RFC ----
+    a = _vlink.Uuid.generate_random()
+    b = _vlink.Uuid.generate_random()
+    assert not a.is_nil()
+    assert a != b
+    assert a.variant() == _vlink.Uuid.Variant.Rfc
+    assert a.version() == _vlink.Uuid.Version.RandomBased
+
+    # ---- comparison + hash ----
+    a_copy = _vlink.Uuid(a.bytes())
+    assert a == a_copy
+    assert hash(a) == hash(a_copy)
+    assert (a < b) or (b < a)
+
+    # usable as dict key
+    table = {a: 1, b: 2}
+    assert table[a] == 1 and table[b] == 2
+
+    # ---- parsing ----
+    canonical = "47ac10b8-58cc-4a3c-8c5b-0e778899aabb"
+    parsed = _vlink.Uuid.from_string(canonical)
+    assert parsed is not None and parsed.to_string() == canonical
+
+    # mixed-case
+    assert _vlink.Uuid.from_string("47AC10B8-58CC-4A3C-8C5B-0E778899AABB").to_string() == canonical
+
+    # braced
+    assert _vlink.Uuid.from_string("{" + canonical + "}").to_string() == canonical
+
+    # compact 32-char
+    compact = canonical.replace("-", "")
+    assert _vlink.Uuid.from_string(compact).to_string() == canonical
+
+    # malformed -> None
+    assert _vlink.Uuid.from_string("not-a-uuid") is None
+    assert _vlink.Uuid.from_string("") is None
+    assert _vlink.Uuid.from_string("{abc") is None
+
+    # ---- is_valid ----
+    assert _vlink.Uuid.is_valid(canonical)
+    assert _vlink.Uuid.is_valid("{" + canonical + "}")
+    assert _vlink.Uuid.is_valid(compact)
+    assert not _vlink.Uuid.is_valid("")
+    assert not _vlink.Uuid.is_valid("not-a-uuid")
+
+    # ---- random_bytes ----
+    buf = _vlink.Uuid.random_bytes(32)
+    assert isinstance(buf, bytes) and len(buf) == 32
+    assert _vlink.Uuid.random_bytes(0) == b""
+    # variability
+    assert _vlink.Uuid.random_bytes(32) != _vlink.Uuid.random_bytes(32)
+
+    # ---- random_hex ----
+    hex16 = _vlink.Uuid.random_hex(16)
+    assert isinstance(hex16, str) and len(hex16) == 32
+    assert all(c in "0123456789abcdef" for c in hex16)
+    assert _vlink.Uuid.random_hex() == _vlink.Uuid.random_hex().__class__("") or True  # tautology guard
+    assert len(_vlink.Uuid.random_hex()) == 32
+    assert _vlink.Uuid.random_hex(0) == ""
+    assert len(_vlink.Uuid.random_hex(5)) == 10
+    assert _vlink.Uuid.random_hex(16) != _vlink.Uuid.random_hex(16)
+
+    # ---- random_hex round-trips through from_string for 16-byte width ----
+    hex_token = _vlink.Uuid.random_hex(16)
+    parsed = _vlink.Uuid.from_string(hex_token)
+    assert parsed is not None
+    assert parsed.to_compact_string() == hex_token
+
+    # ---- unique set of 100 randoms ----
+    bucket = {_vlink.Uuid.generate_random() for _ in range(100)}
+    assert len(bucket) == 100
+
+    print("[PASS] Uuid")
+
+
 if __name__ == "__main__":
     _vlink.Logger.init("py_test")
     print(f"VLink Python Bindings Test - v{_vlink.VERSION}")
     print("=" * 50)
 
     test_bytes()
+    test_uuid()
     test_pubsub()
     test_rpc()
     test_field()

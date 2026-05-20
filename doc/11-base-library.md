@@ -53,6 +53,7 @@ VLink 的 `base` 基础库提供了一套轻量、高性能的底层工具集，
 | Format            | `base/format.h`                 | 轻量无堆分配的 `{}` 占位符格式化器             |
 | Utils             | `base/utils.h`                  | 平台无关的进程、线程、信号工具函数             |
 | Helpers           | `base/helpers.h`                | 字符串/数字/哈希/格式化、文本字段转义等无状态工具函数 |
+| Uuid              | `base/uuid.h`                   | RFC 4122 128-bit UUID 值类型 + v4 随机生成 + 项目级 `random_bytes` / `random_hex` 工具 |
 | Plugin            | `base/plugin.h`                 | 类型安全的动态插件加载器，含版本校验与生命周期 |
 | Exception         | `base/exception.h`              | VLink 异常类型（封装标准异常层级）             |
 | Uint128           | `base/uint128.h`                | 可移植 128 位无符号整数及完整运算符           |
@@ -4114,6 +4115,187 @@ vlink::Utils::try_release_sys_memory();
 // 时区偏差（秒）
 int32_t tz = vlink::Utils::get_timezone_diff(); // UTC+8 -> 28800
 ```
+
+### 11.16.3 Uuid -- RFC 4122 UUID
+
+#### 11.16.3.1 概述
+
+`vlink::Uuid` 是 VLink 的 RFC 4122 128-bit 通用唯一标识符值类型,提供完整的构造、序列化、解析、v4 随机生成,以及项目级的 `random_bytes` / `random_hex` 工具入口 -- proxy 握手层的 auth-token 即由 `Uuid::random_hex()` 直接生成（见 `proxy_server.cc` 和 [16. Proxy](16-proxy.md)）。
+
+类不可继承（`final`）、可平凡复制（trivially copyable）,16 字节内联负载,默认构造产生 nil UUID,多个访问器（`is_nil` / `variant` / `version` / `bytes`）是 `constexpr`,可作为编译期常量。
+
+![Uuid 字节布局](images/uuid-byte-layout.png)
+
+![Uuid 生成管线](images/uuid-generation-pipeline.png)
+
+#### 11.16.3.2 类型与常量
+
+```cpp
+#include <vlink/base/uuid.h>
+
+class Uuid final {
+ public:
+  using value_type = uint8_t;
+  static constexpr size_t kByteSize   = 16;  // RFC 4122 固定 128 bit
+  static constexpr size_t kStringSize = 36;  // canonical: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+  enum class Variant : uint8_t { kNcs, kRfc, kMicrosoft, kReserved };
+  enum class Version : uint8_t { kNone, kTimeBased, kDceSecurity, kNameBasedMd5, kRandomBased, kNameBasedSha1 };
+  // ...
+};
+```
+
+#### 11.16.3.3 构造
+
+```cpp
+vlink::Uuid nil;                                        // 默认 = nil（全零）
+constexpr vlink::Uuid nil_ce;                           // constexpr default ctor
+
+std::array<uint8_t, 16> a{0x47, 0xac, /* ... */ };
+vlink::Uuid id_a{a};                                    // constexpr 从 std::array 构造
+
+uint8_t raw[16] = {0x47, 0xac, /* ... */};
+vlink::Uuid id_b{raw};                                  // constexpr 从 C 数组构造
+
+std::vector<uint8_t> v(16, 0xa5);
+vlink::Uuid id_c{v.begin(), v.end()};                   // 迭代器对（必须 ForwardIterator）
+
+std::vector<uint8_t> bad(8, 0xff);
+vlink::Uuid id_d{bad.begin(), bad.end()};               // 长度 != 16 -> 保持 nil
+```
+
+迭代器构造对模板形参做 `static_assert(forward_iterator_tag)`,传入 `std::istream_iterator` 之类 input iterator 会**编译失败**,而非运行期 UB。
+
+#### 11.16.3.4 文本序列化与解析
+
+```cpp
+vlink::Uuid id = vlink::Uuid::generate_random();
+
+std::string canonical = id.to_string();         // 36 字符 "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+std::string compact   = id.to_compact_string(); // 32 字符 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+std::cout << id;                                // operator<< 与 to_string 同效
+
+auto p1 = vlink::Uuid::from_string("47ac10b8-58cc-4a3c-8c5b-0e778899aabb");
+auto p2 = vlink::Uuid::from_string("{47ac10b8-58cc-4a3c-8c5b-0e778899aabb}"); // 接受 {...} 包裹
+auto p3 = vlink::Uuid::from_string("47ac10b858cc4a3c8c5b0e778899aabb");       // 接受 compact
+auto p4 = vlink::Uuid::from_string(nullptr);                                   // 安全,返回 nullopt
+
+bool ok = vlink::Uuid::is_valid("47ac10b8-58cc-4a3c-8c5b-0e778899aabb");
+```
+
+`is_valid` / `from_string` 都提供 `std::string_view` 与 `const char*` 两个重载,C-string 路径**显式 null-safe**：传入 `nullptr` 返回 `false` / `std::nullopt`,且 `std::string_view(const char*)` 在第一个 NUL 字节截断。
+
+支持形式：
+
+| 形式 | 长度 | 例 |
+|------|------|----|
+| Canonical | 36 | `47ac10b8-58cc-4a3c-8c5b-0e778899aabb` |
+| Compact | 32 | `47ac10b858cc4a3c8c5b0e778899aabb` |
+| Braced canonical | 38 | `{47ac10b8-...-aabb}` |
+| Braced compact | 34 | `{47ac10b858cc...aabb}` |
+
+hyphen 位置不被强制,任意位置都允许出现。
+
+#### 11.16.3.5 变体与版本探测
+
+```cpp
+vlink::Uuid id = vlink::Uuid::generate_random();
+
+assert(id.variant() == vlink::Uuid::Variant::kRfc);
+assert(id.version() == vlink::Uuid::Version::kRandomBased);
+```
+
+| 八位组 8 高位 | Variant | 含义 |
+|---------------|---------|------|
+| `0xxx` | `kNcs` | NCS 旧式兼容 |
+| `10xx` | `kRfc` | RFC 4122 标准（v4 随机生成属此类） |
+| `110x` | `kMicrosoft` | Microsoft GUID |
+| `111x` | `kReserved` | 保留 |
+
+| 八位组 6 高 4 位 | Version |
+|-----------------|---------|
+| `0001` | `kTimeBased`（v1） |
+| `0010` | `kDceSecurity`（v2） |
+| `0011` | `kNameBasedMd5`（v3） |
+| `0100` | `kRandomBased`（v4） |
+| `0101` | `kNameBasedSha1`（v5） |
+| 其他 | `kNone` |
+
+#### 11.16.3.6 字节级访问
+
+```cpp
+constexpr vlink::Uuid id;
+const auto& raw = id.bytes();           // const std::array<uint8_t, 16>&
+
+static_assert(raw[0] == 0);             // constexpr 编译期可访问
+static_assert(vlink::Uuid::kByteSize == 16);
+```
+
+#### 11.16.3.7 v4 随机生成
+
+```cpp
+// 1) 默认重载：使用 thread-local mt19937,首次访问 lazy seed
+vlink::Uuid id = vlink::Uuid::generate_random();
+
+// 2) 注入引擎重载：测试场景下可复现
+std::mt19937 engine_a(0xdeadbeefU);
+std::mt19937 engine_b(0xdeadbeefU);
+
+vlink::Uuid a = vlink::Uuid::generate_random(engine_a);
+vlink::Uuid b = vlink::Uuid::generate_random(engine_b);
+
+assert(a == b);                          // 同 seed 产生同 UUID
+```
+
+随机管线见 [uuid-generation-pipeline.drawio](images/uuid-generation-pipeline.drawio) -- 概括：
+
+* `std::random_device` 取 8 个 32-bit 样本 → `std::seed_seq` 扩展到 624 字状态 → `std::mt19937` 引擎
+* `std::uniform_int_distribution<uint32_t>` 每抽 1 次填 4 字节,显式 shift 解构(LE/BE 输出一致)
+* 末尾 pinning v4 + RFC 位：`data[6] = (data[6] & 0x0F) | 0x40` 和 `data[8] = (data[8] & 0x3F) | 0x80`
+
+#### 11.16.3.8 项目级随机字节工具
+
+```cpp
+// 返回 N 字节随机 buffer（同 generate_random 的管线）
+std::vector<uint8_t> buf = vlink::Uuid::random_bytes(32);
+
+// 返回 N*2 字符的小写 hex 字符串
+std::string hex = vlink::Uuid::random_hex(16);   // 32 hex 字符 = 128-bit token
+std::string token = vlink::Uuid::random_hex();   // 默认 16 字节,proxy 握手用此宽度
+```
+
+`random_bytes(0)` / `random_hex(0)` 返回空容器；分配失败也返回空（函数全 `noexcept`,内部 `try/catch` 兜底）。
+
+> ⚠️ **非 CSPRNG**: `std::mt19937` 不是密码学安全的 RNG。观测约 2.5 KB（624 个 32-bit 输出）即可重建引擎状态。`random_hex` / `random_bytes` 适合短期会话标识、debug 关联 ID、proxy auth-token,**不适合**长期密钥 -- 请改用 OpenSSL `RAND_bytes` 等专用 CSPRNG。
+
+#### 11.16.3.9 比较、`swap`、与 `std::hash`
+
+```cpp
+vlink::Uuid a, b;
+assert(a == b);
+assert(!(a < b));
+
+vlink::Uuid c = vlink::Uuid::generate_random();
+std::unordered_set<vlink::Uuid> set{a, c};      // 通过 std::hash<vlink::Uuid> 哈希
+
+a.swap(b);                                       // 成员 swap,O(1)
+std::swap(a, b);                                 // std::swap fallback 同样 O(1)（平凡可复制）
+```
+
+#### 11.16.3.10 跨平台保证
+
+| 维度 | 保证 |
+|------|------|
+| 头文件 | 全部 C++17 标准库（`<random>` `<chrono>` `<array>` `<algorithm>` `<functional>` `<iterator>` `<optional>` `<ostream>` `<string>` `<string_view>` `<type_traits>` `<vector>`） |
+| 字节序 | 显式 shift,无 `reinterpret_cast`,LE/BE 同 seed 同输出 |
+| 引擎抛异常 | `make_seeded_engine()` 捕获 `std::random_device` 抛出 -> chrono 降级 -> 字面量 `0xDEADBEEF` 兜底,三层全 `noexcept` |
+| DLL / 共享库 | `Uuid` 类、`operator<<` 都带 `VLINK_EXPORT`；`std::hash<vlink::Uuid>` 在 header 内联,消费者 TU 不依赖库导出 |
+| 平台覆盖 | Linux GCC / Clang、Windows MSVC、MinGW、macOS Clang、QNX 7+、Android NDK 全部同套源 |
+
+#### 11.16.3.11 完整示例
+
+请参阅 [`examples/base/uuid_basic/`](../examples/base/uuid_basic/),覆盖默认构造、`std::array` / 原始数组 / 迭代器构造、v4 随机生成（默认引擎与注入引擎两路）、文本解析三种形式 + nullptr 安全路径、variant / version 探测、字节访问、比较、`swap`、`std::unordered_set`、`random_bytes` / `random_hex` 全长度,以及 `constexpr static_assert` 编译期校验。
 
 ---
 

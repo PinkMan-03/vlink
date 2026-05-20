@@ -27,6 +27,7 @@
 #include <vlink/base/helpers.h>
 #include <vlink/base/plugin.h>
 #include <vlink/base/utils.h>
+#include <vlink/base/uuid.h>
 #include <vlink/extension/discovery_viewer.h>
 #include <vlink/extension/runnable_plugin_interface.h>
 #include <vlink/version.h>
@@ -91,6 +92,10 @@ using TimePub = SecurityPublisher<pb::proxy::Time>;
 using InfoPub = SecurityPublisher<pb::proxy::InfoList>;
 using ControlSub = SecuritySubscriber<pb::proxy::Control>;
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+using HandshakeSrv = SecurityServer<pb::proxy::HandshakeReq, pb::proxy::HandshakeResp>;
+#endif
+
 struct ProxySubMeta final {
   std::string ser;
   SchemaType schema{SchemaType::kUnknown};
@@ -123,6 +128,7 @@ struct ProxyServer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
 
   std::string current_host_name;
   std::string current_machine_id;
+  std::string token;
 
   size_t real_max_packet_size{0};
 
@@ -134,6 +140,9 @@ struct ProxyServer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
   std::shared_ptr<TimePub> time_pub;
   std::shared_ptr<InfoPub> info_pub;
   std::shared_ptr<ControlSub> control_sub;
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  std::shared_ptr<HandshakeSrv> handshake_srv;
+#endif
 
   bool filter_by_process{false};
   std::vector<std::string> filter_list;
@@ -188,6 +197,11 @@ ProxyServer::ProxyServer(const Config& config) : impl_(std::make_unique<Impl>())
     VLOG_F("ProxyServer: Already initialized.");
     return;
   }
+
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->token = Uuid::random_hex();
+  // CLOG_I("ProxyServer: Auth token issued (prefix=%.8s..., length=%zu).", impl_->token.c_str(), impl_->token.size());
+#endif
 
   // intra_bind
   static std::string intra_bind = Utils::get_env("VLINK_INTRA_BIND");
@@ -245,6 +259,10 @@ ProxyServer::~ProxyServer() {
   impl_->sub_seq_buffer_map.clear();
   impl_->sub_size_buffer_map.clear();
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_srv.reset();
+#endif
+
   impl_->data_sub.reset();
   impl_->data_pub.reset();
   impl_->time_pub.reset();
@@ -255,6 +273,8 @@ ProxyServer::~ProxyServer() {
 
   impl_->runnable_plugin.clear();
 }
+
+std::string ProxyServer::get_token() const { return impl_->token; }
 
 size_t ProxyServer::get_max_task_count() const { return kMaxTaskSize; }
 
@@ -335,11 +355,19 @@ void ProxyServer::init_server() {
   impl_->control_sub = std::make_shared<ControlSub>(
       impl_->config.dds_impl + VLINK_PROXY_CONTROL_URL_CTX + domain_id_str, sec_cfg, InitType::kWithoutInit);
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_srv = std::make_shared<HandshakeSrv>(
+      impl_->config.dds_impl + VLINK_PROXY_HANDSHAKE_URL_CTX + domain_id_str, sec_cfg, InitType::kWithoutInit);
+#endif
+
   impl_->data_pub->set_discovery_enabled(false);
   impl_->data_sub->set_discovery_enabled(false);
   impl_->time_pub->set_discovery_enabled(false);
   impl_->info_pub->set_discovery_enabled(false);
   impl_->control_sub->set_discovery_enabled(false);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_srv->set_discovery_enabled(false);
+#endif
 
   if (!impl_->config.bind_ip.empty()) {
     impl_->data_pub->set_property("dds.ip", impl_->config.bind_ip);
@@ -347,6 +375,9 @@ void ProxyServer::init_server() {
     impl_->time_pub->set_property("dds.ip", impl_->config.bind_ip);
     impl_->info_pub->set_property("dds.ip", impl_->config.bind_ip);
     impl_->control_sub->set_property("dds.ip", impl_->config.bind_ip);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_srv->set_property("dds.ip", impl_->config.bind_ip);
+#endif
   }
 
   if (!impl_->config.peer_ip.empty()) {
@@ -355,6 +386,9 @@ void ProxyServer::init_server() {
     impl_->time_pub->set_property("dds.peer", impl_->config.peer_ip);
     impl_->info_pub->set_property("dds.peer", impl_->config.peer_ip);
     impl_->control_sub->set_property("dds.peer", impl_->config.peer_ip);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_srv->set_property("dds.peer", impl_->config.peer_ip);
+#endif
   }
 
   if (impl_->config.buf_size > 0) {
@@ -364,12 +398,18 @@ void ProxyServer::init_server() {
     impl_->time_pub->set_property("dds.buf", buf_str);
     impl_->info_pub->set_property("dds.buf", buf_str);
     impl_->control_sub->set_property("dds.buf", buf_str);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_srv->set_property("dds.buf", buf_str);
+#endif
   } else {
     impl_->data_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->data_sub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->time_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->info_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->control_sub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_srv->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
+#endif
   }
 
   if (impl_->config.mtu_size > 0) {
@@ -379,12 +419,18 @@ void ProxyServer::init_server() {
     impl_->time_pub->set_property("dds.mtu", mtu_str);
     impl_->info_pub->set_property("dds.mtu", mtu_str);
     impl_->control_sub->set_property("dds.mtu", mtu_str);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_srv->set_property("dds.mtu", mtu_str);
+#endif
   } else {
     impl_->data_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->data_sub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->time_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->info_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->control_sub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_srv->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
+#endif
   }
 
   if (impl_->config.enable_tcp) {
@@ -401,7 +447,30 @@ void ProxyServer::init_server() {
     impl_->time_pub->set_property("dds.ip", "127.0.0.1");
     impl_->info_pub->set_property("dds.ip", "127.0.0.1");
     impl_->control_sub->set_property("dds.ip", "127.0.0.1");
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_srv->set_property("dds.ip", "127.0.0.1");
+#endif
   }
+
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_srv->listen([this](const pb::proxy::HandshakeReq& req, pb::proxy::HandshakeResp& resp) {
+    resp.set_hostname(impl_->current_host_name);
+    resp.set_machine_id(impl_->current_machine_id);
+    resp.set_version(VLINK_VERSION);
+
+    if VUNLIKELY (!req.version().empty() && req.version() != VLINK_VERSION) {
+      CLOG_E("ProxyServer: Reject handshake from %s due to version mismatch (peer=%s, self=%s).",
+             req.hostname().c_str(), req.version().c_str(), VLINK_VERSION);
+      resp.set_result(pb::proxy::HANDSHAKE_VERSION_MISMATCH);
+      return;
+    }
+
+    resp.set_result(pb::proxy::HANDSHAKE_OK);
+    resp.set_token(impl_->token);
+  });
+
+  impl_->handshake_srv->init();
+#endif
 
   if (!impl_->config.direct) {
     impl_->data_pub->init();
@@ -571,6 +640,14 @@ void ProxyServer::init_server() {
       return;
     }
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    if VUNLIKELY (control.token() != impl_->token) {
+      CLOG_E("ProxyServer: Reject control with mismatched token (control_id=%u).",
+             static_cast<uint32_t>(control.control_id()));
+      return;
+    }
+#endif
+
     impl_->discovery_viewer->post_task([this, control]() { send_control(&control); });
   });
 
@@ -607,6 +684,9 @@ void ProxyServer::send_time() {
   time.set_version(VLINK_VERSION);
   time.set_hostname(impl_->current_host_name);
   time.set_machine_id(impl_->current_machine_id);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  time.set_token(impl_->token);
+#endif
 
   time.set_cpu_usage(Utils::get_cpu_usage());
   time.set_memory_usage(Utils::get_memory_usage());
@@ -1252,7 +1332,6 @@ void ProxyServer::update_all() {
               Bytes queued_bytes = bytes;
 
               // NOLINTNEXTLINE(readability-container-size-empty)
-
               if VUNLIKELY (queued_bytes.size() != bytes.size() || (queued_bytes.size() > 0 && !queued_bytes.data())) {
                 VLOG_E("ProxyServer: Failed to create an owned copy for async forwarding.");
                 return;

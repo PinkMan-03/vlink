@@ -84,6 +84,10 @@ using TimeSub = SecuritySubscriber<pb::proxy::Time>;
 using InfoSub = SecuritySubscriber<pb::proxy::InfoList>;
 using ControlPub = SecurityPublisher<pb::proxy::Control>;
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+using HandshakeCli = SecurityClient<pb::proxy::HandshakeReq, pb::proxy::HandshakeResp>;
+#endif
+
 // ProxyAPI::Impl
 struct ProxyAPI::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<uint32_t> control_error_count{0};
@@ -95,9 +99,14 @@ struct ProxyAPI::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
   std::atomic<double> memory_usage{0};
   std::atomic_bool is_connected{false};
   std::atomic_bool control_ret{false};
+  std::atomic_bool resetting{false};
 
   ProxyAPI::Config config;
   uint32_t control_id{0};
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  std::string token;
+  std::shared_mutex token_mtx;
+#endif
   ProxyAPI::Control last_control;
   Timer heartbeat_timer;
 
@@ -131,6 +140,9 @@ struct ProxyAPI::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
   std::shared_ptr<TimeSub> time_sub;
   std::shared_ptr<InfoSub> info_sub;
   std::shared_ptr<ControlPub> control_pub;
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  std::shared_ptr<HandshakeCli> handshake_cli;
+#endif
 
   std::vector<ProxyAPI::Info> direct_info_list;
 
@@ -174,10 +186,38 @@ ProxyAPI::ProxyAPI(const Config& config) : impl_(std::make_unique<Impl>()) {
         std::shared_lock lock(impl_->control_mtx);
         send_control_sync(impl_->last_control);
       }
-    } else {
-      if VUNLIKELY (impl_->connect_elapsed_timer.get() > 5000) {
-        process_connected(false);
+
+      return;
+    }
+
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    bool token_empty = false;
+
+    {
+      std::shared_lock token_lock(impl_->token_mtx);
+      token_empty = impl_->token.empty();
+    }
+
+    if VUNLIKELY (token_empty) {
+      Error handshake_err = kNoError;
+
+      if (do_handshake(handshake_err)) {
+        process_error(kNoError);
+
+        if (impl_->config.role == kController) {
+          std::shared_lock lock(impl_->control_mtx);
+          send_control_sync(impl_->last_control);
+        }
+      } else if (handshake_err != kNoError && impl_->error != handshake_err) {
+        process_error(handshake_err);
       }
+
+      return;
+    }
+#endif
+
+    if VUNLIKELY (impl_->connect_elapsed_timer.get() > 5000) {
+      process_connected(false);
     }
   });
 
@@ -196,6 +236,9 @@ ProxyAPI::~ProxyAPI() {
   this->wait_for_quit();
 
   std::unique_lock handle_lock(impl_->handle_mtx);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_cli.reset();
+#endif
   impl_->data_sub.reset();
   impl_->data_pub.reset();
   impl_->time_sub.reset();
@@ -715,6 +758,19 @@ bool ProxyAPI::send_control_sync(const Control& control) {
     return false;
   }
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  std::string token_copy;
+
+  {
+    std::shared_lock token_lock(impl_->token_mtx);
+    token_copy = impl_->token;
+  }
+
+  if VUNLIKELY (token_copy.empty()) {
+    return false;
+  }
+#endif
+
   if VUNLIKELY (!impl_->control_pub->has_subscribers()) {
     return false;
   }
@@ -725,6 +781,9 @@ bool ProxyAPI::send_control_sync(const Control& control) {
   pb_control.set_filter_by_process(control.filter_by_process);
   pb_control.set_filter_str(control.filter_str);
   pb_control.set_filter_type(control.filter_type);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  pb_control.set_token(token_copy);
+#endif
 
   for (const auto& url_meta : control.url_meta_list) {
     const auto schema_type = SchemaData::is_valid_type(url_meta.schema) ? url_meta.schema : SchemaType::kUnknown;
@@ -753,8 +812,58 @@ bool ProxyAPI::send_control_sync(const Control& control) {
   return impl_->control_pub->publish(pb_control, true);
 }
 
+bool ProxyAPI::do_handshake(Error& out_err) {
+  out_err = kNoError;
+
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  if VUNLIKELY (!impl_->handshake_cli || !impl_->handshake_cli->has_inited()) {
+    return false;
+  }
+
+  const auto wait_timeout = std::chrono::milliseconds(VLINK_PROXY_HANDSHAKE_WAIT_MS);
+  const auto invoke_timeout = std::chrono::milliseconds(VLINK_PROXY_HANDSHAKE_INVOKE_MS);
+
+  if VUNLIKELY (!impl_->handshake_cli->wait_for_connected(wait_timeout)) {
+    return false;
+  }
+
+  pb::proxy::HandshakeReq req;
+  req.set_control_id(impl_->control_id);
+  req.set_version(VLINK_VERSION);
+  req.set_hostname(Utils::get_host_name());
+  req.set_role(impl_->config.role == kController ? "controller" : "listener");
+
+  pb::proxy::HandshakeResp resp;
+
+  if VUNLIKELY (!impl_->handshake_cli->invoke(req, resp, invoke_timeout)) {
+    return false;
+  }
+
+  if VUNLIKELY (resp.result() == pb::proxy::HANDSHAKE_VERSION_MISMATCH) {
+    VLOG_E("ProxyApi: Handshake version mismatch (server=", resp.version(), ", client=" VLINK_VERSION ").");
+    out_err = kVersionCompError;
+    return false;
+  }
+
+  if VUNLIKELY (resp.result() != pb::proxy::HANDSHAKE_OK || resp.token().empty()) {
+    VLOG_E("ProxyApi: Handshake refused by server (result=", static_cast<int>(resp.result()), ").");
+    out_err = kTokenError;
+    return false;
+  }
+
+  {
+    std::lock_guard token_lock(impl_->token_mtx);
+    impl_->token = resp.token();
+  }
+#endif
+
+  return true;
+}
+
 void ProxyAPI::reset_handle() {
   std::unique_lock handle_lock(impl_->handle_mtx);
+
+  impl_->resetting = true;
 
   impl_->control_ret = false;
 
@@ -794,11 +903,19 @@ void ProxyAPI::reset_handle() {
   impl_->control_pub = std::make_shared<ControlPub>(
       impl_->config.dds_impl + VLINK_PROXY_CONTROL_URL_CTX + domain_id_str, sec_cfg, InitType::kWithoutInit);
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_cli = std::make_shared<HandshakeCli>(
+      impl_->config.dds_impl + VLINK_PROXY_HANDSHAKE_URL_CTX + domain_id_str, sec_cfg, InitType::kWithoutInit);
+#endif
+
   impl_->data_sub->set_discovery_enabled(false);
   impl_->data_pub->set_discovery_enabled(false);
   impl_->time_sub->set_discovery_enabled(false);
   impl_->info_sub->set_discovery_enabled(false);
   impl_->control_pub->set_discovery_enabled(false);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_cli->set_discovery_enabled(false);
+#endif
 
   if (impl_->config.native) {
     impl_->data_sub->set_property("dds.ip", "127.0.0.1");
@@ -806,6 +923,9 @@ void ProxyAPI::reset_handle() {
     impl_->time_sub->set_property("dds.ip", "127.0.0.1");
     impl_->info_sub->set_property("dds.ip", "127.0.0.1");
     impl_->control_pub->set_property("dds.ip", "127.0.0.1");
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_cli->set_property("dds.ip", "127.0.0.1");
+#endif
   } else {
     if (!impl_->config.allow_ip.empty()) {
       impl_->data_sub->set_property("dds.ip", impl_->config.allow_ip);
@@ -813,6 +933,9 @@ void ProxyAPI::reset_handle() {
       impl_->time_sub->set_property("dds.ip", impl_->config.allow_ip);
       impl_->info_sub->set_property("dds.ip", impl_->config.allow_ip);
       impl_->control_pub->set_property("dds.ip", impl_->config.allow_ip);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+      impl_->handshake_cli->set_property("dds.ip", impl_->config.allow_ip);
+#endif
     }
 
     if (!impl_->config.peer_ip.empty()) {
@@ -821,6 +944,9 @@ void ProxyAPI::reset_handle() {
       impl_->time_sub->set_property("dds.peer", impl_->config.peer_ip);
       impl_->info_sub->set_property("dds.peer", impl_->config.peer_ip);
       impl_->control_pub->set_property("dds.peer", impl_->config.peer_ip);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+      impl_->handshake_cli->set_property("dds.peer", impl_->config.peer_ip);
+#endif
     }
   }
 
@@ -831,12 +957,18 @@ void ProxyAPI::reset_handle() {
     impl_->time_sub->set_property("dds.buf", buf_str);
     impl_->info_sub->set_property("dds.buf", buf_str);
     impl_->control_pub->set_property("dds.buf", buf_str);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_cli->set_property("dds.buf", buf_str);
+#endif
   } else {
     impl_->data_sub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->data_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->time_sub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->info_sub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
     impl_->control_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_cli->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
+#endif
   }
 
   if (impl_->config.mtu_size > 0) {
@@ -846,12 +978,18 @@ void ProxyAPI::reset_handle() {
     impl_->time_sub->set_property("dds.mtu", mtu_str);
     impl_->info_sub->set_property("dds.mtu", mtu_str);
     impl_->control_pub->set_property("dds.mtu", mtu_str);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_cli->set_property("dds.mtu", mtu_str);
+#endif
   } else {
     impl_->data_sub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->data_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->time_sub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->info_sub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
     impl_->control_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    impl_->handshake_cli->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
+#endif
   }
 
   if (impl_->config.enable_tcp) {
@@ -861,15 +999,6 @@ void ProxyAPI::reset_handle() {
     impl_->data_sub->set_property("dds.tcp", "0");
     impl_->data_pub->set_property("dds.tcp", "0");
   }
-
-  if (!impl_->config.direct) {
-    impl_->data_sub->init();
-    impl_->data_pub->init();
-  }
-
-  impl_->time_sub->init();
-  impl_->info_sub->init();
-  impl_->control_pub->init();
 
   {
     std::lock_guard version_lock(impl_->version_mtx);
@@ -881,6 +1010,44 @@ void ProxyAPI::reset_handle() {
 
     impl_->proxy_version.clear();
   }
+
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+  {
+    std::lock_guard token_lock(impl_->token_mtx);
+    impl_->token.clear();
+  }
+
+  impl_->handshake_cli->init();
+
+  Error handshake_err = kNoError;
+
+  if VUNLIKELY (!do_handshake(handshake_err)) {
+    if (handshake_err != kNoError) {
+      VLOG_E("ProxyApi: Handshake failed during reset_handle (err=", static_cast<int>(handshake_err), ").");
+
+      const Error prev_err = impl_->error.exchange(handshake_err);
+
+      if (prev_err != handshake_err) {
+        post_task([this, handshake_err]() {
+          std::shared_lock lock(impl_->error_mtx);
+
+          if VLIKELY (impl_->error_callback) {
+            impl_->error_callback(handshake_err);
+          }
+        });
+      }
+    }
+  }
+#endif
+
+  if (!impl_->config.direct) {
+    impl_->data_sub->init();
+    impl_->data_pub->init();
+  }
+
+  impl_->time_sub->init();
+  impl_->info_sub->init();
+  impl_->control_pub->init();
 
   if (impl_->data_sub->has_inited()) {
 #if VLINK_PROXY_ENABLE_ZEROCOPY_DATA
@@ -991,6 +1158,34 @@ void ProxyAPI::reset_handle() {
       return;
     }
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    bool token_mismatch = false;
+    bool token_present = false;
+
+    {
+      std::shared_lock token_lock(impl_->token_mtx);
+      token_present = !impl_->token.empty();
+      token_mismatch = token_present && (time.token() != impl_->token);
+    }
+
+    if VUNLIKELY (!token_present) {
+      return;
+    }
+
+    if VUNLIKELY (token_mismatch) {
+      {
+        std::lock_guard token_lock(impl_->token_mtx);
+        impl_->token.clear();
+      }
+
+      if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
+        process_error(kTokenError);
+      }
+
+      return;
+    }
+#endif
+
     if (impl_->config.role == kController) {
       if VUNLIKELY (time.control_id() != impl_->control_id) {
         if VUNLIKELY (++impl_->control_error_count >= 2 && impl_->error_elapsed_timer.restart() >= 200) {
@@ -1091,6 +1286,16 @@ void ProxyAPI::reset_handle() {
       return;
     }
 
+#if VLINK_PROXY_ENABLE_HANDSHAKE
+    {
+      std::shared_lock token_lock(impl_->token_mtx);
+
+      if VUNLIKELY (impl_->token.empty()) {
+        return;
+      }
+    }
+#endif
+
     if VUNLIKELY (!pb_info_list.hostname().empty()) {
       std::shared_lock version_lock(impl_->version_mtx);
       if VUNLIKELY (pb_info_list.hostname() != impl_->hostname) {
@@ -1190,6 +1395,8 @@ void ProxyAPI::reset_handle() {
       process_connected(false);
     }
   });
+
+  impl_->resetting = false;
 }
 
 void ProxyAPI::process_connected(bool connected) {
@@ -1216,7 +1423,8 @@ void ProxyAPI::process_connected(bool connected) {
       }
     }
 
-    if (!impl_->is_connected && impl_->config.role == kController && impl_->error == kNoError) {
+    if (!impl_->is_connected && impl_->config.role == kController && !impl_->resetting &&
+        (impl_->error == kNoError || impl_->error == kTokenError || impl_->error == kVersionCompError)) {
       post_task([this]() { reset_handle(); });
     }
   }

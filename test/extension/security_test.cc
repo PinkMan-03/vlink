@@ -413,16 +413,23 @@ TEST_SUITE("extension-Security - AES built-in") {
     CHECK_FALSE(b.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("Security default-constructed has no key and fails encrypt/decrypt") {
-    Security sec;
+  TEST_CASE("Security default-constructed installs built-in default slot and round-trips") {
+    Security sender;
+    Security receiver;
 
     Bytes plain = Bytes::create(16);
     std::memset(plain.data(), 0x55, 16);
+
     Bytes cipher;
-    CHECK_FALSE(sec.encrypt(plain, cipher));
+    REQUIRE(sender.encrypt(plain, cipher));
 
     Bytes recovered;
-    CHECK_FALSE(sec.decrypt(plain, recovered));
+    REQUIRE(receiver.decrypt(cipher, recovered));
+    REQUIRE(recovered.size() == plain.size());
+    CHECK(std::memcmp(recovered.data(), plain.data(), plain.size()) == 0);
+
+    Bytes garbage_recovered;
+    CHECK_FALSE(receiver.decrypt(plain, garbage_recovered));
   }
 
   TEST_CASE("AES-GCM concurrent encrypt/decrypt is thread-safe") {
@@ -866,11 +873,11 @@ TEST_SUITE("extension-Security - Node API surface") {
 }
 
 TEST_SUITE("extension-Security - capability queries") {
-  TEST_CASE("default-constructed Security has no usable slot") {
+  TEST_CASE("default-constructed Security exposes built-in default slot") {
     Security sec;
-    CHECK_FALSE(sec.is_configured());
-    CHECK_FALSE(sec.can_encrypt());
-    CHECK_FALSE(sec.can_decrypt());
+    CHECK(sec.is_configured());
+    CHECK(sec.can_encrypt());
+    CHECK(sec.can_decrypt());
   }
 
   TEST_CASE("symmetric key populates all three capability slots") {

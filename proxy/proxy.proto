@@ -62,6 +62,7 @@ message Time {
   string machine_id = 23;
   double cpu_usage = 31;
   double memory_usage = 32;
+  string token = 41;
 }
 
 message Data {
@@ -76,6 +77,27 @@ message Data {
   string hostname = 11;
 }
 
+enum HandshakeResult {
+  HANDSHAKE_OK = 0;
+  HANDSHAKE_VERSION_MISMATCH = 1;
+  HANDSHAKE_INTERNAL_ERROR = 2;
+}
+
+message HandshakeReq {
+  uint32 control_id = 1;
+  string version = 2;
+  string hostname = 3;
+  string role = 4;
+}
+
+message HandshakeResp {
+  HandshakeResult result = 1;
+  string token = 2;
+  string version = 3;
+  string hostname = 4;
+  string machine_id = 5;
+}
+
 message Control {
   uint32 control_id = 1;
   Mode mode = 2;
@@ -88,4 +110,5 @@ message Control {
   repeated string pub_url_list = 31;
   repeated string pub_ser_list = 32;
   repeated uint32 pub_schema_list = 33;
+  string token = 41;
 }

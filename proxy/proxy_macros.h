@@ -27,6 +27,8 @@
 
 #define VLINK_PROXY_ENABLE_ZEROCOPY_DATA 1
 
+#define VLINK_PROXY_ENABLE_HANDSHAKE 1
+
 #define VLINK_PROXY_SOCKET_BUF_STR "8388608"
 
 #define VLINK_PROXY_SOCKET_MTU_STR "65500"
@@ -40,6 +42,10 @@
 #define VLINK_PROXY_TIME_URL_CTX "://proxy/time/v3?qos=clock&domain="
 #define VLINK_PROXY_INFOLIST_URL_CTX "://proxy/info_list/v3?qos=poor&domain="
 #define VLINK_PROXY_CONTROL_URL_CTX "://proxy/control/v3?qos=best&domain="
+#define VLINK_PROXY_HANDSHAKE_URL_CTX "://proxy/handshake/v3?qos=best&domain="
+
+#define VLINK_PROXY_HANDSHAKE_WAIT_MS 800
+#define VLINK_PROXY_HANDSHAKE_INVOKE_MS 800
 
 #define VLINK_PROXY_DATA_SHM_URL_CTX "://proxy/proxy_data/v3?domain="
 #define VLINK_VIEWER_DATA_SHM_URL_CTX "://proxy/viewer_data/v3?domain="

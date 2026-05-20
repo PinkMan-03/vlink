@@ -56,6 +56,7 @@
 #include <vlink/base/spin_lock.h>
 #include <vlink/base/thread_pool.h>
 #include <vlink/base/timer.h>
+#include <vlink/base/uuid.h>
 #include <vlink/base/wheel_timer.h>
 #include <vlink/extension/bag_reader.h>
 #include <vlink/extension/bag_writer.h>
@@ -1910,6 +1911,84 @@ NB_MODULE(_vlink_nanobind, m) {
             async_mode, passthrough);
       },
       "callback"_a, "is_async"_a = false, "pass_through"_a = false);
+
+  nb::class_<vlink::Uuid> uuid_cls(m, "Uuid", "RFC 4122 128-bit UUID value type with v4 random generation");
+
+  nb::enum_<vlink::Uuid::Variant>(uuid_cls, "Variant", "UUID variant field (RFC 4122 section 4.1.1)")
+      .value("Ncs", vlink::Uuid::Variant::kNcs)
+      .value("Rfc", vlink::Uuid::Variant::kRfc)
+      .value("Microsoft", vlink::Uuid::Variant::kMicrosoft)
+      .value("Reserved", vlink::Uuid::Variant::kReserved);
+
+  nb::enum_<vlink::Uuid::Version>(uuid_cls, "Version", "UUID version field (RFC 4122 section 4.1.3)")
+      .value("None_", vlink::Uuid::Version::kNone)
+      .value("TimeBased", vlink::Uuid::Version::kTimeBased)
+      .value("DceSecurity", vlink::Uuid::Version::kDceSecurity)
+      .value("NameBasedMd5", vlink::Uuid::Version::kNameBasedMd5)
+      .value("RandomBased", vlink::Uuid::Version::kRandomBased)
+      .value("NameBasedSha1", vlink::Uuid::Version::kNameBasedSha1);
+
+  uuid_cls.def(nb::init<>(), "Default-constructs a nil (all-zero) UUID.")
+      .def(nb::init<const std::array<uint8_t, vlink::Uuid::kByteSize>&>(), "data"_a,
+           "Constructs from a 16-byte std::array payload.")
+      .def(
+          "__init__",
+          [](vlink::Uuid* self, nb::bytes data) {
+            if (data.size() != vlink::Uuid::kByteSize) {
+              throw nb::value_error("Uuid requires exactly 16 bytes");
+            }
+            std::array<uint8_t, vlink::Uuid::kByteSize> array{};
+            std::memcpy(array.data(), data.c_str(), vlink::Uuid::kByteSize);
+            new (self) vlink::Uuid(array);
+          },
+          "data"_a, "Constructs from a Python bytes-like object of length 16.")
+      .def_ro_static("BYTE_SIZE", &vlink::Uuid::kByteSize)
+      .def_ro_static("STRING_SIZE", &vlink::Uuid::kStringSize)
+      .def("variant", &vlink::Uuid::variant, "Returns the UUID variant field.")
+      .def("version", &vlink::Uuid::version, "Returns the UUID version field.")
+      .def("is_nil", &vlink::Uuid::is_nil, "Returns True when every byte is zero.")
+      .def(
+          "bytes",
+          [](const vlink::Uuid& self) {
+            const auto& data = self.bytes();
+            return nb::bytes(reinterpret_cast<const char*>(data.data()), data.size());
+          },
+          "Returns the 16 underlying bytes as a Python bytes object.")
+      .def("to_string", &vlink::Uuid::to_string, "Formats as the 36-character lowercase canonical form with hyphens.")
+      .def("to_compact_string", &vlink::Uuid::to_compact_string,
+           "Formats as a 32-character lowercase hex string with no hyphens.")
+      .def("__str__", &vlink::Uuid::to_string)
+      .def("__repr__", [](const vlink::Uuid& self) { return std::string("<vlink.Uuid '") + self.to_string() + "'>"; })
+      .def("__eq__", [](const vlink::Uuid& lhs, const vlink::Uuid& rhs) { return lhs == rhs; })
+      .def("__ne__", [](const vlink::Uuid& lhs, const vlink::Uuid& rhs) { return lhs != rhs; })
+      .def("__lt__", [](const vlink::Uuid& lhs, const vlink::Uuid& rhs) { return lhs < rhs; })
+      .def("__hash__", [](const vlink::Uuid& self) { return static_cast<int64_t>(std::hash<vlink::Uuid>{}(self)); })
+      .def_static(
+          "is_valid", [](const std::string& str) { return vlink::Uuid::is_valid(std::string_view(str)); }, "str"_a,
+          "Returns True when str is a well-formed UUID textual representation.")
+      .def_static(
+          "from_string",
+          [](const std::string& str) -> nb::object {
+            auto parsed = vlink::Uuid::from_string(std::string_view(str));
+
+            if (!parsed.has_value()) {
+              return nb::none();
+            }
+
+            return nb::cast(*parsed);
+          },
+          "str"_a, "Parses a UUID string; returns None on malformed input.")
+      .def_static("generate_random", static_cast<vlink::Uuid (*)() noexcept>(&vlink::Uuid::generate_random),
+                  "Generates a random v4 UUID using a thread-local seeded engine.")
+      .def_static(
+          "random_bytes",
+          [](size_t count) {
+            auto buf = vlink::Uuid::random_bytes(count);
+            return nb::bytes(reinterpret_cast<const char*>(buf.data()), buf.size());
+          },
+          "count"_a, "Returns count cryptographically-seeded pseudo-random bytes (NOT a CSPRNG).")
+      .def_static("random_hex", &vlink::Uuid::random_hex, "byte_count"_a = static_cast<size_t>(16U),
+                  "Returns byte_count random bytes encoded as a lowercase hex string (NOT a CSPRNG).");
 
   auto helpers = m.def_submodule("helpers", "String and formatting utilities");
   helpers.def("to_int", &vlink::Helpers::to_int, "str"_a, "default_value"_a = 0);

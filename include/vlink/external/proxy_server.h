@@ -54,14 +54,25 @@
  * @par Communication Architecture
  * @code
  *  ProxyAPI (kController)
- *       |--- ControlPub --> [DDS] --> ControlSub ---|
+ *       |--- HandshakeCli RPC ---> HandshakeSrv -->-|  (issues token)
+ *       |<------------------ token <----------------|
+ *       |--- ControlPub --> [DDS] --> ControlSub ---|  (token-stamped controls)
  *       |                                           v
  *       |                               ProxyServer (this)
  *       |                                           |
- *       |<-- TimeSub <--- [DDS] <--- TimePub -------|
+ *       |<-- TimeSub <--- [DDS] <--- TimePub -------|  (token echoed in heartbeat)
  *       |<-- InfoSub <--- [DDS] <--- InfoPub -------|
  *       |<-- DataSub <--- [DDS/SHM] <- DataPub -----|
  * @endcode
+ *
+ * @par Authentication Token
+ * The server generates a 128-bit hex token at construction (cryptographically
+ * seeded @c std::random_device + @c std::mt19937_64) and exposes it through
+ * @c get_token().  Clients obtain it by invoking the handshake RPC over the
+ * security-authenticated DDS channel; subsequent Control messages without a
+ * matching token are dropped server-side.  The token lives for the lifetime of
+ * the process; restarting the server invalidates all previously-issued tokens
+ * and forces clients to re-handshake on their next reset.
  *
  * @par Runnable Plugin Lifecycle
  * Plugins listed in @c Config::runnable_list are loaded in the constructor.
@@ -232,6 +243,22 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    * lifetime.
    */
   ~ProxyServer() override;
+
+  /**
+   * @brief Returns the authentication token issued by this server.
+   *
+   * @details
+   * When @c VLINK_PROXY_ENABLE_HANDSHAKE is non-zero (default), the token is generated
+   * once at construction via @c vlink::Uuid::random_hex() and stays constant for the
+   * server's lifetime.  Clients learn it by invoking the security-authenticated
+   * handshake RPC; the server then validates that every incoming @c Control carries the
+   * same token and echoes the token inside each @c Time heartbeat so clients can detect
+   * server restarts.  When the macro is 0 the token is empty and validation is disabled
+   * (handshake channel is not created).
+   *
+   * @return Hex-encoded token string, or empty when @c VLINK_PROXY_ENABLE_HANDSHAKE is 0.
+   */
+  [[nodiscard]] std::string get_token() const;
 
  protected:
   size_t get_max_task_count() const override;
