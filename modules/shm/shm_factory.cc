@@ -59,6 +59,10 @@ struct ShmGlobal final {
   class ShmRuntime* runtime_instance{nullptr};
   std::unique_ptr<shm::runtime::PoshRuntime> shm_runtime;
   shm::RuntimeName_t shm_runtime_name;
+#ifdef VLINK_SUPPORT_SHM_ROUDI
+  shm::cxx::optional<shm::roudi::IceOryxRouDiComponents> roudi_components;
+  shm::cxx::optional<shm::roudi::RouDi> roudi;
+#endif
 
   static ShmGlobal& get() {
     static ShmGlobal instance;
@@ -166,6 +170,7 @@ ShmFactory::~ShmFactory() {
   message_loop_.wait_for_quit();
 
   deinit_runtime();
+  deinit_roudi();
 }
 
 bool ShmFactory::has_roudi_inited() { return ShmGlobal::get().has_roudi_inited; }
@@ -213,6 +218,7 @@ bool ShmFactory::auto_init_roudi(bool same_process_from_roudi) {
     ~RoudiManager() {
       if (status_) {
         ShmFactory::deinit_runtime();
+        ShmFactory::deinit_roudi();
       }
     }
 
@@ -359,13 +365,9 @@ void ShmFactory::init_roudi(const std::string& config_path, int memory_strategy,
   parameters.monitoringMode = monitoring_enable ? shm::roudi::MonitoringMode::ON : shm::roudi::MonitoringMode::OFF;
 #endif
 
-  static shm::cxx::optional<shm::roudi::IceOryxRouDiComponents> roudi_components;
-  static shm::cxx::optional<shm::roudi::RouDi> roudi;
-  static auto components_scope_guard = shm::cxx::makeScopedStatic(roudi_components, config);
-  static auto roudi_scope_guard = shm::cxx::makeScopedStatic(roudi, roudi_components.value().rouDiMemoryManager,
-                                                             roudi_components.value().portManager, parameters);
-  (void)components_scope_guard;
-  (void)roudi_scope_guard;
+  ShmGlobal::get().roudi_components.emplace(config);
+  ShmGlobal::get().roudi.emplace(ShmGlobal::get().roudi_components.value().rouDiMemoryManager,
+                                 ShmGlobal::get().roudi_components.value().portManager, parameters);
 #else
   (void)config_path;
   (void)memory_strategy;
@@ -430,6 +432,19 @@ void ShmFactory::deinit_runtime() {
     }
 #endif
   }
+}
+
+void ShmFactory::deinit_roudi() {
+#ifdef VLINK_SUPPORT_SHM_ROUDI
+  static auto& global_instance = ShmGlobal::get();
+
+  bool expected = true;
+
+  if VLIKELY (global_instance.has_roudi_inited.compare_exchange_strong(expected, false)) {
+    global_instance.roudi.reset();
+    global_instance.roudi_components.reset();
+  }
+#endif
 }
 
 shm::popo::Listener* ShmFactory::get_listener(int32_t domain) {

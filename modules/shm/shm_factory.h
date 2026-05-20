@@ -168,6 +168,8 @@ class ShmFactory final : public AbstractFactory<ShmID> {
 
   static void deinit_runtime();
 
+  static void deinit_roudi();
+
   shm::popo::Listener* get_listener(int32_t domain = 0);
 
   void try_to_destroy_listener(int32_t domain = 0, shm::popo::Listener* listener = nullptr);
