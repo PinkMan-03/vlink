@@ -453,6 +453,8 @@ void ProxyServer::init_server() {
   }
 
 #if VLINK_PROXY_ENABLE_HANDSHAKE
+  impl_->handshake_srv->init();
+
   impl_->handshake_srv->listen([this](const pb::proxy::HandshakeReq& req, pb::proxy::HandshakeResp& resp) {
     resp.set_hostname(impl_->current_host_name);
     resp.set_machine_id(impl_->current_machine_id);
@@ -468,8 +470,6 @@ void ProxyServer::init_server() {
     resp.set_result(pb::proxy::HANDSHAKE_OK);
     resp.set_token(impl_->token);
   });
-
-  impl_->handshake_srv->init();
 #endif
 
   if (!impl_->config.direct) {
