@@ -1826,7 +1826,7 @@ vlink-eproto pub shm://sensor/imu -d /path/to/protos \
 
 | 子命令     | 用途                                                                 |
 | ---------- | -------------------------------------------------------------------- |
-| `run`      | 执行基准测试。默认走 `showcase` 预设，可切换到 `quick` 或 `full` 预设扩大测试矩阵；支持 `-u/--url`、`-s/--suite`、`-m/--mode`、`-t/--topology`、`--pattern`、`-q/--qos` 等维度组合 |
+| `run`      | 执行基准测试。默认走 `showcase` 预设，可切换到 `quick` 或 `full` 预设扩大测试矩阵；支持 `-u/--url`、`-s/--suite`、`-m/--mode`、`-t/--topology`、`--pattern`、`-q/--qos`、`-p/--preset` 等维度组合 |
 | `plot`     | 从已有 `bench.json` 结果重建 `html` / `csv` / `terminal` 报告        |
 | `pub`/`sub`| `process` 模式内部 worker 子命令，由主进程通过 `vlink/base/process` 拉起，一般不手工调用 |
 
@@ -1835,13 +1835,13 @@ vlink-eproto pub shm://sensor/imu -d /path/to/protos \
 vlink-bench run
 
 # 完整矩阵并输出 html + csv + json
-vlink-bench run --preset full --report html,csv,json -o /tmp/vlink-full-bench
+vlink-bench run -p full --report html,csv,json -o /tmp/vlink-full-bench
 
 # 从已有结果重建报告
 vlink-bench plot /tmp/vlink-full-bench.json --report html,terminal
 ```
 
-测试套件覆盖 `throughput`、`latency`、`topology`、`serialization`、`backpressure` 五类；执行模式支持 `local-direct`、`local-loop`、`process`；拓扑覆盖 `1:1`、`1:n`、`n:1`、`n:n`。完整的命令行参数、终端交互按键、HTML 报告结构和默认测试策略详见 [13-cli-tools.md#vlink-bench](13-cli-tools.md#1311-vlink-bench--发布订阅性能基准测试)。
+测试套件覆盖 `throughput`、`latency`、`topology`、`fanout`、`serialization`、`backpressure` 六类；执行模式支持 `local-direct`、`local-loop`、`process`；拓扑覆盖 `1:1`、`1:n`、`n:1`、`n:n`。完整的命令行参数、终端交互按键、HTML 报告结构和默认测试策略详见 [13-cli-tools.md#vlink-bench](13-cli-tools.md#1311-vlink-bench--发布订阅性能基准测试)。
 
 ### 0.13.2 性能剖析器（CpuProfiler）
 

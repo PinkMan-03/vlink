@@ -827,6 +827,7 @@ vlink-eproto sub <url> [options]
 | ----------------------------- | ---------------------------------------------- | ---------- |
 | `url`                         | 目标 URL（必填）                               | -          |
 | `-d` / `--proto_dir <dir>`    | Proto 文件目录                                 | 环境变量   |
+| `--schema_plugin <path>`      | Schema 插件共享库路径                          | 空         |
 | `-s` / `--ser_type <type>`    | 序列化类型（消息名）                           | 空（自动）|
 | `-x` / `--encoding <type>`    | 编码提示（`protobuf`/`flatbuffers`/`raw`/`blob`/`zerocopy`，`blob` 时按十六进制显示二进制） | 空 |
 | `-i` / `--filter <str>`       | 过滤字段名（空格分隔）                         | 空         |
@@ -895,6 +896,7 @@ vlink-eproto pub <url> [options]
 | ------------------------------- | ----------------------------------------- | ------- |
 | `url`                           | 目标 URL（必填）                          | -       |
 | `-d` / `--proto_dir <dir>`      | Proto 文件目录                            | 环境变量|
+| `--schema_plugin <path>`        | Schema 插件共享库路径                     | 空      |
 | `-s` / `--ser_type <type>`      | 序列化类型（消息名，必填）                | 空      |
 | `-x` / `--encoding <type>`      | 编码提示（`protobuf`/`flatbuffers`/`raw`/`blob`/`zerocopy`，`raw` 发送文本或 JSON 字符串，`blob` 发送二进制） | 空 |
 | `-n` / `--native`               | 本地模式                                  | `false` |
@@ -957,6 +959,7 @@ vlink-efbs sub <url> [options]
 | ---------------------------- | ----------------------------------------- | -------- |
 | `url`                        | 目标 URL（必填）                          | -        |
 | `-d` / `--fbs_dir <dir>`     | FlatBuffers schema 目录                   | 环境变量 |
+| `--schema_plugin <path>`     | Schema 插件共享库路径                     | 空       |
 | `-s` / `--ser_type <type>`   | 序列化类型（table 名）                    | 空（自动）|
 | `-x` / `--encoding <type>`   | 编码提示（`protobuf`/`flatbuffers`/`raw`/`blob`/`zerocopy`，`raw` 显示文本/JSON，`blob` 以十六进制显示） | 空 |
 | `-i` / `--filter <str>`      | 过滤字段名                                | 空       |
@@ -998,6 +1001,7 @@ vlink-efbs pub <url> [options]
 | ------------------------------ | ------------------------------------------- | ------- |
 | `url`                          | 目标 URL（必填）                            | -       |
 | `-d` / `--fbs_dir <dir>`       | FlatBuffers schema 目录                     | 环境变量|
+| `--schema_plugin <path>`       | Schema 插件共享库路径                       | 空      |
 | `-s` / `--ser_type <type>`     | 序列化类型（table 名，必填）                | 空      |
 | `-x` / `--encoding <type>`     | 编码提示（`protobuf`/`flatbuffers`/`raw`/`blob`/`zerocopy`，`raw` 发送文本/JSON，`blob` 发送二进制） | 空 |
 | `-n` / `--native`              | 本地模式                                    | `false` |

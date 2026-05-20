@@ -36,7 +36,7 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 | 分类              | 目录                         | 示例数量 | 说明                                        |
 | ----------------- | ---------------------------- | -------- | ------------------------------------------- |
 | quickstart        | `examples/quickstart/`       | 3        | 最小化入门示例（PubSub、RPC、Field）        |
-| base              | `examples/base/`             | 23       | 基础库（Logger、Timer、Bytes、内存池、线程池、协程、Cancellation、TaskHandle 等）|
+| base              | `examples/base/`             | 24       | 基础库（Logger、Timer、Bytes、内存池、线程池、协程、Cancellation、TaskHandle、Uuid 等）|
 | communication     | `examples/communication/`    | 7        | 三种通信模型的基础和进阶用法                |
 | serialization     | `examples/serialization/`    | 7        | 各序列化类型的独立演示；当前 CMake 已启用 `intra_data/` |
 | url_guide         | `examples/url_guide/`        | 9        | URL 格式与各传输后端配置指南                |
@@ -80,7 +80,7 @@ examples/
 │   ├── hello_pubsub/
 │   ├── hello_rpc/
 │   └── hello_field/
-├── base/                       # 基础库示例（23 个项目）
+├── base/                       # 基础库示例（24 个项目）
 │   ├── logger_basic/
 │   ├── logger_advanced/
 │   ├── timer_basic/
@@ -103,7 +103,8 @@ examples/
 │   ├── task_handle/
 │   ├── process/
 │   ├── schedule/
-│   └── utils/
+│   ├── utils/
+│   └── uuid_basic/
 ├── communication/              # 通信模型（7 个项目）
 │   ├── event_basic/
 │   ├── event_advanced/
@@ -265,6 +266,7 @@ ls build/output/bin/
 | `process`                | 进程信息查询                                      |
 | `schedule`               | 调度器                                            |
 | `utils`                  | 工具函数（路径、线程、信号等）                    |
+| `uuid_basic`             | Uuid 基础操作（生成、比较、字符串互转）           |
 
 ---
 

@@ -127,7 +127,7 @@ static_assert(vlink::Serializer::is_supported(t), "");
 | `kStandardType`     | `std::is_trivial_v && std::is_standard_layout_v`（非指针） | POD 结构体，直接内存拷贝       | 无              |
 | `kStandardPtrType`  | 指向 trivial + standard_layout 类型的指针                   | POD 指针，零拷贝               | 无              |
 
-> `Serializer::Type`（`include/vlink/serializer.h:123-139`）共 14 个有效枚举（不含 `kUnknownType = 0`）。`kCustomType` 的枚举值为 `3`，但在 `get_type_of<T>()` 的 `if constexpr` 链中优先级低于 CDR / Protobuf / FlatBuffers —— 枚举值顺序不等于检测顺序。
+> `Serializer::Type`（`include/vlink/serializer.h` 中 `enum Type : uint8_t`）共 14 个有效枚举（不含 `kUnknownType = 0`）。`kCustomType` 的枚举值为 `3`，但在 `get_type_of<T>()`（`include/vlink/internal/serializer-inl.h` 中的 `if constexpr` 链）里优先级低于 CDR / Protobuf / FlatBuffers —— 枚举值顺序不等于检测顺序。
 
 ---
 

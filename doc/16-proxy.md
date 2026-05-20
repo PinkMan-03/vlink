@@ -63,7 +63,7 @@ VLink 业务节点在启动时通过 `DiscoveryReporter` 以 UDP 组播方式广
 1. 构造 / 初始化所有 `Security*` 句柄（`HandshakeCli`、`ControlPub`、`TimeSub`、`InfoSub` 等）。
 2. **启用 `VLINK_PROXY_ENABLE_HANDSHAKE`（默认）时**：调用 `HandshakeCli::invoke(HandshakeReq, HandshakeResp)`：
    - 客户端提交 `HandshakeReq`（`control_id`、`VLINK_VERSION`、`hostname`、`role`="controller"/"listener"）。
-   - 服务器在 `init_server()` 阶段已用 `vlink::Uuid::random_hex()` 签发 128-bit 进程级 token；验证版本一致后回 `HandshakeResp { result=HANDSHAKE_OK, token, version, hostname, machine_id }`。
+   - 服务器在构造阶段（`init_server()` 之前）已用 `vlink::Uuid::random_hex()` 签发 128-bit 进程级 token；验证版本一致后回 `HandshakeResp { result=HANDSHAKE_OK, token, version, hostname, machine_id }`。
    - 客户端在 `token_mtx` 保护下把 `resp.token()` 写入 `impl_->token`。
 3. ProxyServer 每秒通过 DDS 安全信道广播：
    - **Time 心跳**：携带 `VLINK_VERSION`、主机名、CPU/内存占用、系统时间（Unix epoch 微秒）、启动时长、以及**服务器签发的 token**。
@@ -139,7 +139,7 @@ ProxyAPI 客户端通过心跳检测连接状态。若连续 **5 秒** 未收到
 ### 16.6.1 主要职责
 
 1. 运行 `DiscoveryViewer`，枚举 DDS 域内所有活跃的 Publisher/Subscriber/Server/Client/Setter/Getter
-2. 启用握手时(默认),构造阶段经 `vlink::Uuid::random_hex()` **签发 128-bit 进程级 auth-token**,启动日志 `Auth token issued (prefix=...)`,通过 `get_token()` 提供给运维 / 嵌入式宿主
+2. 启用握手时(默认),构造阶段经 `vlink::Uuid::random_hex()` **签发 128-bit 进程级 auth-token**,通过 `get_token()` 提供给运维 / 嵌入式宿主（源码中预留了 `ProxyServer: Auth token issued (prefix=...)` 的诊断日志，默认注释保留，需要时取消注释即可输出 prefix 掩码）
 3. 接收来自 `ProxyAPI` 客户端的握手请求(`HandshakeSrv`)并下发 token；同时校验所有 `Control` 入站的 token,失配丢弃
 4. 接收来自 `ProxyAPI` 客户端的 `Control` 指令，切换工作模式
 5. 每秒广播一次 `Time` 心跳（携带版本、主机名、CPU 占用、内存占用、时间戳、token）
@@ -163,7 +163,7 @@ std::string token = server.get_token();
 ```
 
 - 构造阶段调用 `vlink::Uuid::random_hex()` 一次性签发,后续每个 `Time` 心跳和每条 `HandshakeResp` 都包含该 token。
-- 启动日志带 prefix 掩码：`ProxyServer: Auth token issued (prefix=a1b2c3d4..., length=32).` 完整 token **不输出** -- 运维方应通过 `get_token()`（嵌入式）或安全管道（CLI 进程）取出后下发给客户端。
+- 源码中预留了启动日志 `ProxyServer: Auth token issued (prefix=a1b2c3d4..., length=32).`（只输出 prefix 掩码，完整 token 不输出）。当前默认构建注释保留，需要分发观察时取消 `proxy/proxy_server/proxy_server.cc` 中相应 `CLOG_I` 注释即可启用。运维方应优先通过 `get_token()`（嵌入式）或安全管道（CLI 进程）取出 token 后下发给客户端。
 - `VLINK_PROXY_ENABLE_HANDSHAKE = 0` 时 `impl_->token` 为空字符串,Time 不带 token,Control 不校验 token；`get_token()` 返回 `""`。
 - 不存在持久化：服务器重启 -> 新 token -> 客户端走自愈路径(见 §16.4.7) 重新握手。
 

@@ -63,12 +63,14 @@
 #undef min
 #undef max
 #undef GetMessage
-#elif defined(__APPLE__)
+#else
+#include <unistd.h>
+#if defined(__APPLE__)
 #include <mach/mach.h>
 #include <sys/resource.h>
 #elif defined(_POSIX_VERSION)
 #include <sys/resource.h>
-#include <unistd.h>
+#endif
 #endif
 
 namespace vlink::bench {

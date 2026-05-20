@@ -27,29 +27,29 @@
           <mxGeometry x="680" y="95" width="240" height="100" as="geometry" />
         </mxCell>
 
-        <!-- Decision 2: plugin -->
-        <mxCell id="d2" value="convert_plugin&#10;can_convert?&#10;(MessageConvertPlugin)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#bf360c;shadow=1;" vertex="1" parent="1">
+        <!-- Decision 2: mapping (priority over plugin per source: find_mapping is tried before convert_plugin) -->
+        <mxCell id="d2" value="find_mapping?&#10;JSON custom message mapping&#10;(vlink_msgs)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#bf360c;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="360" y="225" width="240" height="100" as="geometry" />
-        </mxCell>
-
-        <!-- Plugin converter (purple) -->
-        <mxCell id="plugin_conv" value="Plugin Conversion&#10;plugin-&gt;convert()&#10;plugin-&gt;get_schema_info()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#4a148c;shadow=1;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="235" width="240" height="80" as="geometry" />
-        </mxCell>
-
-        <!-- Decision 3: mapping -->
-        <mxCell id="d3" value="find_mapping?&#10;JSON custom message mapping" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#bf360c;shadow=1;" vertex="1" parent="1">
-          <mxGeometry x="360" y="355" width="240" height="100" as="geometry" />
         </mxCell>
 
         <!-- Mapping converter (blue) -->
         <mxCell id="mapping_conv" value="Mapping Conversion&#10;Deserialize Proto / FBS&#10;Field mapping + exprtk&#10;Build target schema" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#0d47a1;shadow=1;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="225" width="240" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Decision 3: plugin (fallback after mapping miss) -->
+        <mxCell id="d3" value="convert_plugin&#10;can_convert?&#10;(MessageConvertPlugin)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#bf360c;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="360" y="355" width="240" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Plugin converter (purple) -->
+        <mxCell id="plugin_conv" value="Plugin Conversion&#10;plugin-&gt;convert()&#10;plugin-&gt;get_schema_info()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.5;fontSize=11;fontStyle=1;fontColor=#4a148c;shadow=1;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="680" y="355" width="240" height="100" as="geometry" />
         </mxCell>
 
         <!-- Mapping sub-converters (blue light) -->
         <mxCell id="sub_conv" value="Built-in Mapping Converters&#10;Foxglove: convert_location_fix, convert_pose_in_frame, convert_scene_update&#10;Rerun: log_geo_points, log_transform3d, log_boxes3d, log_points3d,&#10;log_encoded_image, log_scalars, log_line_strips3d, ..." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f2fd;strokeColor=#1565c0;strokeWidth=1.3;fontSize=10;fontStyle=1;fontColor=#0d47a1;shadow=1;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="960" y="355" width="400" height="100" as="geometry" />
+          <mxGeometry x="960" y="225" width="400" height="100" as="geometry" />
         </mxCell>
 
         <!-- No mapping path -->
@@ -59,7 +59,7 @@
 
         <!-- Output -->
         <mxCell id="output" value="Conversion Output&#10;Foxglove: ConvertResult (FlatBuffer payload)&#10;Rerun: RecordingStream::log(archetype)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#455a64;strokeWidth=1.5;fontSize=12;fontStyle=1;fontColor=#263238;shadow=1;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="960" y="210" width="400" height="70" as="geometry" />
+          <mxGeometry x="960" y="380" width="400" height="70" as="geometry" />
         </mxCell>
 
         <!-- Edges -->
@@ -75,7 +75,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="e4" value="Yes" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#8e24aa;fontSize=11;fontStyle=2;fontColor=#4a148c;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" source="d2" target="plugin_conv" parent="1">
+        <mxCell id="e4" value="Yes" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#1565c0;fontSize=11;fontStyle=2;fontColor=#0d47a1;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" source="d2" target="mapping_conv" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
@@ -83,7 +83,7 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="e6" value="Yes" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#1565c0;fontSize=11;fontStyle=2;fontColor=#0d47a1;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" source="d3" target="mapping_conv" parent="1">
+        <mxCell id="e6" value="Yes" style="endArrow=classic;endFill=1;html=1;strokeWidth=2;strokeColor=#8e24aa;fontSize=11;fontStyle=2;fontColor=#4a148c;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" source="d3" target="plugin_conv" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 

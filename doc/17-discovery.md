@@ -91,7 +91,7 @@ vlink::DiscoveryReporter* reporter = vlink::DiscoveryReporter::global_get();
 ```cpp
 #include <vlink/extension/discovery_viewer.h>
 
-// 创建 Viewer，过滤模式为只显示存活节点
+// 创建 Viewer，过滤模式为屏蔽其它主机的本地传输（intra/shm）节点
 vlink::DiscoveryViewer viewer(vlink::DiscoveryViewer::kFilterAvailable);
 
 // 注册回调，每当拓扑变化时触发
@@ -426,7 +426,7 @@ DiscoveryMessage {
 #include <thread>
 
 int main() {
-    vlink::DiscoveryViewer viewer(vlink::DiscoveryViewer::kFilterAvailable);
+    vlink::DiscoveryViewer viewer(vlink::DiscoveryViewer::kFilterAvailable);  // 屏蔽来自其它主机的 intra/shm 节点
 
     viewer.register_callback([](const std::vector<vlink::DiscoveryViewer::Info>& list) {
         std::cout << "=== Topology Update ===" << std::endl;
@@ -538,7 +538,7 @@ vlink-list
 
 `vlink-monitor`（`cli/monitor/`）是一个**持续监控**工具（类似 `top`）：
 
-- 默认创建 `DiscoveryViewer`（`kFilterAvailable`）；`-n/--native` 会切换到 `kFilterNative`。
+- 默认创建 `DiscoveryViewer`（`kFilterAvailable`：屏蔽来自其它主机的本地传输节点）；`-n/--native` 会切换到 `kFilterNative`。
 - 注册回调，每次拓扑变化时刷新终端界面。
 - 显示节点 URL、类型、进程、CPU 利用率等实时数据。
 - 支持按 URL 子串过滤。
@@ -590,8 +590,11 @@ VLink 发现系统基于 UDP 组播/广播，**支持同一局域网内跨进程
 ### 17.8.3 FilterType 在跨网络场景的应用
 
 ```cpp
+// kFilterAvailable：屏蔽来自其它主机的本地传输（intra://、shm://），本机节点全部保留
+vlink::DiscoveryViewer viewer_avail(vlink::DiscoveryViewer::kFilterAvailable);
+
 // kFilterNative：只显示本机节点（过滤掉来自其他主机的节点）
-vlink::DiscoveryViewer viewer(vlink::DiscoveryViewer::kFilterNative);
+vlink::DiscoveryViewer viewer_native(vlink::DiscoveryViewer::kFilterNative);
 
 // 主机名比较基于 DiscoveryReporter::get_host_name()，等同于 hostname 命令输出
 ```

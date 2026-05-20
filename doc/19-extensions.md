@@ -142,15 +142,17 @@ public:
 
 `RunablePluginInterface` 的公开契约是：宿主先由宿主线程显式调用 `on_init()`，再启动插件自己的
 `MessageLoop`；`on_deinit()` 同样由宿主在线程外显式触发。它们都不是插件 loop 线程里的隐式回调。
+`ProxyServer::on_begin()` / `on_end()` 即按此顺序调用每个 runnable 插件。
 
 ```
 dlopen
   -> create (VLINK_PLUGIN_DECLARE)
-    -> on_init()         // 宿主线程调用，初始化订阅/定时器等资源
-    -> async_run()       // 启动插件自己的 MessageLoop 线程
+    -> on_init()           // 宿主线程调用，初始化订阅/定时器等资源
+    -> async_run()         // 启动插件自己的 MessageLoop 线程
       ... 运行中 ...
-    -> on_deinit()       // 宿主线程调用，释放资源
-    -> quit()            // 停止循环线程
+    -> on_deinit()         // 宿主线程调用，释放资源
+    -> quit()              // 通知循环线程退出
+    -> wait_for_quit()     // 阻塞等待循环线程结束
   -> destroy
 dlclose
 ```
@@ -187,19 +189,25 @@ VLINK_PLUGIN_DECLARE(MySensorPlugin, 1, 0)
 ```
 
 ```cpp
-// 宿主加载代码
+// 宿主加载代码（与 ProxyServer::on_begin() / on_end() 中的调用顺序一致）
 vlink::Plugin plugin;
 auto instance = plugin.load<vlink::RunablePluginInterface>("my_sensor_plugin", 1, 0);
 if (instance) {
-    instance->async_run();    // 头文件示例采用“先启动 loop，再初始化”
-    instance->on_init();      // 初始化订阅等资源
+    instance->on_init();      // 先在宿主线程初始化订阅等资源
+    instance->async_run();    // 再启动插件自己的 MessageLoop 线程
 
     // ... 应用运行 ...
 
-    instance->on_deinit();    // 清理资源
-    instance->quit();         // 停止事件循环
+    instance->on_deinit();    // 先释放资源
+    instance->quit();         // 再停止事件循环
+    instance->wait_for_quit();
 }
 ```
+
+> 注：`runnable_plugin_interface.h` 顶部的示例先 `async_run()` 再 `on_init()`，仅展示
+> "loop 已起来再做依赖回调的初始化"这一可选路径。VLink 自带的 `ProxyServer`、`vlink-proxy`
+> 等宿主都采用 `on_init() -> async_run()` 这条主线顺序，建议第三方宿主与之保持一致，避免
+> 在 `on_init()` 内调用任何依赖 loop 已 quit 的资源时陷入竞态。
 
 ---
 
@@ -586,6 +594,9 @@ JSON 映射管道。因此插件只需覆盖需要自定义逻辑的类型。
 ```cpp
 class BagReaderPluginInterface {
 public:
+    // 插件版本/构建元数据（与 SchemaPluginInterface 一致）
+    virtual VersionInfo get_version_info() const = 0;
+
     // URL 级钩子：可修改 url/ser_type/schema_type；返回 false 表示排除该 URL
     virtual bool convert_url_meta(std::string& url,
                                   std::string& ser_type,
@@ -982,7 +993,7 @@ monitor->shutdown();
 ### 19.16.1 共享库搜索路径（`default_search_path()`）
 
 `Plugin::default_search_path()` 按以下顺序返回搜索路径队列（源码
-`src/base/plugin.cc:238`）：
+`src/base/plugin.cc` 中 `Plugin::default_search_path()` 实现）：
 
 1. `VLINK_PLUGIN_DIR` 环境变量指定的目录（若非空，插入队首）
 2. 当前工作目录

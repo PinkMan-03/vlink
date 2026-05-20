@@ -237,7 +237,7 @@ auto result = client.invoke(21);
 
 **URL 格式：**
 ```
-shm://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<0|1>]
+shm://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<ms>]
 ```
 
 | ShmConf 参数 | 类型    | 必填 | URL 参数     | 说明                                                |
@@ -347,7 +347,7 @@ int main() {
 
 **URL 格式：**
 ```
-shm2://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<0|1>][#<size>]
+shm2://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<ms>][#<size>]
 ```
 
 | Shm2Conf 参数 | 类型     | 必填 | URL 参数        | 说明                                 |
@@ -357,7 +357,7 @@ shm2://<address>[?event=<name>&domain=<N>&depth=<N>&history=<N>&wait=<0|1>][#<si
 | `domain`      | int32_t  |  -   | `?domain=`      | 域 ID                                |
 | `depth`       | int32_t  |  -   | `?depth=`       | 历史队列深度                         |
 | `history`     | int32_t  |  -   | `?history=`     | 历史缓存                             |
-| `wait`        | int32_t  |  -   | `?wait=0/1`     | 等待就绪                             |
+| `wait`        | int32_t  |  -   | `?wait=<ms>`    | 阻塞等待超时（毫秒，>0 启用）        |
 | `size`        | uint64_t |  -   | `#<size>`       | 缓冲区大小（默认 128B，最大 32MiB）  |
 
 **size 单位**：`B`、`K`/`KB`、`M`/`MB`、`G`/`GB`（不区分大小写），范围 `(0, 32MiB]`。
@@ -477,7 +477,9 @@ using namespace vlink;
 
 int main() {
     // 注册 QoS Profile（程序启动时，创建节点前）
+    // 注意 valid 必须显式设为 true，否则传输层会忽略本 Qos
     Qos reliable_qos;
+    reliable_qos.valid = true;
     reliable_qos.reliability.kind = Qos::Reliability::kReliable;
     reliable_qos.durability.kind  = Qos::Durability::kTransientLocal;
     DdsConf::register_qos("reliable", reliable_qos);
@@ -567,8 +569,9 @@ ddsc://vehicle/speed?qos=sensor
 using namespace vlink;
 
 int main() {
-    // QoS 注册
+    // QoS 注册（valid 必须显式置 true 才会生效）
     Qos qos;
+    qos.valid = true;
     qos.reliability.kind = Qos::Reliability::kReliable;
     DdscConf::register_qos("reliable", qos);
 
@@ -656,7 +659,7 @@ ddst://perception/model/result?domain=1
 
 **URL 格式：**
 ```
-zenoh://<address>[?event=<name>&domain=<N>&qos=<name>&depth=<N>&shm=<0|1>&shm_size=<N>][#<fragment>]
+zenoh://<address>[?event=<name>&domain=<N>&qos=<name>&depth=<N>&shm=<bool>&shm_mode=<init|lazy>&shm_size=<N>&shm_threshold=<N>&shm_loan_threshold=<N>&shm_blocking=<bool>][#<fragment>]
 ```
 
 | ZenohConf 参数        | 类型    | 必填 | URL 参数                          | 说明                                                                                            |
@@ -696,8 +699,9 @@ zenoh://camera/raw?shm=1&shm_size=64M&shm_loan_threshold=4K
 using namespace vlink;
 
 int main() {
-    // 注册 QoS Profile
+    // 注册 QoS Profile（valid 必须为 true 才会被传输层应用）
     Qos qos;
+    qos.valid = true;
     qos.reliability.kind = Qos::Reliability::kReliable;
     ZenohConf::register_qos("reliable", qos);
 
@@ -1163,8 +1167,9 @@ int main() {
     // 4. dds:// 后端：加载 QoS XML（可选）
     vlink::DdsConf::load_global_qos_file("/etc/vlink/dds_qos.xml");
 
-    // 5. dds:// 后端：注册 QoS Profile
+    // 5. dds:// 后端：注册 QoS Profile（valid 必须显式置 true 才会生效）
     vlink::Qos qos;
+    qos.valid = true;
     qos.reliability.kind = vlink::Qos::Reliability::kReliable;
     vlink::DdsConf::register_qos("reliable", qos);
 

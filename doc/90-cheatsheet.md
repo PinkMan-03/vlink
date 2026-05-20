@@ -478,7 +478,7 @@ viewer->register_callback([](const std::vector<DiscoveryViewer::Info>& infos){
 - `-c [config.toml]`：**同时内嵌 iox-roudi**（默认 `-l 2` Middle = 7 档，见 `proxy/etc/proxy_roudi.toml`；`-l 3` High = 8 档，见 `proxy_roudi_large.toml`；`-l 1` Low = 6 档，见 `proxy_roudi_small.toml`）
 - `-l {1|2|3}`：内存策略（Low/Middle/High，默认 Middle）
 - `-m on|off`：Iceoryx 监控（默认 on）
-- `-d <domain>`（0~255）、`-k <key>`、`-b <bind>`、`-p <peer>`、`-s <buf_size>`、`-e <mtu>`、`-n`（native）、`-a`（async）、`-r`（reliable）、`-t`（TCP）、`-g`（SHM 直连）、`-x <max_MB>`（默认 4.0；**注意：`-x 0` 会丢弃所有非空消息**，`proxy_server.cc:1215` 的过滤是 `bytes.size() > real_max_packet_size` 严格判断，没有 "0 = unlimited" 的特判）、`--dds_impl dds|ddsc|ddsr|ddst`、`--runnable <plugins...>`
+- `-d <domain>`（0~255）、`-k <key>`、`-b <bind>`、`-p <peer>`、`-s <buf_size>`、`-e <mtu>`、`-n`（native）、`-a`（async）、`-r`（reliable）、`-t`（TCP）、`-g`（SHM 直连）、`-x <max_MB>`（默认 4.0；**注意：`-x 0` 会丢弃所有非空消息**，`proxy_server.cc:1313` 的过滤是 `bytes.size() > real_max_packet_size` 严格判断，没有 "0 = unlimited" 的特判）、`--dds_impl dds|ddsc|ddsr|ddst`、`--runnable <plugins...>`
 
 **ProxyAPI 嵌入式使用**：
 ```cpp

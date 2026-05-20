@@ -752,7 +752,7 @@ void old_function();
 ### 92.12.2 输入校验
 
 - 所有公共 API 必须**在入口**校验输入（不为空、边界范围、类型合法）
-- 从外部（URL、env、文件、网络）来的字符串长度要有上限（见 `src/extension/discovery_reporter.cc:301` 的 `trim_url.size() > 300` 检查）
+- 从外部（URL、env、文件、网络）来的字符串长度要有上限（见 `src/extension/discovery_reporter.cc:305` 的 `trim_url.size() > 300` 检查）
 - 反序列化前必须校验 size / CRC / 魔数头
 
 ### 92.12.3 加密

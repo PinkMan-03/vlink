@@ -103,7 +103,7 @@ typedef struct {
 } vlink_publisher_handle_t;
 ```
 
-`reserved[0..4]` 用于内部状态（server callback 协调、Security holder 等）；`reserved[5..7]` 当前未承载公开语义，保留给内部扩展。用户代码不得直接读写。
+具体使用约定：`reserved[0]` 由 `vlink_server_handle_t` 占用，保存 `std::shared_ptr<server_state>` holder；`reserved[4]` 对所有节点类型而言都是 Security holder 槽位（`vlink_create_secure_*()` 路径会写入），普通非加密节点该槽位为 `nullptr`。其余槽位（`reserved[1..3]`、`reserved[5..7]`）当前未承载公开语义，保留给内部扩展。用户代码不得直接读写任何 `reserved` 字段。
 
 | 句柄类型                     | 对应 C++ 类型                                   | 用途         |
 | ---------------------------- | ----------------------------------------------- | ------------ |
@@ -114,13 +114,13 @@ typedef struct {
 | `vlink_setter_handle_t`      | `vlink::Setter<vlink::Bytes>`                   | Field 写入   |
 | `vlink_getter_handle_t`      | `vlink::Getter<vlink::Bytes>`                   | Field 读取   |
 
-`vlink_server_handle_t` 的 `reserved` 数组有特殊用途。当前实现把服务端请求状态封装在 `server_state` 中，并通过 holder 管理生命周期：
+`vlink_server_handle_t` 的 `reserved` 数组比其他句柄多用一个槽位，当前实现把服务端请求状态封装在 `server_state` 中，并通过 holder 管理生命周期：
 
 | 字段          | 用途                                               |
 | ------------- | -------------------------------------------------- |
-| `reserved[0]` | 指向 `std::shared_ptr<server_state>` holder；`server_state` 内部保存 mutex、响应 `Bytes`、请求处理中标记和可选 Security 状态 |
-| `reserved[1..3]` | 当前服务端实现不再分别存放响应缓冲、响应字节数或请求处理中标记，用户不得依赖 |
-| `reserved[4]` | 安全服务端路径可用于保存 Security holder |
+| `reserved[0]` | 指向 `std::shared_ptr<server_state>` holder；`server_state` 内部保存 mutex、响应 `Bytes`、请求处理中标记和可选 Security 引用 |
+| `reserved[1..3]` | 未使用；用户不得依赖任何旧版本可能写入的语义 |
+| `reserved[4]` | `vlink_create_secure_server()` 路径用于保存 Security holder（与其他节点的安全 holder 槽位一致） |
 
 ### 18.4.3 回调类型
 
@@ -923,7 +923,7 @@ fn main() {
 2. **`vlink_publish` / `vlink_invoke` / `vlink_set` 的 `data` 指针**：函数调用期间需有效，返回后可以安全释放
 3. **`vlink_get` 的 `data` 缓冲区**：由调用方分配和管理，`*size` 入参必须是缓冲区容量
 4. **消息回调中的 `data` 指针**：仅在回调执行期间有效，需要在回调内完成拷贝
-5. **`vlink_server_handle_t::reserved`**：属于内部实现细节。当前服务端状态通过 `reserved[0]` 的 `server_state` holder 管理，响应内容保存在 `server_state::response`；`reserved[1]` 不承载响应缓冲语义，用户代码不应直接操作任何 `reserved` 字段
+5. **`vlink_server_handle_t::reserved`**：属于内部实现细节。当前服务端状态通过 `reserved[0]` 的 `server_state` holder 管理（响应内容保存在 `server_state::response`），`reserved[4]` 仅在安全服务端时保存 Security holder；其余槽位未使用。用户代码不应直接操作任何 `reserved` 字段
 
 ### 18.13.3 常见错误
 

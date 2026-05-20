@@ -185,18 +185,20 @@ int main() {
 ### 11.3.1 概述
 
 `vlink::Bytes` 是 VLink 的核心数据载体，总大小固定为 **128 字节**。
-96 字节以内的数据直接存储在对象内部（小缓冲优化 SBO），无需堆分配。
-超出部分从内存池或系统堆分配。
+96 字节以内的数据直接存储在对象内部（小缓冲优化 SBO，常量 `kStackSize=96`），无需堆分配。
+超出部分从 `vlink::MemoryPool` 全局池（详见 11.4 节）分配；只有 owned 缓冲区会保留 `capacity_`
+字段以支持 `reserve()` / `resize()` 原位扩容，shallow / loan / 反序列化借用模式的
+`capacity_` 始终为 0。
 
 ### 11.3.2 所有权模型
 
-| 创建方式                | 拥有内存 | 复制行为   | 典型用途                          |
-| ----------------------- | -------- | ---------- | --------------------------------- |
-| `Bytes::create(n)`      | 是       | 深拷贝     | 新建分配                          |
-| `Bytes::shallow_copy()` | 否       | 指针别名   | 零拷贝包装外部缓冲区              |
-| `Bytes::deep_copy()`    | 是       | 深拷贝     | 拥有外部数据的副本                |
-| `Bytes::loan_internal()`| 否（借用）| 指针别名  | Iceoryx 零拷贝借用（shm 后端）   |
-| `Bytes::shallow_copy_ptr()` | 否  | 指针别名   | 包装不透明指针（size == 0）       |
+| 创建方式                | `is_owner()` | `is_loaned()` | `is_ptr()` | 复制行为   | 典型用途                          |
+| ----------------------- | ------------ | ------------- | ---------- | ---------- | --------------------------------- |
+| `Bytes::create(n)`      | `true`       | `false`       | `false`    | 深拷贝     | 新建分配                          |
+| `Bytes::shallow_copy()` | `false`      | `false`       | `false`    | 指针别名   | 零拷贝包装外部缓冲区              |
+| `Bytes::deep_copy()`    | `true`       | `false`       | `false`    | 深拷贝     | 拥有外部数据的副本                |
+| `Bytes::loan_internal()`| `false`      | `true`        | `false`    | 指针别名   | Iceoryx 零拷贝借用（shm 后端，析构时绝不释放） |
+| `Bytes::shallow_copy_ptr()` | `false`  | `false`       | `true`     | 指针别名   | 包装不透明指针（`size == 0`）     |
 
 ### 11.3.3 内存布局
 
