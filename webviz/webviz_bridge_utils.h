@@ -71,6 +71,8 @@ inline std::string proxy_bridge_error_message(const ProxyBridge& bridge, ProxyAP
       return "Proxy error: version mismatch, proxy [" + (proxy_ver.empty() ? std::string("unknown") : proxy_ver) +
              "] vs client [" + VLINK_VERSION + "]";
     }
+    case ProxyAPI::kTokenError:
+      return "Proxy error: authentication handshake failed or token mismatch";
     case ProxyAPI::kUnknownError:
       return "Proxy error: unknown or unclassified startup/runtime failure";
     default:
@@ -88,7 +90,7 @@ inline void log_proxy_bridge_error(const ProxyBridge& bridge, ProxyAPI::Error er
   if VLIKELY (error == ProxyAPI::kUnknownError || error == ProxyAPI::kControlError || error == ProxyAPI::kModeError ||
               error == ProxyAPI::kReliableCompError || error == ProxyAPI::kTcpCompError ||
               error == ProxyAPI::kDirectCompError || error == ProxyAPI::kMultiProxyError ||
-              error == ProxyAPI::kVersionCompError) {
+              error == ProxyAPI::kVersionCompError || error == ProxyAPI::kTokenError) {
     MLOG_E("{}", message);
   } else {
     MLOG_W("{}", message);

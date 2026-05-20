@@ -161,7 +161,7 @@
             <mxPoint x="540" y="508" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="m6_l" value="Control (DDS secure): send_control({mode=kAuto, url_meta_list=[...]})" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#1565c0;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+        <mxCell id="m6_l" value="Control (DDS secure + token): send_control({mode=kAuto, url_meta_list=[...]})" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#1565c0;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
           <mxGeometry x="560" y="492" width="340" height="18" as="geometry" />
         </mxCell>
         <!-- Msg 7: Server subscribes -->

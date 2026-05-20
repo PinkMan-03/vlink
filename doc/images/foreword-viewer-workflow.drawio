@@ -8,7 +8,7 @@
         <mxCell id="title" value="Viewer Workflow &#160;&#183;&#160; From development to post-drive analysis" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=20;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="820" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="Live topics use ProxyAPI; post-drive analysis replays bags through viewer, player and analyzer" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="Live topics use ProxyAPI + Handshake/token; post-drive analysis replays bags through viewer, player and analyzer" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">
           <mxGeometry x="40" y="52" width="820" height="20" as="geometry" />
         </mxCell>
 
@@ -32,7 +32,7 @@
         <mxCell id="p1vw" value="&lt;b&gt;vlink-viewer&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:10px;color:#546e7a&quot;&gt;real-time visualization&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#bbdefb;strokeColor=#1565c0;strokeWidth=1.3;fontSize=12;fontColor=#0d47a1;align=center;shadow=1;arcSize=8;" vertex="1" parent="1">
           <mxGeometry x="590" y="150" width="220" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="p1arr" value="ProxyAPI" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#1565c0;fontSize=11;fontStyle=1;fontColor=#0d47a1;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="p1app" target="p1vw">
+        <mxCell id="p1arr" value="ProxyAPI + token" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#1565c0;fontSize=11;fontStyle=1;fontColor=#0d47a1;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="p1app" target="p1vw">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
@@ -63,7 +63,7 @@
         <mxCell id="p2j" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#2e7d32;strokeColor=#2e7d32;" vertex="1" parent="1">
           <mxGeometry x="440" y="368" width="14" height="14" as="geometry" />
         </mxCell>
-        <mxCell id="p2a1" value="ProxyAPI" style="endArrow=none;html=1;strokeWidth=2.2;strokeColor=#2e7d32;fontSize=11;fontStyle=1;fontColor=#1b5e20;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="p2app" target="p2j">
+        <mxCell id="p2a1" value="ProxyAPI + token" style="endArrow=none;html=1;strokeWidth=2.2;strokeColor=#2e7d32;fontSize=11;fontStyle=1;fontColor=#1b5e20;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="p2app" target="p2j">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="p2a2" value="" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#2e7d32;exitX=0.5;exitY=0.5;entryX=0;entryY=0.5;edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" parent="1" source="p2j" target="p2vw">

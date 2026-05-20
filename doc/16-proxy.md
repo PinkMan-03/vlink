@@ -139,8 +139,8 @@ ProxyAPI 客户端通过心跳检测连接状态。若连续 **5 秒** 未收到
 ### 16.6.1 主要职责
 
 1. 运行 `DiscoveryViewer`，枚举 DDS 域内所有活跃的 Publisher/Subscriber/Server/Client/Setter/Getter
-2. 启用握手时(默认),构造阶段经 `vlink::Uuid::random_hex()` **签发 128-bit 进程级 auth-token**,通过 `get_token()` 提供给运维 / 嵌入式宿主（源码中预留了 `ProxyServer: Auth token issued (prefix=...)` 的诊断日志，默认注释保留，需要时取消注释即可输出 prefix 掩码）
-3. 接收来自 `ProxyAPI` 客户端的握手请求(`HandshakeSrv`)并下发 token；同时校验所有 `Control` 入站的 token,失配丢弃
+2. 启用握手时(默认),构造阶段经 `vlink::Uuid::random_hex()` **签发 128-bit 进程级 auth-token**,通过 `get_token()` 提供给嵌入式宿主做诊断 / 审计（源码中预留了 `ProxyServer: Auth token issued (prefix=...)` 的诊断日志，默认注释保留，需要时取消注释即可输出 prefix 掩码）
+3. 接收来自 `ProxyAPI` 客户端的握手请求(`HandshakeSrv`),在 `HandshakeResp` 中返回 token；同时校验所有 `Control` 入站的 token,失配丢弃
 4. 接收来自 `ProxyAPI` 客户端的 `Control` 指令，切换工作模式
 5. 每秒广播一次 `Time` 心跳（携带版本、主机名、CPU 占用、内存占用、时间戳、token）
 6. 每秒广播一次 `InfoList`（各话题的频率、吞吐量、丢包率、延迟统计）
@@ -163,7 +163,7 @@ std::string token = server.get_token();
 ```
 
 - 构造阶段调用 `vlink::Uuid::random_hex()` 一次性签发,后续每个 `Time` 心跳和每条 `HandshakeResp` 都包含该 token。
-- 源码中预留了启动日志 `ProxyServer: Auth token issued (prefix=a1b2c3d4..., length=32).`（只输出 prefix 掩码，完整 token 不输出）。当前默认构建注释保留，需要分发观察时取消 `proxy/proxy_server/proxy_server.cc` 中相应 `CLOG_I` 注释即可启用。运维方应优先通过 `get_token()`（嵌入式）或安全管道（CLI 进程）取出 token 后下发给客户端。
+- 源码中预留了启动日志 `ProxyServer: Auth token issued (prefix=a1b2c3d4..., length=32).`（只输出 prefix 掩码，完整 token 不输出）。当前默认构建注释保留，需要诊断服务器重启 / token 轮换时可取消 `proxy/proxy_server/proxy_server.cc` 中相应 `CLOG_I` 注释启用。正常客户端**无需也不能手工配置 token**，会通过安全握手 RPC 自动获取。
 - `VLINK_PROXY_ENABLE_HANDSHAKE = 0` 时 `impl_->token` 为空字符串,Time 不带 token,Control 不校验 token；`get_token()` 返回 `""`。
 - 不存在持久化：服务器重启 -> 新 token -> 客户端走自愈路径(见 §16.4.7) 重新握手。
 
@@ -180,7 +180,7 @@ std::string token = server.get_token();
 | `buf_size`             | `uint32_t`              | `0`      | DDS socket 收发缓冲区大小（字节），0 使用内置默认值（8MB）   |
 | `mtu_size`             | `uint32_t`              | `0`      | DDS 分片 MTU 大小（字节），0 使用内置默认值（65500 字节）    |
 | `max_packet_size`      | `double`                | `0`      | 单条消息最大转发大小（MiB），超出则丢弃。**注意**：当前实现不存在"0 表示不限制"的特判，字段为 `0` 时实际会把所有非空消息都丢弃；要放行大包必须显式设置一个足够大的 MiB 值（CLI 默认 4.0，头文件注释与实现不符，以此处描述为准） |
-| `security_key`         | `std::string`           | `""`     | Time/InfoList/Control 通道的对称密钥。空字符串使用内置默认安全槽位，不会导致控制面节点初始化 fatal；显式设置时客户端与服务端的 `security_key` 必须一致。 |
+| `security_key`         | `std::string`           | `""`     | Handshake/Time/InfoList/Control 通道的对称密钥。空字符串使用内置默认安全槽位，不会导致控制面节点初始化 fatal；显式设置时客户端与服务端的 `security_key` 必须一致。 |
 | `bind_ip`              | `std::string`           | `""`     | DDS socket 绑定的本地 IP，空字符串表示绑定所有接口           |
 | `peer_ip`              | `std::string`           | `""`     | DDS 单播对端 IP，空字符串使用多播发现                        |
 | `dds_impl`             | `std::string`           | `"dds"`  | DDS 实现选择：如 `"dds"`（FastDDS）、`"ddsc"`（CycloneDDS）、`"ddsr"`、`"ddst"` |
@@ -215,8 +215,9 @@ int main() {
 
     vlink::ProxyServer server(cfg);
 
-    // 启用握手时,签发的 token 可通过 get_token() 取出,转发给客户端
-    VLOG_I("Server token = ", server.get_token());
+    // 启用握手时,签发的 token 可通过 get_token() 取出做诊断；客户端通过握手自动获取
+    auto token = server.get_token();
+    VLOG_I("Server token prefix = ", token.substr(0, 8));
 
     // 注册终止信号处理，Ctrl+C 时优雅退出
     vlink::Utils::register_terminate_signal([&server](int) {
@@ -328,8 +329,8 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 | `kDirectCompError`   | 5      | 客户端与服务器的 direct 设置不一致               | 否(同上) |
 | `kMultiProxyError`   | 7      | 同一 DDS 域内检测到多个 ProxyServer              | 否       |
 | `kVersionCompError`  | 8      | 握手 / 心跳显示客户端与服务器的 VLINK_VERSION 不一致 | **是**(心跳自动重握手,版本恢复后即清错) |
-| `kUnknownError`      | 9      | 未分类错误                                       | —        |
-| `kTokenError`        | 10     | 握手失败(超时/拒签)、或 Time 心跳里的 token 与本地缓存不一致 | **是**(本地 token 自动清空,心跳每秒重试握手直至成功) |
+| `kTokenError`        | 9      | 握手被拒 / 返回空 token，或 Time 心跳里的 token 与本地缓存不一致 | **是**(本地 token 自动清空,心跳每秒重试握手直至成功) |
+| `kUnknownError`      | 10     | 未分类错误                                       | —        |
 
 ### 16.8.4 ProxyAPI::Config 字段说明
 
@@ -338,7 +339,7 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 | `role`          | `Role`         | `kController` | 客户端角色                                                    |
 | `domain_id`     | `int`          | `0`           | DDS 域 ID，必须与服务器一致                                   |
 | `dds_impl`      | `std::string`  | `"dds"`       | DDS 实现选择                                                  |
-| `security_key`  | `std::string`  | `""`          | 安全密钥；空字符串使用内置默认安全槽位，显式设置时必须与服务器一致 |
+| `security_key`  | `std::string`  | `""`          | Handshake/Time/InfoList/Control 安全密钥；空字符串使用内置默认安全槽位，显式设置时必须与服务器一致 |
 | `native`        | `bool`         | `false`       | 是否限制 DDS 流量到 127.0.0.1                                 |
 | `reliable`      | `bool`         | `false`       | 数据通道 QoS，必须与服务器一致                                |
 | `direct`        | `bool`         | `false`       | 是否使用 SHM 直连，必须与服务器一致                           |
@@ -355,7 +356,7 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 - 若连续 5 秒未收到心跳，判定连接断开，触发 `ConnectCallback(false)`。
 - **握手层** (`VLINK_PROXY_ENABLE_HANDSHAKE` 默认开启)：
   - `reset_handle()` 阶段经 `SecurityClient<HandshakeReq, HandshakeResp>::invoke()` 拉取 token，默认超时 `VLINK_PROXY_HANDSHAKE_WAIT_MS = 800 ms` + `VLINK_PROXY_HANDSHAKE_INVOKE_MS = 800 ms`。
-  - 握手失败 → `do_handshake(Error& out_err)` 出参语义（与 `proxy_api.cc do_handshake()` 实现一致）：
+  - 握手结果 → `do_handshake(Error& out_err)` 出参语义（与 `proxy_api.cc do_handshake()` 实现一致）：
     - `out_err = kVersionCompError` —— 服务器回复 `HANDSHAKE_VERSION_MISMATCH`。
     - `out_err = kTokenError` —— 服务器回复非 `HANDSHAKE_OK` 或返回空 token（如 `HANDSHAKE_INTERNAL_ERROR`）。
     - `out_err = kNoError`（**静默重试**） —— `handshake_cli` 尚未 init 完毕、`wait_for_connected` 超时、`invoke()` 超时；这三种情况都视为 RPC 通道未就绪，由心跳路径下个 tick 重试。
@@ -446,7 +447,7 @@ message HandshakeResp {
 |------------------------|-------------------------|------|
 | 1 (默认) | 1 (默认) | 完整握手,Control / Time 带 token,失配自愈 |
 | 0 | 0 | 跳过握手,Time/Control 不写 token；服务端不校验 token；行为同早期版本 |
-| 1 | 0 | 客户端反复重试握手 → 超时报 `kTokenError` 但服务端不校验,Control 实际能通过；不推荐(行为不直观) |
+| 1 | 0 | 客户端反复重试握手且 `token` 为空，`send_control_sync()` 拒发；不会因 RPC 通道超时上报 `kTokenError`，但行为不直观 |
 | 0 | 1 | 客户端 Control 不带 token → 服务端**丢弃**,看不到日志的运维容易误以为 Control 静默丢失；不推荐 |
 
 → **强烈建议保持默认**,客户端与服务端宏值一致。
@@ -455,11 +456,11 @@ message HandshakeResp {
 
 ```cpp
 vlink::ProxyServer server(cfg);
-const std::string token = server.get_token();   // 32-char hex,可分发给可信客户端
+const std::string token = server.get_token();   // 32-char hex,诊断 / 审计用
 // ... 业务代码 ...
 ```
 
-客户端无需配置 token —— 通过握手自动协商,业务代码完全无感。
+`get_token()` 适合嵌入式宿主做诊断 / 审计；客户端无需配置 token —— 通过握手自动协商,业务代码完全无感。
 
 ---
 

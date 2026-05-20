@@ -62,7 +62,7 @@
         <mxCell id="proxy_c2" value="Data Forwarding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.2;fontSize=12;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="400" y="196" width="280" height="36" as="geometry" />
         </mxCell>
-        <mxCell id="proxy_c3" value="ProxyAPI Broadcast" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.2;fontSize=12;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
+        <mxCell id="proxy_c3" value="ProxyAPI Handshake + Broadcast" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe082;strokeColor=#ef6c00;strokeWidth=1.2;fontSize=12;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="400" y="242" width="280" height="36" as="geometry" />
         </mxCell>
 
@@ -153,7 +153,7 @@
         </mxCell>
 
         <!-- Arrows: Proxy → Foxglove -->
-        <mxCell id="e_proxy_fg" value="ProxyAPI  ·  Info / Data / Time" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#388e3c;fontSize=11;fontStyle=2;fontColor=#1b5e20;labelBackgroundColor=#ffffff;" edge="1" source="proxy_bg" target="fg_bg" parent="1">
+        <mxCell id="e_proxy_fg" value="ProxyAPI  ·  Handshake + Info / Data / Time" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#388e3c;fontSize=10;fontStyle=2;fontColor=#1b5e20;labelBackgroundColor=#ffffff;" edge="1" source="proxy_bg" target="fg_bg" parent="1">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="700" y="214" as="sourcePoint" />
             <mxPoint x="720" y="214" as="targetPoint" />
@@ -164,7 +164,7 @@
         </mxCell>
 
         <!-- Arrows: Proxy → Rerun (curve over Foxglove column) -->
-        <mxCell id="e_proxy_rr" value="ProxyAPI" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#1565c0;fontSize=11;fontStyle=2;fontColor=#0d47a1;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.9;entryX=0;entryY=0.25;" edge="1" source="proxy_bg" target="rr_bg" parent="1">
+        <mxCell id="e_proxy_rr" value="ProxyAPI + token" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.4;strokeColor=#1565c0;fontSize=11;fontStyle=2;fontColor=#0d47a1;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.9;entryX=0;entryY=0.25;" edge="1" source="proxy_bg" target="rr_bg" parent="1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="720" y="454" />

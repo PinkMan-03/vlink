@@ -8,7 +8,7 @@
         <mxCell id="title" value="ProxyAPI Client Flow" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
           <mxGeometry x="20" y="24" width="1080" height="32" as="geometry" />
         </mxCell>
-        <mxCell id="subtitle" value="ProxyAPI(Config) -&gt; register callbacks -&gt; async_run -&gt; send_control(mode) -&gt; observe / record / play" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
+        <mxCell id="subtitle" value="ProxyAPI(Config) -&gt; secure handshake(token) -&gt; callbacks -&gt; send_control(token) -&gt; observe / record / play" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=13;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
           <mxGeometry x="20" y="58" width="1080" height="22" as="geometry" />
         </mxCell>
 
@@ -125,8 +125,8 @@
           <mxGeometry x="420" y="472" width="320" height="30" as="geometry" />
         </mxCell>
 
-        <mxCell id="api_err" value="Error codes: kModeError, kReliableCompError, kVersionCompError, kMultiProxyError" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#c62828;" vertex="1" parent="1">
-          <mxGeometry x="420" y="510" width="320" height="38" as="geometry" />
+        <mxCell id="api_err" value="ProxyAPI::Error: No=0, Mode=1, Control=2, Reliable=3, Tcp=4, Direct=5&#10;MultiProxy=7, Version=8, Token=9, Unknown=10" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=9;fontStyle=2;fontColor=#c62828;" vertex="1" parent="1">
+          <mxGeometry x="420" y="505" width="320" height="44" as="geometry" />
         </mxCell>
 
         <!-- Section 3: ProxyServer + channels -->
@@ -143,22 +143,25 @@
           <mxGeometry x="800" y="144" width="280" height="18" as="geometry" />
         </mxCell>
 
-        <mxCell id="ch_ctrl" value="Control (Pub)&#10;Controller -&gt; Server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="820" y="186" width="240" height="44" as="geometry" />
+        <mxCell id="ch_handshake" value="Handshake (RPC)&#10;issue token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#6a1b9a;strokeWidth=1.2;arcSize=10;fontSize=11;fontStyle=1;fontColor=#4a148c;" vertex="1" parent="1">
+          <mxGeometry x="820" y="176" width="240" height="38" as="geometry" />
         </mxCell>
-        <mxCell id="ch_time" value="Time (Sub)&#10;1Hz heartbeat" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="820" y="240" width="240" height="44" as="geometry" />
+        <mxCell id="ch_ctrl" value="Control (Pub)&#10;+ token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="820" y="222" width="240" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ch_time" value="Time (Sub)&#10;1Hz + token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="820" y="268" width="240" height="38" as="geometry" />
         </mxCell>
         <mxCell id="ch_info" value="InfoList (Sub)&#10;per-URL stats" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="820" y="294" width="240" height="44" as="geometry" />
+          <mxGeometry x="820" y="314" width="240" height="38" as="geometry" />
         </mxCell>
         <mxCell id="ch_data" value="Data (Pub/Sub)&#10;DDS or SHM" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#a5d6a7;strokeColor=#1b5e20;strokeWidth=1.5;arcSize=10;fontSize=11;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="820" y="348" width="240" height="44" as="geometry" />
+          <mxGeometry x="820" y="360" width="240" height="38" as="geometry" />
         </mxCell>
         <mxCell id="srv_note" value="Without a running ProxyServer&#10;connect_callback reports false" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#a5d6a7;strokeWidth=1;arcSize=8;fontSize=10;fontStyle=2;fontColor=#2e7d32;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="820" y="410" width="240" height="46" as="geometry" />
         </mxCell>
-        <mxCell id="srv_match" value="Controller and Server&#10;must share reliable / direct settings" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
+        <mxCell id="srv_match" value="Client and Server share security_key&#10;+ reliable / direct settings" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
           <mxGeometry x="820" y="466" width="240" height="40" as="geometry" />
         </mxCell>
 

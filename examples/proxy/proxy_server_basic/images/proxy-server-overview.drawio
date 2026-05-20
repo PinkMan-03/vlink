@@ -81,7 +81,7 @@
         <mxCell id="srv_dv" value="DiscoveryViewer&#10;enumerate live Publishers / Subscribers&#10;aggregate freq / loss / size" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#a5d6a7;strokeColor=#1b5e20;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#1b5e20;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="380" y="180" width="380" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="srv_hb" value="Heartbeat Timer&#10;1Hz Time message: cpu, mem, version, hostname" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#a5d6a7;strokeColor=#1b5e20;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#1b5e20;shadow=1;" vertex="1" parent="1">
+        <mxCell id="srv_hb" value="Heartbeat Timer&#10;1Hz Time: cpu, mem, version, hostname, token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#a5d6a7;strokeColor=#1b5e20;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#1b5e20;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="380" y="250" width="380" height="50" as="geometry" />
         </mxCell>
         <mxCell id="srv_sub" value="Internal Subscribers&#10;one per URL from send_control()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#a5d6a7;strokeColor=#1b5e20;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#1b5e20;shadow=1;" vertex="1" parent="1">
@@ -107,31 +107,34 @@
         <mxCell id="ch_t" value="3. DDS Channels" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=16;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
           <mxGeometry x="820" y="116" width="260" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="ch_st" value="ProxyServer  &lt;-&gt;  ProxyAPI" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
+        <mxCell id="ch_st" value="ProxyServer  &lt;-&gt;  ProxyAPI (secure control plane)" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
           <mxGeometry x="820" y="144" width="260" height="18" as="geometry" />
         </mxCell>
 
-        <mxCell id="ch_ctrl" value="ControlSub &lt;- ControlPub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="840" y="186" width="240" height="32" as="geometry" />
+        <mxCell id="ch_handshake" value="HandshakeSrv &lt;-&gt; HandshakeCli&#10;issues token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#6a1b9a;strokeWidth=1.2;arcSize=10;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#4a148c;" vertex="1" parent="1">
+          <mxGeometry x="840" y="176" width="240" height="36" as="geometry" />
         </mxCell>
-        <mxCell id="ch_time" value="TimePub -&gt; TimeSub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="840" y="226" width="240" height="32" as="geometry" />
+        <mxCell id="ch_ctrl" value="ControlSub &lt;- ControlPub&#10;validates token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="840" y="220" width="240" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="ch_time" value="TimePub -&gt; TimeSub&#10;echoes token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
+          <mxGeometry x="840" y="264" width="240" height="36" as="geometry" />
         </mxCell>
         <mxCell id="ch_info" value="InfoPub -&gt; InfoSub" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c8e6c9;strokeColor=#2e7d32;strokeWidth=1.2;arcSize=10;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="840" y="266" width="240" height="32" as="geometry" />
+          <mxGeometry x="840" y="308" width="240" height="32" as="geometry" />
         </mxCell>
         <mxCell id="ch_data" value="DataPub -&gt; DataSub&#10;(DDS or SHM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#a5d6a7;strokeColor=#1b5e20;strokeWidth=1.5;arcSize=10;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#1b5e20;" vertex="1" parent="1">
-          <mxGeometry x="840" y="306" width="240" height="44" as="geometry" />
+          <mxGeometry x="840" y="348" width="240" height="42" as="geometry" />
         </mxCell>
 
         <mxCell id="ch_api" value="ProxyAPI (kController)&#10;vlink-viewer / foxglove / rerun&#10;custom tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#388e3c;strokeColor=#1b5e20;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#ffffff;shadow=1;" vertex="1" parent="1">
-          <mxGeometry x="840" y="370" width="240" height="74" as="geometry" />
+          <mxGeometry x="840" y="406" width="240" height="66" as="geometry" />
         </mxCell>
         <mxCell id="ch_biz" value="Business nodes&#10;Publisher A / B &#183; Setter C" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eceff1;strokeColor=#616161;strokeWidth=1.2;arcSize=10;fontSize=11;fontStyle=1;fontColor=#424242;" vertex="1" parent="1">
-          <mxGeometry x="840" y="456" width="240" height="50" as="geometry" />
+          <mxGeometry x="840" y="484" width="240" height="42" as="geometry" />
         </mxCell>
         <mxCell id="ch_note" value="server subscribes on behalf of API" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#2e7d32;" vertex="1" parent="1">
-          <mxGeometry x="840" y="514" width="240" height="22" as="geometry" />
+          <mxGeometry x="840" y="530" width="240" height="22" as="geometry" />
         </mxCell>
 
         <!-- Arrows -->

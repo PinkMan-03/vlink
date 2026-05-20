@@ -57,14 +57,14 @@
  * @par Communication Architecture
  * @code
  *  ProxyAPI (kController)
- *       |--- HandshakeCli RPC ---> HandshakeSrv -->-|  (issues token)
+ *       |--- HandshakeCli RPC -> [DDS secure] -> HandshakeSrv -->-|  (issues token)
  *       |<------------------ token <----------------|
- *       |--- ControlPub --> [DDS] --> ControlSub ---|  (token-stamped controls)
+ *       |--- ControlPub --> [DDS secure] --> ControlSub ---|  (token-stamped controls)
  *       |                                           v
  *       |                               ProxyServer (this)
  *       |                                           |
- *       |<-- TimeSub <--- [DDS] <--- TimePub -------|  (token echoed in heartbeat)
- *       |<-- InfoSub <--- [DDS] <--- InfoPub -------|
+ *       |<-- TimeSub <--- [DDS secure] <--- TimePub -------|  (token echoed in heartbeat)
+ *       |<-- InfoSub <--- [DDS secure] <--- InfoPub -------|
  *       |<-- DataSub <--- [DDS/SHM] <- DataPub -----|
  * @endcode
  *

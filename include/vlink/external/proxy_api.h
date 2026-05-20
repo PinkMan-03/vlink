@@ -65,8 +65,8 @@
  * | kDirectCompError      |   5   | direct setting mismatch.                          |
  * | kMultiProxyError      |   7   | Multiple proxy servers detected on the network.   |
  * | kVersionCompError     |   8   | VLink version mismatch between client and server. |
- * | kUnknownError         |   9   | Unknown error.                                    |
- * | kTokenError           |  10   | Authentication token mismatch with the server.    |
+ * | kTokenError           |   9   | Handshake refused/empty token or token mismatch.  |
+ * | kUnknownError         |  10   | Unknown or unclassified error.                    |
  *
  * @par Connectivity, Handshake, and Heartbeat
  * Internally the API subscribes to a 1-second Time heartbeat published by
@@ -75,9 +75,11 @@
  * RPC handshake against the server's security-authenticated handshake service
  * before any Control message can be published; the server replies with a
  * per-process @em token that the API caches under a dedicated mutex and stamps
- * onto every outgoing @c Control.  Each incoming Time heartbeat must carry the
- * same token or the cached token is cleared and the handshake is retried; a
- * debounced @c kTokenError is reported only after repeated mismatch evidence.
+ * onto every outgoing @c Control.  A refused handshake or empty response token
+ * reports @c kTokenError, while handshake client setup/connect/invoke timeouts
+ * are treated as channel-not-ready and retried silently.  Each incoming Time
+ * heartbeat must carry the same token or the cached token is cleared and the
+ * handshake is retried; the mismatch path reports a debounced @c kTokenError.
  * The 1-second heartbeat then automatically re-runs the handshake until it
  * succeeds, recovering transparently from server restarts.  If no heartbeat is
  * received for 5 consecutive seconds the connection is declared lost and
@@ -220,8 +222,8 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
     kDirectCompError = 5,    ///< Client and server have mismatched direct setting.
     kMultiProxyError = 7,    ///< Multiple proxy servers detected on the same domain.
     kVersionCompError = 8,   ///< VLINK_VERSION string differs between client and server.
-    kUnknownError = 9,       ///< Unknown or unclassified error.
-    kTokenError = 10,        ///< Authentication token does not match the server's token.
+    kTokenError = 9,         ///< Handshake refused/empty token, or Time token mismatch.
+    kUnknownError = 10,      ///< Unknown or unclassified error.
   };
 
   /**

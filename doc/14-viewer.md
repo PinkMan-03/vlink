@@ -116,7 +116,7 @@ vlink-analyzer
 
 ### 14.5.1 功能定位
 
-`vlink-viewer` 是 VLink 通信监控与实时数据可视化的图形化入口，通过 `ProxyAPI`（参见 [16-proxy.md](16-proxy.md#168-proxyapi-说明)）接入本地或远端 vlink-proxy 进程，
+`vlink-viewer` 是 VLink 通信监控与实时数据可视化的图形化入口，通过 `ProxyAPI`（参见 [16-proxy.md](16-proxy.md#168-proxyapi-说明)）接入本地或远端 vlink-proxy 进程；默认由 ProxyAPI 完成 Handshake/token 校验，
 实时展示所有活跃 URL 的通信状态与数据内容。
 
 ### 14.5.2 连接设置（SettingsDialog）
@@ -127,7 +127,7 @@ vlink-analyzer
 | ----------------------- | -------------------------------------------------------------------- |
 | Run as Controller / Listener | 工作模式：Controller（控制器，同一 domain id 只允许一个）或 Listener（监听器） |
 | Domain ID               | 通信域 ID，与中间件保持一致                                          |
-| Security Key            | 安全密钥，启用加密通信时使用                                         |
+| Security Key            | Handshake / Control / Time / InfoList 控制面安全密钥，需与 ProxyServer 一致 |
 | DDS Implement / DDSC Implement | 分别选择 FastDDS 和 CycloneDDS 后端                          |
 | Native Mode             | 仅显示本机节点                                                       |
 | Reliable Mode           | 使用可靠传输模式                                                     |

@@ -28,13 +28,29 @@
 | kAuto | 6 | 自动观察指定主题 |
 | kAutoAndObserveAll | 7 | 自动 + 观察全部 |
 
-### 2.3 配置
+### 2.3 错误码
+
+| 错误码 | 值 | 描述 |
+|--------|---|------|
+| `kNoError` | 0 | 无错误 |
+| `kModeError` | 1 | 保留的旧模式错误码 |
+| `kControlError` | 2 | Control ID 不匹配 |
+| `kReliableCompError` | 3 | reliable 设置不匹配 |
+| `kTcpCompError` | 4 | enable_tcp 设置不匹配 |
+| `kDirectCompError` | 5 | direct 设置不匹配 |
+| `kMultiProxyError` | 7 | 同一域检测到多个 ProxyServer |
+| `kVersionCompError` | 8 | 客户端与服务器版本不匹配 |
+| `kTokenError` | 9 | 握手被拒 / 返回空 token，或心跳 token 失配 |
+| `kUnknownError` | 10 | 未知或未分类错误 |
+
+### 2.4 配置
 
 ```cpp
 ProxyAPI::Config cfg;
 cfg.role = ProxyAPI::kController;
 cfg.dds_impl = "dds";
 cfg.domain_id = 0;
+cfg.security_key = "";  // 显式设置时必须与 ProxyServer 一致
 cfg.reliable = false;
 cfg.match_version = true;
 ```
@@ -52,6 +68,7 @@ cmake --build build --target example_proxy_api_basic
 ## 4. 注意事项
 
 - ProxyAPI 需要一个正在运行的 ProxyServer
+- 默认启用 Handshake/token：客户端通过握手自动获取 token，业务代码无需配置 token
 - 心跳超时 5 秒后声明连接丢失
 - `match_version` 为 true 时检查版本匹配
 - Controller 和 Server 的 reliable/direct 设置必须一致

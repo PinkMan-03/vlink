@@ -144,7 +144,8 @@ int main() {
     std::cout << "  kDirectCompError(5)    Direct setting mismatch" << std::endl;
     std::cout << "  kMultiProxyError(7)    Multiple proxy servers" << std::endl;
     std::cout << "  kVersionCompError(8)   Version mismatch" << std::endl;
-    std::cout << "  kUnknownError(9)       Unknown error" << std::endl;
+    std::cout << "  kTokenError(9)         Handshake refused/empty token or token mismatch" << std::endl;
+    std::cout << "  kUnknownError(10)      Unknown or unclassified error" << std::endl;
   }
 
   // ======== Section 6: Note ========

@@ -1847,6 +1847,9 @@ void MainWindow::update_error(int error) {
     QMessageBox::warning(this, tr("Warning"),
                          tr("The viewer and proxy versions do not match.\nProxy version: [%1]\nViewer version: [%2]")
                              .arg(proxy_version, viewer_version));
+  } else if (error == vlink::ProxyAPI::kTokenError) {
+    is_show_warn_ = true;
+    QMessageBox::warning(this, tr("Warning"), tr("The proxy authentication handshake failed or token does not match."));
   }
 }
 

@@ -100,7 +100,7 @@
         <mxCell id="proxy_api_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#ef6c00;strokeWidth=1.2;arcSize=6;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="480" y="384" width="300" height="260" as="geometry" />
         </mxCell>
-        <mxCell id="proxy_api_title" value="ProxyAPI Broadcast Channels" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
+        <mxCell id="proxy_api_title" value="ProxyAPI Handshake + Broadcast Channels" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=1;fontColor=#e65100;" vertex="1" parent="1">
           <mxGeometry x="480" y="392" width="300" height="22" as="geometry" />
         </mxCell>
 
@@ -112,7 +112,7 @@
           <mxGeometry x="494" y="496" width="272" height="62" as="geometry" />
         </mxCell>
 
-        <mxCell id="cb_time" value="on_time(timestamp_us)&#10;System time broadcast (microseconds)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.2;fontSize=10;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
+        <mxCell id="cb_time" value="on_time(timestamp_us)&#10;System time broadcast + token validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff8e1;strokeColor=#ef6c00;strokeWidth=1.2;fontSize=10;fontStyle=1;fontColor=#bf360c;shadow=1;arcSize=6;" vertex="1" parent="1">
           <mxGeometry x="494" y="570" width="272" height="60" as="geometry" />
         </mxCell>
 
@@ -207,10 +207,10 @@
         </mxCell>
 
         <!-- Proxy -> bridges -->
-        <mxCell id="e_proxy_fg" value="ProxyAPI (DDS)&#10;Info + Data + Time" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#2e7d32;fontSize=11;fontStyle=2;fontColor=#1b5e20;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="proxy_bg" target="fg_proxy_api" parent="1">
+        <mxCell id="e_proxy_fg" value="ProxyAPI (DDS)&#10;Handshake + Info/Data/Time" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#2e7d32;fontSize=11;fontStyle=2;fontColor=#1b5e20;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="proxy_bg" target="fg_proxy_api" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e_proxy_rr" value="ProxyAPI (DDS)&#10;Info + Data + Time" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#1565c0;fontSize=11;fontStyle=2;fontColor=#0d47a1;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="proxy_bg" target="rr_proxy_api" parent="1">
+        <mxCell id="e_proxy_rr" value="ProxyAPI (DDS)&#10;Handshake + Info/Data/Time" style="endArrow=classic;endFill=1;html=1;strokeWidth=2.2;strokeColor=#1565c0;fontSize=11;fontStyle=2;fontColor=#0d47a1;labelBackgroundColor=#ffffff;edgeStyle=orthogonalEdgeStyle;rounded=1;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="proxy_bg" target="rr_proxy_api" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 

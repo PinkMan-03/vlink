@@ -486,14 +486,17 @@ vlink::ProxyAPI::Config cfg;
 cfg.role = vlink::ProxyAPI::kController;     // 或 kListener
 cfg.domain_id = 0;
 cfg.dds_impl = "dds";
+cfg.security_key = "";                       // 显式设置时必须与 ProxyServer 一致
 vlink::ProxyAPI api(cfg);
 api.register_connect_callback([](bool connected){ ... });
 api.register_info_callback([](auto& infos){ ... });
 ```
 
+**Handshake/token**：默认开启 `VLINK_PROXY_ENABLE_HANDSHAKE=1`。`ProxyAPI` 通过 `HandshakeReq/Resp` 自动获取服务器 128-bit token；Control 带 token，Time 回显 token。RPC 未就绪 / 超时是静默重试，握手被拒或 Time token 失配才进入 `kTokenError=9`。
+
 **ProxyAPI::Mode**：`kOffline=0`/`kObserveOne=1`/`kObserveAll=2`/`kRecord=3`/`kPlay=4`/`kEdit=5`/`kAuto=6`/`kAutoAndObserveAll=7`。
 
-**Error codes**：`kNoError=0`/`kModeError=1`/`kControlError=2`/`kReliableCompError=3`/`kTcpCompError=4`/`kDirectCompError=5`/`kMultiProxyError=7`/`kVersionCompError=8`/`kUnknownError=9`。
+**Error codes**：`kNoError=0`/`kModeError=1`/`kControlError=2`/`kReliableCompError=3`/`kTcpCompError=4`/`kDirectCompError=5`/`kMultiProxyError=7`/`kVersionCompError=8`/`kTokenError=9`/`kUnknownError=10`。
 
 ---
 
