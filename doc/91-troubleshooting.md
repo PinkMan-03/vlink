@@ -243,9 +243,9 @@ iperf -c 239.255.0.100 -u -T 1 -t 3   # 发送端
 
 ### 91.4.4 `SecurityPublisher` 与 `SecuritySubscriber` 连通但乱码
 
-**原因**：双端 `Security::Config` 不一致（不同的 `key` / `passphrase`+`pbkdf2_salt`，或一端配 RSA 密钥另一端配自定义回调）。
+**原因**：双端 `Security::Config` 不一致（不同的 `key` / `passphrase`+`pbkdf2_salt`，一端使用空配置默认安全槽位而另一端显式配置，或一端配 RSA 密钥另一端配自定义回调）。
 
-**修复**：两端通过 `SecurityXxx` 构造函数（第二参数）传入完全等价的 `Security::Config`。AES-128-GCM 会在 tag 校验失败时返回 `false`，日志会出现 GCM authentication failed / RSA unwrap failed 等条目。
+**修复**：两端通过 `SecurityXxx` 构造函数（第二参数）传入完全等价的 `Security::Config`，或双端都省略该参数使用内置默认安全槽位。AES-128-GCM 会在 tag 校验失败时返回 `false`，日志会出现 GCM authentication failed / RSA unwrap failed 等条目。
 
 ### 91.4.5 `Server::listen` 被调用了两次
 

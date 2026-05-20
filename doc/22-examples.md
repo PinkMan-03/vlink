@@ -344,7 +344,7 @@ URL 格式说明和各传输后端的配置指南。
 
 | 项目              | 说明                                              |
 | ----------------- | ------------------------------------------------- |
-| `security_basic`  | 内置 AES-128-GCM 加密（`SecurityPublisher`/`SecuritySubscriber` 构造函数传入 `Security::Config::key`） |
+| `security_basic`  | 内置 AES-128-GCM 加密（显式 `Security::Config::key`，并说明缺省配置的默认安全槽位语义） |
 | `security_custom` | 自定义加密回调（`Config::encrypt_callback` / `decrypt_callback`） |
 | `security_rsa`    | RSA-OAEP hybrid + 可选 RSA-PSS 签名（`Config::public_key_pem` / `advanced.signing_key_pem`） |
 | `security_ssl`    | 传输层 SSL/TLS 加密（`set_ssl_options`）          |
@@ -420,7 +420,7 @@ URL 格式说明和各传输后端的配置指南。
 | `c_pubsub`   | C API Publisher/Subscriber（Event 模型）          |
 | `c_rpc`      | C API Server/Client（Method 模型）                |
 | `c_field`    | C API Setter/Getter（Field 模型）                 |
-| `c_security` | C API 应用层加密（独立 `vlink_security_handle_t` 加解密 + `vlink_create_secure_*` 节点装入 `vlink_security_config_t`） |
+| `c_security` | C API 应用层加密（独立 `vlink_security_handle_t` 加解密 + `vlink_create_secure_*` 节点装入 `vlink_security_config_t`，零初始化配置使用默认安全槽位） |
 
 ---
 

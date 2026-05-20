@@ -273,7 +273,8 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityServer on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Service URL string (e.g. @c "dds://my_service").
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new server.
    */
@@ -286,7 +287,8 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityServer on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new server.
    */
@@ -300,7 +302,7 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg Security configuration aggregate (empty by default; empty uses the built-in default symmetric slot).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -318,7 +320,8 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
    * unless the caller requests deferred initialisation.
    *
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

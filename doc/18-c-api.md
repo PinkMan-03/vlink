@@ -7,6 +7,8 @@ VLink C API 提供了一套稳定的、语言无关的纯 C 绑定，封装了 V
 > **覆盖范围**：C API 暴露六个原语的数据面接口（创建/销毁、发布/订阅、请求/响应、读写字段），以及消息级 Security（AES-128-GCM / RSA-OAEP / 自定义回调）和 SSL 选项；**不覆盖** QoS、Bag 录制、Discovery 等高级功能，这些仍须通过 C++ API 使用。数据载荷类型统一为 `Bytes`，序列化类型通过 `vlink_schema_info_t` 的 `ser` + `schema` 传入。
 >
 > 启用加密的节点必须通过 `vlink_create_secure_publisher()` / `vlink_create_secure_subscriber()` / `vlink_create_secure_server()` / `vlink_create_secure_client()` / `vlink_create_secure_setter()` / `vlink_create_secure_getter()` 创建——`Security` 在 `init()` 之前装配完成。C API 不再暴露 `vlink_*_enable_security()` 系列函数。
+>
+> 传入零初始化的 `vlink_security_config_t` 会映射到 `Security::Config{}`，在内置安全算法启用时使用内置默认安全槽位；生产环境建议显式配置 key / passphrase / PEM / 回调。
 
 > **相关文档**：C++ 通信模型参见 [03-event-model.md](03-event-model.md)、[04-method-model.md](04-method-model.md)、[05-field-model.md](05-field-model.md)；传输 URL 格式参见 [07-transport.md](07-transport.md)；C API 示例参见 [22-examples.md](22-examples.md#c_api)。
 

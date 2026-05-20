@@ -470,8 +470,10 @@ VLINK_C_API_EXPORT int vlink_create_subscriber(const char* url, const vlink_sche
  * @param handle        Output handle.  Must not be @c NULL.
  * @param msg_callback  Message handler.  Must not be @c NULL.
  * @param user_data     Opaque pointer forwarded to @p msg_callback.
- * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      provide a decrypt-capable slot.
+ * @param security_cfg  Security configuration.  Must not be @c NULL.  A
+ *                      zero-initialised config uses the built-in default
+ *                      symmetric slot; otherwise it must provide a
+ *                      decrypt-capable slot.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                      on bad arguments (including a non-decrypt-capable
  *                      @p security_cfg),
@@ -547,8 +549,10 @@ VLINK_C_API_EXPORT int vlink_create_server(const char* url, const vlink_schema_i
  * @param handle         Output handle.  Must not be @c NULL.
  * @param req_callback   Request handler.  Must not be @c NULL.
  * @param user_data      Opaque pointer forwarded to @p req_callback.
- * @param security_cfg   Security configuration.  Must not be @c NULL and must
- *                       provide both encrypt- and decrypt-capable slots.
+ * @param security_cfg   Security configuration.  Must not be @c NULL.  A
+ *                       zero-initialised config uses the built-in default
+ *                       symmetric slot; otherwise it must provide both
+ *                       encrypt- and decrypt-capable slots.
  * @return               @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                       on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                       allocation failure, @c VLINK_RET_TRANSFER_ERROR if
@@ -774,8 +778,10 @@ VLINK_C_API_EXPORT int vlink_create_getter(const char* url, const vlink_schema_i
  * @param handle         Output handle.  Must not be @c NULL.
  * @param msg_callback   Callback for push-mode updates, or @c NULL for poll mode.
  * @param user_data      Opaque pointer forwarded to @p msg_callback.
- * @param security_cfg   Security configuration.  Must not be @c NULL and must
- *                       provide a decrypt-capable slot.
+ * @param security_cfg   Security configuration.  Must not be @c NULL.  A
+ *                       zero-initialised config uses the built-in default
+ *                       symmetric slot; otherwise it must provide a
+ *                       decrypt-capable slot.
  * @return               @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                       on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                       allocation failure, @c VLINK_RET_TRANSFER_ERROR if
@@ -884,7 +890,9 @@ typedef struct {
  * @details
  * Each field maps to the field of the same name on @c vlink::Security::Config.
  * String fields are null-terminated; @c NULL or empty strings disable the
- * corresponding slot.  @c pbkdf2_salt is provided as a raw byte buffer with
+ * corresponding explicit field.  If every explicit cryptographic field is empty,
+ * the config maps to the built-in default symmetric slot when built-in algorithms
+ * are enabled.  @c pbkdf2_salt is provided as a raw byte buffer with
  * @c pbkdf2_salt_size bytes; pass @c NULL / @c 0 to leave it empty.  Setting
  * @c pbkdf2_iterations to @c 0 selects the default (200000).
  *
@@ -893,8 +901,8 @@ typedef struct {
  *   overrides every other slot.
  * - When @c public_key_pem / @c private_key_pem are installed the RSA hybrid
  *   path is used for outbound / inbound messages.
- * - Otherwise the symmetric path is used with the key derived from @c key or
- *   @c passphrase + @c pbkdf2_salt.
+ * - Otherwise the symmetric path is used with the key derived from @c key,
+ *   @c passphrase + @c pbkdf2_salt, or the built-in default.
  *
  * @note @c key / @c passphrase are the symmetric key sources. @c advanced holds low-frequency
  * options such as AAD, replay protection, and signing.
@@ -922,7 +930,8 @@ struct vlink_security_config_s {
  * is empty, both callbacks and @c callback_user_data are @c NULL, @c pbkdf2_iterations is 200000,
  * and @c advanced.replay_window is 4096. Set @c advanced.replay_window back to @c 0 to disable
  * replay checks explicitly. Safe to call on a stack variable before populating the fields you
- * actually need.
+ * actually need.  Passing the zero-initialised config to a Security constructor
+ * uses the built-in default symmetric slot when built-in algorithms are enabled.
  *
  * @par Example
  * @code
@@ -941,12 +950,12 @@ VLINK_C_API_EXPORT void vlink_security_config_init(vlink_security_config_t* cfg)
  * @brief Creates a standalone @c Security instance from @p cfg.
  *
  * @details
- * Allocates a @c vlink::Security on the heap.  When @p cfg is @c NULL, or when
- * the supplied configuration yields no usable cryptographic slot (every field
- * was empty or every non-empty field failed validation), the call returns
- * @c NULL and logs a warning.  Invalid PEM fields or weak RSA keys are logged
- * via @c VLOG_W and the offending slot is left empty so long as @b some other
- * slot validated.
+ * Allocates a @c vlink::Security on the heap.  When @p cfg is @c NULL, the call
+ * returns @c NULL and logs a warning.  A zero-initialised @p cfg maps to
+ * @c Security::Config{} and uses the built-in default symmetric slot when
+ * built-in algorithms are enabled.  Invalid PEM fields or weak RSA keys are
+ * logged via @c VLOG_W and the offending slot is left empty so long as @b some
+ * other slot validated.
  *
  * @par Example
  * @code
@@ -966,11 +975,12 @@ VLINK_C_API_EXPORT void vlink_security_config_init(vlink_security_config_t* cfg)
  * vlink_security_destroy(sec);
  * @endcode
  *
- * @param cfg  Configuration aggregate.  Must contain at least one usable slot
- *             (callback pair, symmetric key/passphrase, or RSA PEM).
+ * @param cfg  Configuration aggregate.  A zero-initialised aggregate uses the
+ *             built-in default symmetric slot; otherwise provide a callback
+ *             pair, symmetric key/passphrase, or RSA PEM.
  * @return     New @c vlink_security_handle_t handle, or @c NULL on @c NULL @p cfg,
- *             on a configuration with no usable cryptographic slot, on allocation
- *             failure, or on a C++ construction exception.
+ *             on a configuration with no usable cryptographic slot after validation,
+ *             on allocation failure, or on a C++ construction exception.
  */
 VLINK_C_API_EXPORT vlink_security_handle_t vlink_security_create(const vlink_security_config_t* cfg);
 
@@ -1059,8 +1069,10 @@ VLINK_C_API_EXPORT void vlink_security_free_buffer(uint8_t* buf);
  * @param url           VLink topic URL.  Must not be @c NULL.
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
  * @param handle        Output handle.  Must not be @c NULL.
- * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      provide an encrypt-capable slot.
+ * @param security_cfg  Security configuration.  Must not be @c NULL.  A
+ *                      zero-initialised config uses the built-in default
+ *                      symmetric slot; otherwise it must provide an
+ *                      encrypt-capable slot.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                      on bad arguments (including a non-encrypt-capable
  *                      @p security_cfg),
@@ -1083,8 +1095,10 @@ VLINK_C_API_EXPORT int vlink_create_secure_publisher(const char* url, const vlin
  * @param url           VLink service URL.  Must not be @c NULL.
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
  * @param handle        Output handle.  Must not be @c NULL.
- * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      provide both encrypt- and decrypt-capable slots.
+ * @param security_cfg  Security configuration.  Must not be @c NULL.  A
+ *                      zero-initialised config uses the built-in default
+ *                      symmetric slot; otherwise it must provide both encrypt-
+ *                      and decrypt-capable slots.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                      on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                      allocation failure, or @c VLINK_RET_RUNTIME_ERROR on
@@ -1107,8 +1121,10 @@ VLINK_C_API_EXPORT int vlink_create_secure_client(const char* url, const vlink_s
  * @param url           VLink field URL.  Must not be @c NULL.
  * @param schema_info   Optional bundled @c ser + @c schema metadata.
  * @param handle        Output handle.  Must not be @c NULL.
- * @param security_cfg  Security configuration.  Must not be @c NULL and must
- *                      provide an encrypt-capable slot.
+ * @param security_cfg  Security configuration.  Must not be @c NULL.  A
+ *                      zero-initialised config uses the built-in default
+ *                      symmetric slot; otherwise it must provide an
+ *                      encrypt-capable slot.
  * @return              @c VLINK_RET_NO_ERROR on success, @c VLINK_RET_INVALID_ERROR
  *                      on bad arguments, @c VLINK_RET_MEMORY_ERROR on pool
  *                      allocation failure, or @c VLINK_RET_RUNTIME_ERROR on

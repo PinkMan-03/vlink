@@ -191,7 +191,7 @@ static ReplayWindow& get_peer_window(std::vector<PeerReplay>& peers, uint64_t se
 }
 
 static bool accept_replay(ReplayWindow& replay, uint64_t seq, uint32_t window_bits) {
-  if VUNLIKELY (window_bits == 0U) {
+  if (window_bits == 0U) {
     return true;
   }
 
@@ -406,7 +406,7 @@ static bool decrypt_aad_parts(EVP_CIPHER_CTX* ctx, const AadParts& aad) noexcept
   return true;
 }
 
-static Bytes derive_aes_key_sha256(const std::string& seed) noexcept {
+static Bytes derive_aes_key_sha256(const uint8_t* seed, size_t seed_size) noexcept {
   Bytes out = Bytes::create(kAesKeySize);
 
   if VUNLIKELY (out.data() == nullptr) {
@@ -417,13 +417,17 @@ static Bytes derive_aes_key_sha256(const std::string& seed) noexcept {
   DigestScrub digest_scrub{digest, sizeof(digest)};
   unsigned int digest_len = 0;
 
-  if VUNLIKELY (EVP_Digest(seed.data(), seed.size(), digest, &digest_len, EVP_sha256(), nullptr) != 1) {
+  if VUNLIKELY (EVP_Digest(seed, seed_size, digest, &digest_len, EVP_sha256(), nullptr) != 1) {
     return Bytes{};
   }
 
   std::memcpy(out.data(), digest, kAesKeySize);
 
   return out;
+}
+
+static Bytes derive_aes_key_sha256(const std::string& seed) noexcept {
+  return derive_aes_key_sha256(reinterpret_cast<const uint8_t*>(seed.data()), seed.size());
 }
 
 static Bytes derive_aes_key_pbkdf2(const std::string& passphrase, const uint8_t* salt, size_t salt_len,
@@ -934,7 +938,7 @@ static bool derive_symmetric_slot_key(const std::string& key, const std::string&
                                       uint32_t iterations, Bytes& out) {
   out = Bytes{};
 
-  if VUNLIKELY (!passphrase.empty()) {
+  if (!passphrase.empty()) {
     if VUNLIKELY (salt.size() < kPbkdf2MinSaltSize || salt.data() == nullptr) {
       VLOG_W("Security: rejected passphrase: salt must be >= ", kPbkdf2MinSaltSize, " bytes");
       return false;
@@ -955,7 +959,7 @@ static bool derive_symmetric_slot_key(const std::string& key, const std::string&
     return true;
   }
 
-  if VLIKELY (!key.empty()) {
+  if (!key.empty()) {
     out = derive_aes_key_sha256(key);
 
     if VUNLIKELY (out.size() != kAesKeySize) {
@@ -973,11 +977,11 @@ static bool install_symmetric_key(SymmetricKeySlot& slot, const std::string& key
                                   const Bytes& salt, uint32_t iterations) {
   Bytes derived;
 
-  if (!derive_symmetric_slot_key(key, passphrase, salt, iterations, derived)) {
+  if VUNLIKELY (!derive_symmetric_slot_key(key, passphrase, salt, iterations, derived)) {
     return false;
   }
 
-  if VUNLIKELY (!slot.key.empty()) {
+  if (!slot.key.empty()) {
     OPENSSL_cleanse(slot.key.data(), slot.key.size());
   }
 
@@ -985,6 +989,36 @@ static bool install_symmetric_key(SymmetricKeySlot& slot, const std::string& key
   slot.peers.clear();
 
   return true;
+}
+
+static bool install_built_in_default_slot(SymmetricKeySlot& slot) {
+  std::array<uint8_t, kAadDomainSize + 2U> seed{};
+  std::memcpy(seed.data(), kAadDomain, kAadDomainSize);
+  seed[kAadDomainSize] = kEnvelopeVersion;
+  seed[kAadDomainSize + 1U] = kEnvelopeModeSymmetric;
+
+  Bytes derived = derive_aes_key_sha256(seed.data(), seed.size());
+  OPENSSL_cleanse(seed.data(), seed.size());
+
+  if VUNLIKELY (derived.size() != kAesKeySize || derived.data() == nullptr) {
+    VLOG_W("Security: default security slot derivation failed");
+    return false;
+  }
+
+  if (!slot.key.empty()) {
+    OPENSSL_cleanse(slot.key.data(), slot.key.size());
+  }
+
+  slot.key = std::move(derived);
+  slot.peers.clear();
+
+  return true;
+}
+
+static bool has_explicit_security_field(const Security::Config& cfg) noexcept {
+  return !cfg.key.empty() || !cfg.passphrase.empty() || !cfg.public_key_pem.empty() || !cfg.private_key_pem.empty() ||
+         !cfg.advanced.signing_key_pem.empty() || !cfg.advanced.verify_key_pem.empty() ||
+         static_cast<bool>(cfg.encrypt_callback) || static_cast<bool>(cfg.decrypt_callback);
 }
 
 static bool next_nonce(uint64_t& send_seq, uint64_t& sender_id, std::array<uint8_t, kAesNonceSize>& nonce_base,
@@ -1025,7 +1059,7 @@ static bool next_nonce(uint64_t& send_seq, uint64_t& sender_id, std::array<uint8
 }
 
 static void cleanse_symmetric_key(SymmetricKeySlot& slot) noexcept {
-  if VLIKELY (!slot.key.empty() && slot.key.data() != nullptr) {
+  if (!slot.key.empty() && slot.key.data() != nullptr) {
     OPENSSL_cleanse(slot.key.data(), slot.key.size());
   }
 
@@ -1092,6 +1126,10 @@ Security::Security(const Config& cfg) : Security(Config{cfg}) {}
 Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
   impl_->config = std::move(cfg);
 
+#ifdef VLINK_ENABLE_SECURITY
+  const bool had_explicit_security_field = has_explicit_security_field(impl_->config);
+#endif
+
   if VUNLIKELY (static_cast<bool>(impl_->config.encrypt_callback) !=
                 static_cast<bool>(impl_->config.decrypt_callback)) {
     VLOG_W(
@@ -1109,10 +1147,14 @@ Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
     VLOG_W("Security: rejected aad_context: context exceeds 65535 bytes");
   }
 
-  (void)install_symmetric_key(impl_->symmetric_key, impl_->config.key, impl_->config.passphrase,
-                              impl_->config.pbkdf2_salt, impl_->config.pbkdf2_iterations);
+  if (!had_explicit_security_field) {
+    (void)install_built_in_default_slot(impl_->symmetric_key);
+  } else {
+    (void)install_symmetric_key(impl_->symmetric_key, impl_->config.key, impl_->config.passphrase,
+                                impl_->config.pbkdf2_salt, impl_->config.pbkdf2_iterations);
+  }
 
-  if VUNLIKELY (!impl_->config.public_key_pem.empty()) {
+  if (!impl_->config.public_key_pem.empty()) {
     auto pkey = load_pubkey_from_pem(impl_->config.public_key_pem);
 
     if VUNLIKELY (!pkey) {
@@ -1122,7 +1164,7 @@ Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
     }
   }
 
-  if VUNLIKELY (!impl_->config.private_key_pem.empty()) {
+  if (!impl_->config.private_key_pem.empty()) {
     auto pkey = load_privkey_from_pem(impl_->config.private_key_pem);
 
     if VUNLIKELY (!pkey) {
@@ -1132,7 +1174,7 @@ Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
     }
   }
 
-  if VUNLIKELY (!impl_->config.advanced.signing_key_pem.empty()) {
+  if (!impl_->config.advanced.signing_key_pem.empty()) {
     auto pkey = load_privkey_from_pem(impl_->config.advanced.signing_key_pem);
 
     if VUNLIKELY (!pkey) {
@@ -1142,7 +1184,7 @@ Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
     }
   }
 
-  if VUNLIKELY (!impl_->config.advanced.verify_key_pem.empty()) {
+  if (!impl_->config.advanced.verify_key_pem.empty()) {
     auto pkey = load_pubkey_from_pem(impl_->config.advanced.verify_key_pem);
 
     if VUNLIKELY (!pkey) {
@@ -1152,9 +1194,9 @@ Security::Security(Config&& cfg) : impl_(std::make_unique<Impl>()) {
     }
   }
 #else
-  if VUNLIKELY (!impl_->config.key.empty() || !impl_->config.passphrase.empty() ||
-                !impl_->config.public_key_pem.empty() || !impl_->config.private_key_pem.empty() ||
-                !impl_->config.advanced.signing_key_pem.empty() || !impl_->config.advanced.verify_key_pem.empty()) {
+  if (!impl_->config.key.empty() || !impl_->config.passphrase.empty() || !impl_->config.public_key_pem.empty() ||
+      !impl_->config.private_key_pem.empty() || !impl_->config.advanced.signing_key_pem.empty() ||
+      !impl_->config.advanced.verify_key_pem.empty()) {
     VLOG_W(
         "Security: ignoring built-in algorithm fields (VLINK_ENABLE_SECURITY off); "
         "only Config::encrypt_callback / decrypt_callback will function.");
@@ -1201,12 +1243,12 @@ bool Security::is_configured() const noexcept {
   std::lock_guard lock(impl_->mtx);
 
 #ifdef VLINK_ENABLE_SECURITY
-  if VLIKELY (impl_->aad_context_valid) {
-    if VLIKELY (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
+  if (impl_->aad_context_valid) {
+    if (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
       return true;
     }
 
-    if VUNLIKELY (impl_->public_key || impl_->private_key) {
+    if (impl_->public_key || impl_->private_key) {
       return true;
     }
   }
@@ -1231,11 +1273,11 @@ bool Security::can_encrypt() const noexcept {
     return false;
   }
 
-  if VLIKELY (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
+  if (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
     return true;
   }
 
-  if VUNLIKELY (impl_->public_key) {
+  if (impl_->public_key) {
     return true;
   }
 #endif
@@ -1255,11 +1297,11 @@ bool Security::can_decrypt() const noexcept {
     return false;
   }
 
-  if VLIKELY (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
+  if (impl_->symmetric_key.key.size() >= kAesKeySize && impl_->symmetric_key.key.data() != nullptr) {
     return true;
   }
 
-  if VUNLIKELY (impl_->private_key) {
+  if (impl_->private_key) {
     return true;
   }
 #endif
@@ -1276,7 +1318,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
     return false;
   }
 
-  if VUNLIKELY (impl_->config.encrypt_callback) {
+  if (impl_->config.encrypt_callback) {
     if VUNLIKELY (!impl_->config.encrypt_callback(in, out)) {
       out = Bytes{};
       return false;
@@ -1296,7 +1338,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
     return false;
   }
 
-  if VUNLIKELY (impl_->public_key) {
+  if (impl_->public_key) {
     uint8_t session_key[kAesKeySize] = {};
     DigestScrub session_scrub{session_key, sizeof session_key};
     uint8_t nonce[kAesNonceSize] = {};
@@ -1361,7 +1403,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
 
     Bytes signature;
 
-    if VUNLIKELY (impl_->signing_key) {
+    if (impl_->signing_key) {
       Bytes signed_range = Bytes::create(aad.size() + body_size);
       if VUNLIKELY (signed_range.data() == nullptr) {
         return false;
@@ -1400,7 +1442,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
 
     std::memcpy(dst + kAsymHeaderFieldsSize, wrapped.data(), wrapped.size());
 
-    if VUNLIKELY (!signature.empty()) {
+    if (!signature.empty()) {
       std::memcpy(dst + kAsymHeaderFieldsSize + wrapped.size(), signature.data(), signature.size());
     }
 
@@ -1412,7 +1454,7 @@ bool Security::encrypt(const Bytes& in, Bytes& out) {
   auto* key_slot = &impl_->symmetric_key;
 
   if VUNLIKELY (key_slot->key.size() < kAesKeySize || key_slot->key.data() == nullptr) {
-    VLOG_W("Security::encrypt no symmetric key installed; construct with a non-empty Config");
+    VLOG_W("Security::encrypt no symmetric key installed; construct with a usable Config");
     return false;
   }
 
@@ -1465,7 +1507,7 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
     return false;
   }
 
-  if VUNLIKELY (impl_->config.decrypt_callback) {
+  if (impl_->config.decrypt_callback) {
     if VUNLIKELY (!impl_->config.decrypt_callback(in, out)) {
       out = Bytes{};
       return false;
@@ -1493,8 +1535,8 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
 
   const uint8_t* src = in.data();
 
-  if VUNLIKELY (header.mode == kEnvelopeModeAsymmetric) {
-    if VUNLIKELY (!impl_->private_key) {
+  if (header.mode == kEnvelopeModeAsymmetric) {
+    if (!impl_->private_key) {
       VLOG_W("Security::decrypt no private key installed for asymmetric envelope");
       return false;
     }
@@ -1534,7 +1576,7 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
       return false;
     }
 
-    if VUNLIKELY (impl_->verify_key) {
+    if (impl_->verify_key) {
       if VUNLIKELY (sig_len == 0U) {
         VLOG_W("Security::decrypt verify_key set but message is unsigned");
         return false;
@@ -1597,7 +1639,7 @@ bool Security::decrypt(const Bytes& in, Bytes& out) {
     return true;
   }
 
-  if VLIKELY (header.mode == kEnvelopeModeSymmetric) {
+  if (header.mode == kEnvelopeModeSymmetric) {
     auto* key_slot = &impl_->symmetric_key;
 
     if VUNLIKELY (key_slot->key.size() < kAesKeySize || key_slot->key.data() == nullptr) {

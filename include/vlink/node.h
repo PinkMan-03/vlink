@@ -74,7 +74,8 @@
  * @par Security
  * Enable per-message encryption by using the @c Security* aliases.  The
  * @c Security::Config aggregate is the second constructor argument; there is
- * no runtime setter:
+ * no runtime setter.  Omitting the argument, or passing an empty config, uses
+ * the built-in default symmetric slot when built-in algorithms are enabled:
  * @code
  * Security::Config cfg;
  * cfg.key = "my-secret";
@@ -536,10 +537,12 @@ class Node {
    * Internal helper used by @c SecurityPublisher / @c SecuritySubscriber /
    * @c SecurityServer / @c SecurityClient / @c SecuritySetter /
    * @c SecurityGetter constructors after @c impl_ is created and before
-   * @c init().  Delegates validation and storage to @c NodeImpl::enable_security().
+   * @c init().  Delegates default handling, validation, and storage to
+   * @c NodeImpl::enable_security().
    *
    * @param cfg  Security configuration aggregate.
-   * @return     @c true when @p cfg is usable for this node role and transport.
+   * @return     @c true when @p cfg, including the empty default case, is usable
+   *             for this node role and transport.
    */
   bool enable_security(const Security::Config& cfg);
 
@@ -551,7 +554,8 @@ class Node {
    * @c NodeImpl::enable_security(Security::Config&&) without an extra copy.
    *
    * @param cfg  Security configuration aggregate to consume.
-   * @return     @c true when @p cfg is usable for this node role and transport.
+   * @return     @c true when @p cfg, including the empty default case, is usable
+   *             for this node role and transport.
    */
   bool enable_security(Security::Config&& cfg);
 

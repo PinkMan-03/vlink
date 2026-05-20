@@ -58,7 +58,7 @@ typedef struct {
   vlink_security_advanced_config_t advanced;
 } vlink_security_config_t;
 
-void vlink_security_config_init(vlink_security_config_t* cfg);  // 清零 + 默认值
+void vlink_security_config_init(vlink_security_config_t* cfg);  // 清零 + 默认值；保持零配置会使用内置默认安全槽位
 ```
 
 ### 3.2 独立加解密
@@ -95,7 +95,7 @@ vlink_destroy_publisher(&pub);
 六种节点都有对应的原子构造接口：
 `vlink_create_secure_publisher` / `_subscriber` / `_server` / `_client` / `_setter` / `_getter`。
 
-`vlink_create_secure_*` 在 `advanced.aad_context` 为空时会自动绑定 `url|ser_type|schema_type`；`schema_info == NULL` 时按 C API 的 `Bytes` 默认值绑定为 `url||VLINK_SCHEMA_RAW`。独立 `vlink_security_create()` 不会自动推导上下文。
+`vlink_create_secure_*` 在 `advanced.aad_context` 为空时会自动绑定 `url|ser_type|schema_type`；`schema_info == NULL` 时按 C API 的 `Bytes` 默认值绑定为 `url||VLINK_SCHEMA_RAW`。传入零初始化的 `vlink_security_config_t` 会使用内置默认安全槽位；独立 `vlink_security_create()` 不会自动推导上下文，且 `cfg == NULL` 仍返回空句柄。
 
 ### 3.4 返回码
 
@@ -109,7 +109,7 @@ vlink_destroy_publisher(&pub);
 
 ## 4. 限制
 
-- C API 的 `vlink_create_secure_*` 在 C wrapper 层对 `Bytes` payload 加解密；它不走 C++ `SecurityXxx` 的 `NodeImpl::enable_security()` 传输限制。跨 C API / C++ / Python 互通时，双方必须使用相同 URL、schema metadata 和 `Security::Config`。
+- C API 的 `vlink_create_secure_*` 在 C wrapper 层对 `Bytes` payload 加解密；它不走 C++ `SecurityXxx` 的 `NodeImpl::enable_security()` 传输限制。跨 C API / C++ / Python 互通时，双方必须使用相同 URL、schema metadata 和等价的安全配置（同一显式配置，或双端都使用零初始化/空配置默认安全槽位）。
 - 因为 `Security` 在 `vlink_create_secure_*` 内部于 `listen()` / `init()` 之前装配，所以不存在“前几条消息可能走明文”的窗口。
 - `vlink_security_config_t.encrypt_callback` 与 `decrypt_callback` 必须**成对**安装，单独一个会被忽略并打 warning。
 - 同一 `vlink_security_handle_t` 上的 encrypt/decrypt callback 会串行执行；多个 handle 共享回调状态时仍需业务自行同步。

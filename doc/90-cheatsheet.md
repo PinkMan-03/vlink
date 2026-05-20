@@ -136,7 +136,7 @@ auto sp = Publisher<T>::create_shared(url_str);
 | `void set_property(key, value)` / `std::string get_property(key) const` | 自定义属性（会在 Discovery 广播） |
 | `void set_ser_type(ser, schema_type)` / `const std::string& get_ser_type()` / `SchemaType get_schema_type()` | 显式序列化类型名 |
 | `void set_discovery_enabled(bool)` / `bool get_discovery_enabled()` | 开关本节点的 Discovery 上报 |
-| `SecurityXxx(url, Security::Config{}, type)` | 加密（仅通过 `SecurityPublisher/Subscriber/...` 的构造函数传入；`enable_security()` / `security()` 已下沉为内部实现） |
+| `SecurityXxx(url, Security::Config{}, type)` | 加密（空配置使用内置默认安全槽位；仅通过 `SecurityPublisher/Subscriber/...` 的构造函数传入） |
 | `void set_record_path(path)` | 用 BagWriter 单节点旁路录制 |
 | `void set_ssl_options(SslOptions)` | TLS 配置（ddsc/mqtt/zenoh） |
 | `void bind_proto_arena(void*)` | 绑定 Google Arena（Protobuf） |
@@ -315,7 +315,7 @@ cfg.key = "my-secret";                          // 对称：SHA-256 截断为 AE
 vlink::SecurityPublisher<Msg> pub("dds://topic", cfg);   // sec_cfg 作为构造函数第二个参数
 ```
 
-- 配置一次性：`Security::Config` 是 aggregate；只能在构造时传入（`SecurityXxx` 的第 2 个参数，可缺省）
+- 配置一次性：`Security::Config` 是 aggregate；只能在构造时传入（`SecurityXxx` 的第 2 个参数，可缺省；缺省使用内置默认安全槽位）
 - 无运行时 setter：要换密钥/回调必须销毁重建节点
 - 模式自动选择：自定义回调 > RSA 非对称 > 对称
 - 不支持：`intra://`（无序列化流程）、`dds://` + CDR（CDR 直通 DDS，绕过 VLink 管道）

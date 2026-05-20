@@ -470,13 +470,13 @@ class MpmcQueue : public MpmcQueueBase {
 #ifdef _WIN32
       auto* p = static_cast<ChunkT*>(_aligned_malloc(sizeof(ChunkT) * n, alignof(ChunkT)));
 
-      if (p == nullptr) {
+      if VUNLIKELY (p == nullptr) {
         throw std::bad_alloc();
       }
 #else
       ChunkT* p;
 
-      if (posix_memalign(reinterpret_cast<void**>(&p), alignof(ChunkT), sizeof(ChunkT) * n) != 0) {
+      if VUNLIKELY (posix_memalign(reinterpret_cast<void**>(&p), alignof(ChunkT), sizeof(ChunkT) * n) != 0) {
         throw std::bad_alloc();
       }
 #endif

@@ -486,8 +486,9 @@ class VLINK_EXPORT NodeImpl {
    * @details
    * Called before @c init() by the protected @c Node::enable_security() helper.
    * Rejects unsupported transports, fills an empty AAD context from the node
-   * wire metadata, validates the resulting @c Security instance against the
-   * current node role, then stores it in @c security on success.
+   * wire metadata, lets @c Security handle the empty-config default, validates
+   * the resulting instance against the current node role, then stores it in
+   * @c security on success.
    *
    * @param cfg  Security configuration aggregate supplied by the public node wrapper.
    * @return @c true when a usable @c Security instance was installed; otherwise @c false.
@@ -501,7 +502,7 @@ class VLINK_EXPORT NodeImpl {
    * Same validation path as the const-reference overload, but avoids copying
    * callback targets and key material when the caller owns the config.  The
    * method may fill @c cfg.advanced.aad_context before moving it into
-   * @c Security.
+   * @c Security; an otherwise empty config is defaulted by @c Security.
    *
    * @param cfg  Security configuration aggregate to consume.
    * @return @c true when a usable @c Security instance was installed; otherwise @c false.

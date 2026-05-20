@@ -552,7 +552,7 @@ vlink::Publisher<MyCustomType> pub("shm://my/topic");
 `Node` 基类提供以下通用能力：
 - **懒初始化**：通过 `InitType::kWithoutInit` 参数，可以推迟 `init()` 调用，用于在构造器中注册回调后再初始化
 - **QoS 配置**：通过传输配置对象（如 `DdsConf`）或 URL 参数（如 `?qos=name&depth=10`）配置 QoS 策略
-- **安全密钥**：通过 `SecurityXxx` 派生类构造函数（第二参数）一次性传入 `Security::Config` 配置加密/解密参数
+- **安全密钥**：通过 `SecurityXxx` 派生类构造函数（第二参数）一次性传入 `Security::Config` 配置加密/解密参数；省略时使用内置默认安全槽位
 - **消息录制**：`set_record_path()` 启用自动消息录制，所有通过该节点的消息均被记录到 bag 文件
 - **服务发现**：`set_discovery_enabled()` 控制该节点是否参与发现广播
 - **属性 KV 存储**：`set_property()` / `get_property()` 用于存储节点元数据
@@ -819,7 +819,7 @@ VLink 将安全加密作为模板参数，与正常通信完全同构：
 // 普通发布者
 vlink::Publisher<MyMsg> pub("dds://my/topic");
 
-// 加密发布者（接口仅多一个 Security::Config 构造参数）
+// 加密发布者（可显式传入 Security::Config；省略时使用内置默认安全槽位）
 vlink::Security::Config cfg;
 cfg.key = "vlink-secret";   // 对称 AES-128-GCM；SHA-256 截断后作为 AES key
 vlink::SecurityPublisher<MyMsg> sec_pub("dds://my/topic", cfg);

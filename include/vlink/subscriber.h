@@ -286,7 +286,8 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> 
    * @brief Creates a @c SecuritySubscriber on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Topic URL string (e.g. @c "dds://vehicle/speed").
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new subscriber.
    */
@@ -299,7 +300,8 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> 
    * @brief Creates a @c SecuritySubscriber on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Topic URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new subscriber.
    */
@@ -313,7 +315,7 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> 
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg Security configuration aggregate (empty by default; empty uses the built-in default symmetric slot).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -331,7 +333,8 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> 
    * unless the caller requests deferred initialisation.
    *
    * @param url_str  Topic URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

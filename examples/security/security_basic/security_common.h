@@ -30,8 +30,9 @@
 namespace security_common {
 
 // Algorithm metadata for the construction-only Security::Config API.
-// All endpoints must construct Security with matching Config fields; there is
-// no built-in default key.  Inject your own key via:
+// All endpoints must construct Security with matching Config fields.  An empty
+// Config uses the built-in default symmetric slot; production deployments should
+// inject their own key via:
 //   vlink::Security::Config cfg;
 //   cfg.key = "...";  // or cfg.passphrase + cfg.pbkdf2_salt
 //   vlink::SecurityPublisher<T> pub(url, cfg);  // cfg passed as the 2nd ctor arg

@@ -331,7 +331,7 @@ class VLINK_PROXY_API_EXPORT ProxyAPI : public MessageLoop {
     Role role{kController};       ///< Role of this client instance.
     int domain_id{0};             ///< DDS domain ID; must match the server's domain_id.
     std::string dds_impl{"dds"};  ///< DDS implementation transport: "dds", "ddsc", "ddsr", etc.
-    std::string security_key;     ///< Optional security key for encrypted DDS channels; must match the server key.
+    std::string security_key;     ///< Optional security key; empty uses the built-in default security slot.
     bool native{false};           ///< When true, restricts all DDS traffic to 127.0.0.1 (loopback only).
     bool reliable{false};         ///< Use reliable DDS QoS; must match the server's reliable setting.
     bool direct{false};           ///< Use direct SHM channels for data; must match the server's direct setting.

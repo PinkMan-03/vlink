@@ -155,7 +155,7 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    * | buf_size                | 0        | DDS socket buffer size in bytes; 0 = built-in default.                |
    * | mtu_size                | 0        | DDS MTU size in bytes; 0 = built-in default.                          |
    * | max_packet_size         | 0        | Max relayed message size in MiB; see note below.                      |
-   * | security_key            | ""       | Security key for Time, Info, and Control DDS channels.                |
+   * | security_key            | ""       | Security key for DDS control channels; empty = default security slot. |
    * | bind_ip                 | ""       | Bind DDS sockets to this IP; empty = any interface.                   |
    * | peer_ip                 | ""       | Unicast peer IP for DDS discovery; empty = multicast.                 |
    * | dds_impl                | "dds"    | DDS implementation: "dds", "ddsc", "ddsr", etc.                       |
@@ -185,7 +185,7 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
     uint32_t mtu_size{0};     ///< DDS fragment MTU in bytes; 0 = default.
     double max_packet_size{
         0};  ///< Maximum relayed payload in MiB; 0 drops every non-empty message (set > 0 to forward).
-    std::string security_key;                ///< Security key for authenticated DDS channels.
+    std::string security_key;                ///< Security key; empty = default security slot.
     std::string bind_ip;                     ///< Local IP to bind DDS sockets; empty = any.
     std::string peer_ip;                     ///< Peer unicast IP for DDS; empty = multicast.
     std::string dds_impl{"dds"};             ///< DDS implementation transport.

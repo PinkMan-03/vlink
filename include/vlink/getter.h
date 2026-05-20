@@ -331,7 +331,8 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityGetter on the heap wrapped in a @c unique_ptr.
    *
    * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c UniquePtr owning the new getter.
    */
@@ -344,7 +345,8 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    * @brief Creates a @c SecurityGetter on the heap wrapped in a @c shared_ptr.
    *
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    * @return         @c SharedPtr owning the new getter.
    */
@@ -358,7 +360,7 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    *
    * @tparam ConfT  @c Conf-derived configuration type.
    * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg Security configuration aggregate (empty by default; empty uses the built-in default symmetric slot).
    * @param type    @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
@@ -376,7 +378,8 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
    * unless the caller requests deferred initialisation.
    *
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; must configure a usable slot before init).
+   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
+   * slot).
    * @param type     @c kWithInit to call @c init() immediately (default).
    */
   // NOLINTNEXTLINE(modernize-use-constraints)

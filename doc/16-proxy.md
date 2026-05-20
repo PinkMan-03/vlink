@@ -132,7 +132,7 @@ ProxyAPI 客户端通过心跳检测连接状态。若连续 **5 秒** 未收到
 | `buf_size`             | `uint32_t`              | `0`      | DDS socket 收发缓冲区大小（字节），0 使用内置默认值（8MB）   |
 | `mtu_size`             | `uint32_t`              | `0`      | DDS 分片 MTU 大小（字节），0 使用内置默认值（65500 字节）    |
 | `max_packet_size`      | `double`                | `0`      | 单条消息最大转发大小（MiB），超出则丢弃。**注意**：当前实现不存在"0 表示不限制"的特判，字段为 `0` 时实际会把所有非空消息都丢弃；要放行大包必须显式设置一个足够大的 MiB 值（CLI 默认 4.0，头文件注释与实现不符，以此处描述为准） |
-| `security_key`         | `std::string`           | `""`     | Time/InfoList/Control 通道的对称密钥。**必须非空**——这三条通道使用 `SecurityPublisher`/`SecuritySubscriber`，运行时不再有公共 `enable_security()` 入口，`Security::Config::key` 只能通过构造函数传入。空字符串会让 `NodeImpl::security` 保持空，控制面节点初始化时会 fatal 并抛 `RuntimeError`。客户端与服务端的 `security_key` 必须一致。 |
+| `security_key`         | `std::string`           | `""`     | Time/InfoList/Control 通道的对称密钥。空字符串使用内置默认安全槽位，不会导致控制面节点初始化 fatal；显式设置时客户端与服务端的 `security_key` 必须一致。 |
 | `bind_ip`              | `std::string`           | `""`     | DDS socket 绑定的本地 IP，空字符串表示绑定所有接口           |
 | `peer_ip`              | `std::string`           | `""`     | DDS 单播对端 IP，空字符串使用多播发现                        |
 | `dds_impl`             | `std::string`           | `"dds"`  | DDS 实现选择：如 `"dds"`（FastDDS）、`"ddsc"`（CycloneDDS）、`"ddsr"`、`"ddst"` |
@@ -286,7 +286,7 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 | `role`          | `Role`         | `kController` | 客户端角色                                                    |
 | `domain_id`     | `int`          | `0`           | DDS 域 ID，必须与服务器一致                                   |
 | `dds_impl`      | `std::string`  | `"dds"`       | DDS 实现选择                                                  |
-| `security_key`  | `std::string`  | `""`          | 安全密钥，必须与服务器 `security_key` 一致                    |
+| `security_key`  | `std::string`  | `""`          | 安全密钥；空字符串使用内置默认安全槽位，显式设置时必须与服务器一致 |
 | `native`        | `bool`         | `false`       | 是否限制 DDS 流量到 127.0.0.1                                 |
 | `reliable`      | `bool`         | `false`       | 数据通道 QoS，必须与服务器一致                                |
 | `direct`        | `bool`         | `false`       | 是否使用 SHM 直连，必须与服务器一致                           |
@@ -543,6 +543,7 @@ api.send_data(data);  // send_data() 同样要求显式传入 ser + schema
 ## 16.14 安全配置
 
 代理系统的 Time、InfoList、Control 三个信道使用 DDS 安全扩展进行加密和认证。
+如果 `security_key` 保持空字符串，服务端和客户端都会使用同一个内置默认安全槽位；生产环境建议显式设置自定义密钥。
 
 ### 16.14.1 配置安全密钥
 

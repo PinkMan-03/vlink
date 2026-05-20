@@ -35,7 +35,7 @@
  * | ---------- | ---------------------------------- | ------------------------------------ |
  * | Custom     | @c encrypt_callback installed      | @c decrypt_callback installed        |
  * | Asymmetric | @c public_key_pem installed        | @c private_key_pem installed         |
- * | Symmetric  | @c key or @c passphrase installed  | Same @c key or @c passphrase + salt  |
+ * | Symmetric  | @c key, @c passphrase, or default  | Same explicit or built-in default    |
  *
  * Cryptographic primitives:
  * - AEAD: AES-128-GCM with a 12-byte nonce, authenticated envelope header, and 16-byte tag.
@@ -43,11 +43,13 @@
  *   are authenticated as AAD; receivers reject replayed sequence numbers within @c replay_window.
  * - Asymmetric key wrap: RSA-OAEP-SHA256 wrapping a fresh 16-byte AES session key per message.
  * - Optional sender authentication: RSA-PSS-SHA256 over the AAD-bound envelope and ciphertext/tag.
- * - Symmetric key derivation: SHA-256 truncation (from @c key) or PBKDF2-HMAC-SHA256
- *   (from @c passphrase + @c pbkdf2_salt + @c pbkdf2_iterations).
+ * - Symmetric key derivation: SHA-256 truncation (from @c key or the built-in default slot)
+ *   or PBKDF2-HMAC-SHA256 (from @c passphrase + @c pbkdf2_salt + @c pbkdf2_iterations).
  *
  * Configuration is one-shot at construction time via @c Security::Config.  There are no
- * runtime setters; rebuild the @c Security instance to change settings.
+ * runtime setters; rebuild the @c Security instance to change settings.  An otherwise
+ * empty @c Config uses the built-in default symmetric slot when built-in algorithms are
+ * enabled; production deployments should pass an explicit key, passphrase, PEM, or callback.
  *
  * @par Example (symmetric passphrase)
  * @code
@@ -117,9 +119,12 @@ class VLINK_EXPORT Security final {
    *
    * @details
    * Fields are processed independently.  Empty PEM strings, empty @c key, empty @c passphrase,
-   * and null callbacks mean "do not install this slot"; non-empty values are validated and
-   * installed.  Validation failures (bad PEM, weak RSA key, missing salt, etc.) are logged and the
-   * corresponding slot is left empty.
+   * and null callbacks mean "do not install this explicit field"; non-empty values are validated
+   * and installed.  Validation failures (bad PEM, weak RSA key, missing salt, etc.) are logged and
+   * the corresponding slot is left empty.  If no explicit cryptographic field is supplied at all,
+   * the constructor installs the built-in default symmetric slot when built-in algorithms are
+   * enabled.  Invalid explicit fields do not fall back to the default; signing / verification PEM
+   * fields alone are not encrypt- or decrypt-capable.
    *
    * @par Mode selection
    * - @c encrypt_callback and @c decrypt_callback override everything else when present.
@@ -130,7 +135,8 @@ class VLINK_EXPORT Security final {
    * @par Symmetric key sources
    * Provide either @c key (raw seed, hashed via SHA-256 truncation) or @c passphrase
    * (low-entropy, normalised via PBKDF2-HMAC-SHA256 with @c pbkdf2_salt and
-   * @c pbkdf2_iterations).  When both are empty no symmetric key is installed.
+   * @c pbkdf2_iterations).  When every explicit cryptographic field is empty, the built-in
+   * default symmetric slot is used.
    *
    * @par RSA constraints
    * All four PEM fields require RSA keys of at least 2048 bits.
@@ -160,8 +166,9 @@ class VLINK_EXPORT Security final {
    * @brief Constructs an empty @c Security instance.
    *
    * @details
-   * Equivalent to @c Security(Config{}).  @c encrypt() and @c decrypt() return @c false
-   * until a fresh @c Security is constructed with a non-empty @c Config.
+   * Equivalent to @c Security(Config{}).  With built-in algorithms enabled, this installs
+   * the built-in default symmetric slot.  When built-in algorithms are disabled, encrypt/decrypt
+   * require a callback pair supplied through an explicit @c Config.
    */
   Security();
 

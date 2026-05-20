@@ -67,8 +67,8 @@ vlink::SecuritySubscriber<std::string> sub("shm://secure/topic", cfg);
 | 行为 | 说明 |
 |------|------|
 | 构造时传 cfg | 一次性安装；运行时不再有 `enable_security()` setter，重新配置请销毁重建节点 |
-| 缺省 cfg | 可写 `SecurityXxx(url)` 或 `SecurityXxx(url, {})`，等价于不安装 Security，encrypt/decrypt 始终失败 |
-| 双端配置 | 必须等价（相同 `key`，或相同 `passphrase + pbkdf2_salt`） |
+| 缺省 cfg | 可写 `SecurityXxx(url)` 或 `SecurityXxx(url, {})`，使用内置默认安全槽位；生产环境建议显式配置 |
+| 双端配置 | 必须等价（相同 `key`，相同 `passphrase + pbkdf2_salt`，或双端都使用缺省 cfg） |
 
 ## 5. 工作原理
 
@@ -78,7 +78,7 @@ vlink::SecuritySubscriber<std::string> sub("shm://secure/topic", cfg);
 
 ## 6. 注意事项
 
-- 双端 `Config` 必须等价；任一端未在 ctor 传 cfg 或使用不同 `key` 时，GCM tag 校验失败、消息被丢弃。
+- 双端 `Config` 必须等价；一端使用缺省 cfg 而另一端显式配置，或双端使用不同 `key` 时，GCM tag 校验失败、消息被丢弃。
 - 若要替换 AEAD 为其它算法（SM4 / ChaCha20 / HSM 等），见 [`../security_custom/`](../security_custom/) 中 `encrypt_callback` / `decrypt_callback` 用法。
 - 若要使用 RSA 混合握手（无需预共享对称密钥），见 [doc/09-security.md §9.6](../../../doc/09-security.md#96-非对称模式rsa-混合握手)。
 
