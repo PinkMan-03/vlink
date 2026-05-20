@@ -21,7 +21,7 @@
  * limitations under the License.
  */
 
-#include "./extension/mcap_writer.h"
+#include "./extension/vcap_writer.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -63,8 +63,8 @@ std::string make_channel_key(const std::string& url, std::string_view action_nam
 
 }  // namespace
 
-// McapWriter::Impl
-struct McapWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// VCAPWriter::Impl
+struct VCAPWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   // UrlMsgInfo
   struct UrlMsgInfo final {
     int index{0};
@@ -146,10 +146,10 @@ struct McapWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
   SchemaPluginInterface* schema_plugin_interface{nullptr};
 };
 
-// McapWriter
-McapWriter::McapWriter(const std::string& path, const Config& config)
+// VCAPWriter
+VCAPWriter::VCAPWriter(const std::string& path, const Config& config)
     : BagWriter(path, config), impl_{std::make_unique<Impl>()} {
-  set_name("McapWriter");
+  set_name("VCAPWriter");
 
   impl_->url_map.reserve(128);
   impl_->ser_map.reserve(128);
@@ -207,7 +207,7 @@ McapWriter::McapWriter(const std::string& path, const Config& config)
     impl_->config.compress = kCompressNone;
 
     impl_->enable_compressed = false;
-    VLOG_W("McapWriter: Compress is not supported.");
+    VLOG_W("VCAPWriter: Compress is not supported.");
 #endif
   } else {
     impl_->writer_options.compression = mcap::Compression::None;
@@ -225,12 +225,12 @@ McapWriter::McapWriter(const std::string& path, const Config& config)
 
     if (impl_->enable_compressed) {
       impl_->enable_compressed = false;
-      VLOG_W("McapWriter: Compress is not supported without cache_size > 0.");
+      VLOG_W("VCAPWriter: Compress is not supported without cache_size > 0.");
     }
   }
 
   // if VUNLIKELY (impl_->config.wal_mode) {
-  //   VLOG_W("McapWriter not support [config.wal_mode]");
+  //   VLOG_W("VCAPWriter not support [config.wal_mode]");
   // }
 
   if VUNLIKELY (impl_->config.max_task_depth <= 0) {
@@ -240,7 +240,7 @@ McapWriter::McapWriter(const std::string& path, const Config& config)
   reset_lockfree_capacity();
 
   if VUNLIKELY (impl_->config.enable_limit) {
-    VLOG_W("McapWriter: Enable limit is not supported.");
+    VLOG_W("VCAPWriter: Enable limit is not supported.");
   }
 
   try {
@@ -348,17 +348,17 @@ McapWriter::McapWriter(const std::string& path, const Config& config)
       open(path);
     }
   } catch (std::filesystem::filesystem_error& e) {
-    VLOG_F("McapWriter: Filesystem error, ", e.what(), ".");
+    VLOG_F("VCAPWriter: Filesystem error, ", e.what(), ".");
   }
 
   impl_->elapsed_timer.start();
 }
 
-McapWriter::~McapWriter() {
+VCAPWriter::~VCAPWriter() {
   impl_->quit_flag = true;
 
   if VUNLIKELY (!wait_for_idle(30000U)) {
-    VLOG_W("McapWriter: Force to quit.");
+    VLOG_W("VCAPWriter: Force to quit.");
   }
 
   quit(true);
@@ -372,18 +372,18 @@ McapWriter::~McapWriter() {
   }
 }
 
-void McapWriter::register_split_callback(SplitCallback&& callback, bool before) {
+void VCAPWriter::register_split_callback(SplitCallback&& callback, bool before) {
   std::lock_guard lock(impl_->split_mtx);
   impl_->split_before = before;
   impl_->split_callback = std::move(callback);
 }
 
-void McapWriter::register_schema_callback(SchemaCallback&& callback) {
+void VCAPWriter::register_schema_callback(SchemaCallback&& callback) {
   std::lock_guard lock(impl_->write_mtx);
   impl_->schema_callback = std::move(callback);
 }
 
-bool McapWriter::merge_schema(SchemaData& schema_data) {
+bool VCAPWriter::merge_schema(SchemaData& schema_data) {
   const auto resolved_schema_type =
       SchemaData::resolve_type(schema_data.schema_type, schema_data.name, schema_data.encoding);
   schema_data.schema_type = resolved_schema_type;
@@ -419,7 +419,7 @@ bool McapWriter::merge_schema(SchemaData& schema_data) {
                   (!schema_data.data.empty() && !current.data.empty() && current.data != schema_data.data) ||
                   (SchemaData::is_real_type(resolved_schema_type) && SchemaData::is_real_type(current.schema_type) &&
                    current.schema_type != resolved_schema_type)) {
-      CLOG_E("McapWriter: Conflicting schema pushed for [%s].", schema_data.name.c_str());
+      CLOG_E("VCAPWriter: Conflicting schema pushed for [%s].", schema_data.name.c_str());
       return false;
     }
 
@@ -446,7 +446,7 @@ bool McapWriter::merge_schema(SchemaData& schema_data) {
   return true;
 }
 
-bool McapWriter::load_schema(const std::string& ser_type, SchemaType& schema_type, SchemaData& schema_data) {
+bool VCAPWriter::load_schema(const std::string& ser_type, SchemaType& schema_type, SchemaData& schema_data) {
   schema_data = SchemaData{};
 
   if VUNLIKELY (ser_type.empty()) {
@@ -498,7 +498,7 @@ bool McapWriter::load_schema(const std::string& ser_type, SchemaType& schema_typ
 
   if (schema_type != SchemaType::kUnknown && schema_data.schema_type != SchemaType::kUnknown &&
       schema_type != schema_data.schema_type) {
-    CLOG_E("McapWriter: Schema family mismatch for [%s], requested = %d, resolved = %d.", ser_type.c_str(),
+    CLOG_E("VCAPWriter: Schema family mismatch for [%s], requested = %d, resolved = %d.", ser_type.c_str(),
            static_cast<int>(schema_type), static_cast<int>(schema_data.schema_type));
     return false;
   }
@@ -527,7 +527,7 @@ bool McapWriter::load_schema(const std::string& ser_type, SchemaType& schema_typ
   return true;
 }
 
-bool McapWriter::push_schema(const SchemaData& schema_data, bool immediate) {
+bool VCAPWriter::push_schema(const SchemaData& schema_data, bool immediate) {
   SchemaData stored_schema = schema_data;
 
   if VUNLIKELY (!stored_schema.data.is_owner()) {
@@ -537,7 +537,7 @@ bool McapWriter::push_schema(const SchemaData& schema_data, bool immediate) {
   if VUNLIKELY (stored_schema.data.size() != schema_data.data.size() ||
                 (stored_schema.data.size() > 0  // NOLINT(readability-container-size-empty)
                  && !stored_schema.data.data())) {
-    CLOG_E("McapWriter: Failed to create an owned copy for async schema data.");
+    CLOG_E("VCAPWriter: Failed to create an owned copy for async schema data.");
     return false;
   }
 
@@ -550,7 +550,7 @@ bool McapWriter::push_schema(const SchemaData& schema_data, bool immediate) {
     std::lock_guard lock(impl_->write_mtx);
 
     if VUNLIKELY (!merge_schema(stored_schema)) {
-      CLOG_E("McapWriter: Deferred merge_schema failed for [%s] in async push_schema path.",
+      CLOG_E("VCAPWriter: Deferred merge_schema failed for [%s] in async push_schema path.",
              stored_schema.name.c_str());
     }
   });
@@ -558,7 +558,7 @@ bool McapWriter::push_schema(const SchemaData& schema_data, bool immediate) {
   return posted;
 }
 
-int64_t McapWriter::push(const std::string& url, const std::string& ser_type, SchemaType schema_type,
+int64_t VCAPWriter::push(const std::string& url, const std::string& ser_type, SchemaType schema_type,
                          ActionType action_type, const Bytes& data, int64_t* microseconds_timestamp, bool immediate) {
   if VUNLIKELY (url.empty()) {
     return -1;
@@ -594,7 +594,7 @@ int64_t McapWriter::push(const std::string& url, const std::string& ser_type, Sc
     // NOLINTNEXTLINE(readability-container-size-empty)
 
     if VUNLIKELY (queued_data.size() != data.size() || (queued_data.size() > 0 && !queued_data.data())) {
-      CLOG_E("McapWriter: Failed to create an owned copy for async write.");
+      CLOG_E("VCAPWriter: Failed to create an owned copy for async write.");
       return -1;
     }
 
@@ -624,13 +624,13 @@ int64_t McapWriter::push(const std::string& url, const std::string& ser_type, Sc
   return target_timestamp;
 }
 
-bool McapWriter::is_dumping() const { return impl_->is_dumping; }
+bool VCAPWriter::is_dumping() const { return impl_->is_dumping; }
 
-bool McapWriter::is_split_mode() const { return impl_->is_split_mode; }
+bool VCAPWriter::is_split_mode() const { return impl_->is_split_mode; }
 
-int McapWriter::get_split_index() const { return impl_->split_index; }
+int VCAPWriter::get_split_index() const { return impl_->split_index; }
 
-void McapWriter::set_url_loss(const std::string& url, double loss) {
+void VCAPWriter::set_url_loss(const std::string& url, double loss) {
   std::lock_guard lock(impl_->sample_mtx);
 
   if (loss > 1) {
@@ -641,17 +641,17 @@ void McapWriter::set_url_loss(const std::string& url, double loss) {
   impl_->total_url_loss_map[url] = loss;
 }
 
-size_t McapWriter::get_max_task_count() const { return impl_->config.max_task_depth; }
+size_t VCAPWriter::get_max_task_count() const { return impl_->config.max_task_depth; }
 
-void McapWriter::on_begin() {
+void VCAPWriter::on_begin() {
   MessageLoop::on_begin();
 
   impl_->elapsed_timer.restart();
 }
 
-void McapWriter::on_end() { MessageLoop::on_end(); }
+void VCAPWriter::on_end() { MessageLoop::on_end(); }
 
-void McapWriter::open(const std::string& path) {
+void VCAPWriter::open(const std::string& path) {
   try {
 #ifdef _WIN32
     impl_->split_file_list.emplace_back(Helpers::path_to_string(std::filesystem::path(path).filename()));
@@ -671,7 +671,7 @@ void McapWriter::open(const std::string& path) {
       }
     }
   } catch (std::filesystem::filesystem_error& e) {
-    VLOG_F("McapWriter: Filesystem error, ", e.what(), ".");
+    VLOG_F("VCAPWriter: Filesystem error, ", e.what(), ".");
     return;
   }
 
@@ -682,7 +682,7 @@ void McapWriter::open(const std::string& path) {
   status = impl_->writer->open(path, impl_->writer_options);
 
   if VUNLIKELY (!status.ok()) {
-    CLOG_F("McapWriter: Failed to open vcap, error = %s.", status.message.c_str());
+    CLOG_F("VCAPWriter: Failed to open vcap, error = %s.", status.message.c_str());
     return;
   }
 
@@ -699,16 +699,16 @@ void McapWriter::open(const std::string& path) {
   status = impl_->writer->write(header_meta_data);
 
   if VUNLIKELY (!status.ok()) {
-    CLOG_F("McapWriter: Failed to write header meta data, error = %s.", status.message.c_str());
+    CLOG_F("VCAPWriter: Failed to write header meta data, error = %s.", status.message.c_str());
     return;
   }
 
   impl_->last_timestamp = 0;
 }
 
-void McapWriter::close() {
+void VCAPWriter::close() {
   if VUNLIKELY (!impl_->writer) {
-    VLOG_E("McapWriter: Writer is not open.");
+    VLOG_E("VCAPWriter: Writer is not open.");
     return;
   }
 
@@ -748,7 +748,7 @@ void McapWriter::close() {
     status = impl_->writer->write(channel_meta_data);
 
     if VUNLIKELY (!status.ok()) {
-      CLOG_F("McapWriter: Failed to write channel meta data, error = %s.", status.message.c_str());
+      CLOG_F("VCAPWriter: Failed to write channel meta data, error = %s.", status.message.c_str());
       return;
     }
   }
@@ -769,10 +769,10 @@ void McapWriter::close() {
   impl_->cached_size = 0;
 }
 
-bool McapWriter::write(const std::string& url, const std::string& ser_type, SchemaType schema_type,
+bool VCAPWriter::write(const std::string& url, const std::string& ser_type, SchemaType schema_type,
                        ActionType action_type, const Bytes& data, int64_t microseconds_timestamp) {
   if VUNLIKELY (!impl_->writer) {
-    VLOG_E("McapWriter: Writer is not open.");
+    VLOG_E("VCAPWriter: Writer is not open.");
     return false;
   }
 
@@ -856,7 +856,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
       if (next_ser_type.empty()) {
         next_ser_type = ser_type;
       } else if VUNLIKELY (next_ser_type != ser_type) {
-        CLOG_E("McapWriter: URL [%s] ser changed from [%s] to [%s].", url.c_str(), next_ser_type.c_str(),
+        CLOG_E("VCAPWriter: URL [%s] ser changed from [%s] to [%s].", url.c_str(), next_ser_type.c_str(),
                ser_type.c_str());
         return false;
       }
@@ -920,7 +920,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
         if (next_schema_type == SchemaType::kUnknown) {
           next_schema_type = resolved_schema_type;
         } else if VUNLIKELY (next_schema_type != resolved_schema_type) {
-          CLOG_E("McapWriter: URL [%s] schema changed from [%d] to [%d].", url.c_str(),
+          CLOG_E("VCAPWriter: URL [%s] schema changed from [%d] to [%d].", url.c_str(),
                  static_cast<int>(next_schema_type), static_cast<int>(resolved_schema_type));
           return false;
         }
@@ -1084,7 +1084,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
   status = impl_->writer->write(message);
 
   if VUNLIKELY (!status.ok()) {
-    CLOG_W("McapWriter: Failed to write message data, error = %s.", status.message.c_str());
+    CLOG_W("VCAPWriter: Failed to write message data, error = %s.", status.message.c_str());
     return false;
   }
 
@@ -1100,7 +1100,7 @@ bool McapWriter::write(const std::string& url, const std::string& ser_type, Sche
   return true;
 }
 
-bool McapWriter::write_filex(bool complete) {
+bool VCAPWriter::write_filex(bool complete) {
   try {
 #ifdef _WIN32
     std::filesystem::path file_path(Helpers::string_to_wstring(impl_->path));
@@ -1168,7 +1168,7 @@ bool McapWriter::write_filex(bool complete) {
       filex.close();
     }
   } catch (nlohmann::json::exception& e) {
-    VLOG_F("McapWriter: Filesystem error, ", e.what(), ".");
+    VLOG_F("VCAPWriter: Filesystem error, ", e.what(), ".");
     return false;
   }
 

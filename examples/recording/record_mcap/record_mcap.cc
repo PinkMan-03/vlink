@@ -22,8 +22,8 @@
  */
 
 // MCAP format writer and reader
-#include <vlink/extension/mcap_reader.h>
-#include <vlink/extension/mcap_writer.h>
+#include <vlink/extension/vcap_reader.h>
+#include <vlink/extension/vcap_writer.h>
 // Generic BagWriter/BagReader factory (auto-detects format by extension)
 #include <vlink/extension/bag_reader.h>
 #include <vlink/extension/bag_writer.h>
@@ -40,9 +40,9 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 ///
 /// Demonstrates:
 ///   1. Creating an MCAP writer via BagWriter::create() with .vcap extension
-///   2. Creating an McapWriter explicitly
+///   2. Creating an VCAPWriter explicitly
 ///   3. Recording with compression in MCAP format
-///   4. Reading back MCAP files with McapReader
+///   4. Reading back MCAP files with VCAPReader
 ///   5. Split mode with MCAP files
 ///
 /// MCAP (Message Capture Archive Protocol) is a modular, indexed binary format
@@ -50,34 +50,34 @@ using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-
 /// MCAP files can be opened by Foxglove Studio and other MCAP-compatible tools.
 int main() {
   // ======== MCAP via BagWriter::create() ========
-  // When the path ends with .vcap or .vcapx, create() returns an McapWriter
+  // When the path ends with .vcap or .vcapx, create() returns an VCAPWriter
   {
     VLOG_I("=== MCAP via BagWriter::create() ===");
 
     auto writer = vlink::BagWriter::create("/tmp/mcap_auto.vcap");
     writer->async_run();
 
-    // Push messages -- same API as DatabaseWriter
+    // Push messages -- same API as VDBWriter
     for (int i = 0; i < 100; ++i) {
       std::string payload = "mcap_message_" + std::to_string(i);
       writer->push("dds://mcap/topic_a", "raw", vlink::SchemaType::kRaw, vlink::ActionType::kPublish,
                    vlink::Bytes::from_string(payload));
     }
 
-    VLOG_I("Auto-detected McapWriter: 100 messages pushed to .vcap file.");
+    VLOG_I("Auto-detected VCAPWriter: 100 messages pushed to .vcap file.");
   }
 
-  // ======== Explicit McapWriter Construction ========
+  // ======== Explicit VCAPWriter Construction ========
   {
-    VLOG_I("=== Explicit McapWriter ===");
+    VLOG_I("=== Explicit VCAPWriter ===");
 
     vlink::BagWriter::Config config;
     config.tag_name = "mcap_explicit_test";
     config.compress = vlink::BagWriter::CompressType::kCompressZstd;  // Zstandard compression
     config.compress_level = 5;
 
-    // Directly construct McapWriter instead of using the factory
-    auto writer = std::make_shared<vlink::McapWriter>("/tmp/mcap_explicit.vcap", config);
+    // Directly construct VCAPWriter instead of using the factory
+    auto writer = std::make_shared<vlink::VCAPWriter>("/tmp/mcap_explicit.vcap", config);
     writer->async_run();
 
     // Push messages from multiple topics
@@ -92,7 +92,7 @@ int main() {
       ts += 50000LL;
     }
 
-    VLOG_I("Explicit McapWriter: is_dumping =", writer->is_dumping());
+    VLOG_I("Explicit VCAPWriter: is_dumping =", writer->is_dumping());
   }
 
   // ======== MCAP with Split Mode ========
@@ -170,11 +170,11 @@ int main() {
     VLOG_I("Total MCAP messages read:", msg_count.load());
   }
 
-  // ======== Explicit McapReader ========
+  // ======== Explicit VCAPReader ========
   {
-    VLOG_I("=== Explicit McapReader ===");
+    VLOG_I("=== Explicit VCAPReader ===");
 
-    auto reader = std::make_shared<vlink::McapReader>("/tmp/mcap_explicit.vcap");
+    auto reader = std::make_shared<vlink::VCAPReader>("/tmp/mcap_explicit.vcap");
 
     const auto& info = reader->get_info();
     VLOG_I("Tag:", info.tag_name);

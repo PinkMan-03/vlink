@@ -448,7 +448,7 @@ r->fix();                                     // 可选 r->fix(/*rebuild=*/true)
 **Config 字段**（`extension/bag_reader.h:181-191`）：
 `begin_time/end_time`（ms，0 = 从头/到尾）、`times`（-1 = 无限）、`rate`（默认 1.0）、`skip_blank`（跳过静默段）、`force_delay`（-1 = 用原始间隔）、`auto_pause`（每条暂停）、`auto_quit`（结束后退出）、`filter_urls`。
 
-**格式识别**：`.vdb`/`.vdbx` → SQLite（DatabaseWriter）；`.vcap`/`.vcapx` → MCAP（McapWriter）。
+**格式识别**：`.vdb`/`.vdbx` → SQLite（VDBWriter）；`.vcap`/`.vcapx` → MCAP（VCAPWriter）。
 
 ---
 

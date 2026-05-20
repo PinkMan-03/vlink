@@ -98,7 +98,7 @@
           <mxGeometry x="800" y="144" width="280" height="18" as="geometry" />
         </mxCell>
 
-        <mxCell id="bk_db" value=".vdb (SQLite, DatabaseWriter)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ce93d8;strokeColor=#6a1b9a;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
+        <mxCell id="bk_db" value=".vdb (SQLite, VDBWriter)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ce93d8;strokeColor=#6a1b9a;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="820" y="180" width="240" height="36" as="geometry" />
         </mxCell>
         <mxCell id="bk_db_n" value="None  -&gt; raw" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6a1b9a;strokeWidth=1;arcSize=8;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#4a148c;" vertex="1" parent="1">
@@ -111,7 +111,7 @@
           <mxGeometry x="836" y="274" width="208" height="22" as="geometry" />
         </mxCell>
 
-        <mxCell id="bk_mcap" value=".vcap / .vcapx (MCAP, McapWriter)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ce93d8;strokeColor=#6a1b9a;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
+        <mxCell id="bk_mcap" value=".vcap / .vcapx (MCAP, VCAPWriter)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ce93d8;strokeColor=#6a1b9a;strokeWidth=1.5;arcSize=10;fontSize=12;fontStyle=1;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="820" y="316" width="240" height="36" as="geometry" />
         </mxCell>
         <mxCell id="bk_mcap_n" value="None  -&gt; raw" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6a1b9a;strokeWidth=1;arcSize=8;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#4a148c;" vertex="1" parent="1">

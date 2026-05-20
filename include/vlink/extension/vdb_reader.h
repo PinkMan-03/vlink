@@ -22,23 +22,22 @@
  */
 
 /**
- * @file mcap_reader.h
- * @brief Concrete BagReader implementation for the MCAP bag file format.
+ * @file vdb_reader.h
+ * @brief Concrete BagReader implementation for the SQLite-backed VLink bag format.
  *
  * @details
- * @c McapReader reads bag files in the MCAP format (@c .vcap / @c .vcapx extension) and implements
- * playback, seeking, and integrity checking.  Reindex and fix operations are not supported for MCAP
- * and complete with @c false.
+ * @c VDBReader reads bag files in the SQLite-backed @c .vdb / @c .vdbx format and inherits all
+ * playback, seeking, fix, and reindex capabilities from @c BagReader.
  *
- * MCAP (Message Capture Archive Protocol) is a modular, indexed binary format designed
- * for efficient random-access playback.  It supports channel-level schemas, checksums,
- * and multiple compression codecs.
+ * The SQLite bag format stores messages in structured @c .vdb databases; @c .vdbx
+ * files are JSON manifests that reference split @c .vdb files.  This enables efficient
+ * random-access queries, indexed playback, and in-place repair with @c fix().
  *
  * @par Usage
  * @code
- * auto reader = vlink::BagReader::create("/data/recording.vcap");
+ * auto reader = vlink::BagReader::create("/data/recording.vdb");
  * // or explicitly:
- * auto reader = std::make_shared<vlink::McapReader>("/data/recording.vcap");
+ * auto reader = std::make_shared<vlink::VDBReader>("/data/recording.vdb");
  * reader->register_output_callback([](int64_t ts, const std::string& url,
  *                                     vlink::ActionType action, const vlink::Bytes& data) {
  *     // process message
@@ -47,7 +46,7 @@
  * reader->play({});
  * @endcode
  *
- * @see BagReader, DatabaseReader
+ * @see BagReader, VCAPReader
  */
 
 #pragma once
@@ -62,28 +61,28 @@
 namespace vlink {
 
 /**
- * @class McapReader
- * @brief Concrete MCAP-format bag file player.
+ * @class VDBReader
+ * @brief Concrete SQLite-backed bag file player.
  *
  * @details
  * All virtual methods from @c BagReader are implemented.  Prefer using
  * @c BagReader::create() for format-agnostic construction.
  */
-class VLINK_EXPORT McapReader final : public BagReader {
+class VLINK_EXPORT VDBReader final : public BagReader {
  public:
   /**
-   * @brief Constructs an @c McapReader for the given @p path.
+   * @brief Constructs a @c VDBReader for the given @p path.
    *
-   * @param path        Path to the @c .vcap / @c .vcapx file.
-   * @param read_only   Open in read-only mode.
-   * @param try_to_fix  If @c true, allows a fallback summary scan when the indexed summary is unreadable.
+   * @param path        Path to the @c .vdb / @c .vdbx file.
+   * @param read_only   Open in read-only mode (no write operations allowed).
+   * @param try_to_fix  Reserved for table-rebuild recovery when table checks are enabled.
    */
-  explicit McapReader(const std::string& path, bool read_only = true, bool try_to_fix = false);
+  explicit VDBReader(const std::string& path, bool read_only = true, bool try_to_fix = false);
 
   /**
-   * @brief Destructor -- stops playback and releases the MCAP file handle.
+   * @brief Destructor -- stops playback and closes the SQLite database handle.
    */
-  ~McapReader() override;
+  ~VDBReader() override;
 
   /**
    * @brief Attaches a @c BagReaderPluginInterface for custom URL/type conversion.
@@ -158,32 +157,29 @@ class VLINK_EXPORT McapReader final : public BagReader {
   void jump(int64_t begin_time, double rate, int times, bool force_to_play = false) override;
 
   /**
-   * @brief Verifies the integrity of the MCAP file asynchronously.
+   * @brief Verifies the integrity of the SQLite bag file asynchronously.
    *
    * @return @c std::future<bool> that resolves to @c true if the file is intact.
    */
   std::future<bool> check() override;
 
   /**
-   * @brief Attempts to rebuild indexes asynchronously.
+   * @brief Rebuilds the SQLite index tables asynchronously.
    *
-   * @return @c std::future<bool> that resolves to @c false because MCAP reindex is unsupported.
+   * @return @c std::future<bool> that resolves to @c true on success.
    */
   std::future<bool> reindex() override;
 
   /**
-   * @brief Attempts to repair a corrupt MCAP file asynchronously.
+   * @brief Repairs a corrupt SQLite bag file asynchronously.
    *
-   * @param rebuild  Ignored.
-   * @return @c std::future<bool> that resolves to @c false because MCAP fix is unsupported.
+   * @param rebuild  If @c true, rebuilds the entire index from scratch.
+   * @return @c std::future<bool> that resolves to @c true if repair succeeded.
    */
   std::future<bool> fix(bool rebuild = false) override;
 
   /**
-   * @brief Updates the tag name stored in split-bag metadata.
-   *
-   * @details
-   * Only @c .vcapx metadata is updated.  Single @c .vcap files log a warning and are unchanged.
+   * @brief Updates the tag name stored in the bag metadata.
    *
    * @param tag_name  New tag name string.
    */
@@ -218,9 +214,9 @@ class VLINK_EXPORT McapReader final : public BagReader {
   [[nodiscard]] const Info& get_info() const override;
 
   /**
-   * @brief Scans the MCAP file and returns all embedded schemas.
+   * @brief Scans the SQLite bag and returns all embedded schemas.
    *
-   * @return Vector of @c SchemaData descriptors found in the file.
+   * @return Vector of @c SchemaData descriptors found in the bag.
    */
   [[nodiscard]] std::vector<SchemaData> detect_schema() override;
 
@@ -282,7 +278,7 @@ class VLINK_EXPORT McapReader final : public BagReader {
   struct Impl;
   std::unique_ptr<Impl> impl_;
 
-  VLINK_DISALLOW_COPY_AND_ASSIGN(McapReader)
+  VLINK_DISALLOW_COPY_AND_ASSIGN(VDBReader)
 };
 
 }  // namespace vlink

@@ -38,11 +38,11 @@
           <mxGeometry x="680" y="213" width="200" height="50" as="geometry" />
         </mxCell>
 
-        <mxCell id="w_db" value="&lt;b&gt;DatabaseWriter&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vdb &#183; SQLite&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
+        <mxCell id="w_db" value="&lt;b&gt;VDBWriter&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vdb &#183; SQLite&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="220" y="276" width="230" height="42" as="geometry" />
         </mxCell>
 
-        <mxCell id="w_mcap" value="&lt;b&gt;McapWriter&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vcap &#183; MCAP&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
+        <mxCell id="w_mcap" value="&lt;b&gt;VCAPWriter&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vcap &#183; MCAP&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="550" y="276" width="230" height="42" as="geometry" />
         </mxCell>
 
@@ -83,10 +83,10 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
-        <mxCell id="r_db" value="&lt;b&gt;DatabaseReader&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vdb &#183; SQLite&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
+        <mxCell id="r_db" value="&lt;b&gt;VDBReader&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vdb &#183; SQLite&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="220" y="468" width="230" height="42" as="geometry" />
         </mxCell>
-        <mxCell id="r_mcap" value="&lt;b&gt;McapReader&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vcap &#183; MCAP&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
+        <mxCell id="r_mcap" value="&lt;b&gt;VCAPReader&lt;/b&gt;&lt;br/&gt;&lt;span style=&quot;font-size:11px;&quot;&gt;.vcap &#183; MCAP&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1bee7;strokeColor=#8e24aa;strokeWidth=1.2;fontSize=13;fontColor=#4a148c;shadow=1;" vertex="1" parent="1">
           <mxGeometry x="550" y="468" width="230" height="42" as="geometry" />
         </mxCell>
 

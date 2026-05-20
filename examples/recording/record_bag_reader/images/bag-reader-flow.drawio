@@ -36,7 +36,7 @@
         <mxCell id="src_info" value="reader-&gt;get_info()&#10;file_name, storage_type,&#10;compression_type,&#10;message_count, url_metas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#6a1b9a;strokeWidth=1.2;arcSize=10;fontSize=10;fontFamily=Courier New;fontStyle=1;fontColor=#4a148c;dashed=1;" vertex="1" parent="1">
           <mxGeometry x="60" y="342" width="220" height="78" as="geometry" />
         </mxCell>
-        <mxCell id="src_note" value="DatabaseReader or McapReader&#10;selected by extension" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#6a1b9a;" vertex="1" parent="1">
+        <mxCell id="src_note" value="VDBReader or VCAPReader&#10;selected by extension" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=10;fontStyle=2;fontColor=#6a1b9a;" vertex="1" parent="1">
           <mxGeometry x="60" y="430" width="220" height="40" as="geometry" />
         </mxCell>
 

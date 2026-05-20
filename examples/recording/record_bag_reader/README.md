@@ -14,8 +14,8 @@
 
 | 实现类 | 文件扩展名 | 存储后端 |
 |--------|-----------|----------|
-| `DatabaseReader` | `.vdb` / `.vdbx` | SQLite |
-| `McapReader` | `.vcap` / `.vcapx` | MCAP |
+| `VDBReader` | `.vdb` / `.vdbx` | SQLite |
+| `VCAPReader` | `.vcap` / `.vcapx` | MCAP |
 
 `BagReader::create()` 根据文件扩展名自动选择实现，未知扩展名返回空指针。
 

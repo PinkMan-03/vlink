@@ -11,8 +11,8 @@
 `include/vlink/extension/` 目录下的 header，按用途分组：
 
 **录制 / 回放**：`bag_writer.h`、`bag_reader.h`、`bag_reader_processor.h`、
-`bag_reader_plugin_interface.h`、`database_writer.h`、`database_reader.h`、
-`mcap_writer.h`、`mcap_reader.h`（录制细节见 [12-bag-recording.md](12-bag-recording.md)）
+`bag_reader_plugin_interface.h`、`vdb_writer.h`、`vdb_reader.h`、
+`vcap_writer.h`、`vcap_reader.h`（录制细节见 [12-bag-recording.md](12-bag-recording.md)）
 
 **QoS 与安全**：`qos.h`、`qos_profile.h`、`security.h`
 （细节见 [08-qos.md](08-qos.md)、[09-security.md](09-security.md)）

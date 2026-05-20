@@ -21,7 +21,7 @@
  * limitations under the License.
  */
 
-#include "./extension/database_writer.h"
+#include "./extension/vdb_writer.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -58,8 +58,8 @@ namespace vlink {
 
 static constexpr int kSyncWriteInterval = 1000;  // ms
 
-// DatabaseWriter::Impl
-struct DatabaseWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// VDBWriter::Impl
+struct VDBWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   // UrlMsgInfo
   struct UrlMsgInfo final {
     int index{0};
@@ -92,7 +92,7 @@ struct DatabaseWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.
     std::unordered_map<std::string, int64_t> compress_ignore_map;
     std::string write_url_type;
 
-    explicit WriteStateSnapshot(const DatabaseWriter::Impl& impl)
+    explicit WriteStateSnapshot(const VDBWriter::Impl& impl)
         : current_row(impl.current_row),
           current_size(impl.current_size),
           has_oversize(impl.has_oversize),
@@ -108,7 +108,7 @@ struct DatabaseWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.
           compress_ignore_map(impl.compress_ignore_map),
           write_url_type(impl.write_url_type) {}
 
-    void restore(DatabaseWriter::Impl& impl) const {
+    void restore(VDBWriter::Impl& impl) const {
       impl.current_row = current_row;
       impl.current_size = current_size;
       impl.has_oversize = has_oversize;
@@ -206,10 +206,10 @@ struct DatabaseWriter::Impl final {  // NOLINT(clang-analyzer-optin.performance.
   SchemaPluginInterface* schema_plugin_interface{nullptr};
 };
 
-// DatabaseWriter
-DatabaseWriter::DatabaseWriter(const std::string& path, const Config& config)
+// VDBWriter
+VDBWriter::VDBWriter(const std::string& path, const Config& config)
     : BagWriter(path, config), impl_(std::make_unique<Impl>()) {
-  set_name("DatabaseWriter");
+  set_name("VDBWriter");
 
   impl_->url_map.reserve(128);
   impl_->ser_map.reserve(128);
@@ -360,7 +360,7 @@ DatabaseWriter::DatabaseWriter(const std::string& path, const Config& config)
       open(path);
     }
   } catch (std::filesystem::filesystem_error& e) {
-    VLOG_F("DatabaseWriter: Filesystem error during init, ", e.what(), ".");
+    VLOG_F("VDBWriter: Filesystem error during init, ", e.what(), ".");
     return;
   }
 
@@ -368,17 +368,17 @@ DatabaseWriter::DatabaseWriter(const std::string& path, const Config& config)
   impl_->sync_timer.start();
 
 #ifndef VLINK_ENABLE_SQLITE
-  VLOG_F("DatabaseWriter: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
+  VLOG_F("VDBWriter: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
 #endif
 }
 
-DatabaseWriter::~DatabaseWriter() {
+VDBWriter::~VDBWriter() {
   impl_->quit_flag = true;
 
   impl_->check_timer.stop();
 
   if VUNLIKELY (!wait_for_idle(30000U)) {
-    VLOG_W("DatabaseWriter: Force to quit.");
+    VLOG_W("VDBWriter: Force to quit.");
   }
 
 #ifdef VLINK_ENABLE_SQLITE
@@ -399,18 +399,18 @@ DatabaseWriter::~DatabaseWriter() {
   }
 }
 
-void DatabaseWriter::register_split_callback(SplitCallback&& callback, bool before) {
+void VDBWriter::register_split_callback(SplitCallback&& callback, bool before) {
   std::lock_guard lock(impl_->split_mtx);
   impl_->split_before = before;
   impl_->split_callback = std::move(callback);
 }
 
-void DatabaseWriter::register_schema_callback(SchemaCallback&& callback) {
+void VDBWriter::register_schema_callback(SchemaCallback&& callback) {
   std::lock_guard lock(impl_->write_mtx);
   impl_->schema_callback = std::move(callback);
 }
 
-bool DatabaseWriter::merge_schema(SchemaData& schema_data) {
+bool VDBWriter::merge_schema(SchemaData& schema_data) {
   const auto resolved_schema_type =
       SchemaData::resolve_type(schema_data.schema_type, schema_data.name, schema_data.encoding);
   schema_data.schema_type = resolved_schema_type;
@@ -458,7 +458,7 @@ bool DatabaseWriter::merge_schema(SchemaData& schema_data) {
                 (!schema_data.data.empty() && !current.data.empty() && current.data != schema_data.data) ||
                 (SchemaData::is_real_type(resolved_schema_type) && SchemaData::is_real_type(current.schema_type) &&
                  current.schema_type != resolved_schema_type)) {
-    CLOG_E("DatabaseWriter: Conflicting schema pushed for [%s].", schema_data.name.c_str());
+    CLOG_E("VDBWriter: Conflicting schema pushed for [%s].", schema_data.name.c_str());
     return false;
   }
 
@@ -497,7 +497,7 @@ bool DatabaseWriter::merge_schema(SchemaData& schema_data) {
   return true;
 }
 
-bool DatabaseWriter::load_schema(const std::string& ser_type, SchemaType& schema_type, SchemaData& schema_data) {
+bool VDBWriter::load_schema(const std::string& ser_type, SchemaType& schema_type, SchemaData& schema_data) {
 #ifdef VLINK_ENABLE_SQLITE
   schema_data = SchemaData{};
 
@@ -550,7 +550,7 @@ bool DatabaseWriter::load_schema(const std::string& ser_type, SchemaType& schema
 
   if (schema_type != SchemaType::kUnknown && schema_data.schema_type != SchemaType::kUnknown &&
       schema_type != schema_data.schema_type) {
-    CLOG_E("DatabaseWriter: Schema family mismatch for [%s], requested = %d, resolved = %d.", ser_type.c_str(),
+    CLOG_E("VDBWriter: Schema family mismatch for [%s], requested = %d, resolved = %d.", ser_type.c_str(),
            static_cast<int>(schema_type), static_cast<int>(schema_data.schema_type));
     return false;
   }
@@ -585,7 +585,7 @@ bool DatabaseWriter::load_schema(const std::string& ser_type, SchemaType& schema
 #endif
 }
 
-bool DatabaseWriter::push_schema(const SchemaData& schema_data, bool immediate) {
+bool VDBWriter::push_schema(const SchemaData& schema_data, bool immediate) {
   SchemaData stored_schema = schema_data;
 
   if VUNLIKELY (!stored_schema.data.is_owner()) {
@@ -595,7 +595,7 @@ bool DatabaseWriter::push_schema(const SchemaData& schema_data, bool immediate) 
   if VUNLIKELY (stored_schema.data.size() != schema_data.data.size() ||
                 (stored_schema.data.size() > 0  // NOLINT(readability-container-size-empty)
                  && !stored_schema.data.data())) {
-    CLOG_E("DatabaseWriter: Failed to create an owned copy for async schema data.");
+    CLOG_E("VDBWriter: Failed to create an owned copy for async schema data.");
     return false;
   }
 
@@ -608,17 +608,15 @@ bool DatabaseWriter::push_schema(const SchemaData& schema_data, bool immediate) 
     std::lock_guard lock(impl_->write_mtx);
 
     if VUNLIKELY (!merge_schema(stored_schema)) {
-      CLOG_E("DatabaseWriter: Deferred merge_schema failed for [%s] in async push_schema path.",
-             stored_schema.name.c_str());
+      CLOG_E("VDBWriter: Deferred merge_schema failed for [%s] in async push_schema path.", stored_schema.name.c_str());
     }
   });
 
   return posted;
 }
 
-int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type, SchemaType schema_type,
-                             ActionType action_type, const Bytes& data, int64_t* microseconds_timestamp,
-                             bool immediate) {
+int64_t VDBWriter::push(const std::string& url, const std::string& ser_type, SchemaType schema_type,
+                        ActionType action_type, const Bytes& data, int64_t* microseconds_timestamp, bool immediate) {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (url.empty()) {
@@ -655,7 +653,7 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
     // NOLINTNEXTLINE(readability-container-size-empty)
 
     if VUNLIKELY (queued_data.size() != data.size() || (queued_data.size() > 0 && !queued_data.data())) {
-      CLOG_E("DatabaseWriter: Failed to create an owned copy for async write.");
+      CLOG_E("VDBWriter: Failed to create an owned copy for async write.");
       return -1;
     }
 
@@ -695,13 +693,13 @@ int64_t DatabaseWriter::push(const std::string& url, const std::string& ser_type
 #endif
 }
 
-bool DatabaseWriter::is_dumping() const { return impl_->is_dumping; }
+bool VDBWriter::is_dumping() const { return impl_->is_dumping; }
 
-bool DatabaseWriter::is_split_mode() const { return impl_->is_split_mode; }
+bool VDBWriter::is_split_mode() const { return impl_->is_split_mode; }
 
-int DatabaseWriter::get_split_index() const { return impl_->split_index; }
+int VDBWriter::get_split_index() const { return impl_->split_index; }
 
-void DatabaseWriter::set_url_loss(const std::string& url, double loss) {
+void VDBWriter::set_url_loss(const std::string& url, double loss) {
   if (loss > 1) {
     loss = -1;
   }
@@ -712,18 +710,18 @@ void DatabaseWriter::set_url_loss(const std::string& url, double loss) {
   impl_->total_url_loss_map[url] = loss;
 }
 
-size_t DatabaseWriter::get_max_task_count() const { return impl_->config.max_task_depth; }
+size_t VDBWriter::get_max_task_count() const { return impl_->config.max_task_depth; }
 
-void DatabaseWriter::on_begin() {
+void VDBWriter::on_begin() {
   MessageLoop::on_begin();
 
   impl_->elapsed_timer.restart();
   impl_->sync_timer.restart();
 }
 
-void DatabaseWriter::on_end() { MessageLoop::on_end(); }
+void VDBWriter::on_end() { MessageLoop::on_end(); }
 
-void DatabaseWriter::open(const std::string& path) {
+void VDBWriter::open(const std::string& path) {
 #ifdef VLINK_ENABLE_SQLITE
   try {
 #ifdef _WIN32
@@ -744,7 +742,7 @@ void DatabaseWriter::open(const std::string& path) {
       }
     }
   } catch (std::filesystem::filesystem_error& e) {
-    VLOG_F("DatabaseWriter: Filesystem error during file preparation, ", e.what(), ".");
+    VLOG_F("VDBWriter: Filesystem error during file preparation, ", e.what(), ".");
     return;
   }
 
@@ -1140,17 +1138,17 @@ void DatabaseWriter::open(const std::string& path) {
 
 #else
   (void)path;
-  VLOG_F("DatabaseWriter: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
+  VLOG_F("VDBWriter: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
 #endif
 
   impl_->last_timestamp = 0;
 }
 
-void DatabaseWriter::close() {
+void VDBWriter::close() {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (!impl_->db) {
-    VLOG_W("DatabaseWriter: Sqlite not open.");
+    VLOG_W("VDBWriter: Sqlite not open.");
     return;
   }
 
@@ -1339,12 +1337,12 @@ void DatabaseWriter::close() {
   impl_->last_timestamp = 0;
 }
 
-bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, SchemaType schema_type,
-                           ActionType action_type, const Bytes& data, int64_t microseconds_timestamp) {
+bool VDBWriter::write(const std::string& url, const std::string& ser_type, SchemaType schema_type,
+                      ActionType action_type, const Bytes& data, int64_t microseconds_timestamp) {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (!impl_->db) {
-    VLOG_W("DatabaseWriter: Sqlite not open.");
+    VLOG_W("VDBWriter: Sqlite not open.");
     return false;
   }
 
@@ -1372,9 +1370,9 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
   while (impl_->current_row > impl_->config.max_row_count || impl_->current_size > impl_->config.max_bytes_size) {
     if VUNLIKELY (!impl_->has_oversize) {
       if (impl_->config.enable_limit) {
-        VLOG_W("DatabaseWriter: The number of messages has reached the upper limit, the oldest data will be deleted.");
+        VLOG_W("VDBWriter: The number of messages has reached the upper limit, the oldest data will be deleted.");
       } else {
-        VLOG_W("DatabaseWriter: The number of messages has reached the upper limit, data after that will be ignored.");
+        VLOG_W("VDBWriter: The number of messages has reached the upper limit, data after that will be ignored.");
       }
 
       impl_->has_oversize = true;
@@ -1511,7 +1509,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
       if (next_ser_type.empty()) {
         next_ser_type = ser_type;
       } else if VUNLIKELY (next_ser_type != ser_type) {
-        CLOG_E("DatabaseWriter: URL [%s] ser changed from [%s] to [%s].", url.c_str(), next_ser_type.c_str(),
+        CLOG_E("VDBWriter: URL [%s] ser changed from [%s] to [%s].", url.c_str(), next_ser_type.c_str(),
                ser_type.c_str());
         rollback_cache();
         return false;
@@ -1577,7 +1575,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
         if (next_schema_type == SchemaType::kUnknown) {
           next_schema_type = resolved_schema_type;
         } else if VUNLIKELY (next_schema_type != resolved_schema_type) {
-          CLOG_E("DatabaseWriter: URL [%s] schema changed from [%d] to [%d].", url.c_str(),
+          CLOG_E("VDBWriter: URL [%s] schema changed from [%d] to [%d].", url.c_str(),
                  static_cast<int>(next_schema_type), static_cast<int>(resolved_schema_type));
           rollback_cache();
           return false;
@@ -1868,7 +1866,7 @@ bool DatabaseWriter::write(const std::string& url, const std::string& ser_type, 
 #endif
 }
 
-bool DatabaseWriter::write_filex(bool complete) {
+bool VDBWriter::write_filex(bool complete) {
 #ifdef _WIN32
   std::filesystem::path file_path(Helpers::string_to_wstring(impl_->path));
 #else
@@ -1935,18 +1933,18 @@ bool DatabaseWriter::write_filex(bool complete) {
       filex.close();
     }
   } catch (nlohmann::json::exception& e) {
-    VLOG_F("DatabaseWriter: JSON error during config export, ", e.what(), ".");
+    VLOG_F("VDBWriter: JSON error during config export, ", e.what(), ".");
     return false;
   }
 
   return true;
 }
 
-bool DatabaseWriter::begin_cache() {
+bool VDBWriter::begin_cache() {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (!impl_->db) {
-    VLOG_W("DatabaseWriter: Sqlite not open.");
+    VLOG_W("VDBWriter: Sqlite not open.");
     return false;
   }
 
@@ -1973,11 +1971,11 @@ bool DatabaseWriter::begin_cache() {
 #endif
 }
 
-bool DatabaseWriter::sync_cache() {
+bool VDBWriter::sync_cache() {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (!impl_->db) {
-    VLOG_W("DatabaseWriter: Sqlite not open.");
+    VLOG_W("VDBWriter: Sqlite not open.");
     return false;
   }
 
@@ -2004,11 +2002,11 @@ bool DatabaseWriter::sync_cache() {
 #endif
 }
 
-bool DatabaseWriter::rollback_cache() {
+bool VDBWriter::rollback_cache() {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (!impl_->db) {
-    VLOG_W("DatabaseWriter: Sqlite not open.");
+    VLOG_W("VDBWriter: Sqlite not open.");
     return false;
   }
 
@@ -2030,11 +2028,11 @@ bool DatabaseWriter::rollback_cache() {
 #endif
 }
 
-bool DatabaseWriter::insert_schema(const SchemaData& schema_data) {
+bool VDBWriter::insert_schema(const SchemaData& schema_data) {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (!impl_->db) {
-    VLOG_W("DatabaseWriter: Sqlite not open.");
+    VLOG_W("VDBWriter: Sqlite not open.");
     return false;
   }
 

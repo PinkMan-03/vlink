@@ -12,8 +12,8 @@
 
 | 实现类 | 文件扩展名 | 存储后端 |
 |--------|-----------|----------|
-| `DatabaseWriter` | `.vdb` / `.vdbx` | SQLite 数据库 |
-| `McapWriter` | `.vcap` / `.vcapx` | MCAP 二进制格式 |
+| `VDBWriter` | `.vdb` / `.vdbx` | SQLite 数据库 |
+| `VCAPWriter` | `.vcap` / `.vcapx` | MCAP 二进制格式 |
 
 `BagWriter::create()` 工厂方法根据文件扩展名自动选择实现，未知扩展名返回空指针。
 
@@ -82,7 +82,7 @@ struct Config final {
 文件分割策略。当 bag 文件大小达到 `split_by_size` 字节或经过 `split_by_time` 毫秒后，自动创建新文件。`split_by_time` 为 0 表示禁用时间分割。
 
 #### 4.1.5 wal_mode
-启用 SQLite WAL（Write-Ahead Log）模式。WAL 模式提供更好的崩溃恢复能力和并发读写性能。仅对 `DatabaseWriter` 有效。
+启用 SQLite WAL（Write-Ahead Log）模式。WAL 模式提供更好的崩溃恢复能力和并发读写性能。仅对 `VDBWriter` 有效。
 
 #### 4.1.6 optimize_on_exit
 关闭文件时执行 VACUUM 操作，回收未使用的数据库页。适用于录制完成后需要最小化文件体积的场景。

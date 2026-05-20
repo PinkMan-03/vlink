@@ -20,16 +20,16 @@ VLink 通过文件扩展名自动选择录制格式：
 
 | 扩展名 | 格式 | Writer 实现 | Reader 实现 |
 |--------|------|------------|------------|
-| `.vcap` | MCAP | `McapWriter` | `McapReader` |
-| `.vcapx` | MCAP | `McapWriter` | `McapReader` |
-| `.vdb` / `.vdbx` | SQLite | `DatabaseWriter` | `DatabaseReader` |
+| `.vcap` | MCAP | `VCAPWriter` | `VCAPReader` |
+| `.vcapx` | MCAP | `VCAPWriter` | `VCAPReader` |
+| `.vdb` / `.vdbx` | SQLite | `VDBWriter` | `VDBReader` |
 
 ## 3. 创建 MCAP 文件
 
 ### 3.1 方式一：通过工厂方法（推荐）
 
 ```cpp
-// 文件扩展名为 .vcap，自动使用 McapWriter
+// 文件扩展名为 .vcap，自动使用 VCAPWriter
 auto writer = BagWriter::create("/tmp/recording.vcap");
 writer->async_run();
 writer->push("dds://my/topic", "raw", SchemaType::kRaw, ActionType::kPublish, data);
@@ -38,15 +38,15 @@ writer->push("dds://my/topic", "raw", SchemaType::kRaw, ActionType::kPublish, da
 ### 3.2 方式二：显式构造
 
 ```cpp
-auto writer = std::make_shared<McapWriter>("/tmp/recording.vcap", config);
+auto writer = std::make_shared<VCAPWriter>("/tmp/recording.vcap", config);
 writer->async_run();
 ```
 
 两种方式的 API 完全一致，区别仅在于工厂方法自动根据扩展名选择实现。
 
-## 4. McapWriter 特性
+## 4. VCAPWriter 特性
 
-`McapWriter` 继承 `BagWriter` 的全部配置和能力，包括：
+`VCAPWriter` 继承 `BagWriter` 的全部配置和能力，包括：
 
 ### 4.1 压缩支持
 
@@ -105,7 +105,7 @@ auto reader = BagReader::create("/tmp/recording.vcap");
 ### 5.2 显式构造
 
 ```cpp
-auto reader = std::make_shared<McapReader>("/tmp/recording.vcap");
+auto reader = std::make_shared<VCAPReader>("/tmp/recording.vcap");
 ```
 
 ### 5.3 查看文件元数据
@@ -137,9 +137,9 @@ for (const auto& schema : schemas) {
 }
 ```
 
-## 6. McapReader 回放控制
+## 6. VCAPReader 回放控制
 
-`McapReader` 继承了 `BagReader` 的全部回放控制能力：
+`VCAPReader` 继承了 `BagReader` 的全部回放控制能力：
 
 ```cpp
 reader->async_run();
@@ -159,7 +159,7 @@ reader->stop();
 
 ## 7. .vcap 与 .vcapx 的区别
 
-两种扩展名在当前实现中均使用 `McapWriter`/`McapReader`。`.vcap` 是单文件 MCAP；`.vcapx` 是 split 模式的 manifest 文件，内部引用实际写出的 `.vcap` 分片。需要按大小或时间切分时，输出路径必须使用 `.vcapx`。
+两种扩展名在当前实现中均使用 `VCAPWriter`/`VCAPReader`。`.vcap` 是单文件 MCAP；`.vcapx` 是 split 模式的 manifest 文件，内部引用实际写出的 `.vcap` 分片。需要按大小或时间切分时，输出路径必须使用 `.vcapx`。
 
 ## 8. MCAP 与 SQLite 格式对比
 

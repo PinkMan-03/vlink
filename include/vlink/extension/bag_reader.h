@@ -28,7 +28,7 @@
  * @details
  * @c BagReader is an abstract @c MessageLoop-based player that reads VLink bag files and
  * replays recorded messages through an @c OutputCallback.  Concrete implementations are
- * @c DatabaseReader (SQLite-backed) and @c McapReader (MCAP-format).
+ * @c VDBReader (SQLite-backed) and @c VCAPReader (MCAP-format).
  *
  * Playback features:
  * - Configurable playback rate (e.g., @c rate=2.0 for 2x speed).
@@ -59,7 +59,7 @@
  * - @c check(), @c reindex(), and @c fix() run on a background thread and return
  *   a @c std::future<bool> for result polling.
  * - The file format is auto-detected from the extension by @c create()
- *   (@c .vdb / @c .vdbx -> DatabaseReader, @c .vcap / @c .vcapx -> McapReader).
+ *   (@c .vdb / @c .vdbx -> VDBReader, @c .vcap / @c .vcapx -> VCAPReader).
  */
 
 #pragma once
@@ -88,7 +88,7 @@ namespace vlink {
  *
  * @details
  * Inherits @c MessageLoop to drive playback on a dedicated thread.
- * Concrete subclasses (@c DatabaseReader, @c McapReader) implement format-specific I/O.
+ * Concrete subclasses (@c VDBReader, @c VCAPReader) implement format-specific I/O.
  */
 class VLINK_EXPORT BagReader : public MessageLoop {
  public:
@@ -229,8 +229,8 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    * @brief Creates a concrete @c BagReader for @p path, selecting the implementation by extension.
    *
    * @details
-   * - @c .vdb / @c .vdbx -- @c DatabaseReader (SQLite)
-   * - @c .vcap / @c .vcapx -- @c McapReader (MCAP format)
+   * - @c .vdb / @c .vdbx -- @c VDBReader (SQLite)
+   * - @c .vcap / @c .vcapx -- @c VCAPReader (MCAP format)
    * - unknown suffixes return @c nullptr
    *
    * @param path        Path to the bag file.

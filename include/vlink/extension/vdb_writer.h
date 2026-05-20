@@ -22,29 +22,32 @@
  */
 
 /**
- * @file mcap_writer.h
- * @brief Concrete BagWriter implementation for the MCAP bag file format.
+ * @file vdb_writer.h
+ * @brief Concrete BagWriter implementation for the SQLite-backed VLink bag format.
  *
  * @details
- * @c McapWriter records VLink messages to the MCAP format (@c .vcap / @c .vcapx extension).
- * It inherits the shared writer configuration and split support from @c BagWriter.
- * Compression is Zstd-based for @c kCompressAuto / @c kCompressZstd when Zstd support
- * is compiled in; other compression selectors are treated as no compression.
+ * @c VDBWriter records VLink messages to SQLite-backed @c .vdb / @c .vdbx files.  It extends
+ * @c BagWriter with transactional write caching (WAL mode, batch commit), optional
+ * VACUUM optimisation on exit, and in-place schema embedding for offline introspection.
  *
- * MCAP files can be opened by the Foxglove Studio visualisation tool and other
- * MCAP-compatible readers.  The file is finalised with an index footer on clean shutdown.
+ * Internally, messages are accumulated in a memory cache and committed in batches to
+ * reduce SQLite write overhead.  Cache parameters are configurable via @c BagWriter::Config.
  *
  * @par Usage
  * @code
- * auto writer = vlink::BagWriter::create("/data/recording.vcap");
+ * vlink::BagWriter::Config cfg;
+ * cfg.compress = vlink::BagWriter::kCompressLzav;
+ * cfg.wal_mode = true;
+ *
+ * auto writer = vlink::BagWriter::create("/data/recording.vdb", cfg);
  * // or explicitly:
- * auto writer = std::make_shared<vlink::McapWriter>("/data/recording.vcap");
+ * auto writer = std::make_shared<vlink::VDBWriter>("/data/recording.vdb", cfg);
  * writer->async_run();
  * writer->push("dds://my/topic", "demo.proto.PointCloud", vlink::SchemaType::kProtobuf,
  *              vlink::ActionType::kPublish, data);
  * @endcode
  *
- * @see BagWriter, DatabaseWriter
+ * @see BagWriter, VCAPWriter
  */
 
 #pragma once
@@ -57,27 +60,27 @@
 namespace vlink {
 
 /**
- * @class McapWriter
- * @brief Concrete MCAP-format bag file recorder.
+ * @class VDBWriter
+ * @brief Concrete SQLite-backed bag file recorder with transactional write caching.
  *
  * @details
  * All virtual methods from @c BagWriter are implemented.  Prefer using
  * @c BagWriter::create() for format-agnostic construction.
  */
-class VLINK_EXPORT McapWriter final : public BagWriter {
+class VLINK_EXPORT VDBWriter final : public BagWriter {
  public:
   /**
-   * @brief Constructs an @c McapWriter for the given @p path.
+   * @brief Constructs a @c VDBWriter for the given @p path.
    *
-   * @param path    Path to the output @c .vcap / @c .vcapx file.  Created if it does not exist.
+   * @param path    Path to the output @c .vdb / @c .vdbx file.  Created if it does not exist.
    * @param config  Recording configuration.
    */
-  explicit McapWriter(const std::string& path, const Config& config = {});
+  explicit VDBWriter(const std::string& path, const Config& config = {});
 
   /**
-   * @brief Destructor -- finalises the MCAP file footer and flushes all pending writes.
+   * @brief Destructor -- commits remaining cached writes and closes the SQLite database.
    */
-  ~McapWriter() override;
+  ~VDBWriter() override;
 
   /**
    * @brief Registers a callback invoked when a file split occurs.
@@ -95,7 +98,7 @@ class VLINK_EXPORT McapWriter final : public BagWriter {
   void register_schema_callback(SchemaCallback&& callback) override;
 
   /**
-   * @brief Embeds a @c SchemaData into the MCAP file for offline introspection.
+   * @brief Embeds a @c SchemaData into the SQLite bag for offline introspection.
    *
    * @param schema_data  Schema descriptor to store.
    * @param immediate    If @c true, merges synchronously; otherwise enqueues.
@@ -104,7 +107,7 @@ class VLINK_EXPORT McapWriter final : public BagWriter {
   bool push_schema(const SchemaData& schema_data, bool immediate = false) override;
 
   /**
-   * @brief Records one message to the MCAP file.
+   * @brief Records one message to the SQLite bag file.
    *
    * @param url                    VLink URL of the topic.
    * @param ser_type               Serialisation type string.
@@ -154,19 +157,27 @@ class VLINK_EXPORT McapWriter final : public BagWriter {
 
   void close();
 
-  bool merge_schema(SchemaData& schema_data);
-
-  bool load_schema(const std::string& ser_type, SchemaType& schema_type, SchemaData& schema_data);
-
   bool write(const std::string& url, const std::string& ser_type, SchemaType schema_type, ActionType action_type,
              const Bytes& data, int64_t microseconds_timestamp);
 
   bool write_filex(bool complete = true);
 
+  bool begin_cache();
+
+  bool sync_cache();
+
+  bool rollback_cache();
+
+  bool merge_schema(SchemaData& schema_data);
+
+  bool load_schema(const std::string& ser_type, SchemaType& schema_type, SchemaData& schema_data);
+
+  bool insert_schema(const SchemaData& schema_data);
+
   struct Impl;
   std::unique_ptr<Impl> impl_;
 
-  VLINK_DISALLOW_COPY_AND_ASSIGN(McapWriter)
+  VLINK_DISALLOW_COPY_AND_ASSIGN(VDBWriter)
 };
 
 }  // namespace vlink

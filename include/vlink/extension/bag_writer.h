@@ -28,7 +28,7 @@
  * @details
  * @c BagWriter is an abstract @c MessageLoop-based recorder that captures VLink messages
  * (URL + serialisation type + payload) to a bag file.  Concrete implementations are
- * @c DatabaseWriter (SQLite-backed) and @c McapWriter (MCAP-format).
+ * @c VDBWriter (SQLite-backed) and @c VCAPWriter (MCAP-format).
  *
  * Key features:
  * - Asynchronous recording via the inherited @c MessageLoop queue.
@@ -59,7 +59,7 @@
  *
  * @note
  * - @c create() selects the concrete implementation based on the file extension
- *   (@c .vdb / @c .vdbx -> DatabaseWriter, @c .vcap / @c .vcapx -> McapWriter).
+ *   (@c .vdb / @c .vdbx -> VDBWriter, @c .vcap / @c .vcapx -> VCAPWriter).
  * - @c push() is thread-safe and non-blocking; recording is done on the loop thread.
  * - The @c immediate flag bypasses the task queue and writes synchronously (use with care).
  */
@@ -175,8 +175,8 @@ class VLINK_EXPORT BagWriter : public MessageLoop {
    *
    * @details
    * Selects the implementation based on the file extension:
-   * - @c .vdb / @c .vdbx -- @c DatabaseWriter (SQLite)
-   * - @c .vcap / @c .vcapx -- @c McapWriter (MCAP format)
+   * - @c .vdb / @c .vdbx -- @c VDBWriter (SQLite)
+   * - @c .vcap / @c .vcapx -- @c VCAPWriter (MCAP format)
    * - unknown suffixes return @c nullptr
    * The returned writer has not yet started its event loop; call @c async_run().
    *

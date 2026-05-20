@@ -21,7 +21,7 @@
  * limitations under the License.
  */
 
-#include "./extension/database_reader.h"
+#include "./extension/vdb_reader.h"
 
 #include <algorithm>
 #include <atomic>
@@ -81,8 +81,8 @@ static std::string sqlite_column_text_or_empty(::sqlite3_stmt* stmt, int column)
 }
 #endif
 
-// DatabaseReader::Impl
-struct DatabaseReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+// VDBReader::Impl
+struct VDBReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<BagReader::Status> status{BagReader::kStopped};
   std::atomic_bool stop_flag{false};
   std::atomic_bool pause_flag{false};
@@ -160,10 +160,10 @@ struct DatabaseReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.
 #endif
 };
 
-// DatabaseReader
-DatabaseReader::DatabaseReader(const std::string& path, bool read_only, bool try_to_fix)
+// VDBReader
+VDBReader::VDBReader(const std::string& path, bool read_only, bool try_to_fix)
     : BagReader(path, read_only, try_to_fix), impl_(std::make_unique<Impl>()) {
-  set_name("DatabaseReader");
+  set_name("VDBReader");
 
   impl_->url_to_ser_map.reserve(128);
   impl_->url_to_schema_type_map.reserve(128);
@@ -176,11 +176,11 @@ DatabaseReader::DatabaseReader(const std::string& path, bool read_only, bool try
   open(path);
 
 #ifndef VLINK_ENABLE_SQLITE
-  VLOG_F("DatabaseReader: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
+  VLOG_F("VDBReader: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
 #endif
 }
 
-DatabaseReader::~DatabaseReader() {
+VDBReader::~VDBReader() {
   if (!impl_->stop_flag) {
     do_stop();
   }
@@ -194,34 +194,34 @@ DatabaseReader::~DatabaseReader() {
   close();
 }
 
-void DatabaseReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
+void VDBReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
   BagReader::bind_plugin_interface(plugin_interface);
   impl_->info.url_metas = impl_->raw_url_metas;
   process_url_metas(impl_->info.url_metas);
   rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
 }
 
-void DatabaseReader::register_status_callback(StatusCallback&& status_callback) {
+void VDBReader::register_status_callback(StatusCallback&& status_callback) {
   impl_->status_callback = std::move(status_callback);
 }
 
-void DatabaseReader::register_ready_callback(ReadyCallback&& ready_callback) {
+void VDBReader::register_ready_callback(ReadyCallback&& ready_callback) {
   impl_->ready_callback = std::move(ready_callback);
 }
 
-void DatabaseReader::register_finish_callback(FinishCallback&& finish_callback) {
+void VDBReader::register_finish_callback(FinishCallback&& finish_callback) {
   impl_->finish_callback = std::move(finish_callback);
 }
 
-void DatabaseReader::register_output_callback(OutputCallback&& output_callback) {
+void VDBReader::register_output_callback(OutputCallback&& output_callback) {
   BagReader::register_output_callback(std::move(output_callback));
 }
 
-void DatabaseReader::play(const Config& config) {
+void VDBReader::play(const Config& config) {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (is_busy()) {
-    VLOG_W("DatabaseReader: Is busy.");
+    VLOG_W("VDBReader: Is busy.");
     // return;
   }
 
@@ -261,9 +261,9 @@ void DatabaseReader::play(const Config& config) {
 #endif
 }
 
-void DatabaseReader::stop() { do_stop(); }
+void VDBReader::stop() { do_stop(); }
 
-void DatabaseReader::pause() {
+void VDBReader::pause() {
 #ifdef VLINK_ENABLE_SQLITE
   {
     std::unique_lock lock(impl_->mtx);
@@ -274,7 +274,7 @@ void DatabaseReader::pause() {
 #endif
 }
 
-void DatabaseReader::resume() {
+void VDBReader::resume() {
 #ifdef VLINK_ENABLE_SQLITE
   {
     std::unique_lock lock(impl_->mtx);
@@ -285,7 +285,7 @@ void DatabaseReader::resume() {
 #endif
 }
 
-void DatabaseReader::pause_to_next() {
+void VDBReader::pause_to_next() {
 #ifdef VLINK_ENABLE_SQLITE
   {
     std::unique_lock lock(impl_->mtx);
@@ -301,7 +301,7 @@ void DatabaseReader::pause_to_next() {
 #endif
 }
 
-void DatabaseReader::jump(int64_t begin_time, double rate, int times, bool force_to_play) {
+void VDBReader::jump(int64_t begin_time, double rate, int times, bool force_to_play) {
 #ifdef VLINK_ENABLE_SQLITE
 
   if (begin_time < 0) {
@@ -360,11 +360,11 @@ void DatabaseReader::jump(int64_t begin_time, double rate, int times, bool force
 #endif
 }
 
-std::future<bool> DatabaseReader::check() {
+std::future<bool> VDBReader::check() {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (is_busy()) {
-    VLOG_W("DatabaseReader: Is busy.");
+    VLOG_W("VDBReader: Is busy.");
     // return std::future<bool>();
   }
 
@@ -372,7 +372,7 @@ std::future<bool> DatabaseReader::check() {
     int ret = 0;
 
     if (!impl_->total_has_completed) {
-      VLOG_W("DatabaseReader: Incomplete data detected.");
+      VLOG_W("VDBReader: Incomplete data detected.");
       return false;
     }
 
@@ -438,13 +438,13 @@ std::future<bool> DatabaseReader::check() {
     bool is_ok = true;
 
     if VUNLIKELY (impl_->info.total_duration < impl_->info.blank_duration) {
-      VLOG_W("DatabaseReader: Invalid duration, blank=", impl_->info.blank_duration,
-             " total=", impl_->info.total_duration, ".");
+      VLOG_W("VDBReader: Invalid duration, blank=", impl_->info.blank_duration, " total=", impl_->info.total_duration,
+             ".");
       is_ok = false;
     }
 
     if VUNLIKELY (impl_->info.message_count > 0 && impl_->info.url_metas.empty()) {
-      VLOG_W("DatabaseReader: Message count is ", impl_->info.message_count, " but url meta list is empty.");
+      VLOG_W("VDBReader: Message count is ", impl_->info.message_count, " but url meta list is empty.");
       is_ok = false;
     }
 
@@ -456,27 +456,27 @@ std::future<bool> DatabaseReader::check() {
       total_raw_size += url_meta.size;
 
       if VUNLIKELY (!url_meta.valid) {
-        CLOG_W("DatabaseReader: Invalid url meta detected at index=%d.", url_meta.index);
+        CLOG_W("VDBReader: Invalid url meta detected at index=%d.", url_meta.index);
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.url.empty()) {
-        CLOG_W("DatabaseReader: Empty url detected at index=%d.", url_meta.index);
+        CLOG_W("VDBReader: Empty url detected at index=%d.", url_meta.index);
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.url_type.empty()) {
-        CLOG_W("DatabaseReader: Empty url_type detected for url=%s.", url_meta.url.c_str());
+        CLOG_W("VDBReader: Empty url_type detected for url=%s.", url_meta.url.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.count > 0 && url_meta.ser_type.empty()) {
-        CLOG_W("DatabaseReader: Empty ser_type detected for url=%s.", url_meta.url.c_str());
+        CLOG_W("VDBReader: Empty ser_type detected for url=%s.", url_meta.url.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (!SchemaData::is_valid_type(url_meta.schema_type)) {
-        CLOG_W("DatabaseReader: Invalid schema_type=%d detected for url=%s.", static_cast<int>(url_meta.schema_type),
+        CLOG_W("VDBReader: Invalid schema_type=%d detected for url=%s.", static_cast<int>(url_meta.schema_type),
                url_meta.url.c_str());
         is_ok = false;
       }
@@ -485,49 +485,49 @@ std::future<bool> DatabaseReader::check() {
 
       if VUNLIKELY (url_meta.schema_type == SchemaType::kUnknown && inferred_schema_type != SchemaType::kUnknown) {
         const auto schema_label = SchemaData::convert_type(inferred_schema_type);
-        CLOG_W("DatabaseReader: Missing schema_type for url=%s, inferred=%.*s.", url_meta.url.c_str(),
+        CLOG_W("VDBReader: Missing schema_type for url=%s, inferred=%.*s.", url_meta.url.c_str(),
                static_cast<int>(schema_label.size()), schema_label.data());
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.loss < 0.0 || url_meta.loss > 1.0) {
-        CLOG_W("DatabaseReader: Invalid loss=%f detected for url=%s.", url_meta.loss, url_meta.url.c_str());
+        CLOG_W("VDBReader: Invalid loss=%f detected for url=%s.", url_meta.loss, url_meta.url.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.freq < 0.0) {
-        CLOG_W("DatabaseReader: Invalid freq=%f detected for url=%s.", url_meta.freq, url_meta.url.c_str());
+        CLOG_W("VDBReader: Invalid freq=%f detected for url=%s.", url_meta.freq, url_meta.url.c_str());
         is_ok = false;
       }
     }
 
     if ((!impl_->info.url_metas.empty() || impl_->info.message_count != 0) &&
         total_count != static_cast<size_t>(impl_->info.message_count)) {
-      VLOG_W("DatabaseReader: Message count mismatch, header=", impl_->info.message_count, " metas=", total_count, ".");
+      VLOG_W("VDBReader: Message count mismatch, header=", impl_->info.message_count, " metas=", total_count, ".");
       is_ok = false;
     }
 
     if ((!impl_->info.url_metas.empty() || impl_->info.total_raw_size != 0) &&
         total_raw_size != static_cast<size_t>(impl_->info.total_raw_size)) {
-      VLOG_W("DatabaseReader: Raw size mismatch, header=", impl_->info.total_raw_size, " metas=", total_raw_size, ".");
+      VLOG_W("VDBReader: Raw size mismatch, header=", impl_->info.total_raw_size, " metas=", total_raw_size, ".");
       is_ok = false;
     }
 
     for (const auto& schema_data : detect_schema()) {
       if VUNLIKELY (schema_data.name.empty()) {
-        CLOG_W("DatabaseReader: Empty schema name detected.");
+        CLOG_W("VDBReader: Empty schema name detected.");
         is_ok = false;
       }
 
       if VUNLIKELY (schema_data.encoding.empty()) {
-        CLOG_W("DatabaseReader: Empty schema encoding detected for name=%s.", schema_data.name.c_str());
+        CLOG_W("VDBReader: Empty schema encoding detected for name=%s.", schema_data.name.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (!SchemaData::is_valid_type(schema_data.schema_type) ||
                     schema_data.schema_type == SchemaType::kUnknown) {
-        CLOG_W("DatabaseReader: Invalid schema_type=%d detected for schema=%s.",
-               static_cast<int>(schema_data.schema_type), schema_data.name.c_str());
+        CLOG_W("VDBReader: Invalid schema_type=%d detected for schema=%s.", static_cast<int>(schema_data.schema_type),
+               schema_data.name.c_str());
         is_ok = false;
       }
     }
@@ -539,11 +539,11 @@ std::future<bool> DatabaseReader::check() {
 #endif
 }
 
-std::future<bool> DatabaseReader::reindex() {
+std::future<bool> VDBReader::reindex() {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (is_busy()) {
-    VLOG_W("DatabaseReader: Is busy.");
+    VLOG_W("VDBReader: Is busy.");
     // return std::future<bool>();
   }
 
@@ -676,11 +676,11 @@ std::future<bool> DatabaseReader::reindex() {
 #endif
 }
 
-std::future<bool> DatabaseReader::fix(bool rebuild) {
+std::future<bool> VDBReader::fix(bool rebuild) {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (is_busy()) {
-    VLOG_W("DatabaseReader: Is busy.");
+    VLOG_W("VDBReader: Is busy.");
     // return std::future<bool>();
   }
 
@@ -937,11 +937,11 @@ std::future<bool> DatabaseReader::fix(bool rebuild) {
 #endif
 }
 
-void DatabaseReader::tag(const std::string& tag_name) {
+void VDBReader::tag(const std::string& tag_name) {
 #ifdef VLINK_ENABLE_SQLITE
 
   if VUNLIKELY (is_busy()) {
-    VLOG_W("DatabaseReader: Is busy.");
+    VLOG_W("VDBReader: Is busy.");
     // return;
   }
 
@@ -1036,11 +1036,11 @@ void DatabaseReader::tag(const std::string& tag_name) {
             }
           }
         } catch (nlohmann::json::exception& e) {
-          VLOG_W("DatabaseReader: JSON parse error, ", e.what(), ".");
+          VLOG_W("VDBReader: JSON parse error, ", e.what(), ".");
         }
       }
     } catch (std::filesystem::filesystem_error& e) {
-      VLOG_F("DatabaseReader: Filesystem error, ", e.what(), ".");
+      VLOG_F("VDBReader: Filesystem error, ", e.what(), ".");
       return;
     }
   });
@@ -1049,7 +1049,7 @@ void DatabaseReader::tag(const std::string& tag_name) {
 #endif
 }
 
-int64_t DatabaseReader::get_timestamp() const {
+int64_t VDBReader::get_timestamp() const {
   std::shared_lock time_lock(impl_->time_mtx);
 
   if (impl_->status == kPlaying) {
@@ -1065,7 +1065,7 @@ int64_t DatabaseReader::get_timestamp() const {
   }
 }
 
-int64_t DatabaseReader::get_real_timestamp() const {
+int64_t VDBReader::get_real_timestamp() const {
   if (impl_->status == kPlaying || impl_->status == kPaused) {
     return impl_->real_elapsed / 1000U;
   } else {
@@ -1073,11 +1073,11 @@ int64_t DatabaseReader::get_real_timestamp() const {
   }
 }
 
-DatabaseReader::Status DatabaseReader::get_status() const { return impl_->status; }
+VDBReader::Status VDBReader::get_status() const { return impl_->status; }
 
-const BagReader::Info& DatabaseReader::get_info() const { return impl_->info; }
+const BagReader::Info& VDBReader::get_info() const { return impl_->info; }
 
-std::vector<SchemaData> DatabaseReader::detect_schema() {
+std::vector<SchemaData> VDBReader::detect_schema() {
 #ifdef VLINK_ENABLE_SQLITE
   std::vector<SchemaData> schema_list;
   std::unordered_map<std::string, size_t> schema_index_map;
@@ -1154,7 +1154,7 @@ std::vector<SchemaData> DatabaseReader::detect_schema() {
 #endif
 }
 
-std::string DatabaseReader::get_ser_type(const std::string& url) const {
+std::string VDBReader::get_ser_type(const std::string& url) const {
   auto iter = impl_->url_to_ser_map.find(url);
 
   if VLIKELY (iter != impl_->url_to_ser_map.end()) {
@@ -1164,7 +1164,7 @@ std::string DatabaseReader::get_ser_type(const std::string& url) const {
   return {};
 }
 
-SchemaType DatabaseReader::get_schema_type(const std::string& url) const {
+SchemaType VDBReader::get_schema_type(const std::string& url) const {
   auto iter = impl_->url_to_schema_type_map.find(url);
 
   if VLIKELY (iter != impl_->url_to_schema_type_map.end()) {
@@ -1174,19 +1174,19 @@ SchemaType DatabaseReader::get_schema_type(const std::string& url) const {
   return SchemaType::kUnknown;
 }
 
-bool DatabaseReader::is_split_mode() const { return impl_->info.split_count > 0; }
+bool VDBReader::is_split_mode() const { return impl_->info.split_count > 0; }
 
-int DatabaseReader::get_split_index() const { return impl_->split_index; }
+int VDBReader::get_split_index() const { return impl_->split_index; }
 
-bool DatabaseReader::is_jumping() const { return impl_->jump_flag; }
+bool VDBReader::is_jumping() const { return impl_->jump_flag; }
 
-size_t DatabaseReader::get_max_task_count() const { return kMaxTaskSize; }
+size_t VDBReader::get_max_task_count() const { return kMaxTaskSize; }
 
-void DatabaseReader::on_begin() { MessageLoop::on_begin(); }
+void VDBReader::on_begin() { MessageLoop::on_begin(); }
 
-void DatabaseReader::on_end() { MessageLoop::on_end(); }
+void VDBReader::on_end() { MessageLoop::on_end(); }
 
-void DatabaseReader::update_status(Status status) {
+void VDBReader::update_status(Status status) {
   bool has_changed = false;
 
   if (status == kStopped) {
@@ -1213,7 +1213,7 @@ void DatabaseReader::update_status(Status status) {
   }
 }
 
-void DatabaseReader::do_stop() {
+void VDBReader::do_stop() {
 #ifdef VLINK_ENABLE_SQLITE
   {
     std::unique_lock lock(impl_->mtx);
@@ -1233,7 +1233,7 @@ void DatabaseReader::do_stop() {
 #endif
 }
 
-void DatabaseReader::do_pause() {
+void VDBReader::do_pause() {
   std::unique_lock lock(impl_->mtx);
 
   while (impl_->pause_flag) {
@@ -1278,7 +1278,7 @@ void DatabaseReader::do_pause() {
   }
 }
 
-void DatabaseReader::prepare_file(void* file) {
+void VDBReader::prepare_file(void* file) {
 #ifdef VLINK_ENABLE_SQLITE
   auto* wrapper_file = static_cast<Impl::WrapperFile*>(file);
 
@@ -1370,11 +1370,11 @@ void DatabaseReader::prepare_file(void* file) {
 
       if (need_rebuild_header) {
         if (!impl_->try_to_fix || impl_->read_only) {
-          CLOG_F("DatabaseReader: Table [VLinkHeader] is incompatible, num=%d.", invalid_header_num);
+          CLOG_F("VDBReader: Table [VLinkHeader] is incompatible, num=%d.", invalid_header_num);
           return;
         }
 
-        CLOG_W("DatabaseReader: Table [VLinkHeader] is incompatible, num=%d. Try to rebuild.", invalid_header_num);
+        CLOG_W("VDBReader: Table [VLinkHeader] is incompatible, num=%d. Try to rebuild.", invalid_header_num);
       }
     }
 
@@ -1547,7 +1547,7 @@ void DatabaseReader::prepare_file(void* file) {
 
       if VUNLIKELY (invalid_schema_table) {
         wrapper_file->has_completed = false;
-        CLOG_F("DatabaseReader: Table [VLinkSchemas] is incompatible, num=%d.", invalid_schema_num);
+        CLOG_F("VDBReader: Table [VLinkSchemas] is incompatible, num=%d.", invalid_schema_num);
         return;
       }
     }
@@ -1627,7 +1627,7 @@ void DatabaseReader::prepare_file(void* file) {
 
       if VUNLIKELY (invalid_urls_table) {
         wrapper_file->has_completed = false;
-        CLOG_F("DatabaseReader: Table [VLinkUrls] is incompatible, num=%d.", invalid_urls_num);
+        CLOG_F("VDBReader: Table [VLinkUrls] is incompatible, num=%d.", invalid_urls_num);
         return;
       }
     }
@@ -1707,7 +1707,7 @@ void DatabaseReader::prepare_file(void* file) {
 
       if VUNLIKELY (invalid_datas_table) {
         wrapper_file->has_completed = false;
-        CLOG_F("DatabaseReader: Table [VLinkDatas] is incompatible, num=%d.", invalid_datas_num);
+        CLOG_F("VDBReader: Table [VLinkDatas] is incompatible, num=%d.", invalid_datas_num);
         return;
       }
     }
@@ -1744,7 +1744,7 @@ void DatabaseReader::prepare_file(void* file) {
 
   if VUNLIKELY (major != VLINK_VERSION_MAJOR) {
     wrapper_file->has_completed = false;
-    VLOG_F("DatabaseReader: Database version is incompatible.");
+    VLOG_F("VDBReader: Database version is incompatible.");
     return;
   }
 
@@ -1774,7 +1774,7 @@ void DatabaseReader::prepare_file(void* file) {
     wrapper_file->has_completed = false;
 
     if (impl_->read_only) {
-      VLOG_E("DatabaseReader: Invalid start_timestamp.");
+      VLOG_E("VDBReader: Invalid start_timestamp.");
     }
   }
 
@@ -1787,7 +1787,7 @@ void DatabaseReader::prepare_file(void* file) {
 
   if VUNLIKELY (impl_->info.time_accuracy != "MicroSecond") {
     wrapper_file->has_completed = false;
-    VLOG_F("DatabaseReader: Database accuracy is not supported.");
+    VLOG_F("VDBReader: Database accuracy is not supported.");
     return;
   }
 
@@ -1982,11 +1982,11 @@ void DatabaseReader::prepare_file(void* file) {
   }
 #else
   (void)file;
-  VLOG_F("DatabaseReader: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
+  VLOG_F("VDBReader: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
 #endif
 }
 
-void DatabaseReader::open(const std::string& path) {
+void VDBReader::open(const std::string& path) {
 #ifdef VLINK_ENABLE_SQLITE
   auto to_open = [this](Impl::WrapperFile& wrapper_file) {
     if (impl_->read_only) {
@@ -2150,7 +2150,7 @@ void DatabaseReader::open(const std::string& path) {
         impl_->info.split_count = impl_->file_list.size();
 
         if VUNLIKELY (impl_->file_list.empty()) {
-          VLOG_F("DatabaseReader: DB list is empty.");
+          VLOG_F("VDBReader: DB list is empty.");
           return;
         }
 
@@ -2179,7 +2179,7 @@ void DatabaseReader::open(const std::string& path) {
           impl_->info.start_timestamp = 0;
 
           if (impl_->read_only) {
-            VLOG_E("DatabaseReader: Invalid start_timestamp.");
+            VLOG_E("VDBReader: Invalid start_timestamp.");
           }
         }
 
@@ -2219,7 +2219,7 @@ void DatabaseReader::open(const std::string& path) {
         }
 
         if VUNLIKELY (impl_->info.time_accuracy != "MicroSecond") {
-          VLOG_F("DatabaseReader: Database accuracy is not supported.");
+          VLOG_F("VDBReader: Database accuracy is not supported.");
           return;
         }
 
@@ -2270,7 +2270,7 @@ void DatabaseReader::open(const std::string& path) {
         impl_->raw_url_metas = impl_->info.url_metas;
         rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
       } catch (nlohmann::json::exception& e) {
-        VLOG_F("DatabaseReader: JSON parse error, ", e.what(), ".");
+        VLOG_F("VDBReader: JSON parse error, ", e.what(), ".");
         return;
       }
     } else {
@@ -2300,16 +2300,16 @@ void DatabaseReader::open(const std::string& path) {
       impl_->file_list.emplace_back(std::move(wrapper_file));
     }
   } catch (std::filesystem::filesystem_error& e) {
-    VLOG_F("DatabaseReader: Filesystem error, ", e.what(), ".");
+    VLOG_F("VDBReader: Filesystem error, ", e.what(), ".");
     return;
   }
 #else
   (void)path;
-  VLOG_F("DatabaseReader: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
+  VLOG_F("VDBReader: The compile macro VLINK_ENABLE_SQLITE is not turned on.");
 #endif
 }
 
-void DatabaseReader::close() {
+void VDBReader::close() {
 #ifdef VLINK_ENABLE_SQLITE
   for (auto& wrapper_file : impl_->file_list) {
     if VLIKELY (wrapper_file.stmt) {
@@ -2333,7 +2333,7 @@ void DatabaseReader::close() {
 #endif
 }
 
-int DatabaseReader::get_reset_index(const Config& config) {
+int VDBReader::get_reset_index(const Config& config) {
 #ifdef VLINK_ENABLE_SQLITE
   impl_->is_pending = true;
 
@@ -2411,7 +2411,7 @@ int DatabaseReader::get_reset_index(const Config& config) {
     // VLOG_W(select_sql);
 
     if VLIKELY (!select_sql) {
-      VLOG_E("DatabaseReader: Failed to prepare select sql str.");
+      VLOG_E("VDBReader: Failed to prepare select sql str.");
       break;
     }
 
@@ -2440,7 +2440,7 @@ int DatabaseReader::get_reset_index(const Config& config) {
 #endif
 }
 
-void DatabaseReader::read(const Config& config) {
+void VDBReader::read(const Config& config) {
 #ifdef VLINK_ENABLE_SQLITE
   int loop_times = 0;
 
@@ -2461,7 +2461,7 @@ void DatabaseReader::read(const Config& config) {
     }
 
     if VUNLIKELY (start_index < 0 || start_index > static_cast<int>(impl_->file_list.size()) - 1) {
-      VLOG_W("DatabaseReader: Cannot find any data for play.");
+      VLOG_W("VDBReader: Cannot find any data for play.");
 
       update_status(kStopped);
 
@@ -2526,7 +2526,7 @@ void DatabaseReader::read(const Config& config) {
       auto& wrapper_file = impl_->file_list.at(impl_->split_index);
 
       if VUNLIKELY (!wrapper_file.db || !wrapper_file.stmt) {
-        VLOG_W("DatabaseReader: Target db or stmt is empty.");
+        VLOG_W("VDBReader: Target db or stmt is empty.");
         return;
       }
 
@@ -2537,7 +2537,7 @@ void DatabaseReader::read(const Config& config) {
         impl_->offset_timer.restart();
 
         if VUNLIKELY (last_timestamp > timestamp + 10'000U) {
-          VLOG_W("DatabaseReader: The database timestamp is incorrect.");
+          VLOG_W("VDBReader: The database timestamp is incorrect.");
         }
 
         last_timestamp = timestamp;

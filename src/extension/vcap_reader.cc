@@ -21,7 +21,7 @@
  * limitations under the License.
  */
 
-#include "./extension/mcap_reader.h"
+#include "./extension/vcap_reader.h"
 
 #include <algorithm>
 #include <atomic>
@@ -54,9 +54,9 @@ namespace vlink {
 
 [[maybe_unused]] static constexpr size_t kMaxTaskSize = 50000U;
 
-// McapReader::Impl
-struct McapReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
-  std::atomic<BagReader::Status> status{McapReader::kStopped};
+// VCAPReader::Impl
+struct VCAPReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
+  std::atomic<BagReader::Status> status{VCAPReader::kStopped};
   std::atomic_bool stop_flag{false};
   std::atomic_bool pause_flag{false};
   std::atomic_bool pause_next_flag{false};
@@ -132,10 +132,10 @@ struct McapReader::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padd
   std::vector<WrapperFile> file_list;
 };
 
-// McapReader
-McapReader::McapReader(const std::string& path, bool read_only, bool try_to_fix)
+// VCAPReader
+VCAPReader::VCAPReader(const std::string& path, bool read_only, bool try_to_fix)
     : BagReader(path, read_only, try_to_fix), impl_{std::make_unique<Impl>()} {
-  set_name("McapReader");
+  set_name("VCAPReader");
 
   impl_->url_to_ser_map.reserve(128);
   impl_->url_to_schema_type_map.reserve(128);
@@ -146,7 +146,7 @@ McapReader::McapReader(const std::string& path, bool read_only, bool try_to_fix)
   open(path);
 }
 
-McapReader::~McapReader() {
+VCAPReader::~VCAPReader() {
   if (!impl_->stop_flag) {
     do_stop();
   }
@@ -160,32 +160,32 @@ McapReader::~McapReader() {
   close();
 }
 
-void McapReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
+void VCAPReader::bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface) {
   BagReader::bind_plugin_interface(plugin_interface);
   impl_->info.url_metas = impl_->raw_url_metas;
   process_url_metas(impl_->info.url_metas);
   rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
 }
 
-void McapReader::register_status_callback(StatusCallback&& status_callback) {
+void VCAPReader::register_status_callback(StatusCallback&& status_callback) {
   impl_->status_callback = std::move(status_callback);
 }
 
-void McapReader::register_ready_callback(ReadyCallback&& ready_callback) {
+void VCAPReader::register_ready_callback(ReadyCallback&& ready_callback) {
   impl_->ready_callback = std::move(ready_callback);
 }
 
-void McapReader::register_finish_callback(FinishCallback&& finish_callback) {
+void VCAPReader::register_finish_callback(FinishCallback&& finish_callback) {
   impl_->finish_callback = std::move(finish_callback);
 }
 
-void McapReader::register_output_callback(OutputCallback&& output_callback) {
+void VCAPReader::register_output_callback(OutputCallback&& output_callback) {
   BagReader::register_output_callback(std::move(output_callback));
 }
 
-void McapReader::play(const Config& config) {
+void VCAPReader::play(const Config& config) {
   if VUNLIKELY (is_busy()) {
-    VLOG_W("McapReader: Is busy.");
+    VLOG_W("VCAPReader: Is busy.");
     // return;
   }
 
@@ -222,9 +222,9 @@ void McapReader::play(const Config& config) {
   post_task([this]() { read(impl_->config); });
 }
 
-void McapReader::stop() { do_stop(); }
+void VCAPReader::stop() { do_stop(); }
 
-void McapReader::pause() {
+void VCAPReader::pause() {
   {
     std::unique_lock lock(impl_->mtx);
     impl_->pause_flag = true;
@@ -233,7 +233,7 @@ void McapReader::pause() {
   impl_->cv.notify_one();
 }
 
-void McapReader::resume() {
+void VCAPReader::resume() {
   {
     std::unique_lock lock(impl_->mtx);
     impl_->pause_flag = false;
@@ -242,7 +242,7 @@ void McapReader::resume() {
   impl_->cv.notify_one();
 }
 
-void McapReader::pause_to_next() {
+void VCAPReader::pause_to_next() {
   {
     std::unique_lock lock(impl_->mtx);
 
@@ -256,7 +256,7 @@ void McapReader::pause_to_next() {
   impl_->cv.notify_one();
 }
 
-void McapReader::jump(int64_t begin_time, double rate, int times, bool force_to_play) {
+void VCAPReader::jump(int64_t begin_time, double rate, int times, bool force_to_play) {
   if (begin_time < 0) {
     begin_time = 0;
   } else if (begin_time > impl_->info.total_duration) {
@@ -301,15 +301,15 @@ void McapReader::jump(int64_t begin_time, double rate, int times, bool force_to_
   post_task([this]() { read(impl_->config); });
 }
 
-std::future<bool> McapReader::check() {
+std::future<bool> VCAPReader::check() {
   if VUNLIKELY (is_busy()) {
-    VLOG_W("McapReader: Is busy.");
+    VLOG_W("VCAPReader: Is busy.");
     // return std::future<bool>();
   }
 
   return invoke_task([this]() {
     if (!impl_->total_has_completed) {
-      VLOG_W("McapReader: Incomplete data detected.");
+      VLOG_W("VCAPReader: Incomplete data detected.");
       return false;
     }
 
@@ -317,7 +317,7 @@ std::future<bool> McapReader::check() {
 
     auto status_function = [](const mcap::Status& status) {
       if (!status.ok()) {
-        CLOG_W("McapReader: Failed to check summary, error = %s.", status.message.c_str());
+        CLOG_W("VCAPReader: Failed to check summary, error = %s.", status.message.c_str());
       }
     };
 
@@ -329,7 +329,7 @@ std::future<bool> McapReader::check() {
       status = wrapper_file.reader->readSummary(mcap::ReadSummaryMethod::ForceScan, status_function);
 
       if VUNLIKELY (!status.ok()) {
-        CLOG_W("McapReader: Failed to check whole summary, error = %s.", status.message.c_str());
+        CLOG_W("VCAPReader: Failed to check whole summary, error = %s.", status.message.c_str());
         return false;
       }
     }
@@ -337,13 +337,13 @@ std::future<bool> McapReader::check() {
     bool is_ok = true;
 
     if VUNLIKELY (impl_->info.total_duration < impl_->info.blank_duration) {
-      CLOG_W("McapReader: Invalid duration, blank=%" PRId64 " total=%" PRId64 ".",
+      CLOG_W("VCAPReader: Invalid duration, blank=%" PRId64 " total=%" PRId64 ".",
              static_cast<int64_t>(impl_->info.blank_duration), static_cast<int64_t>(impl_->info.total_duration));
       is_ok = false;
     }
 
     if VUNLIKELY (impl_->info.message_count > 0 && impl_->info.url_metas.empty()) {
-      CLOG_W("McapReader: Message count is %" PRId64 " but url meta list is empty.",
+      CLOG_W("VCAPReader: Message count is %" PRId64 " but url meta list is empty.",
              static_cast<int64_t>(impl_->info.message_count));
       is_ok = false;
     }
@@ -356,27 +356,27 @@ std::future<bool> McapReader::check() {
       total_raw_size += url_meta.size;
 
       if VUNLIKELY (!url_meta.valid) {
-        CLOG_W("McapReader: Invalid url meta detected at index=%d.", url_meta.index);
+        CLOG_W("VCAPReader: Invalid url meta detected at index=%d.", url_meta.index);
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.url.empty()) {
-        CLOG_W("McapReader: Empty url detected at index=%d.", url_meta.index);
+        CLOG_W("VCAPReader: Empty url detected at index=%d.", url_meta.index);
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.url_type.empty()) {
-        CLOG_W("McapReader: Empty url_type detected for url=%s.", url_meta.url.c_str());
+        CLOG_W("VCAPReader: Empty url_type detected for url=%s.", url_meta.url.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.count > 0 && url_meta.ser_type.empty()) {
-        CLOG_W("McapReader: Empty ser_type detected for url=%s.", url_meta.url.c_str());
+        CLOG_W("VCAPReader: Empty ser_type detected for url=%s.", url_meta.url.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (!SchemaData::is_valid_type(url_meta.schema_type)) {
-        CLOG_W("McapReader: Invalid schema_type=%d detected for url=%s.", static_cast<int>(url_meta.schema_type),
+        CLOG_W("VCAPReader: Invalid schema_type=%d detected for url=%s.", static_cast<int>(url_meta.schema_type),
                url_meta.url.c_str());
         is_ok = false;
       }
@@ -385,50 +385,50 @@ std::future<bool> McapReader::check() {
 
       if VUNLIKELY (url_meta.schema_type == SchemaType::kUnknown && inferred_schema_type != SchemaType::kUnknown) {
         const auto schema_label = SchemaData::convert_type(inferred_schema_type);
-        CLOG_W("McapReader: Missing schema_type for url=%s, inferred=%.*s.", url_meta.url.c_str(),
+        CLOG_W("VCAPReader: Missing schema_type for url=%s, inferred=%.*s.", url_meta.url.c_str(),
                static_cast<int>(schema_label.size()), schema_label.data());
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.loss < 0.0 || url_meta.loss > 1.0) {
-        CLOG_W("McapReader: Invalid loss=%f detected for url=%s.", url_meta.loss, url_meta.url.c_str());
+        CLOG_W("VCAPReader: Invalid loss=%f detected for url=%s.", url_meta.loss, url_meta.url.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (url_meta.freq < 0.0) {
-        CLOG_W("McapReader: Invalid freq=%f detected for url=%s.", url_meta.freq, url_meta.url.c_str());
+        CLOG_W("VCAPReader: Invalid freq=%f detected for url=%s.", url_meta.freq, url_meta.url.c_str());
         is_ok = false;
       }
     }
 
     if ((!impl_->info.url_metas.empty() || impl_->info.message_count != 0) &&
         total_count != static_cast<size_t>(impl_->info.message_count)) {
-      CLOG_W("McapReader: Message count mismatch, header=%" PRId64 " metas=%zu.",
+      CLOG_W("VCAPReader: Message count mismatch, header=%" PRId64 " metas=%zu.",
              static_cast<int64_t>(impl_->info.message_count), total_count);
       is_ok = false;
     }
 
     if ((!impl_->info.url_metas.empty() || impl_->info.total_raw_size != 0) &&
         total_raw_size != static_cast<size_t>(impl_->info.total_raw_size)) {
-      CLOG_W("McapReader: Raw size mismatch, header=%" PRId64 " metas=%zu.",
+      CLOG_W("VCAPReader: Raw size mismatch, header=%" PRId64 " metas=%zu.",
              static_cast<int64_t>(impl_->info.total_raw_size), total_raw_size);
       is_ok = false;
     }
 
     for (const auto& schema_data : detect_schema()) {
       if VUNLIKELY (schema_data.name.empty()) {
-        CLOG_W("McapReader: Empty schema name detected.");
+        CLOG_W("VCAPReader: Empty schema name detected.");
         is_ok = false;
       }
 
       if VUNLIKELY (schema_data.encoding.empty()) {
-        CLOG_W("McapReader: Empty schema encoding detected for name=%s.", schema_data.name.c_str());
+        CLOG_W("VCAPReader: Empty schema encoding detected for name=%s.", schema_data.name.c_str());
         is_ok = false;
       }
 
       if VUNLIKELY (!SchemaData::is_valid_type(schema_data.schema_type) ||
                     schema_data.schema_type == SchemaType::kUnknown) {
-        CLOG_W("McapReader: Invalid schema_type=%d detected for schema=%s.", static_cast<int>(schema_data.schema_type),
+        CLOG_W("VCAPReader: Invalid schema_type=%d detected for schema=%s.", static_cast<int>(schema_data.schema_type),
                schema_data.name.c_str());
         is_ok = false;
       }
@@ -438,37 +438,37 @@ std::future<bool> McapReader::check() {
   });
 }
 
-std::future<bool> McapReader::reindex() {
+std::future<bool> VCAPReader::reindex() {
   if VUNLIKELY (is_busy()) {
-    VLOG_W("McapReader: Is busy.");
+    VLOG_W("VCAPReader: Is busy.");
     // return std::future<bool>();
   }
 
   return invoke_task([]() {
-    VLOG_W("McapReader: Reindex is not supported for vcap.");
+    VLOG_W("VCAPReader: Reindex is not supported for vcap.");
 
     return false;
   });
 }
 
-std::future<bool> McapReader::fix(bool rebuild) {
+std::future<bool> VCAPReader::fix(bool rebuild) {
   if VUNLIKELY (is_busy()) {
-    VLOG_W("McapReader: Is busy.");
+    VLOG_W("VCAPReader: Is busy.");
     // return std::future<bool>();
   }
 
   return invoke_task([rebuild]() {
     (void)rebuild;
 
-    VLOG_W("McapReader: Fix is not supported for vcap.");
+    VLOG_W("VCAPReader: Fix is not supported for vcap.");
 
     return false;
   });
 }
 
-void McapReader::tag(const std::string& tag_name) {
+void VCAPReader::tag(const std::string& tag_name) {
   if VUNLIKELY (is_busy()) {
-    VLOG_W("McapReader: Is busy.");
+    VLOG_W("VCAPReader: Is busy.");
     // return;
   }
 
@@ -512,19 +512,19 @@ void McapReader::tag(const std::string& tag_name) {
             }
           }
         } catch (nlohmann::json::exception& e) {
-          VLOG_W("McapReader: JSON parse error, ", e.what(), ".");
+          VLOG_W("VCAPReader: JSON parse error, ", e.what(), ".");
         }
       } else {
-        VLOG_W("McapReader: Tag is not supported for single vcap.");
+        VLOG_W("VCAPReader: Tag is not supported for single vcap.");
       }
     } catch (std::filesystem::filesystem_error& e) {
-      VLOG_F("McapReader: Filesystem error, ", e.what(), ".");
+      VLOG_F("VCAPReader: Filesystem error, ", e.what(), ".");
       return;
     }
   });
 }
 
-int64_t McapReader::get_timestamp() const {
+int64_t VCAPReader::get_timestamp() const {
   std::shared_lock time_lock(impl_->time_mtx);
 
   if (impl_->status == kPlaying) {
@@ -542,7 +542,7 @@ int64_t McapReader::get_timestamp() const {
   }
 }
 
-int64_t McapReader::get_real_timestamp() const {
+int64_t VCAPReader::get_real_timestamp() const {
   if (impl_->status == kPlaying || impl_->status == kPaused) {
     return impl_->real_elapsed / 1000U;
   } else {
@@ -550,11 +550,11 @@ int64_t McapReader::get_real_timestamp() const {
   }
 }
 
-BagReader::Status McapReader::get_status() const { return impl_->status; }
+BagReader::Status VCAPReader::get_status() const { return impl_->status; }
 
-const BagReader::Info& McapReader::get_info() const { return impl_->info; }
+const BagReader::Info& VCAPReader::get_info() const { return impl_->info; }
 
-std::vector<SchemaData> McapReader::detect_schema() {
+std::vector<SchemaData> VCAPReader::detect_schema() {
   std::vector<SchemaData> schema_list;
   std::unordered_map<std::string, size_t> schema_index_map;
 
@@ -603,7 +603,7 @@ std::vector<SchemaData> McapReader::detect_schema() {
   return schema_list;
 }
 
-std::string McapReader::get_ser_type(const std::string& url) const {
+std::string VCAPReader::get_ser_type(const std::string& url) const {
   auto iter = impl_->url_to_ser_map.find(url);
 
   if VLIKELY (iter != impl_->url_to_ser_map.end()) {
@@ -613,7 +613,7 @@ std::string McapReader::get_ser_type(const std::string& url) const {
   return {};
 }
 
-SchemaType McapReader::get_schema_type(const std::string& url) const {
+SchemaType VCAPReader::get_schema_type(const std::string& url) const {
   auto iter = impl_->url_to_schema_type_map.find(url);
 
   if VLIKELY (iter != impl_->url_to_schema_type_map.end()) {
@@ -623,19 +623,19 @@ SchemaType McapReader::get_schema_type(const std::string& url) const {
   return SchemaType::kUnknown;
 }
 
-bool McapReader::is_split_mode() const { return impl_->info.split_count > 0; }
+bool VCAPReader::is_split_mode() const { return impl_->info.split_count > 0; }
 
-int McapReader::get_split_index() const { return impl_->split_index; }
+int VCAPReader::get_split_index() const { return impl_->split_index; }
 
-bool McapReader::is_jumping() const { return impl_->jump_flag; }
+bool VCAPReader::is_jumping() const { return impl_->jump_flag; }
 
-size_t McapReader::get_max_task_count() const { return kMaxTaskSize; }
+size_t VCAPReader::get_max_task_count() const { return kMaxTaskSize; }
 
-void McapReader::on_begin() { MessageLoop::on_begin(); }
+void VCAPReader::on_begin() { MessageLoop::on_begin(); }
 
-void McapReader::on_end() { MessageLoop::on_end(); }
+void VCAPReader::on_end() { MessageLoop::on_end(); }
 
-void McapReader::update_status(Status status) {
+void VCAPReader::update_status(Status status) {
   bool has_changed = false;
 
   if (status == kStopped) {
@@ -662,7 +662,7 @@ void McapReader::update_status(Status status) {
   }
 }
 
-void McapReader::do_stop() {
+void VCAPReader::do_stop() {
   {
     std::unique_lock lock(impl_->mtx);
     impl_->stop_flag = true;
@@ -674,7 +674,7 @@ void McapReader::do_stop() {
   impl_->cv.notify_one();
 }
 
-void McapReader::do_pause() {
+void VCAPReader::do_pause() {
   std::unique_lock lock(impl_->mtx);
 
   while (impl_->pause_flag) {
@@ -718,7 +718,7 @@ void McapReader::do_pause() {
   }
 }
 
-void McapReader::prepare_file(void* file) {
+void VCAPReader::prepare_file(void* file) {
   auto* wrapper_file = static_cast<Impl::WrapperFile*>(file);
 
   wrapper_file->has_completed = true;
@@ -727,19 +727,19 @@ void McapReader::prepare_file(void* file) {
 
   if VUNLIKELY (!reader) {
     wrapper_file->has_completed = false;
-    CLOG_F("McapReader: Mcap [%s] reader is nullptr.", wrapper_file->path.c_str());
+    CLOG_F("VCAPReader: Mcap [%s] reader is nullptr.", wrapper_file->path.c_str());
     return;
   }
 
   if VUNLIKELY (!reader->header()) {
     wrapper_file->has_completed = false;
-    CLOG_F("McapReader: Mcap [%s] reader header is nullptr.", wrapper_file->path.c_str());
+    CLOG_F("VCAPReader: Mcap [%s] reader header is nullptr.", wrapper_file->path.c_str());
     return;
   }
 
   if VUNLIKELY (reader->header()->profile != "vlink") {
     wrapper_file->has_completed = false;
-    CLOG_F("McapReader: Mcap [%s] profile is %s, not valid.", wrapper_file->path.c_str(),
+    CLOG_F("VCAPReader: Mcap [%s] profile is %s, not valid.", wrapper_file->path.c_str(),
            reader->header()->profile.c_str());
     return;
   }
@@ -752,16 +752,16 @@ void McapReader::prepare_file(void* file) {
     wrapper_file->has_completed = false;
 
     if (impl_->try_to_fix) {
-      CLOG_E("McapReader: Failed to read summary, error = %s. Trying to fix.", status.message.c_str());
+      CLOG_E("VCAPReader: Failed to read summary, error = %s. Trying to fix.", status.message.c_str());
       status = reader->readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
 
       if VUNLIKELY (!status.ok()) {
-        CLOG_F("McapReader: Failed to read summary, error = %s.", status.message.c_str());
+        CLOG_F("VCAPReader: Failed to read summary, error = %s.", status.message.c_str());
         return;
       }
 
     } else {
-      CLOG_F("McapReader: Failed to read summary, error = %s.", status.message.c_str());
+      CLOG_F("VCAPReader: Failed to read summary, error = %s.", status.message.c_str());
       return;
     }
   }
@@ -771,7 +771,7 @@ void McapReader::prepare_file(void* file) {
 
   if (!statistics.has_value()) {
     wrapper_file->has_completed = false;
-    CLOG_F("McapReader: Mcap [%s] cannot find statistics.", wrapper_file->path.c_str());
+    CLOG_F("VCAPReader: Mcap [%s] cannot find statistics.", wrapper_file->path.c_str());
     return;
   }
 
@@ -791,7 +791,7 @@ void McapReader::prepare_file(void* file) {
 
     if VUNLIKELY (header_iter == meta_index.end()) {
       wrapper_file->has_completed = false;
-      CLOG_F("McapReader: Mcap [%s] cannot find header.", wrapper_file->path.c_str());
+      CLOG_F("VCAPReader: Mcap [%s] cannot find header.", wrapper_file->path.c_str());
       return;
     }
 
@@ -803,7 +803,7 @@ void McapReader::prepare_file(void* file) {
 
     if VUNLIKELY (!status.ok()) {
       wrapper_file->has_completed = false;
-      CLOG_F("McapReader: Failed to read header record for index, error = %s.", status.message.c_str());
+      CLOG_F("VCAPReader: Failed to read header record for index, error = %s.", status.message.c_str());
       return;
     }
 
@@ -813,7 +813,7 @@ void McapReader::prepare_file(void* file) {
 
     if VUNLIKELY (!status.ok()) {
       wrapper_file->has_completed = false;
-      CLOG_F("McapReader: Failed to parse header meta data, error = %s.", status.message.c_str());
+      CLOG_F("VCAPReader: Failed to parse header meta data, error = %s.", status.message.c_str());
       return;
     }
 
@@ -829,7 +829,7 @@ void McapReader::prepare_file(void* file) {
       wrapper_file->has_completed = false;
 
       if (impl_->read_only) {
-        CLOG_E("McapReader: Mcap [%s] cannot find version in header.", wrapper_file->path.c_str());
+        CLOG_E("VCAPReader: Mcap [%s] cannot find version in header.", wrapper_file->path.c_str());
       }
 
       version_str = "0.0.0";
@@ -840,12 +840,12 @@ void McapReader::prepare_file(void* file) {
         wrapper_file->has_completed = false;
 
         if (impl_->read_only) {
-          CLOG_E("McapReader: Mcap [%s] header version is invalid.", wrapper_file->path.c_str());
+          CLOG_E("VCAPReader: Mcap [%s] header version is invalid.", wrapper_file->path.c_str());
         }
       } else {
         if VUNLIKELY (version.major != VLINK_VERSION_MAJOR) {
           wrapper_file->has_completed = false;
-          VLOG_F("McapReader: Mcap version is incompatible.");
+          VLOG_F("VCAPReader: Mcap version is incompatible.");
           return;
         }
       }
@@ -855,7 +855,7 @@ void McapReader::prepare_file(void* file) {
       wrapper_file->has_completed = false;
 
       if (impl_->read_only) {
-        CLOG_E("McapReader: Mcap [%s] cannot find compress in header.", wrapper_file->path.c_str());
+        CLOG_E("VCAPReader: Mcap [%s] cannot find compress in header.", wrapper_file->path.c_str());
       }
 
       compress_str = "Unknown";
@@ -865,7 +865,7 @@ void McapReader::prepare_file(void* file) {
       wrapper_file->has_completed = false;
 
       if (impl_->read_only) {
-        CLOG_E("McapReader: Mcap [%s] cannot find process in header.", wrapper_file->path.c_str());
+        CLOG_E("VCAPReader: Mcap [%s] cannot find process in header.", wrapper_file->path.c_str());
       }
 
       process_str = "Unknown";
@@ -875,7 +875,7 @@ void McapReader::prepare_file(void* file) {
       wrapper_file->has_completed = false;
 
       if (impl_->read_only) {
-        CLOG_E("McapReader: Mcap [%s] cannot find date in header.", wrapper_file->path.c_str());
+        CLOG_E("VCAPReader: Mcap [%s] cannot find date in header.", wrapper_file->path.c_str());
       }
 
       date_str = "Unknown";
@@ -885,7 +885,7 @@ void McapReader::prepare_file(void* file) {
       wrapper_file->has_completed = false;
 
       if (impl_->read_only) {
-        CLOG_E("McapReader: Mcap [%s] cannot find timezone in header.", wrapper_file->path.c_str());
+        CLOG_E("VCAPReader: Mcap [%s] cannot find timezone in header.", wrapper_file->path.c_str());
       }
     }
 
@@ -912,7 +912,7 @@ void McapReader::prepare_file(void* file) {
       impl_->info.start_timestamp = 0;
 
       if (impl_->read_only) {
-        VLOG_E("McapReader: Invalid start_timestamp_ns.");
+        VLOG_E("VCAPReader: Invalid start_timestamp_ns.");
       }
     }
 
@@ -975,7 +975,7 @@ void McapReader::prepare_file(void* file) {
         wrapper_file->has_completed = false;
 
         if (impl_->read_only) {
-          CLOG_E("McapReader: Mcap [%s] cannot read statistics in channel.", wrapper_file->path.c_str());
+          CLOG_E("VCAPReader: Mcap [%s] cannot read statistics in channel.", wrapper_file->path.c_str());
         }
 
         continue;
@@ -989,7 +989,7 @@ void McapReader::prepare_file(void* file) {
         wrapper_file->has_completed = false;
 
         if (impl_->read_only) {
-          CLOG_E("McapReader: Mcap [%s] cannot find ptr in channel.", wrapper_file->path.c_str());
+          CLOG_E("VCAPReader: Mcap [%s] cannot find ptr in channel.", wrapper_file->path.c_str());
         }
 
         continue;
@@ -1001,7 +1001,7 @@ void McapReader::prepare_file(void* file) {
         wrapper_file->has_completed = false;
 
         if (impl_->read_only) {
-          CLOG_E("McapReader: Failed to read channel record for index, error = %s.", status.message.c_str());
+          CLOG_E("VCAPReader: Failed to read channel record for index, error = %s.", status.message.c_str());
         }
 
         continue;
@@ -1015,7 +1015,7 @@ void McapReader::prepare_file(void* file) {
         wrapper_file->has_completed = false;
 
         if (impl_->read_only) {
-          CLOG_E("McapReader: Failed to parse channel meta data, error = %s.", status.message.c_str());
+          CLOG_E("VCAPReader: Failed to parse channel meta data, error = %s.", status.message.c_str());
         }
 
         continue;
@@ -1046,7 +1046,7 @@ void McapReader::prepare_file(void* file) {
         wrapper_file->has_completed = false;
 
         if (impl_->read_only) {
-          CLOG_E("McapReader: Mcap [%s] channel index error.", wrapper_file->path.c_str());
+          CLOG_E("VCAPReader: Mcap [%s] channel index error.", wrapper_file->path.c_str());
         }
 
         continue;
@@ -1183,7 +1183,7 @@ void McapReader::prepare_file(void* file) {
   impl_->info.has_completed = wrapper_file->has_completed;
 }
 
-void McapReader::open(const std::string& path) {
+void VCAPReader::open(const std::string& path) {
   auto to_open = [this](Impl::WrapperFile& wrapper_file) {
     mcap::Status status;
 
@@ -1192,7 +1192,7 @@ void McapReader::open(const std::string& path) {
     status = wrapper_file.reader->open(wrapper_file.path);
 
     if VUNLIKELY (!status.ok()) {
-      CLOG_F("McapReader: Failed to open vcap, error = %s.", status.message.c_str());
+      CLOG_F("VCAPReader: Failed to open vcap, error = %s.", status.message.c_str());
       return;
     }
 
@@ -1227,7 +1227,7 @@ void McapReader::open(const std::string& path) {
     std::error_code exists_ec;
 
     if VUNLIKELY (!std::filesystem::exists(file_path, exists_ec)) {
-      CLOG_F("McapReader: Mcap [%s] does not exist.", path.c_str());
+      CLOG_F("VCAPReader: Mcap [%s] does not exist.", path.c_str());
       return;
     }
 
@@ -1299,7 +1299,7 @@ void McapReader::open(const std::string& path) {
           std::error_code db_exists_ec;
 
           if VUNLIKELY (!std::filesystem::exists(file_db, db_exists_ec)) {
-            CLOG_F("McapReader: Mcap [%s] does not exist.", file_db_str.c_str());
+            CLOG_F("VCAPReader: Mcap [%s] does not exist.", file_db_str.c_str());
             return;
           }
 
@@ -1325,7 +1325,7 @@ void McapReader::open(const std::string& path) {
           std::uintmax_t file_size = std::filesystem::file_size(file_db, db_size_ec);
 
           if VUNLIKELY (db_size_ec) {
-            CLOG_W("McapReader: file_size failed for [%s]: %s.", file_db_str.c_str(), db_size_ec.message().c_str());
+            CLOG_W("VCAPReader: file_size failed for [%s]: %s.", file_db_str.c_str(), db_size_ec.message().c_str());
             file_size = 0;
           }
 
@@ -1354,7 +1354,7 @@ void McapReader::open(const std::string& path) {
         impl_->info.split_count = impl_->file_list.size();
 
         if VUNLIKELY (impl_->file_list.empty()) {
-          VLOG_F("McapReader: DB list is empty.");
+          VLOG_F("VCAPReader: DB list is empty.");
           return;
         }
 
@@ -1383,7 +1383,7 @@ void McapReader::open(const std::string& path) {
           impl_->info.start_timestamp = 0;
 
           if (impl_->read_only) {
-            VLOG_E("McapReader: Invalid start_timestamp.");
+            VLOG_E("VCAPReader: Invalid start_timestamp.");
           }
         }
 
@@ -1423,7 +1423,7 @@ void McapReader::open(const std::string& path) {
         }
 
         if VUNLIKELY (impl_->info.time_accuracy != "MicroSecond") {
-          VLOG_F("McapReader: MCAP accuracy is not supported.");
+          VLOG_F("VCAPReader: MCAP accuracy is not supported.");
           return;
         }
 
@@ -1479,7 +1479,7 @@ void McapReader::open(const std::string& path) {
         impl_->raw_url_metas = impl_->info.url_metas;
         rebuild_url_meta_maps(impl_->info.url_metas, impl_->url_to_ser_map, impl_->url_to_schema_type_map);
       } catch (nlohmann::json::exception& e) {
-        VLOG_F("McapReader: JSON parse error, ", e.what(), ".");
+        VLOG_F("VCAPReader: JSON parse error, ", e.what(), ".");
         return;
       }
     } else {
@@ -1494,7 +1494,7 @@ void McapReader::open(const std::string& path) {
       std::uintmax_t file_size = std::filesystem::file_size(file_path, single_size_ec);
 
       if VUNLIKELY (single_size_ec) {
-        CLOG_W("McapReader: file_size failed for [%s]: %s.", path.c_str(), single_size_ec.message().c_str());
+        CLOG_W("VCAPReader: file_size failed for [%s]: %s.", path.c_str(), single_size_ec.message().c_str());
         file_size = 0;
       }
 
@@ -1515,12 +1515,12 @@ void McapReader::open(const std::string& path) {
       impl_->file_list.emplace_back(std::move(wrapper_file));
     }
   } catch (std::filesystem::filesystem_error& e) {
-    VLOG_F("McapReader: Filesystem error, ", e.what(), ".");
+    VLOG_F("VCAPReader: Filesystem error, ", e.what(), ".");
     return;
   }
 }
 
-void McapReader::close() {
+void VCAPReader::close() {
   for (auto& wrapper_file : impl_->file_list) {
     if (wrapper_file.reader) {
       wrapper_file.reader->close();
@@ -1531,14 +1531,14 @@ void McapReader::close() {
   impl_->file_list.clear();
 }
 
-int McapReader::get_reset_index(const Config& config) {
+int VCAPReader::get_reset_index(const Config& config) {
   (void)config;
 
   impl_->is_pending = true;
 
   auto status_function = [](const mcap::Status& status) {
     if (!status.ok()) {
-      CLOG_W("McapReader: Failed to read message, error = %s.", status.message.c_str());
+      CLOG_W("VCAPReader: Failed to read message, error = %s.", status.message.c_str());
     }
   };
 
@@ -1597,7 +1597,7 @@ int McapReader::get_reset_index(const Config& config) {
   return start_index;
 }
 
-void McapReader::read(const Config& config) {
+void VCAPReader::read(const Config& config) {
   int loop_times = 0;
 
   if (config.auto_pause) {
@@ -1617,7 +1617,7 @@ void McapReader::read(const Config& config) {
     }
 
     if VUNLIKELY (start_index < 0 || start_index > static_cast<int>(impl_->file_list.size()) - 1) {
-      VLOG_W("McapReader: Cannot find any data for play.");
+      VLOG_W("VCAPReader: Cannot find any data for play.");
 
       update_status(kStopped);
 
@@ -1680,7 +1680,7 @@ void McapReader::read(const Config& config) {
       auto& wrapper_file = impl_->file_list.at(impl_->split_index);
 
       if VUNLIKELY (!wrapper_file.reader) {
-        VLOG_W("McapReader: Target vcap reader is empty.");
+        VLOG_W("VCAPReader: Target vcap reader is empty.");
         return;
       }
 
@@ -1692,7 +1692,7 @@ void McapReader::read(const Config& config) {
         timestamp = (iter->message.logTime - impl_->total_start_timestamp_ns) / 1000;
 
         if VUNLIKELY (last_timestamp > timestamp + 10'000U) {
-          VLOG_W("McapReader: The vcap timestamp is incorrect.");
+          VLOG_W("VCAPReader: The vcap timestamp is incorrect.");
         }
 
         last_timestamp = timestamp;
@@ -1709,7 +1709,7 @@ void McapReader::read(const Config& config) {
         data = reinterpret_cast<const uint8_t*>(iter->message.data);
 
         if VUNLIKELY (iter->message.dataSize > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
-          CLOG_W("McapReader: Message data size is too large to address, size = %" PRIu64 ".",
+          CLOG_W("VCAPReader: Message data size is too large to address, size = %" PRIu64 ".",
                  static_cast<uint64_t>(iter->message.dataSize));
           continue;
         }

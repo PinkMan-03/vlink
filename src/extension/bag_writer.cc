@@ -33,9 +33,9 @@
 #include "./base/helpers.h"
 #include "./base/logger.h"
 #include "./base/utils.h"
-#include "./extension/database_writer.h"
-#include "./extension/mcap_writer.h"
 #include "./extension/schema_plugin_manager.h"
+#include "./extension/vcap_writer.h"
+#include "./extension/vdb_writer.h"
 
 namespace vlink {
 
@@ -98,9 +98,9 @@ std::shared_ptr<BagWriter> BagWriter::create(const std::string& path, const Conf
                  [](unsigned char c) { return std::tolower(c); });
 
   if (Helpers::has_endwith(suffix_check, ".vdb") || Helpers::has_endwith(suffix_check, ".vdbx")) {
-    return std::make_shared<DatabaseWriter>(path, config);
+    return std::make_shared<VDBWriter>(path, config);
   } else if (Helpers::has_endwith(suffix_check, ".vcap") || Helpers::has_endwith(suffix_check, ".vcapx")) {
-    return std::make_shared<McapWriter>(path, config);
+    return std::make_shared<VCAPWriter>(path, config);
   } else {
     CLOG_E("BagWriter: Unknown bag suffix, path=%s", path.c_str());
     return nullptr;
@@ -138,9 +138,9 @@ std::shared_ptr<BagWriter> BagWriter::filter_get(const std::string& path) {
     std::shared_ptr<BagWriter> target;
 
     if (is_mcap) {
-      auto* ptr = new McapWriter(path);
+      auto* ptr = new VCAPWriter(path);
 
-      target = std::shared_ptr<McapWriter>(ptr, [path](McapWriter* ptr) {
+      target = std::shared_ptr<VCAPWriter>(ptr, [path](VCAPWriter* ptr) {
         {
           std::lock_guard lock(instance.mtx);
           auto iter = instance.writer_map.find(path);
@@ -153,9 +153,9 @@ std::shared_ptr<BagWriter> BagWriter::filter_get(const std::string& path) {
         delete ptr;
       });
     } else {
-      auto* ptr = new DatabaseWriter(path);
+      auto* ptr = new VDBWriter(path);
 
-      target = std::shared_ptr<DatabaseWriter>(ptr, [path](DatabaseWriter* ptr) {
+      target = std::shared_ptr<VDBWriter>(ptr, [path](VDBWriter* ptr) {
         {
           std::lock_guard lock(instance.mtx);
           auto iter = instance.writer_map.find(path);

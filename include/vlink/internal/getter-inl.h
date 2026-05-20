@@ -180,7 +180,7 @@ inline bool Getter<ValueT, SecT>::get_change_reporting() const {
 
 template <typename ValueT, SecurityType SecT>
 inline bool Getter<ValueT, SecT>::init() {
-  if VUNLIKELY (!Node<GetterImpl, SecT>::init()) {
+  if VUNLIKELY ((!Node<GetterImpl, SecT>::init())) {
     return false;
   }
 

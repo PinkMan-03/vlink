@@ -35,7 +35,7 @@
 
 //
 #include "../common_test.h"
-#include "./extension/mcap_writer.h"
+#include "./extension/vcap_writer.h"
 
 // ---------------------------------------------------------------------------
 // Helpers: concrete subclass to test protected methods
@@ -401,7 +401,7 @@ TEST_SUITE("extension-BagWriter - construction") {
   }
 }
 
-// TEST_SUITE("extension-McapWriter - sealed_schema_set cleared across splits") {
+// TEST_SUITE("extension-VCAPWriter - sealed_schema_set cleared across splits") {
 //   TEST_CASE("push_schema succeeds after a split rotates the output file") {
 //     namespace fs = std::filesystem;
 //     const auto dir =
@@ -418,7 +418,7 @@ TEST_SUITE("extension-BagWriter - construction") {
 //     config.split_by_size = 2048;
 //     config.split_name_by_time = false;
 
-//     auto writer = std::make_shared<McapWriter>(path, config);
+//     auto writer = std::make_shared<VCAPWriter>(path, config);
 
 //     std::atomic<int> split_count{0};
 //     writer->register_split_callback(

@@ -34,8 +34,8 @@
 #include "./base/helpers.h"
 #include "./base/logger.h"
 #include "./extension/bag_reader_plugin_interface.h"
-#include "./extension/database_reader.h"
-#include "./extension/mcap_reader.h"
+#include "./extension/vcap_reader.h"
+#include "./extension/vdb_reader.h"
 #include "./impl/url.h"
 
 namespace vlink {
@@ -65,7 +65,6 @@ struct BagReader::Impl final {
   std::unordered_map<std::string, std::string> playback_url_remap;
   std::unordered_set<std::string> excluded_playback_urls;
   mutable std::shared_mutex playback_state_mtx;
-  // Protects output_callback against concurrent register vs invoke.
   mutable std::shared_mutex output_callback_mtx;
 };
 
@@ -77,9 +76,9 @@ std::shared_ptr<BagReader> BagReader::create(const std::string& path, bool read_
                  [](unsigned char c) { return std::tolower(c); });
 
   if (Helpers::has_endwith(suffix_check, ".vdb") || Helpers::has_endwith(suffix_check, ".vdbx")) {
-    return std::make_shared<DatabaseReader>(path, read_only, try_to_fix);
+    return std::make_shared<VDBReader>(path, read_only, try_to_fix);
   } else if (Helpers::has_endwith(suffix_check, ".vcap") || Helpers::has_endwith(suffix_check, ".vcapx")) {
-    return std::make_shared<McapReader>(path, read_only, try_to_fix);
+    return std::make_shared<VCAPReader>(path, read_only, try_to_fix);
   } else {
     CLOG_F("BagReader: Unknown bag suffix, path=%s", path.c_str());
     return nullptr;
