@@ -351,7 +351,7 @@ sub.listen([&](const Bytes& b){
 - `RawData`（64 B）· `CameraFrame`（80 B）· `PointCloud`（256 B）· `ProxyData`（80 B）
 - 都内嵌 40 B `Header`：`frame_id[16] + seq[4] + reserved[4] + time_meas[8] + time_pub[8]`
 
-**Bytes 五种所有权模式**（源：`base/bytes.h:42-48`）：
+**Bytes 五种工厂方法**（源：`base/bytes.h:187-284` 工厂；内部模式 `enum Type` 见 `bytes.h:901-906`，仅含 `kCreate / kShallowCopy / kDeepCopy / kMove`，对外通过 `loaned` 标志区分 loan 形态）：
 | 工厂 | 拥有内存 | 典型用途 |
 |---|---|---|
 | `Bytes::create(n)` | ✅ | 新分配（≤96 B 走 SBO） |

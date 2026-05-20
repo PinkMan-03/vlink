@@ -1835,7 +1835,7 @@ vlink-eproto pub shm://sensor/imu -d /path/to/protos \
 vlink-bench run
 
 # 完整矩阵并输出 html + csv + json
-vlink-bench run -p full --report html,csv,json -o /tmp/vlink-full-bench
+vlink-bench run --preset full --report html,csv,json -o /tmp/vlink-full-bench
 
 # 从已有结果重建报告
 vlink-bench plot /tmp/vlink-full-bench.json --report html,terminal

@@ -113,7 +113,7 @@ ctest --test-dir build --output-on-failure
 ### 92.2.3 禁用项
 
 - **不要**用 IDE 格式化工具去"格式化整个文件"然后提交 —— 只允许 `clang-format -i` 格式化"你改动的行以及上下文必要的行"
-- **不要**把 `.idea/`、`.vscode/settings.json`、`.qtcreator/` 等 IDE 个人化配置提交（已在 `.gitignore`）
+- **不要**把 `.idea/`、`.vscode/`、`.qtcreator/` 等 IDE 个人化配置目录提交（`.gitignore` 已通配排除上述顶级目录）
 - **不要**在仓库里跑 `pip install`、`npm install` 的全局安装
 - **不要**提交任何 `.log`、`.json.bak`、`.so`、`.dll`、`.exe`、`.a`、`.pdb` 类二进制产物（`drawio` 导出的 `.png` 是**唯一例外**，因为它是文档组成部分）
 
@@ -746,7 +746,8 @@ void old_function();
 ### 92.12.1 Secret 管理
 
 - **绝对** 不要把密钥、证书、token、passphrase 提交到仓库
-- `.gitignore` 已排除 `*.key` / `*.pem` / `*.p12`；新增类型的 secret 要补 `.gitignore`
+- 当前 `.gitignore` 只排除了 `/build*`、`build-*`、`.idea`、`.vscode`、`.qtcreator`、`__pycache__` 等 IDE/构建产物；**尚未** 通配排除 `*.key` / `*.pem` / `*.p12` 等敏感后缀，所以提交时务必人工核查
+- 新增任何类型的 secret 文件后，按需补 `.gitignore`（首选通配后缀；个例放具体路径）
 - 需要测试用密钥时，放 `test/fixtures/` 并用**明显标注"TEST ONLY"的自签证书**
 
 ### 92.12.2 输入校验
@@ -783,10 +784,10 @@ void old_function();
 
 ```bash
 cd doc/images/
-drawio --no-sandbox -x -f png -o <topic>.png <topic>.drawio
+drawio -x -t -f png -o <topic>.png <topic>.drawio
 ```
 
-无 GUI 环境（CI / SSH）必须带 `--no-sandbox`。
+`-x` 进入导出模式、`-t` 透明背景、`-f png` 指定格式；headless 环境（CI / SSH 终端）如遇沙箱权限错误，可临时追加 `--no-sandbox`。
 
 ### 92.13.3 样式约定
 
