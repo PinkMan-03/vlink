@@ -171,7 +171,7 @@ cc_library_shared {
     defaults: [
         "libvlink-defaults",
     ],
-    // rtti: true,
+    rtti: true,
     // vendor_available: true,
     srcs: [
         "proxy/proxy_api/*.cc",
@@ -204,7 +204,7 @@ cc_library_shared {
     defaults: [
         "libvlink-defaults",
     ],
-    // rtti: true,
+    rtti: true,
     // vendor_available: true,
     srcs: [
         "proxy/proxy_server/*.cc",
@@ -237,6 +237,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "proxy/*.cc",
     ],
@@ -264,6 +265,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/info/*.cc",
     ],
@@ -283,6 +285,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/bag/*.cc",
     ],
@@ -309,6 +312,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/monitor/*.cc",
     ],
@@ -334,6 +338,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/list/*.cc",
     ],
@@ -353,6 +358,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/eproto/*.cc",
     ],
@@ -381,6 +387,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/dump/*.cc",
     ],
@@ -409,6 +416,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/check/*.cc",
     ],
@@ -434,6 +442,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "cli/bench/*.cc",
     ],
@@ -460,6 +469,7 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
+    rtti: true,
     srcs: [
         "test/*.cc",
         "test/base/*.cc",
