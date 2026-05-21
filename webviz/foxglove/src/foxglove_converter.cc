@@ -120,7 +120,6 @@ namespace webviz {
 
 constexpr std::string_view kFoxgloveFlatbufferEncoding = "flatbuffer";
 
-// The class declaration is already static; repeating `static` here would be ill-formed.
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 flatbuffers::Offset<flatbuffers::Vector<uint8_t>> FoxgloveConverter::create_proto_repeated_byte_vector(
     flatbuffers::FlatBufferBuilder& builder, const google::protobuf::Message& msg,
@@ -1424,7 +1423,6 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
-
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2048,7 +2046,6 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
-
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2152,7 +2149,6 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
-
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2499,7 +2495,6 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
-
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
@@ -2611,7 +2606,6 @@ FoxgloveMessage FoxgloveConverter::convert_fbs_mapping(const FoxgloveMapping& ma
         const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *field);
 
         // NOLINTNEXTLINE(readability-container-size-empty, clang-analyzer-core.StackAddressEscape)
-
         if VLIKELY (vec && vec->size() != 0U) {
           data_vec = builder.CreateVector(vec->data(), vec->size());
         }
