@@ -317,7 +317,7 @@ inline bool Server<ReqT, RespT, SecT>::listen_bytes(NodeImpl::ReqRespCallback&& 
 template <typename ReqT, typename RespT, SecurityType SecT>
 template <bool HasPtrT>
 inline bool Server<ReqT, RespT, SecT>::reply_bytes(uint64_t req_id, const Bytes& resp_data, bool is_sync,
-                                                   Bytes* resp_data_ptr) {
+                                                   [[maybe_unused]] Bytes* resp_data_ptr) {
   if VUNLIKELY (!this->has_inited_) {
     VLOG_F("Server::reply_bytes() called before init().");
   }

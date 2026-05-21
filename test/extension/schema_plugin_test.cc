@@ -67,8 +67,8 @@ class TestSchemaPlugin final : public SchemaPluginBase {
 };
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
-VLINK_REGISTER_FLATBUFFERS("invalid.Schema", InvalidBinarySchema);
-VLINK_REGISTER_FLATBUFFERS("invalid.Schema.second", InvalidBinarySchema);
+VLINK_REGISTER_FLATBUFFERS("invalid.Schema", InvalidBinarySchema)
+VLINK_REGISTER_FLATBUFFERS("invalid.Schema.second", InvalidBinarySchema)
 #endif
 
 [[maybe_unused]] static std::filesystem::path test_idl_dir() {

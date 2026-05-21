@@ -69,8 +69,12 @@ TEST_SUITE("extension-Qos") {
   TEST_CASE("name field accepts up to 19 characters") {
     Qos qos;
     const char* name = "1234567890123456789";
-    std::strncpy(qos.name, name, sizeof(qos.name) - 1);
-    qos.name[sizeof(qos.name) - 1] = '\0';
+    const size_t name_len = std::strlen(name);
+    const size_t max_len = sizeof(qos.name) - 1;
+    const size_t copy_len = std::min(name_len, max_len);
+    std::memcpy(qos.name, name, copy_len);
+    qos.name[copy_len] = '\0';
+
     CHECK_EQ(std::string(qos.name), name);
     CHECK_EQ(std::strlen(qos.name), 19u);
   }

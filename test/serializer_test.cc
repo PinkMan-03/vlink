@@ -81,7 +81,7 @@ struct AnotherCustom {
   }
 };
 
-VLINK_INTRA_DATA_DECLARE(vlink::zerocopy::RawData, WrappedRawData);
+VLINK_INTRA_DATA_DECLARE(vlink::zerocopy::RawData, WrappedRawData)
 
 TEST_SUITE("ser-types") {
   TEST_CASE("bytes maps to kBytesType") {

@@ -67,15 +67,21 @@ TEST_SUITE("zerocopy-Header") {
   TEST_CASE("frame_id stores short and max-length strings") {
     zerocopy::Header h;
 
+    const size_t max_len = sizeof(h.frame_id) - 1;
+
     SUBCASE("short string") {
-      std::strncpy(h.frame_id, "cam_front", sizeof(h.frame_id) - 1);
-      h.frame_id[sizeof(h.frame_id) - 1] = '\0';
+      const char* s = "cam_front";
+      const size_t n = std::min(std::strlen(s), max_len);
+      std::memcpy(h.frame_id, s, n);
+      h.frame_id[n] = '\0';
       CHECK_EQ(std::string(h.frame_id), "cam_front");
     }
 
     SUBCASE("15-char string fills buffer") {
-      std::strncpy(h.frame_id, "123456789012345", sizeof(h.frame_id) - 1);
-      h.frame_id[sizeof(h.frame_id) - 1] = '\0';
+      const char* s = "123456789012345";
+      const size_t n = std::min(std::strlen(s), max_len);
+      std::memcpy(h.frame_id, s, n);
+      h.frame_id[n] = '\0';
       CHECK_EQ(std::string(h.frame_id), "123456789012345");
     }
   }
