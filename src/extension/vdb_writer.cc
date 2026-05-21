@@ -651,7 +651,6 @@ int64_t VDBWriter::push(const std::string& url, const std::string& ser_type, Sch
     Bytes queued_data = data;
 
     // NOLINTNEXTLINE(readability-container-size-empty)
-
     if VUNLIKELY (queued_data.size() != data.size() || (queued_data.size() > 0 && !queued_data.data())) {
       CLOG_E("VDBWriter: Failed to create an owned copy for async write.");
       return -1;

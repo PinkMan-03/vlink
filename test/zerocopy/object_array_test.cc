@@ -472,6 +472,7 @@ TEST_SUITE("zerocopy-ObjectArray") {
     CHECK(dst.is_owner());
     CHECK_EQ(dst.data(), ptr);
     CHECK_EQ(dst.count(), 1u);
+    CHECK_EQ(dst.capacity(), 4u * sizeof(zerocopy::ObjectArray::Object));
 
     CHECK_FALSE(src.is_valid());
     CHECK_FALSE(src.is_owner());
@@ -523,6 +524,7 @@ TEST_SUITE("zerocopy-ObjectArray") {
     CHECK(moved.is_owner());
     CHECK_EQ(moved.data(), ptr);
     CHECK_EQ(moved.count(), 1u);
+    CHECK_EQ(moved.capacity(), 4u * sizeof(zerocopy::ObjectArray::Object));
     CHECK_FALSE(src.is_valid());
   }
 
@@ -559,6 +561,7 @@ TEST_SUITE("zerocopy-ObjectArray") {
 
     CHECK(dst.is_owner());
     CHECK_EQ(dst.data(), ptr);
+    CHECK_EQ(dst.capacity(), 4u * sizeof(zerocopy::ObjectArray::Object));
     CHECK_FALSE(src.is_valid());
   }
 
@@ -608,6 +611,7 @@ TEST_SUITE("zerocopy-ObjectArray") {
 
     CHECK(dst.is_valid());
     CHECK_FALSE(dst.is_owner());
+    CHECK_EQ(dst.capacity(), 0u);
     CHECK_EQ(dst.count(), 5u);
     CHECK_EQ(dst.pack_size(), sizeof(zerocopy::ObjectArray::Object));
     CHECK_EQ(std::string(dst.source_id()), "fusion");

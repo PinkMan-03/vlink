@@ -91,11 +91,15 @@ int main() {
   // UUIDs (useful for reproducible tests). Advancing the engine yields a
   // different value, as expected from a deterministic PRNG.
   {
+    // NOLINTNEXTLINE(bugprone-random-generator-seed)
     std::mt19937 e1(0xdeadbeefU);
+
+    // NOLINTNEXTLINE(bugprone-random-generator-seed)
     std::mt19937 e2(0xdeadbeefU);
     vlink::Uuid a = vlink::Uuid::generate_random(e1);
     vlink::Uuid b = vlink::Uuid::generate_random(e2);
     vlink::Uuid c = vlink::Uuid::generate_random(e1);
+
     VLOG_I("seeded same engine: a==b=", a == b, " c!=a after engine advanced=", c != a);
   }
 
@@ -191,13 +195,13 @@ int main() {
   // constexpr: the default ctor and the array-based ctor are constant
   // expressions, allowing UUID literals in static_assert / constexpr context.
   {
-    constexpr vlink::Uuid nil_id;
-    static_assert(nil_id.is_nil(), "default Uuid must be nil");
-    constexpr std::array<uint8_t, 16> sample{
+    constexpr vlink::Uuid kNilId;
+    static_assert(kNilId.is_nil(), "default Uuid must be nil");
+    constexpr std::array<uint8_t, 16> kSample{
         0x47, 0xac, 0x10, 0xb8, 0x58, 0xcc, 0x4a, 0x3c, 0x8c, 0x5b, 0x0e, 0x77, 0x88, 0x99, 0xaa, 0xbb,
     };
-    constexpr vlink::Uuid sample_id{sample};
-    static_assert(sample_id.bytes()[0] == 0x47U, "constexpr bytes() must work");
+    constexpr vlink::Uuid kSampleId{kSample};
+    static_assert(kSampleId.bytes()[0] == 0x47U, "constexpr bytes() must work");
     VLOG_I("constexpr static_asserts passed");
   }
 

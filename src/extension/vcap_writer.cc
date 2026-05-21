@@ -592,7 +592,6 @@ int64_t VCAPWriter::push(const std::string& url, const std::string& ser_type, Sc
     Bytes queued_data = data;
 
     // NOLINTNEXTLINE(readability-container-size-empty)
-
     if VUNLIKELY (queued_data.size() != data.size() || (queued_data.size() > 0 && !queued_data.data())) {
       CLOG_E("VCAPWriter: Failed to create an owned copy for async write.");
       return -1;

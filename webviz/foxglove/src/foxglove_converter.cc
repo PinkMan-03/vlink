@@ -120,6 +120,8 @@ namespace webviz {
 
 constexpr std::string_view kFoxgloveFlatbufferEncoding = "flatbuffer";
 
+// The class declaration is already static; repeating `static` here would be ill-formed.
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 flatbuffers::Offset<flatbuffers::Vector<uint8_t>> FoxgloveConverter::create_proto_repeated_byte_vector(
     flatbuffers::FlatBufferBuilder& builder, const google::protobuf::Message& msg,
     const google::protobuf::FieldDescriptor& field, const google::protobuf::Reflection& ref) {
@@ -5672,12 +5674,26 @@ FoxgloveMessage FoxgloveConverter::occupancy_grid_fbs(const Bytes& raw) {
   auto cell_sz = og.cell_size();
   auto width = og.width();
   auto height = og.height();
-  auto data_size = static_cast<size_t>(width) * static_cast<size_t>(height) * static_cast<size_t>(cell_sz);
 
   if VUNLIKELY (cell_sz == 0 || width == 0 || height == 0) {
     MLOG_W("OccupancyGrid invalid: width={} height={} cell_size={}", width, height, cell_sz);
     return result;
   }
+
+  if VUNLIKELY (static_cast<size_t>(width) > std::numeric_limits<size_t>::max() / height) {
+    MLOG_W("OccupancyGrid cell count overflow: width={} height={}", width, height);
+    return result;
+  }
+
+  const size_t cell_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+
+  if VUNLIKELY (cell_count > std::numeric_limits<size_t>::max() / cell_sz ||
+                width > std::numeric_limits<uint32_t>::max() / cell_sz) {
+    MLOG_W("OccupancyGrid byte size overflow: width={} height={} cell_size={}", width, height, cell_sz);
+    return result;
+  }
+
+  const size_t data_size = cell_count * static_cast<size_t>(cell_sz);
 
   if VUNLIKELY (data_size > og.size()) {
     MLOG_W("OccupancyGrid payload too small: need={} have={}", data_size, og.size());
@@ -5750,7 +5766,7 @@ FoxgloveMessage FoxgloveConverter::occupancy_grid_fbs(const Bytes& raw) {
       ::foxglove::CreateVector2(builder, static_cast<double>(og.resolution()), static_cast<double>(og.resolution()));
 
   uint32_t cell_stride = cell_sz;
-  uint32_t row_stride = width * cell_sz;
+  uint32_t row_stride = width * static_cast<uint32_t>(cell_sz);
 
   auto grid = ::foxglove::CreateGrid(builder, &ts, frame_id, pose, width, cell_size_vec, row_stride, cell_stride,
                                      fields_vec, data_vec);
@@ -5841,6 +5857,11 @@ FoxgloveMessage FoxgloveConverter::object_array_fbs(const Bytes& raw) {
 
   auto count = arr.count();
 
+  if VUNLIKELY (count != 0 && (!arr.data() || arr.pack_size() != sizeof(zerocopy::ObjectArray::Object))) {
+    MLOG_W("ObjectArray invalid: count={} pack_size={}", count, arr.pack_size());
+    return result;
+  }
+
   thread_local flatbuffers::FlatBufferBuilder builder(64 * 1024);
   builder.Clear();
 
@@ -5880,9 +5901,9 @@ FoxgloveMessage FoxgloveConverter::object_array_fbs(const Bytes& raw) {
     auto orientation = ::foxglove::CreateQuaternion(builder, 0.0, 0.0, qz, qw);
     auto pose = ::foxglove::CreatePose(builder, position, orientation);
 
-    double sx = static_cast<double>(obj->size[0]);
-    double sy = static_cast<double>(obj->size[1]);
-    double sz = static_cast<double>(obj->size[2]);
+    auto sx = static_cast<double>(obj->size[0]);
+    auto sy = static_cast<double>(obj->size[1]);
+    auto sz = static_cast<double>(obj->size[2]);
 
     if (sx <= 0.0) {
       sx = 1.0;
@@ -5898,10 +5919,10 @@ FoxgloveMessage FoxgloveConverter::object_array_fbs(const Bytes& raw) {
 
     auto size = ::foxglove::CreateVector3(builder, sx, sy, sz);
 
-    size_t palette_idx = static_cast<size_t>(obj->motion_state);
+    auto palette_idx = static_cast<size_t>(obj->motion_state);
 
     if (palette_idx >= (sizeof(kPalette) / sizeof(kPalette[0]))) {
-      double hue = static_cast<double>(obj->class_id % 6U);
+      auto hue = static_cast<double>(obj->class_id % 6U);
       auto color = ::foxglove::CreateColor(builder, std::fmod(hue * 0.17, 1.0), std::fmod(hue * 0.29 + 0.3, 1.0),
                                            std::fmod(hue * 0.41 + 0.6, 1.0), 0.8);
       cubes_vec_data.emplace_back(::foxglove::CreateCubePrimitive(builder, pose, size, color));
@@ -5942,46 +5963,41 @@ FoxgloveMessage FoxgloveConverter::audio_frame_fbs(const Bytes& raw) {
     return result;
   }
 
-  std::string fmt_str;
+  if VUNLIKELY (frame.format() != zerocopy::AudioFrame::kFormatPcmS16 ||
+                frame.layout() != zerocopy::AudioFrame::kLayoutInterleaved) {
+    MLOG_W("Foxglove RawAudio supports only interleaved pcm-s16 AudioFrame messages");
+    return result;
+  }
 
-  switch (frame.format()) {
-    case zerocopy::AudioFrame::kFormatPcmS16:
-      fmt_str = "pcm-s16";
-      break;
-    case zerocopy::AudioFrame::kFormatPcmS24:
-      fmt_str = "pcm-s24";
-      break;
-    case zerocopy::AudioFrame::kFormatPcmS32:
-      fmt_str = "pcm-s32";
-      break;
-    case zerocopy::AudioFrame::kFormatPcmF32:
-      fmt_str = "pcm-f32";
-      break;
-    case zerocopy::AudioFrame::kFormatPcmU8:
-      fmt_str = "pcm-u8";
-      break;
-    case zerocopy::AudioFrame::kFormatOpus:
-      fmt_str = "opus";
-      break;
-    case zerocopy::AudioFrame::kFormatAac:
-      fmt_str = "aac";
-      break;
-    case zerocopy::AudioFrame::kFormatMp3:
-      fmt_str = "mp3";
-      break;
-    case zerocopy::AudioFrame::kFormatFlac:
-      fmt_str = "flac";
-      break;
-    default:
-      fmt_str = "pcm-s16";
-      break;
+  const uint32_t sample_rate = frame.sample_rate();
+  const uint32_t num_samples = frame.num_samples();
+  const uint16_t num_channels = frame.num_channels();
+
+  if VUNLIKELY (!frame.data() || frame.size() == 0 || sample_rate == 0 || num_samples == 0 || num_channels == 0) {
+    MLOG_W("AudioFrame invalid for RawAudio: size={} sample_rate={} samples={} channels={}", frame.size(), sample_rate,
+           num_samples, num_channels);
+    return result;
+  }
+
+  const size_t channel_sample_size = static_cast<size_t>(num_channels) * sizeof(int16_t);
+
+  if VUNLIKELY (channel_sample_size == 0 || num_samples > std::numeric_limits<size_t>::max() / channel_sample_size) {
+    MLOG_W("AudioFrame RawAudio size overflow: samples={} channels={}", num_samples, num_channels);
+    return result;
+  }
+
+  const size_t expected_size = static_cast<size_t>(num_samples) * channel_sample_size;
+
+  if VUNLIKELY (frame.size() != expected_size) {
+    MLOG_W("AudioFrame RawAudio size mismatch: actual={} expected={}", frame.size(), expected_size);
+    return result;
   }
 
   thread_local flatbuffers::FlatBufferBuilder builder(64 * 1024);
   builder.Clear();
 
   auto ts = make_timestamp_from_ns(frame.header.time_meas);
-  auto fmt = builder.CreateString(fmt_str);
+  auto fmt = builder.CreateString("pcm-s16");
 
   flatbuffers::Offset<flatbuffers::Vector<uint8_t>> data_vec;
 
@@ -5991,8 +6007,7 @@ FoxgloveMessage FoxgloveConverter::audio_frame_fbs(const Bytes& raw) {
     data_vec = builder.CreateVector(static_cast<const uint8_t*>(nullptr), 0);
   }
 
-  auto ra = ::foxglove::CreateRawAudio(builder, &ts, data_vec, fmt, frame.sample_rate(),
-                                       static_cast<uint32_t>(frame.num_channels()));
+  auto ra = ::foxglove::CreateRawAudio(builder, &ts, data_vec, fmt, sample_rate, static_cast<uint32_t>(num_channels));
   builder.Finish(ra);
 
   result.payload = Bytes::shallow_copy(builder.GetBufferPointer(), builder.GetSize());

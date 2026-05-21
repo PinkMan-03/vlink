@@ -775,7 +775,10 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
           },
           "data"_a, "Return a concurrent.futures.Future resolved with the response bytes.")
       .def("__repr__", [name = std::string(name)](const ClientT& self) {
-        const char* connected = !self.has_inited() ? "Unknown" : (self.is_connected() ? "True" : "False");
+        const char* connected = "Unknown";
+        if (self.has_inited()) {
+          connected = self.is_connected() ? "True" : "False";
+        }
         return name + "(url='" + self.get_url() + "', connected=" + connected + ")";
       });
 }
@@ -815,7 +818,10 @@ void bind_fire_forget_client(nb::module_& m, const char* name, const char* doc) 
           },
           "data"_a)
       .def("__repr__", [name = std::string(name)](const ClientT& self) {
-        const char* connected = !self.has_inited() ? "Unknown" : (self.is_connected() ? "True" : "False");
+        const char* connected = "Unknown";
+        if (self.has_inited()) {
+          connected = self.is_connected() ? "True" : "False";
+        }
         return name + "(url='" + self.get_url() + "', connected=" + connected + ")";
       });
 }
@@ -931,7 +937,7 @@ NB_MODULE(_vlink_nanobind, m) {
       .value("Set", vlink::ActionType::kSet)
       .value("Get", vlink::ActionType::kGet);
 
-  nb::enum_<vlink::SchemaType>(m, "SchemaType", "Coarse schema family")
+  nb::enum_<vlink::SchemaType>(m, "SchemaType", nb::is_arithmetic(), "Coarse schema family")
       .value("Unknown", vlink::SchemaType::kUnknown)
       .value("Protobuf", vlink::SchemaType::kProtobuf)
       .value("Flatbuffers", vlink::SchemaType::kFlatbuffers)
@@ -1083,19 +1089,20 @@ NB_MODULE(_vlink_nanobind, m) {
   nb::class_<vlink::zerocopy::Header>(m, "ZeroCopyHeader", "Common timestamp and sequencing metadata header (40 bytes)")
       .def(nb::init<>())
       .def_prop_rw(
-          "frame_id", [](const vlink::zerocopy::Header& self) { return std::string(self.frame_id); },
+          "frame_id", [](const vlink::zerocopy::Header& self) { return std::string(self.frame_id_view()); },
           [](vlink::zerocopy::Header& self, const std::string& s) {
             constexpr size_t kMax = sizeof(vlink::zerocopy::Header::frame_id) - 1;
             const size_t n = std::min(s.size(), kMax);
+            std::memset(self.frame_id, 0, sizeof(self.frame_id));
             std::memcpy(self.frame_id, s.data(), n);
-            self.frame_id[n] = '\0';
           })
       .def_rw("seq", &vlink::zerocopy::Header::seq)
       .def_rw("reserved", &vlink::zerocopy::Header::reserved)
       .def_rw("time_meas", &vlink::zerocopy::Header::time_meas)
       .def_rw("time_pub", &vlink::zerocopy::Header::time_pub)
       .def("__repr__", [](const vlink::zerocopy::Header& self) {
-        return std::string("ZeroCopyHeader(frame_id='") + self.frame_id + "', seq=" + std::to_string(self.seq) + ")";
+        return std::string("ZeroCopyHeader(frame_id='") + std::string(self.frame_id_view()) +
+               "', seq=" + std::to_string(self.seq) + ")";
       });
 
   nb::class_<vlink::zerocopy::RawData>(m, "RawData", "Generic zero-copy raw-byte data container (64 bytes)")
@@ -1506,7 +1513,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(
           "set_shape",
           [](vlink::zerocopy::Tensor& self, const std::vector<uint32_t>& v) {
-            self.set_shape(v.data(), static_cast<uint8_t>(v.size()));
+            const auto rank = std::min<size_t>(v.size(), vlink::zerocopy::Tensor::kMaxRank);
+            self.set_shape(v.data(), static_cast<uint8_t>(rank));
           },
           "shape"_a)
       .def("set_shape_at", &vlink::zerocopy::Tensor::set_shape_at, "dim"_a, "value"_a)
@@ -1561,12 +1569,15 @@ NB_MODULE(_vlink_nanobind, m) {
   nb::class_<vlink::zerocopy::ObjectArray::Object>(object_array_cls, "Object")
       .def(nb::init<>())
       .def_prop_rw(
-          "label", [](const vlink::zerocopy::ObjectArray::Object& self) { return std::string(self.label); },
+          "label",
+          [](const vlink::zerocopy::ObjectArray::Object& self) {
+            return std::string(self.label, ::strnlen(self.label, sizeof(self.label)));
+          },
           [](vlink::zerocopy::ObjectArray::Object& self, const std::string& s) {
             constexpr size_t kMax = sizeof(vlink::zerocopy::ObjectArray::Object::label) - 1;
             const size_t n = std::min(s.size(), kMax);
+            std::memset(self.label, 0, sizeof(self.label));
             std::memcpy(self.label, s.data(), n);
-            self.label[n] = '\0';
           })
       .def_prop_rw(
           "position",
@@ -1649,8 +1660,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_rw("subtype_id", &vlink::zerocopy::ObjectArray::Object::subtype_id)
       .def_rw("reserved32", &vlink::zerocopy::ObjectArray::Object::reserved32)
       .def("__repr__", [](const vlink::zerocopy::ObjectArray::Object& self) {
-        return std::string("Object(label='") + self.label + "', class_id=" + std::to_string(self.class_id) +
-               ", track_id=" + std::to_string(self.track_id) + ")";
+        return std::string("Object(label='") + std::string(self.label, ::strnlen(self.label, sizeof(self.label))) +
+               "', class_id=" + std::to_string(self.class_id) + ", track_id=" + std::to_string(self.track_id) + ")";
       });
   object_array_cls.def(nb::init<>())
       .def_rw("header", &vlink::zerocopy::ObjectArray::header)
@@ -1683,7 +1694,7 @@ NB_MODULE(_vlink_nanobind, m) {
           "objects",
           [](const vlink::zerocopy::ObjectArray& self,
              uint32_t index) -> std::optional<vlink::zerocopy::ObjectArray::Object> {
-            auto* p = self.objects(index);
+            const auto* p = self.objects(index);
 
             if (!p) {
               return std::nullopt;
@@ -1697,7 +1708,8 @@ NB_MODULE(_vlink_nanobind, m) {
           [](vlink::zerocopy::ObjectArray& self, uint32_t v) { self.get_reserved() = v; })
       .def("data",
            [](const vlink::zerocopy::ObjectArray& self) {
-             return nb::bytes(self.data(), self.count() * self.pack_size());
+             const size_t payload_size = static_cast<size_t>(self.count()) * static_cast<size_t>(self.pack_size());
+             return nb::bytes(self.data(), payload_size);
            })
       .def("to_bytes",
            [](const vlink::zerocopy::ObjectArray& self) {
@@ -3228,6 +3240,8 @@ NB_MODULE(_vlink_nanobind, m) {
       .def(
           "push_schema",
           [](vlink::BagWriter& self, const vlink::SchemaData& schema_data, bool immediate) {
+            // Keep a stable copy while the GIL is released.
+            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto schema_copy = schema_data;
             nb::gil_scoped_release release;
             return self.push_schema(schema_copy, immediate);

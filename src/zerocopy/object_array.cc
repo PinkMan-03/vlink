@@ -24,6 +24,7 @@
 #include "./zerocopy/object_array.h"
 
 #include <cstdint>
+#include <limits>
 
 namespace vlink {
 
@@ -110,14 +111,16 @@ bool ObjectArray::operator<<(const Bytes& bytes) noexcept {
 #pragma GCC diagnostic pop
 #endif
 
+  data_ = const_cast<uint8_t*>(bytes.data() + kMagicNumberBeginSize + sizeof(ObjectArray));
+
+  capacity_ = 0;
+
+  is_owner_ = false;
+
   if VUNLIKELY (bytes.size() != get_serialized_size()) {
     clear();
     return false;
   }
-
-  data_ = const_cast<uint8_t*>(bytes.data() + kMagicNumberBeginSize + sizeof(ObjectArray));
-
-  is_owner_ = false;
 
   return true;
 }
@@ -248,6 +251,7 @@ bool ObjectArray::move_copy(ObjectArray& target) noexcept {
   }
 
   is_owner_ = target.is_owner_;
+  capacity_ = target.capacity_;
 
   target.update_time_ns_ = 0;
   std::memset(target.source_id_, 0, sizeof(target.source_id_));
@@ -275,6 +279,10 @@ bool ObjectArray::move_copy(ObjectArray& target) noexcept {
 
 bool ObjectArray::create(size_t count) noexcept {
   if VUNLIKELY (count == 0) {
+    return false;
+  }
+
+  if VUNLIKELY (count > std::numeric_limits<size_t>::max() / sizeof(Object)) {
     return false;
   }
 

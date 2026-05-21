@@ -104,7 +104,7 @@ int main(void) {
     vlink_security_config_t cfg;
     /* Always init the struct so unset future fields get defaults. */
     vlink_security_config_init(&cfg);
-    cfg.key = "my-secret-key-16";                 /* must be 16 bytes for AES-128 */
+    cfg.key = "my-secret-key-16";                    /* must be 16 bytes for AES-128 */
     cfg.advanced.aad_context = "c_api/security/raw"; /* topic-scoped AAD */
 
     vlink_security_handle_t sec = vlink_security_create(&cfg);
@@ -180,6 +180,8 @@ int main(void) {
     uint8_t* cipher = NULL;
     size_t cipher_size = 0;
     ret = vlink_security_encrypt(sec, (const uint8_t*)plain, plain_size, &cipher, &cipher_size);
+
+    (void)ret;
 
     uint8_t* recovered = NULL;
     size_t recovered_size = 0;

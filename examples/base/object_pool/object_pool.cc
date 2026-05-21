@@ -76,6 +76,8 @@ int main() {
     {
       auto shared_buf = pool->get_shared();
       shared_buf->used = 50;
+
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto copy = shared_buf;
       MLOG_I("  use_count={}", copy.use_count());
     }

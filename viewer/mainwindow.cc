@@ -4575,7 +4575,18 @@ static void set_property_text(QTreeWidgetItem* item, const QString& value) {
 }
 
 void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
-  ui->treeWidget_property->setUpdatesEnabled(false);
+  QTreeWidget* property_tree = ui->treeWidget_property;
+  property_tree->setUpdatesEnabled(false);
+
+  struct PropertyUpdateGuard final {
+    QTreeWidget* tree{nullptr};
+
+    ~PropertyUpdateGuard() {
+      if (tree) {
+        tree->setUpdatesEnabled(true);
+      }
+    }
+  } property_update_guard{property_tree};
 
   if (current_ser_.find("RawData") != std::string::npos) {
     for (const auto& [name, item] : raw_item_map_) {

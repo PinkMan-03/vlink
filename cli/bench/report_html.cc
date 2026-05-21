@@ -58,7 +58,6 @@ std::string wrap_status_brief_html(const AggregatedCase& item) {
     const std::string_view token{tokens[index]};
 
     // NOLINTNEXTLINE(modernize-use-starts-ends-with)
-
     if (brief.compare(0, token.size(), token) == 0) {
       std::string out = "<span data-i18n=\"";
       out += keys[index];

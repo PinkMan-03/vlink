@@ -176,6 +176,8 @@ int main() {
     vlink::SecuritySubscriber<vlink::Bytes> sub("dds://security_basic/bytes", sub_cfg);
     sub.listen([&received](const vlink::Bytes& msg) {
       received++;
+
+      // NOLINTNEXTLINE(readability-container-size-empty)
       VLOG_I("[Bytes] Received size: ", msg.size(), " first_byte: ", msg.size() > 0 ? +msg.data()[0] : -1);
     });
 

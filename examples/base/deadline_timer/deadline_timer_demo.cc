@@ -114,6 +114,8 @@ int main() {
   {
     VLOG_I("--- Copy semantics ---");
     vlink::DeadlineTimer original(500);
+
+    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     vlink::DeadlineTimer copy_a(original);
     vlink::DeadlineTimer copy_b;
     copy_b = original;

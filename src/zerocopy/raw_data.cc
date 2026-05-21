@@ -97,14 +97,13 @@ bool RawData::operator<<(const Bytes& bytes) noexcept {
 #pragma GCC diagnostic pop
 #endif
 
+  data_ = const_cast<uint8_t*>(bytes.data() + kMagicNumberBeginSize + sizeof(RawData));
+  is_owner_ = false;
+
   if VUNLIKELY (bytes.size() != get_serialized_size()) {
     clear();
     return false;
   }
-
-  data_ = const_cast<uint8_t*>(bytes.data() + kMagicNumberBeginSize + sizeof(RawData));
-
-  is_owner_ = false;
 
   return true;
 }

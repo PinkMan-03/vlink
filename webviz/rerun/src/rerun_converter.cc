@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <unordered_set>
 
@@ -1543,7 +1544,12 @@ bool RerunConverter::log_occupancy_grid(::rerun::RecordingStream& rec, const std
   auto cell_type = grid.cell_type();
   auto cell_size = grid.cell_size();
 
-  if VUNLIKELY (cell_size == 0 || cell_count * cell_size > data_size) {
+  if VUNLIKELY (cell_size == 0 || cell_count > std::numeric_limits<size_t>::max() / cell_size) {
+    MLOG_W("OccupancyGrid byte size overflow: cells={} cell_size={}", cell_count, cell_size);
+    return false;
+  }
+
+  if VUNLIKELY (cell_count * cell_size > data_size) {
     MLOG_W("OccupancyGrid size mismatch: cells={} cell_size={} bytes={}", cell_count, cell_size, data_size);
     return false;
   }
@@ -1637,13 +1643,40 @@ bool RerunConverter::log_tensor(::rerun::RecordingStream& rec, const std::string
 
   std::vector<uint64_t> shape;
   shape.reserve(rank);
+  size_t expected_elements = 1;
 
   for (uint8_t i = 0; i < rank; ++i) {
-    shape.emplace_back(tensor.shape_at(i));
+    const uint32_t dim = tensor.shape_at(i);
+
+    if VUNLIKELY (dim == 0 || expected_elements > std::numeric_limits<size_t>::max() / dim) {
+      MLOG_W("Tensor shape invalid: dim={} rank={}", dim, static_cast<int>(rank));
+      return false;
+    }
+
+    expected_elements *= dim;
+    shape.emplace_back(dim);
   }
 
   ::rerun::datatypes::TensorBuffer buffer;
   auto dtype = tensor.dtype();
+  const size_t element_size = zerocopy::Tensor::element_size_of(dtype);
+
+  if VUNLIKELY (element_size == 0 || dtype == zerocopy::Tensor::kFloat16 || dtype == zerocopy::Tensor::kBfloat16) {
+    MLOG_W("Tensor dtype unsupported for rerun: {}", static_cast<int>(dtype));
+    return false;
+  }
+
+  if VUNLIKELY (expected_elements > std::numeric_limits<size_t>::max() / element_size) {
+    MLOG_W("Tensor byte size overflow");
+    return false;
+  }
+
+  const size_t expected_size = expected_elements * element_size;
+
+  if VUNLIKELY (data_size != expected_size) {
+    MLOG_W("Tensor data size mismatch: actual={} expected={}", data_size, expected_size);
+    return false;
+  }
 
   switch (dtype) {
     case zerocopy::Tensor::kBool:
@@ -1699,11 +1732,8 @@ bool RerunConverter::log_tensor(::rerun::RecordingStream& rec, const std::string
       buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<double>::take_ownership(std::move(aligned)));
       break;
     }
-    case zerocopy::Tensor::kFloat16:
-    case zerocopy::Tensor::kBfloat16:
     default: {
-      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint8_t>::borrow(data_ptr, data_size));
-      break;
+      return false;
     }
   }
 
@@ -1747,6 +1777,11 @@ bool RerunConverter::log_object_array(::rerun::RecordingStream& rec, const std::
   auto count = arr.count();
 
   if VUNLIKELY (count == 0) {
+    return false;
+  }
+
+  if VUNLIKELY (!arr.data() || arr.pack_size() != sizeof(zerocopy::ObjectArray::Object)) {
+    MLOG_W("ObjectArray invalid: count={} pack_size={}", count, arr.pack_size());
     return false;
   }
 
@@ -1856,13 +1891,52 @@ bool RerunConverter::log_audio_frame(::rerun::RecordingStream& rec, const std::s
   auto data_size = frame.size();
   auto num_channels = frame.num_channels();
   auto num_samples = frame.num_samples();
+  auto layout = frame.layout();
 
   if VUNLIKELY (!data_ptr || data_size == 0 || num_channels == 0 || num_samples == 0) {
     return false;
   }
 
+  if VUNLIKELY (layout != zerocopy::AudioFrame::kLayoutInterleaved && layout != zerocopy::AudioFrame::kLayoutPlanar) {
+    MLOG_W("AudioFrame layout unsupported for rerun tensor: {}", static_cast<int>(layout));
+    return false;
+  }
+
   ::rerun::datatypes::TensorBuffer buffer;
   auto format = frame.format();
+  size_t element_size = 0;
+
+  switch (format) {
+    case zerocopy::AudioFrame::kFormatPcmU8:
+      element_size = sizeof(uint8_t);
+      break;
+    case zerocopy::AudioFrame::kFormatPcmS16:
+      element_size = sizeof(int16_t);
+      break;
+    case zerocopy::AudioFrame::kFormatPcmS32:
+      element_size = sizeof(int32_t);
+      break;
+    case zerocopy::AudioFrame::kFormatPcmF32:
+      element_size = sizeof(float);
+      break;
+    default:
+      MLOG_W("AudioFrame format unsupported for rerun tensor: {}", static_cast<int>(format));
+      return false;
+  }
+
+  const size_t channel_sample_size = static_cast<size_t>(num_channels) * element_size;
+
+  if VUNLIKELY (channel_sample_size == 0 || num_samples > std::numeric_limits<size_t>::max() / channel_sample_size) {
+    MLOG_W("AudioFrame byte size overflow: samples={} channels={}", num_samples, num_channels);
+    return false;
+  }
+
+  const size_t expected_size = static_cast<size_t>(num_samples) * channel_sample_size;
+
+  if VUNLIKELY (data_size != expected_size) {
+    MLOG_W("AudioFrame data size mismatch: actual={} expected={}", data_size, expected_size);
+    return false;
+  }
 
   switch (format) {
     case zerocopy::AudioFrame::kFormatPcmU8: {
@@ -1887,16 +1961,14 @@ bool RerunConverter::log_audio_frame(::rerun::RecordingStream& rec, const std::s
           ::rerun::Collection<float>::borrow(reinterpret_cast<const float*>(data_ptr), element_count));
       break;
     }
-    default: {
-      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint8_t>::borrow(data_ptr, data_size));
-      break;
-    }
+    default:
+      return false;
   }
 
   std::vector<uint64_t> shape;
   shape.reserve(2);
 
-  if (frame.layout() == zerocopy::AudioFrame::kLayoutPlanar) {
+  if (layout == zerocopy::AudioFrame::kLayoutPlanar) {
     shape.emplace_back(static_cast<uint64_t>(num_channels));
     shape.emplace_back(static_cast<uint64_t>(num_samples));
   } else {
@@ -1909,7 +1981,7 @@ bool RerunConverter::log_audio_frame(::rerun::RecordingStream& rec, const std::s
   std::vector<std::string> dim_names;
   dim_names.reserve(2);
 
-  if (frame.layout() == zerocopy::AudioFrame::kLayoutPlanar) {
+  if (layout == zerocopy::AudioFrame::kLayoutPlanar) {
     dim_names.emplace_back("channel");
     dim_names.emplace_back("sample");
   } else {
@@ -6178,7 +6250,6 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
-
     if VUNLIKELY (vec == nullptr || vec->size() == 0) {
       return false;
     }
@@ -6273,7 +6344,6 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
-
     if VUNLIKELY (vec == nullptr || vec->size() == 0) {
       return false;
     }
@@ -6317,7 +6387,6 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
-
     if VUNLIKELY (vec == nullptr || vec->size() == 0) {
       return false;
     }
@@ -7324,7 +7393,6 @@ bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const s
     const auto* data_vec = flatbuffers::GetFieldV<uint8_t>(*root_table, *data_fld);
 
     // NOLINTNEXTLINE(readability-container-size-empty)
-
     if (data_vec == nullptr || data_vec->size() == 0 || shape.empty()) {
       return false;
     }

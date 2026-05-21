@@ -507,6 +507,11 @@ def test_zerocopy_tensor():
     assert t2.name() == "image"
     assert t2.layout() == "NCHW"
 
+    many_dims = _vlink.Tensor()
+    many_dims.set_shape([1] * 300)
+    assert many_dims.rank() == _vlink.Tensor.kMaxRank
+    assert many_dims.shape() == [1] * _vlink.Tensor.kMaxRank
+
     print("[PASS] Tensor")
 
 

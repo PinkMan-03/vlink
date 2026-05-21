@@ -142,16 +142,14 @@ bool PointCloud::operator<<(const Bytes& bytes) noexcept {
 
   is_owner_ = false;
   index_ = 0;
+  data_ = const_cast<uint8_t*>(bytes.data() + kMagicNumberBeginSize + sizeof(PointCloud));
+  capacity_ = 0;
 
   if VUNLIKELY (bytes.size() != get_serialized_size()) {
     clear(true);
 
     return false;
   }
-
-  data_ = const_cast<uint8_t*>(bytes.data() + kMagicNumberBeginSize + sizeof(PointCloud));
-
-  capacity_ = 0;
 
   return true;
 }

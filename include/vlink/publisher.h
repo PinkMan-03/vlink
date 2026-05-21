@@ -326,7 +326,7 @@ class SecurityPublisher : public Publisher<MsgT, SecurityType::kWithSecurity> {
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename SecurityConfigT = Security::Config,
-            typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
+            typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>  // NOLINT(modernize-use-constraints)
   explicit SecurityPublisher(const ConfT& conf, SecurityConfigT&& sec_cfg = {}, InitType type = InitType::kWithInit);
 
   /**
