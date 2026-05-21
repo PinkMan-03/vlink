@@ -21,159 +21,98 @@
  * limitations under the License.
  */
 
-/**
- * @file event_advanced.cc
- * @brief Advanced Publisher/Subscriber features: detect_subscribers, latency tracking,
- *        force publish, and multiple subscribers on the same topic.
- *
- * Demonstrates:
- *   - detect_subscribers(callback): async notification when subscribers connect/disconnect
- *   - wait_for_subscribers(timeout): block until a subscriber appears
- *   - has_subscribers(): non-blocking subscriber presence query
- *   - publish(msg, force=true): publish even when no subscribers are present
- *   - set_latency_and_lost_enabled(true): enable per-message latency tracking
- *   - get_latency(): read end-to-end latency in microseconds
- *   - get_lost(): read cumulative sample delivery statistics
- *   - Multiple subscribers on one topic (fan-out)
- */
-
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
 #include <atomic>
-#include <string>
 #include <thread>
+
+#include "sensor_types.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-// POD type defined in sensor_types.h -- see that file for field descriptions
-#include "sensor_types.h"
-
+// event_advanced: production-grade Event-model features.
+//
+// Demonstrates:
+//   - detect_subscribers: async notification when subscriber set changes.
+//   - publish(msg, force=true): force-send even when no subscriber matched.
+//   - Fan-out to multiple subscribers on the same URL.
+//   - set_latency_and_lost_enabled: per-sample latency + loss accounting.
+//   - SampleLostInfo: cumulative total/lost sample counters.
+//
+// Typical scenarios: telemetry pipelines that need observability, fault
+// detection, or proof-of-life publishing.
 int main() {
-  VLOG_I("=== VLink Event Advanced Example ===");
+  static constexpr char kUrl[] = "dds://advanced/sensor";
 
   vlink::MessageLoop loop;
   loop.set_name("main_loop");
   loop.async_run();
 
-  // ---------------------------------------------------------------
-  // Section 1: detect_subscribers -- async connection notification
-  // ---------------------------------------------------------------
-  VLOG_I("--- Section 1: detect_subscribers ---");
-
-  vlink::Publisher<SensorReading> pub("dds://advanced/sensor");
+  // detect_subscribers: registers an async observer of subscriber presence.
+  // The callback fires on the loop thread whenever the matched-subscriber set
+  // transitions empty<->non-empty. This is asynchronous discovery -- the call
+  // returns immediately, before the first notification is delivered.
+  vlink::Publisher<SensorReading> pub(kUrl);
   pub.attach(&loop);
+  pub.detect_subscribers([](bool has) { VLOG_I("[pub] subscribers present: ", has); });
+  VLOG_I("[pub] has_subscribers (before): ", pub.has_subscribers());
 
-  // Register a callback that fires when subscriber presence changes.
-  // The callback receives true when at least one subscriber exists,
-  // and false when the last subscriber disconnects.
-  pub.detect_subscribers(
-      [](bool has_subscribers) { VLOG_I("[Publisher] Subscriber presence changed: ", has_subscribers); });
+  // force=true publishes even when no subscriber matched: the sample is
+  // serialized and pushed onto the wire regardless. Useful for diagnostic
+  // beacons or to keep recordings populated when consumers are absent.
+  SensorReading forced{0, -1.0};
+  VLOG_I("[pub] normal publish (no subs): ", pub.publish(forced));
+  VLOG_I("[pub] forced publish (no subs): ", pub.publish(forced, true));
 
-  // Before any subscriber is created, has_subscribers() returns false.
-  VLOG_I("[Publisher] has_subscribers (before): ", pub.has_subscribers());
+  // Fan-out: multiple subscribers on the same URL each receive every sample.
+  // Atomic counters because each listen() callback runs on the loop thread
+  // and main() reads them after wait_for_idle().
+  std::atomic<int> count1{0};
+  std::atomic<int> count2{0};
+  std::atomic<int> count3{0};
 
-  // ---------------------------------------------------------------
-  // Section 2: Force publish (no subscribers yet)
-  //
-  // By default, publish() is a no-op when no subscribers exist.
-  // Pass force=true to send anyway (useful for recording or logging).
-  // ---------------------------------------------------------------
-  VLOG_I("--- Section 2: Force publish ---");
-
-  SensorReading forced_msg{0, -1.0};
-  bool ok_normal = pub.publish(forced_msg);        // no subscribers => no-op
-  bool ok_forced = pub.publish(forced_msg, true);  // force=true => always sends
-  VLOG_I("[Publisher] Normal publish (no subs): ", ok_normal);
-  VLOG_I("[Publisher] Forced publish (no subs): ", ok_forced);
-
-  // ---------------------------------------------------------------
-  // Section 3: Multiple subscribers (fan-out)
-  //
-  // All subscribers on the same URL receive every published message.
-  // Each subscriber can have its own callback and its own loop.
-  // ---------------------------------------------------------------
-  VLOG_I("--- Section 3: Multiple subscribers ---");
-
-  std::atomic<int> sub1_count{0};
-  std::atomic<int> sub2_count{0};
-  std::atomic<int> sub3_count{0};
-
-  vlink::Subscriber<SensorReading> sub1("dds://advanced/sensor");
+  vlink::Subscriber<SensorReading> sub1(kUrl);
   sub1.attach(&loop);
-  sub1.listen([&sub1_count](const SensorReading& msg) {
-    VLOG_I("[Sub1] sensor_id=", msg.sensor_id, " value=", msg.value);
-    sub1_count++;
+  sub1.listen([&count1](const SensorReading& msg) {
+    VLOG_I("[sub1] id=", msg.sensor_id, " value=", msg.value);
+    count1.fetch_add(1);
   });
 
-  vlink::Subscriber<SensorReading> sub2("dds://advanced/sensor");
+  vlink::Subscriber<SensorReading> sub2(kUrl);
   sub2.attach(&loop);
-  sub2.listen([&sub2_count](const SensorReading& msg) {
-    (void)msg;
-    sub2_count++;  // Silent counter -- does not log
-  });
+  sub2.listen([&count2](const SensorReading&) { count2.fetch_add(1); });
 
-  // Sub3 uses latency tracking (Section 4 below)
-  vlink::Subscriber<SensorReading> sub3("dds://advanced/sensor");
+  // set_latency_and_lost_enabled(true) MUST be called BEFORE listen(): it
+  // allocates the per-sample timing buffers and reconfigures the dispatch
+  // path. Calling it after listen() is a no-op (or worse, undefined).
+  vlink::Subscriber<SensorReading> sub3(kUrl);
   sub3.attach(&loop);
-
-  // ---------------------------------------------------------------
-  // Section 4: Latency and lost tracking
-  //
-  // set_latency_and_lost_enabled(true) must be called BEFORE listen().
-  // After enabling, get_latency() returns the end-to-end latency in
-  // microseconds, and get_lost() returns cumulative delivery stats.
-  // ---------------------------------------------------------------
-  VLOG_I("--- Section 4: Latency and lost tracking ---");
-
   sub3.set_latency_and_lost_enabled(true);
-  sub3.listen([&sub3, &sub3_count](const SensorReading& msg) {
-    sub3_count++;
-    int64_t latency_us = sub3.get_latency();
-    VLOG_I("[Sub3-latency] sensor_id=", msg.sensor_id, " latency=", latency_us, "us");
+  // Callback runs on the loop thread; get_latency() reads the most-recent
+  // measurement for this delivery in microseconds.
+  sub3.listen([&sub3, &count3](const SensorReading& msg) {
+    count3.fetch_add(1);
+    VLOG_I("[sub3] id=", msg.sensor_id, " latency=", sub3.get_latency(), "us");
   });
 
-  // ---------------------------------------------------------------
-  // Section 5: wait_for_subscribers
-  //
-  // Block until at least one subscriber is present.
-  // Default timeout is Timeout::kDefaultInterval (5000ms).
-  // ---------------------------------------------------------------
-  VLOG_I("--- Section 5: wait_for_subscribers ---");
-
-  bool found = pub.wait_for_subscribers(2000ms);
-  VLOG_I("[Publisher] wait_for_subscribers: ", found);
-  VLOG_I("[Publisher] has_subscribers (after): ", pub.has_subscribers());
-
-  // ---------------------------------------------------------------
-  // Section 6: Publish messages and observe fan-out + latency
-  // ---------------------------------------------------------------
-  VLOG_I("--- Section 6: Publish and observe ---");
+  // Bounded handshake: poll for at least one subscriber, time out at 2s.
+  VLOG_I("[pub] wait_for_subscribers: ", pub.wait_for_subscribers(2000ms));
 
   for (int i = 1; i <= 5; ++i) {
-    SensorReading msg{i, 10.0 + i * 0.1};
-    pub.publish(msg);
+    pub.publish({i, 10.0 + i * 0.1});
     std::this_thread::sleep_for(100ms);
   }
 
-  // Wait for all callbacks to complete
   loop.wait_for_idle(2000);
 
-  // ---------------------------------------------------------------
-  // Section 7: Check lost statistics
-  // ---------------------------------------------------------------
-  VLOG_I("--- Section 7: Delivery statistics ---");
+  // Cumulative loss accounting: total=samples the framework expected to see,
+  // lost=samples that never reached this subscriber (queue overflow, transport
+  // drop, etc.). Only valid because set_latency_and_lost_enabled(true).
+  vlink::SampleLostInfo lost = sub3.get_lost();
+  VLOG_I("[sub3] total=", lost.total, " lost=", lost.lost);
+  VLOG_I("sub1=", count1.load(), " sub2=", count2.load(), " sub3=", count3.load());
 
-  vlink::SampleLostInfo lost_info = sub3.get_lost();
-  VLOG_I("[Sub3] total=", lost_info.total, " lost=", lost_info.lost);
-  VLOG_I("[Sub1] received: ", sub1_count.load());
-  VLOG_I("[Sub2] received: ", sub2_count.load());
-  VLOG_I("[Sub3] received: ", sub3_count.load());
-
-  // ---------------------------------------------------------------
-  // Cleanup
-  // ---------------------------------------------------------------
-  VLOG_I("=== Example complete ===");
   loop.quit();
   loop.wait_for_quit();
 

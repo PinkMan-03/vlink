@@ -21,84 +21,76 @@
  * limitations under the License.
  */
 
-// VLink core communication API
+#include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
-#include <cstring>
-#include <iostream>
-#include <string>
+#include "custom_types.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// Custom type serialization example
-///
-/// Demonstrates using user-defined types with operator>>(Bytes&) and operator<<(const Bytes&)
-/// for serialization. These are detected as kCustomType (= 3) in the detection chain.
-///
-/// Custom types require:
-///   - void operator>>(Bytes& out) const   -> serialize (write this object into out)
-///   - void operator<<(const Bytes& in)    -> deserialize (read from in into this object)
-///
-/// This example shows:
-///   1. Fixed-length custom type (simple memcpy-like encoding)
-///   2. Variable-length custom type (string + binary data with length prefix)
-///   3. The serialization flow: publish() -> operator>> -> transport -> operator<< -> callback
-
-// Custom types defined in custom_types.h -- see that file for struct definitions
-#include "custom_types.h"
+// ---------------------------------------------------------------------------
+// custom_type.cc
+//
+// Exercises the kCustomType serialization path with two user-defined types
+// declared in custom_types.h:
+//   * Vec3       -> fixed 12-byte layout written via operator>>/<<.
+//   * NamedValue -> variable-length [u32 len][name][i32][f64] payload.
+// The example also performs a manual Serializer::serialize/deserialize round
+// trip after the pub/sub run, proving the wire codec works standalone (which
+// is what bag writers and custom transports rely on).
+// ---------------------------------------------------------------------------
 
 int main() {
   vlink::MessageLoop loop;
 
-  // ======== Vec3 pub/sub ========
+  // ---- Vec3 pub/sub ----
+  // Fixed-size custom payload. Subscriber callback runs on `loop`'s thread.
   int vec3_count = 0;
   vlink::Subscriber<Vec3> vec3_sub("dds://example/custom/vec3");
   vec3_sub.attach(&loop);
   vec3_sub.listen([&vec3_count](const Vec3& v) {
     vec3_count++;
-    std::cout << "[Vec3] #" << vec3_count << " x=" << v.x << " y=" << v.y << " z=" << v.z << std::endl;
+    VLOG_I("[Vec3] #", vec3_count, " x=", v.x, " y=", v.y, " z=", v.z);
   });
 
   vlink::Publisher<Vec3> vec3_pub("dds://example/custom/vec3");
   vec3_pub.attach(&loop);
 
-  // ======== NamedValue pub/sub ========
+  // ---- NamedValue pub/sub (variable-length payload) ----
+  // Same shape as Vec3 but the wire size depends on the embedded string.
+  // Callback fires on `loop`'s thread.
   int nv_count = 0;
   vlink::Subscriber<NamedValue> nv_sub("dds://example/custom/named");
   nv_sub.attach(&loop);
   nv_sub.listen([&nv_count](const NamedValue& nv) {
     nv_count++;
-    std::cout << "[NamedValue] #" << nv_count << " name=\"" << nv.name << "\""
-              << " code=" << nv.code << " value=" << nv.value << std::endl;
+    VLOG_I("[NamedValue] #", nv_count, " name=\"", nv.name, "\" code=", nv.code, " value=", nv.value);
   });
 
   vlink::Publisher<NamedValue> nv_pub("dds://example/custom/named");
   nv_pub.attach(&loop);
 
+  // One-shot timer (50ms, repeat=1) drives a burst of publishes on the loop
+  // thread. Running publishes from the timer keeps producer + consumer on
+  // the same thread, which avoids any cross-thread sync between them.
   vlink::Timer timer(&loop, 50, 1);
   timer.start([&]() {
-    // Publish Vec3 values
-    Vec3 v1{1.0F, 2.0F, 3.0F};
-    vec3_pub.publish(v1);
+    vec3_pub.publish(Vec3{1.0F, 2.0F, 3.0F});
+    vec3_pub.publish(Vec3{-0.5F, 100.0F, -999.0F});
 
-    Vec3 v2{-0.5F, 100.0F, -999.0F};
-    vec3_pub.publish(v2);
-
-    // Publish NamedValue with variable-length name
     NamedValue nv1;
     nv1.name = "temperature";
     nv1.code = 100;
     nv1.value = 36.6;
     nv_pub.publish(nv1);
 
-    // Publish with empty name (edge case)
+    // Edge case: empty name exercises the name_len==0 branch in operator<<.
     NamedValue nv2;
     nv2.name = "";
     nv2.code = -1;
-    nv2.value = 0.0;
     nv_pub.publish(nv2);
 
-    // Publish with long name
+    // Long name -- verifies length-prefix correctness beyond SSO threshold.
     NamedValue nv3;
     nv3.name = "a_very_long_sensor_name_that_exceeds_the_typical_short_string_optimization_threshold";
     nv3.code = 42;
@@ -111,17 +103,9 @@ int main() {
   loop.quit();
   loop.wait_for_quit();
 
-  // ======== Serialization flow explanation ========
-  std::cout << "\n[Serialization Flow]" << std::endl;
-  std::cout << "  publish(msg)" << std::endl;
-  std::cout << "    -> Serializer detects kCustomType" << std::endl;
-  std::cout << "    -> calls msg.operator>>(Bytes& out)" << std::endl;
-  std::cout << "    -> transport delivers Bytes to subscriber" << std::endl;
-  std::cout << "    -> Serializer calls msg.operator<<(const Bytes& in)" << std::endl;
-  std::cout << "    -> callback receives deserialized msg" << std::endl;
-
-  // Verify round-trip manually
-  std::cout << "\n[Manual Round-trip Test]" << std::endl;
+  // ---- Manual round-trip verification ----
+  // Direct Serializer use bypasses pub/sub entirely. This is the same code
+  // path used by BagWriter/BagReader when persisting custom types to disk.
   NamedValue original;
   original.name = "test_field";
   original.code = 777;
@@ -129,16 +113,12 @@ int main() {
 
   vlink::Bytes buf;
   vlink::Serializer::serialize(original, buf);
-  std::cout << "  Serialized size: " << buf.size() << " bytes" << std::endl;
 
   NamedValue restored;
   vlink::Serializer::deserialize(buf, restored);
-  std::cout << "  name:  \"" << restored.name << "\" (match: " << std::boolalpha << (original.name == restored.name)
-            << ")" << std::endl;
-  std::cout << "  code:  " << restored.code << " (match: " << (original.code == restored.code) << ")" << std::endl;
-  std::cout << "  value: " << restored.value << " (match: " << (original.value == restored.value) << ")" << std::endl;
+  VLOG_I("[RoundTrip] name_match=", original.name == restored.name, " code_match=", original.code == restored.code,
+         " value_match=", original.value == restored.value);
 
-  std::cout << "\n[Summary] Vec3=" << vec3_count << " NamedValue=" << nv_count << std::endl;
-
+  VLOG_I("[Summary] Vec3=", vec3_count, " NamedValue=", nv_count);
   return 0;
 }

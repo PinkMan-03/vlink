@@ -1,252 +1,221 @@
-# VLink MessageLoop 基础示例 -- 深入解析
+# message_loop_basic — vlink 任务调度核心：`MessageLoop` 入门
 
-## 1. 概述
+`vlink::MessageLoop` 是 vlink 应用层的中央事件循环，**Publisher / Subscriber / Client / Server / Setter / Getter / Timer 的所有回调都跑在某个 MessageLoop 上**。理解 MessageLoop 是理解 vlink 应用层并发模型的前提。
 
-`MessageLoop` 是 VLink 框架的核心任务调度器。所有任务和定时器回调都在其绑定的线程上**串行**执行。本示例深入演示 MessageLoop 的启动/退出、任务投递、手动事件处理以及生命周期回调。
+本示例覆盖 MessageLoop 最常用的 5 种用法：
 
-理解 MessageLoop 是掌握 VLink 框架的关键，因为几乎所有高层通信原语（Publisher、Subscriber、Getter、Setter、Server、Client）的回调最终都在某个 MessageLoop 上执行。
+1. `async_run() + post_task()` 后台线程驱动 + 投递任务。
+2. 生命周期回调：begin / end / idle handler。
+3. 阻塞式 `run()` —— 主线程直接驱动 loop。
+4. 手动 `spin_once()` —— 外部 loop 集成（Qt、ROS、自定义事件循环）。
+5. 状态查询：`is_running` / `get_task_count` / `get_type`。
 
-## 2. 文件说明
+读完本示例你能掌握：
 
-| 文件 | 说明 |
-|------|------|
-| `message_loop_basic.cc` | MessageLoop 基础功能演示源码 |
-| `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
+- async_run vs run 何时用哪个。
+- post_task 的串行语义和它给业务带来的"无锁"优势。
+- 生命周期 hook 用来做线程初始化（设亲和性、注册信号、注册 logger 上下文）。
+- 何时用 spin_once。
 
-## 3. 构建与运行
+## 背景与适用场景
 
-```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_message_loop_basic
-./build/output/bin/example_message_loop_basic
-```
+MessageLoop 是 vlink 实现"任务串行执行"的基础设施。当你把 Subscriber 用 `sub.attach(&loop)` 绑定到一个 MessageLoop 后，所有 listen 回调都跑在 loop 线程上；同一 loop 上挂多个 Subscriber，它们的回调天然串行，不需要业务自己加锁。
 
-## 4. 事件循环概念
+适用场景：
 
-![MessageLoop Architecture](images/message-loop-architecture.png)
+- 应用层的事件分发主循环（最常见）。
+- 把传输层回调"搬"到固定业务线程，避免多线程数据竞争。
+- 跨线程任务投递（任意线程 `post_task` 到 loop 线程执行）。
+- 定时任务驱动（Timer 必须挂在 MessageLoop 上）。
 
-### 4.1 什么是事件循环
+不适合：
 
-事件循环（Event Loop）是一种编程模式：**单线程不断从任务队列中取出任务并执行**。这种模式的核心优势是回调天然串行化，无需加锁。
+- CPU 密集型并行计算（用 `ThreadPool` 或 `MultiLoop`）。
+- 完全独立的 IO 线程（每个 IO 通道一个 loop 也行，但通常用一个全局 loop 集中处理足够）。
+- 极低延迟（< 微秒级）—— MessageLoop 的任务投递走 mutex + cv，有几百纳秒开销。
 
-在车载软件领域，事件循环模式尤其重要：
-- **确定性执行顺序**：任务按 FIFO 投递，按序执行
-- **无锁回调**：所有回调在同一线程上执行，共享状态无需 mutex
-- **与定时器天然集成**：定时器到期时将回调投递到同一队列
-- **便于调试**：所有操作都在一个线程上，堆栈清晰
+## 核心 API
 
-### 4.2 MessageLoop vs 传统线程模型
+| API | 签名 | 说明 |
+|-----|------|------|
+| `MessageLoop` | 默认构造 | 单独构造一个未启动的 loop |
+| `set_name` | `void set_name(const std::string&)` | 线程名，便于 top/htop 识别 |
+| `async_run` | `void async_run()` | 在后台线程启动 loop，立即返回 |
+| `run` | `void run()` | 当前线程驱动 loop，阻塞到 quit |
+| `quit` | `void quit()` | 请求退出 |
+| `wait_for_quit` | `bool wait_for_quit(std::chrono::milliseconds timeout)` | 等 loop 真正退出 |
+| `post_task` | `bool post_task(Function<void()>&&, const PostTaskOptions& = {})` | 把任务投递到 loop 队列 |
+| `wait_for_idle` | `bool wait_for_idle(uint32_t timeout_ms = ...)` | 阻塞等队列清空 |
+| `spin_once` | `void spin_once(bool blocking = false)` | 处理一批待执行任务 |
+| `register_begin_handler` | `void register_begin_handler(Function<void()>&&)` | loop 线程开始时调一次 |
+| `register_end_handler` | `void register_end_handler(Function<void()>&&)` | loop 线程退出前调一次 |
+| `register_idle_handler` | `void register_idle_handler(Function<void()>&&)` | 队列每次清空时调 |
+| `is_running` | `bool is_running() const` | 当前是否在运行 |
+| `get_task_count` | `size_t get_task_count() const` | 队列中待执行任务数 |
+| `get_type` | `MessageLoopType get_type() const` | 队列类型（normal、priority、time-ordered 等） |
 
-传统多线程模型中，每个操作可能在不同线程上执行，需要锁来保护共享状态。MessageLoop 模型将所有操作序列化到一个线程上：
+## 代码导读
 
-```
-传统模型：
-  Thread1: read(shared_data) ──┐
-  Thread2: write(shared_data) ─┤──> 需要 mutex
-  Thread3: read(shared_data) ──┘
-
-MessageLoop 模型：
-  Queue: [read, write, read] ──> LoopThread: read -> write -> read (串行)
-```
-
-### 4.3 线程模型
-
-MessageLoop 内部维护：
-1. **任务队列**：线程安全的 FIFO 队列（可选 Normal/Lockfree/Priority 类型）
-2. **定时器注册表**：最多 100 个定时器（`kMaxTimerSize`）
-3. **调度线程**：唯一执行任务的线程
-4. **生命周期回调**：begin_handler / idle_handler / end_handler
-
-### 4.4 三种队列类型对比
-
-| 类型 | 内部实现 | 适用场景 | 吞吐量 | 延迟 |
-|------|---------|---------|--------|------|
-| `kNormalType` | mutex + std::queue | 通用场景（默认） | 中 | 中 |
-| `kLockfreeType` | MPMC lock-free queue | 高并发投递 | 高 | 低 |
-| `kPriorityType` | priority_queue | 需要优先级调度 | 中 | 中 |
-
-### 4.5 三种调度策略对比（队列已满时的入队行为）
-
-策略只控制 `post_task` 在队列已满（达到 `kMaxTaskSize = 10000`）时如何处理；空闲调度恒为条件变量等待，不受策略影响。
-
-| 策略 | 队列已满时行为 | 适用场景 |
-|------|--------------|---------|
-| `kOptimizationStrategy` | 重试最多 10 次（每次 sleep 1 ms），仍满则丢弃最旧任务再入队（默认） | 平衡延迟与背压 |
-| `kPopStrategy` | 立即丢弃最旧任务并入队 | 实时场景（最新数据优先） |
-| `kBlockStrategy` | 无限重试（每次 sleep 1 ms）直到空位出现 | 不允许丢任务的场景 |
-
-## 5. 四种运行模式
-
-### 5.1 async_run() -- 异步运行（最常用）
+### 1. async_run + post_task
 
 ```cpp
 MessageLoop loop;
-loop.async_run();     // 启动后台线程，立即返回
-loop.post_task(cb);   // 投递任务
-loop.quit();          // 通知退出
-loop.wait_for_quit(); // 等待后台线程完成
+loop.set_name("basic_loop");
+loop.async_run();
+
+for (int i = 0; i < 5; ++i) {
+  loop.post_task([i]() { MLOG_I("  task {} on loop thread", i); });
+}
+
+loop.wait_for_idle();
+VLOG_I("  all tasks completed");
+
+loop.quit();
+loop.wait_for_quit();
 ```
 
-创建新的后台线程运行事件循环。调用者可以继续执行。这是最常用的模式。
+最常用的形态：主线程构造 loop、`async_run()` 让 loop 在后台线程跑、主线程 `post_task` 投递任务、`wait_for_idle()` 等任务全部跑完、`quit()` + `wait_for_quit()` 干净退出。
 
-### 5.2 run() -- 阻塞运行
+任务是按 FIFO 顺序串行执行的；5 个任务一定按 i=0..4 顺序在同一线程跑。
+
+### 2. 生命周期 hook
 
 ```cpp
 MessageLoop loop;
-// 需要从其他线程调用 quit() 来终止
-loop.run();  // 阻塞当前线程
-```
-
-在调用线程上运行事件循环，阻塞直到 `quit()` 被调用。适合在主线程上运行的场景。
-
-### 5.3 spin() -- 自旋模式
-
-```cpp
-loop.spin();  // 持续自旋直到 quit()
-```
-
-在调用线程上持续自旋处理任务。适合集成到已有事件循环框架中。
-
-### 5.4 spin_once() -- 单次处理
-
-```cpp
-loop.spin_once(false);  // 非阻塞：处理一批后返回
-loop.spin_once(true);   // 阻塞：队列为空时等待
-```
-
-手动处理一批待处理任务。`block` 参数控制队列为空时的行为。适合需要精细控制执行节奏的场景，例如与渲染循环集成。
-
-## 6. 关键代码分析
-
-### 6.1 post_task() 线程安全投递
-
-```cpp
-loop.post_task([]() {
-    // 在循环线程上执行
-});
-```
-
-`post_task()` 是**线程安全**的，可以从任意线程调用。内部实现根据队列类型选择不同的入队策略。如果队列已满（`kMaxTaskSize = 10000`），返回 `false`。
-
-### 6.2 生命周期回调
-
-```cpp
-loop.register_begin_handler([]() {
-    // 循环线程启动后、处理第一个任务前调用一次
-    // 适合：设置线程名称、CPU 亲和性、TLS 初始化
-});
-
-loop.register_end_handler([]() {
-    // quit() 后、线程退出前调用一次
-    // 适合：TLS 清理、统计汇总
-});
-
+loop.set_name("handler_loop");
+loop.register_begin_handler([]() { VLOG_I("  [begin] thread started"); });
+loop.register_end_handler([]() { VLOG_I("  [end] thread exiting"); });
 loop.register_idle_handler([]() {
-    // 每次任务队列清空时调用
-    // 注意：频繁触发，避免做耗时操作
+  // fires every time the queue drains; keep it cheap
 });
+
+loop.async_run();
+loop.post_task([]() { VLOG_I("  task between begin/end handlers"); });
+loop.wait_for_idle();
 ```
 
-### 6.3 等待与同步
+`register_begin_handler` 在 loop 线程开始时调一次：典型用途是设线程 CPU 亲和性、注册 SIGPIPE 忽略、绑定 logger context、初始化 thread-local 存储。
+
+`register_idle_handler` 在队列每次清空时调；用于做"空闲清理"（如内存池 trim）。注意频繁触发，回调一定要快。
+
+### 3. 阻塞 run()
 
 ```cpp
-loop.wait_for_idle();           // 等待队列清空
-loop.wait_for_idle(1000);       // 带超时（毫秒）
-loop.wait_for_quit();           // 等待循环完全退出
-loop.wait_for_quit(5000, true); // 带超时和强制退出标志
-```
+MessageLoop loop;
+loop.set_name("blocking_loop");
 
-### 6.4 状态查询
-
-```cpp
-loop.is_running();         // 循环是否正在运行
-loop.is_busy();            // 是否正在执行任务
-loop.is_ready_to_quit();   // quit() 是否已被调用
-loop.get_task_count();     // 队列中待处理任务数
-loop.get_type();           // 队列类型
-loop.is_in_same_thread();  // 当前线程是否是循环线程
-```
-
-所有查询方法都是线程安全的。
-
-## 7. 代码执行流程
-
-1. **async_run + post_task**：创建循环并异步启动，投递 5 个任务，等待完成后退出
-2. **生命周期回调**：注册 begin/end/idle 处理器，观察它们的调用时机
-3. **阻塞 run()**：在调用线程上阻塞运行循环，由辅助线程投递任务并调用 quit()
-4. **spin_once**：手动调用 spin_once 逐批处理任务
-5. **状态查询**：在循环的不同阶段查询运行状态
-
-## 8. 常见错误
-
-### 8.1 错误 1：在循环线程上调用 wait_for_idle()
-
-```cpp
-loop.post_task([&loop]() {
-    loop.wait_for_idle();  // 死锁！当前线程就是循环线程
+std::thread poster([&loop]() {
+  std::this_thread::sleep_for(50ms);
+  loop.post_task([]() { VLOG_I("  posted from helper #1"); });
+  loop.post_task([]() { VLOG_I("  posted from helper #2"); });
+  std::this_thread::sleep_for(50ms);
+  loop.quit();
 });
+
+loop.run();
+poster.join();
 ```
 
-`wait_for_idle()` 等待循环线程清空队列。如果在循环线程内调用，线程无法继续处理队列，形成死锁。
+`run()` 在当前线程直接驱动 loop，**阻塞到 quit**。适合"main 函数自己就是 loop 线程"的场景：主线程 init → 注册 publisher/subscriber → 进 loop.run() → 收到 SIGINT 后 quit 退出。
 
-### 8.2 错误 2：在循环线程上调用 invoke_task().get()
-
-```cpp
-loop.post_task([&loop]() {
-    auto future = loop.invoke_task([]() { return 42; });
-    future.get();  // 死锁！future 需要循环线程执行才能 ready
-});
-```
-
-同理，`invoke_task` 返回的 future 需要循环线程执行任务后才变为 ready。在循环线程上等待它会死锁。
-
-### 8.3 错误 3：忘记调用 wait_for_quit()
+### 4. spin_once 集成外部 loop
 
 ```cpp
-{
-    MessageLoop loop;
-    loop.async_run();
-    loop.post_task(task);
-    loop.quit();
-    // 没有 wait_for_quit()!
-}  // 析构函数会自动 quit(true) + wait，但可能有资源竞争
-```
+MessageLoop loop;
+loop.set_name("spin_loop");
 
-虽然析构函数会自动处理，但最佳实践是显式调用 `wait_for_quit()`。
+std::atomic<int> processed{0};
+for (int i = 0; i < 3; ++i) {
+  loop.post_task([&processed, i]() {
+    MLOG_I("  spin_once task {}", i);
+    processed.fetch_add(1);
+  });
+}
 
-### 8.4 错误 4：超过最大队列深度
-
-```cpp
-for (int i = 0; i < 20000; ++i) {
-    bool ok = loop.post_task([]() { /* ... */ });
-    if (!ok) {
-        VLOG_W("Queue full! Task dropped.");  // kMaxTaskSize = 10000
-    }
+while (processed.load() < 3) {
+  loop.spin_once(false);
 }
 ```
 
-应始终检查 `post_task()` 的返回值，特别是在高吞吐量场景下。
+`spin_once(blocking=false)` 处理一批待执行任务，立即返回。用于把 vlink loop 嵌入外部事件循环（如 Qt 的 QEventLoop、ROS spin、GLFW 主循环）——外部 loop 每帧调一次 `spin_once`，让 vlink 任务有机会跑。
 
-## 9. 线程安全模型
+`spin_once(true)` 会阻塞等到至少一个任务到达再返回。
 
-- `post_task()` 可从任意线程安全调用
-- 所有任务回调在循环线程上串行执行，回调内部**无需加锁**
-- `quit()` 可从任意线程调用
-- `is_in_same_thread()` 可用于断言是否在正确的线程上
+### 5. 状态查询
 
-## 10. 与其他框架的对比
+```cpp
+MLOG_I("  before run: is_running={}", loop.is_running());
+loop.async_run();
+MLOG_I("  after async_run: is_running={} type={} tasks={}", loop.is_running(),
+       static_cast<int>(loop.get_type()), loop.get_task_count());
 
-| 特性 | VLink MessageLoop | Qt QEventLoop | libuv event loop | ASIO io_context |
-|------|------------------|---------------|------------------|-----------------|
-| 线程模型 | 单线程 | 单线程 | 单线程 | 可多线程 |
-| 队列类型 | 3 种可选 | 固定 | 固定 | 固定 |
-| 定时器集成 | 是 | 是 | 是 | 是 |
-| 优先级支持 | 是 (kPriorityType) | 是 | 否 | 否 |
-| 零拷贝友好 | 是 | 否 | 否 | 否 |
+loop.quit();
+loop.wait_for_quit();
+MLOG_I("  after quit: is_running={}", loop.is_running());
+```
 
-## 11. 相关示例
+`is_running` / `get_task_count` / `get_type` 用于运行时监控；常配合监控 metric 上报。
 
-- [message_loop_advanced](../message_loop_advanced/) -- 队列类型比较、Schedule::Config、chaining、invoke_task
-- [timer_basic](../timer_basic/) -- 与 MessageLoop 集成的定时器
-- [multi_loop](../multi_loop/) -- 多循环协作
-- [thread_pool](../thread_pool/) -- 并行替代方案，用于 CPU 密集型任务
+## 运行
+
+```bash
+./build/output/bin/example_message_loop_basic
+```
+
+预期输出（节选）：
+
+```
+=== async_run + post_task ===
+  task 0 on loop thread
+  task 1 on loop thread
+  ...
+  all tasks completed
+=== Lifecycle handlers ===
+  [begin] thread started
+  task between begin/end handlers
+  [end] thread exiting
+=== Blocking run() ===
+  posted from helper #1
+  posted from helper #2
+  run() returned after quit()
+=== spin_once ===
+  spin_once task 0
+  spin_once task 1
+  spin_once task 2
+  processed 3 tasks via spin_once
+=== State queries ===
+  before run: is_running=0
+  after async_run: is_running=1 type=0 tasks=...
+  after quit: is_running=0
+MessageLoop basic example finished.
+```
+
+## 常见陷阱
+
+1. **post_task 时 loop 已 quit**：任务被丢弃；不会报错。要在生产代码里检查 `is_running()`。
+2. **run() 和 async_run() 重复调用**：同一 loop 只能用一种启动方式。
+3. **wait_for_idle() 在 run 线程内调用**：死锁 —— 你在等的就是自己。`wait_for_idle` 只能在 loop 外的线程调。
+4. **回调里抛异常**：未捕获异常会让 loop 线程崩溃；vlink 不会自动 catch。生产代码里回调都要 try/catch。
+5. **begin/end handler 里 post_task**：begin handler 跑在 loop 线程，post_task 加入队列；安全。但 end handler 时 loop 已经停止处理，新任务会被丢。
+
+## 设计要点
+
+- MessageLoop 用 mutex + cv 实现任务队列；任务投递延迟约 100ns - 1us。
+- 任务对象由 `Function<void()>` 包装；大 lambda 捕获 + move-only 类型支持良好。
+- 没有 cancel API —— 任务一旦入队就会跑（除非走 `post_task_handle` + cancellation_token）。
+- 一个 loop 只对应一个线程；要并行就开多个 loop（见 `multi_loop/`）。
+
+## 配图
+
+![MessageLoop architecture](./images/message-loop-architecture.png)
+
+图中展示 MessageLoop 内部的"任务队列 + 工作线程 + 三种 hook"结构。
+
+## 参考
+
+- `../message_loop_advanced/` — 队列类型、跨线程分发、`Schedule::Config`
+- `../multi_loop/` — N 线程并行 loop
+- `../timer/` — Timer 必须挂在 MessageLoop 上
+- `../thread_pool/` — 与 ThreadPool 的取舍
+- `vlink/include/vlink/base/message_loop.h` — MessageLoop 完整接口
+- 顶层 `doc/00-whitepaper.md` — vlink 并发模型

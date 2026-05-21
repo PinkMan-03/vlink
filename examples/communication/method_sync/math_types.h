@@ -23,17 +23,16 @@
 
 #pragma once
 
-/// POD math RPC request for the method_sync example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
+// Request / response types for method_sync. Both PODs, dispatched via the
+// "Standard" serializer. operation: 0=add, 1=sub, 2=mul, 3=div, 4=pow.
+// success=false signals server-side errors (e.g. division by zero).
 struct MathRequest {
-  double x;       // First operand
-  double y;       // Second operand
-  int operation;  // Operation code: 0=add, 1=sub, 2=mul, 3=div, 4=pow
+  double x;
+  double y;
+  int operation;
 };
 
-/// POD math RPC response for the method_sync example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
 struct MathResponse {
-  double result;  // Computed result of the operation
-  bool success;   // Whether the operation completed successfully
+  double result;
+  bool success;
 };

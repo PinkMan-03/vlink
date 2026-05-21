@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)

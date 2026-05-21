@@ -29,532 +29,285 @@
 #include <sstream>
 #include <string>
 
+#include "../common_test.h"
 #include "./extension/status_detail.h"
 
-//
-#include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status classification helpers
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status - classification helpers") {
-  TEST_CASE("is_for_writer - kUnknown is not writer side (< kSubscriptionMatched)") {
-    CHECK(Status::is_for_writer(Status::kUnknown) == false);
+TEST_SUITE("extension-Status") {
+  TEST_CASE("type enum has expected numeric values") {
+    CHECK_EQ(static_cast<int>(Status::kUnknown), 0);
+    CHECK_EQ(static_cast<int>(Status::kPublicationMatched), 1);
+    CHECK_EQ(static_cast<int>(Status::kOfferedDeadlineMissed), 2);
+    CHECK_EQ(static_cast<int>(Status::kOfferedIncompatibleQos), 3);
+    CHECK_EQ(static_cast<int>(Status::kLivelinessLost), 4);
+    CHECK_EQ(static_cast<int>(Status::kSubscriptionMatched), 5);
+    CHECK_EQ(static_cast<int>(Status::kRequestedDeadlineMissed), 6);
+    CHECK_EQ(static_cast<int>(Status::kLivelinessChanged), 7);
+    CHECK_EQ(static_cast<int>(Status::kSampleRejected), 8);
+    CHECK_EQ(static_cast<int>(Status::kRequestedIncompatibleQos), 9);
+    CHECK_EQ(static_cast<int>(Status::kSampleLost), 10);
   }
 
-  TEST_CASE("is_for_writer - writer types") {
-    CHECK(Status::is_for_writer(Status::kPublicationMatched) == true);
-    CHECK(Status::is_for_writer(Status::kOfferedDeadlineMissed) == true);
-    CHECK(Status::is_for_writer(Status::kOfferedIncompatibleQos) == true);
-    CHECK(Status::is_for_writer(Status::kLivelinessLost) == true);
+  TEST_CASE("is_for_writer returns false for kUnknown") { CHECK_FALSE(Status::is_for_writer(Status::kUnknown)); }
+
+  TEST_CASE("is_for_writer returns true for all writer types") {
+    CHECK(Status::is_for_writer(Status::kPublicationMatched));
+    CHECK(Status::is_for_writer(Status::kOfferedDeadlineMissed));
+    CHECK(Status::is_for_writer(Status::kOfferedIncompatibleQos));
+    CHECK(Status::is_for_writer(Status::kLivelinessLost));
   }
 
-  TEST_CASE("is_for_writer - reader types return false") {
-    CHECK(Status::is_for_writer(Status::kSubscriptionMatched) == false);
-    CHECK(Status::is_for_writer(Status::kRequestedDeadlineMissed) == false);
-    CHECK(Status::is_for_writer(Status::kLivelinessChanged) == false);
-    CHECK(Status::is_for_writer(Status::kSampleRejected) == false);
-    CHECK(Status::is_for_writer(Status::kRequestedIncompatibleQos) == false);
-    CHECK(Status::is_for_writer(Status::kSampleLost) == false);
+  TEST_CASE("is_for_writer returns false for all reader types") {
+    CHECK_FALSE(Status::is_for_writer(Status::kSubscriptionMatched));
+    CHECK_FALSE(Status::is_for_writer(Status::kRequestedDeadlineMissed));
+    CHECK_FALSE(Status::is_for_writer(Status::kLivelinessChanged));
+    CHECK_FALSE(Status::is_for_writer(Status::kSampleRejected));
+    CHECK_FALSE(Status::is_for_writer(Status::kRequestedIncompatibleQos));
+    CHECK_FALSE(Status::is_for_writer(Status::kSampleLost));
   }
 
-  TEST_CASE("is_for_reader - reader types") {
-    CHECK(Status::is_for_reader(Status::kSubscriptionMatched) == true);
-    CHECK(Status::is_for_reader(Status::kRequestedDeadlineMissed) == true);
-    CHECK(Status::is_for_reader(Status::kLivelinessChanged) == true);
-    CHECK(Status::is_for_reader(Status::kSampleRejected) == true);
-    CHECK(Status::is_for_reader(Status::kRequestedIncompatibleQos) == true);
-    CHECK(Status::is_for_reader(Status::kSampleLost) == true);
+  TEST_CASE("is_for_reader returns true for all reader types") {
+    CHECK(Status::is_for_reader(Status::kSubscriptionMatched));
+    CHECK(Status::is_for_reader(Status::kRequestedDeadlineMissed));
+    CHECK(Status::is_for_reader(Status::kLivelinessChanged));
+    CHECK(Status::is_for_reader(Status::kSampleRejected));
+    CHECK(Status::is_for_reader(Status::kRequestedIncompatibleQos));
+    CHECK(Status::is_for_reader(Status::kSampleLost));
   }
 
-  TEST_CASE("is_for_reader - writer types return false") {
-    CHECK(Status::is_for_reader(Status::kPublicationMatched) == false);
-    CHECK(Status::is_for_reader(Status::kOfferedDeadlineMissed) == false);
-    CHECK(Status::is_for_reader(Status::kOfferedIncompatibleQos) == false);
-    CHECK(Status::is_for_reader(Status::kLivelinessLost) == false);
+  TEST_CASE("is_for_reader returns false for all writer types") {
+    CHECK_FALSE(Status::is_for_reader(Status::kPublicationMatched));
+    CHECK_FALSE(Status::is_for_reader(Status::kOfferedDeadlineMissed));
+    CHECK_FALSE(Status::is_for_reader(Status::kOfferedIncompatibleQos));
+    CHECK_FALSE(Status::is_for_reader(Status::kLivelinessLost));
   }
 
-  TEST_CASE("Type enum numeric values") {
-    CHECK(static_cast<int>(Status::kUnknown) == 0);
-    CHECK(static_cast<int>(Status::kPublicationMatched) == 1);
-    CHECK(static_cast<int>(Status::kOfferedDeadlineMissed) == 2);
-    CHECK(static_cast<int>(Status::kOfferedIncompatibleQos) == 3);
-    CHECK(static_cast<int>(Status::kLivelinessLost) == 4);
-    CHECK(static_cast<int>(Status::kSubscriptionMatched) == 5);
-    CHECK(static_cast<int>(Status::kRequestedDeadlineMissed) == 6);
-    CHECK(static_cast<int>(Status::kLivelinessChanged) == 7);
-    CHECK(static_cast<int>(Status::kSampleRejected) == 8);
-    CHECK(static_cast<int>(Status::kRequestedIncompatibleQos) == 9);
-    CHECK(static_cast<int>(Status::kSampleLost) == 10);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::Unknown
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::Unknown") {
-  TEST_CASE("get_type returns kUnknown") {
+  TEST_CASE("Unknown get_type returns kUnknown and get_string is non-empty") {
     Status::Unknown u;
-    CHECK(u.get_type() == Status::kUnknown);
+    CHECK_EQ(u.get_type(), Status::kUnknown);
+    CHECK_FALSE(u.get_string().empty());
   }
 
-  TEST_CASE("get_string is not empty") {
-    Status::Unknown u;
-    CHECK(!u.get_string().empty());
-  }
-
-  TEST_CASE("ostream operator") {
+  TEST_CASE("Unknown ostream operator writes non-empty text") {
     Status::Unknown u;
     std::ostringstream oss;
     oss << u;
-    CHECK(!oss.str().empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::PublicationMatched
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::PublicationMatched") {
-  TEST_CASE("get_type returns kPublicationMatched") {
-    Status::PublicationMatched s;
-    CHECK(s.get_type() == Status::kPublicationMatched);
+    CHECK_FALSE(oss.str().empty());
   }
 
-  TEST_CASE("default field values") {
-    Status::PublicationMatched s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-    CHECK(s.current_count == 0);
-    CHECK(s.current_count_change == 0);
-    CHECK(s.last_subscription_handle == nullptr);
-  }
-
-  TEST_CASE("fields are mutable") {
-    Status::PublicationMatched s;
-    s.total_count = 5;
-    s.current_count = 2;
-    s.total_count_change = 1;
-    s.current_count_change = -1;
-
-    CHECK(s.total_count == 5);
-    CHECK(s.current_count == 2);
-    CHECK(s.total_count_change == 1);
-    CHECK(s.current_count_change == -1);
-  }
-
-  TEST_CASE("get_string contains meaningful text") {
-    Status::PublicationMatched s;
-    s.total_count = 3;
-    s.current_count = 1;
-    CHECK(!s.get_string().empty());
-  }
-
-  TEST_CASE("ostream operator") {
-    Status::PublicationMatched s;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(!oss.str().empty());
-  }
-
-  TEST_CASE("as<T>() from shared_ptr works") {
-    auto base = std::make_shared<Status::PublicationMatched>();
-    base->total_count = 10;
-
-    auto derived = base->as<Status::PublicationMatched>();
-    REQUIRE(derived != nullptr);
-    CHECK(derived->total_count == 10);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::OfferedDeadlineMissed
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::OfferedDeadlineMissed") {
-  TEST_CASE("get_type returns kOfferedDeadlineMissed") {
-    Status::OfferedDeadlineMissed s;
-    CHECK(s.get_type() == Status::kOfferedDeadlineMissed);
-  }
-
-  TEST_CASE("default fields") {
-    Status::OfferedDeadlineMissed s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-    CHECK(s.last_instance_handle == nullptr);
-  }
-
-  TEST_CASE("get_string not empty") {
-    Status::OfferedDeadlineMissed s;
-    CHECK(!s.get_string().empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::OfferedIncompatibleQos
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::OfferedIncompatibleQos") {
-  TEST_CASE("get_type returns kOfferedIncompatibleQos") {
-    Status::OfferedIncompatibleQos s;
-    CHECK(s.get_type() == Status::kOfferedIncompatibleQos);
-  }
-
-  TEST_CASE("default fields") {
-    Status::OfferedIncompatibleQos s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-    CHECK(s.last_policy_id == 0);
-  }
-
-  TEST_CASE("field mutation") {
-    Status::OfferedIncompatibleQos s;
-    s.total_count = 2;
-    s.last_policy_id = 7;
-
-    CHECK(s.total_count == 2);
-    CHECK(s.last_policy_id == 7);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::LivelinessLost
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::LivelinessLost") {
-  TEST_CASE("get_type returns kLivelinessLost") {
-    Status::LivelinessLost s;
-    CHECK(s.get_type() == Status::kLivelinessLost);
-  }
-
-  TEST_CASE("default fields") {
-    Status::LivelinessLost s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-  }
-
-  TEST_CASE("get_string not empty") {
-    Status::LivelinessLost s;
-    CHECK(!s.get_string().empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::SubscriptionMatched
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::SubscriptionMatched") {
-  TEST_CASE("get_type returns kSubscriptionMatched") {
-    Status::SubscriptionMatched s;
-    CHECK(s.get_type() == Status::kSubscriptionMatched);
-  }
-
-  TEST_CASE("default fields") {
-    Status::SubscriptionMatched s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-    CHECK(s.current_count == 0);
-    CHECK(s.current_count_change == 0);
-    CHECK(s.last_publication_handle == nullptr);
-  }
-
-  TEST_CASE("as<T>() from shared_ptr") {
-    auto base = std::make_shared<Status::SubscriptionMatched>();
-    base->current_count = 3;
-
-    auto derived = base->as<Status::SubscriptionMatched>();
-    REQUIRE(derived != nullptr);
-    CHECK(derived->current_count == 3);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::RequestedDeadlineMissed
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::RequestedDeadlineMissed") {
-  TEST_CASE("get_type") {
-    Status::RequestedDeadlineMissed s;
-    CHECK(s.get_type() == Status::kRequestedDeadlineMissed);
-  }
-
-  TEST_CASE("default fields") {
-    Status::RequestedDeadlineMissed s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-    CHECK(s.last_instance_handle == nullptr);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::LivelinessChanged
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::LivelinessChanged") {
-  TEST_CASE("get_type") {
-    Status::LivelinessChanged s;
-    CHECK(s.get_type() == Status::kLivelinessChanged);
-  }
-
-  TEST_CASE("default fields") {
-    Status::LivelinessChanged s;
-    CHECK(s.alive_count == 0);
-    CHECK(s.not_alive_count == 0);
-    CHECK(s.alive_count_change == 0);
-    CHECK(s.not_alive_count_change == 0);
-    CHECK(s.last_publication_handle == nullptr);
-  }
-
-  TEST_CASE("field mutation") {
-    Status::LivelinessChanged s;
-    s.alive_count = 2;
-    s.not_alive_count = 1;
-    s.alive_count_change = 1;
-    s.not_alive_count_change = -1;
-
-    CHECK(s.alive_count == 2);
-    CHECK(s.not_alive_count == 1);
-    CHECK(s.alive_count_change == 1);
-    CHECK(s.not_alive_count_change == -1);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::SampleRejected
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::SampleRejected") {
-  TEST_CASE("get_type") {
-    Status::SampleRejected s;
-    CHECK(s.get_type() == Status::kSampleRejected);
-  }
-
-  TEST_CASE("default fields") {
-    Status::SampleRejected s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-    CHECK(s.last_reason == Status::SampleRejected::kNotRejected);
-    CHECK(s.last_instance_handle == nullptr);
-  }
-
-  TEST_CASE("Kind enum values") {
-    CHECK(static_cast<int>(Status::SampleRejected::kNotRejected) == 0);
-    CHECK(static_cast<int>(Status::SampleRejected::kRejectedByInstancesLimit) == 1);
-    CHECK(static_cast<int>(Status::SampleRejected::kRejectedBySamplesLimit) == 2);
-    CHECK(static_cast<int>(Status::SampleRejected::kRejectedBySamplesPerInstanceLimit) == 3);
-  }
-
-  TEST_CASE("rejection reason mutation") {
-    Status::SampleRejected s;
-    s.last_reason = Status::SampleRejected::kRejectedBySamplesLimit;
-    CHECK(s.last_reason == Status::SampleRejected::kRejectedBySamplesLimit);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::RequestedIncompatibleQos
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::RequestedIncompatibleQos") {
-  TEST_CASE("get_type") {
-    Status::RequestedIncompatibleQos s;
-    CHECK(s.get_type() == Status::kRequestedIncompatibleQos);
-  }
-
-  TEST_CASE("default fields") {
-    Status::RequestedIncompatibleQos s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-    CHECK(s.last_policy_id == 0);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Status::SampleLost
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::SampleLost") {
-  TEST_CASE("get_type") {
-    Status::SampleLost s;
-    CHECK(s.get_type() == Status::kSampleLost);
-  }
-
-  TEST_CASE("default fields") {
-    Status::SampleLost s;
-    CHECK(s.total_count == 0);
-    CHECK(s.total_count_change == 0);
-  }
-
-  TEST_CASE("get_string not empty") {
-    Status::SampleLost s;
-    CHECK(!s.get_string().empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: ostream operators for all status detail types
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status - ostream operators") {
-  TEST_CASE("OfferedDeadlineMissed ostream") {
-    Status::OfferedDeadlineMissed s;
-    s.total_count = 5;
-    s.total_count_change = 2;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("OfferedDeadlineMissed") != std::string::npos);
-    CHECK(oss.str().find("total_count") != std::string::npos);
-  }
-
-  TEST_CASE("OfferedIncompatibleQos ostream") {
-    Status::OfferedIncompatibleQos s;
-    s.total_count = 3;
-    s.last_policy_id = 7;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("OfferedIncompatibleQos") != std::string::npos);
-    CHECK(oss.str().find("last_policy_id") != std::string::npos);
-  }
-
-  TEST_CASE("LivelinessLost ostream") {
-    Status::LivelinessLost s;
-    s.total_count = 1;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("LivelinessLost") != std::string::npos);
-  }
-
-  TEST_CASE("SubscriptionMatched ostream") {
-    Status::SubscriptionMatched s;
-    s.total_count = 10;
-    s.current_count = 3;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("SubscriptionMatched") != std::string::npos);
-    CHECK(oss.str().find("current_count") != std::string::npos);
-  }
-
-  TEST_CASE("RequestedDeadlineMissed ostream") {
-    Status::RequestedDeadlineMissed s;
-    s.total_count = 4;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("RequestedDeadlineMissed") != std::string::npos);
-  }
-
-  TEST_CASE("LivelinessChanged ostream") {
-    Status::LivelinessChanged s;
-    s.alive_count = 2;
-    s.not_alive_count = 1;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("LivelinessChanged") != std::string::npos);
-    CHECK(oss.str().find("alive_count") != std::string::npos);
-  }
-
-  TEST_CASE("SampleRejected ostream") {
-    Status::SampleRejected s;
-    s.total_count = 6;
-    s.last_reason = Status::SampleRejected::kRejectedBySamplesLimit;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("SampleRejected") != std::string::npos);
-    CHECK(oss.str().find("last_reason") != std::string::npos);
-  }
-
-  TEST_CASE("RequestedIncompatibleQos ostream") {
-    Status::RequestedIncompatibleQos s;
-    s.total_count = 2;
-    s.last_policy_id = 5;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("RequestedIncompatibleQos") != std::string::npos);
-  }
-
-  TEST_CASE("SampleLost ostream") {
-    Status::SampleLost s;
-    s.total_count = 8;
-    s.total_count_change = 3;
-    std::ostringstream oss;
-    oss << s;
-    CHECK(oss.str().find("SampleLost") != std::string::npos);
-    CHECK(oss.str().find("total_count") != std::string::npos);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: get_string for remaining types
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status - get_string completeness") {
-  TEST_CASE("OfferedIncompatibleQos get_string") {
-    Status::OfferedIncompatibleQos s;
-    CHECK(!s.get_string().empty());
-  }
-
-  TEST_CASE("SubscriptionMatched get_string") {
-    Status::SubscriptionMatched s;
-    CHECK(!s.get_string().empty());
-  }
-
-  TEST_CASE("RequestedDeadlineMissed get_string") {
-    Status::RequestedDeadlineMissed s;
-    CHECK(!s.get_string().empty());
-  }
-
-  TEST_CASE("LivelinessChanged get_string") {
-    Status::LivelinessChanged s;
-    CHECK(!s.get_string().empty());
-  }
-
-  TEST_CASE("SampleRejected get_string") {
-    Status::SampleRejected s;
-    CHECK(!s.get_string().empty());
-  }
-
-  TEST_CASE("RequestedIncompatibleQos get_string") {
-    Status::RequestedIncompatibleQos s;
-    CHECK(!s.get_string().empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: BasePtr ostream operator
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-Status::BasePtr - ostream") {
-  TEST_CASE("shared_ptr PublicationMatched ostream") {
-    Status::BasePtr ptr = std::make_shared<Status::PublicationMatched>();
-    std::ostringstream oss;
-    oss << ptr;
-    CHECK(!oss.str().empty());
-  }
-
-  TEST_CASE("shared_ptr SubscriptionMatched ostream") {
-    Status::BasePtr ptr = std::make_shared<Status::SubscriptionMatched>();
-    std::ostringstream oss;
-    oss << ptr;
-    CHECK(!oss.str().empty());
-  }
-
-  TEST_CASE("shared_ptr SampleRejected ostream") {
-    Status::BasePtr ptr = std::make_shared<Status::SampleRejected>();
-    std::ostringstream oss;
-    oss << ptr;
-    CHECK(!oss.str().empty());
-  }
-
-  TEST_CASE("Base::as<T>() throws for Unknown type") {
+  TEST_CASE("as() on Unknown throws RuntimeError") {
     auto u = std::make_shared<Status::Unknown>();
     CHECK_THROWS_AS((void)u->as<Status::PublicationMatched>(), Exception::RuntimeError);
   }
 
-  TEST_CASE("Base::as<T>() with wrong concrete type returns nullptr") {
+  TEST_CASE("as() with wrong concrete type returns nullptr") {
     auto pub = std::make_shared<Status::PublicationMatched>();
     auto lost = pub->as<Status::SampleLost>();
-    CHECK(lost == nullptr);
+    CHECK_EQ(lost, nullptr);
+  }
+
+  TEST_CASE("PublicationMatched default fields are zero-initialised") {
+    Status::PublicationMatched s;
+    CHECK_EQ(s.get_type(), Status::kPublicationMatched);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_EQ(s.current_count, 0);
+    CHECK_EQ(s.current_count_change, 0);
+    CHECK_EQ(s.last_subscription_handle, nullptr);
+  }
+
+  TEST_CASE("PublicationMatched fields are mutable and as() round-trips") {
+    auto base = std::make_shared<Status::PublicationMatched>();
+    base->total_count = 5;
+    base->current_count = 2;
+    base->total_count_change = 1;
+    base->current_count_change = -1;
+
+    auto derived = base->as<Status::PublicationMatched>();
+    REQUIRE_NE(derived, nullptr);
+    CHECK_EQ(derived->total_count, 5);
+    CHECK_EQ(derived->current_count, 2);
+    CHECK_FALSE(base->get_string().empty());
+  }
+
+  TEST_CASE("OfferedDeadlineMissed default fields and ostream") {
+    Status::OfferedDeadlineMissed s;
+    CHECK_EQ(s.get_type(), Status::kOfferedDeadlineMissed);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_EQ(s.last_instance_handle, nullptr);
+    CHECK_FALSE(s.get_string().empty());
+
+    s.total_count = 5;
+    s.total_count_change = 2;
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("OfferedDeadlineMissed"), std::string::npos);
+    CHECK_NE(oss.str().find("total_count"), std::string::npos);
+  }
+
+  TEST_CASE("OfferedIncompatibleQos default fields and mutation") {
+    Status::OfferedIncompatibleQos s;
+    CHECK_EQ(s.get_type(), Status::kOfferedIncompatibleQos);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_EQ(s.last_policy_id, 0);
+    CHECK_FALSE(s.get_string().empty());
+
+    s.total_count = 2;
+    s.last_policy_id = 7;
+    CHECK_EQ(s.total_count, 2);
+    CHECK_EQ(s.last_policy_id, 7);
+
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("OfferedIncompatibleQos"), std::string::npos);
+    CHECK_NE(oss.str().find("last_policy_id"), std::string::npos);
+  }
+
+  TEST_CASE("LivelinessLost default fields and ostream") {
+    Status::LivelinessLost s;
+    CHECK_EQ(s.get_type(), Status::kLivelinessLost);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_FALSE(s.get_string().empty());
+
+    s.total_count = 1;
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("LivelinessLost"), std::string::npos);
+  }
+
+  TEST_CASE("SubscriptionMatched default fields and as() round-trip") {
+    Status::SubscriptionMatched s;
+    CHECK_EQ(s.get_type(), Status::kSubscriptionMatched);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_EQ(s.current_count, 0);
+    CHECK_EQ(s.current_count_change, 0);
+    CHECK_EQ(s.last_publication_handle, nullptr);
+    CHECK_FALSE(s.get_string().empty());
+
+    auto base = std::make_shared<Status::SubscriptionMatched>();
+    base->current_count = 3;
+    auto derived = base->as<Status::SubscriptionMatched>();
+    REQUIRE_NE(derived, nullptr);
+    CHECK_EQ(derived->current_count, 3);
+
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("SubscriptionMatched"), std::string::npos);
+    CHECK_NE(oss.str().find("current_count"), std::string::npos);
+  }
+
+  TEST_CASE("RequestedDeadlineMissed default fields and ostream") {
+    Status::RequestedDeadlineMissed s;
+    CHECK_EQ(s.get_type(), Status::kRequestedDeadlineMissed);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_EQ(s.last_instance_handle, nullptr);
+    CHECK_FALSE(s.get_string().empty());
+
+    s.total_count = 4;
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("RequestedDeadlineMissed"), std::string::npos);
+  }
+
+  TEST_CASE("LivelinessChanged default fields and mutation") {
+    Status::LivelinessChanged s;
+    CHECK_EQ(s.get_type(), Status::kLivelinessChanged);
+    CHECK_EQ(s.alive_count, 0);
+    CHECK_EQ(s.not_alive_count, 0);
+    CHECK_EQ(s.alive_count_change, 0);
+    CHECK_EQ(s.not_alive_count_change, 0);
+    CHECK_EQ(s.last_publication_handle, nullptr);
+
+    s.alive_count = 2;
+    s.not_alive_count = 1;
+    s.alive_count_change = 1;
+    s.not_alive_count_change = -1;
+    CHECK_EQ(s.alive_count, 2);
+    CHECK_EQ(s.not_alive_count, 1);
+
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("LivelinessChanged"), std::string::npos);
+    CHECK_NE(oss.str().find("alive_count"), std::string::npos);
+  }
+
+  TEST_CASE("SampleRejected default fields and Kind enum values") {
+    Status::SampleRejected s;
+    CHECK_EQ(s.get_type(), Status::kSampleRejected);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_EQ(s.last_reason, Status::SampleRejected::kNotRejected);
+    CHECK_EQ(s.last_instance_handle, nullptr);
+
+    CHECK_EQ(static_cast<int>(Status::SampleRejected::kNotRejected), 0);
+    CHECK_EQ(static_cast<int>(Status::SampleRejected::kRejectedByInstancesLimit), 1);
+    CHECK_EQ(static_cast<int>(Status::SampleRejected::kRejectedBySamplesLimit), 2);
+    CHECK_EQ(static_cast<int>(Status::SampleRejected::kRejectedBySamplesPerInstanceLimit), 3);
+
+    s.last_reason = Status::SampleRejected::kRejectedBySamplesLimit;
+    CHECK_EQ(s.last_reason, Status::SampleRejected::kRejectedBySamplesLimit);
+
+    s.total_count = 6;
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("SampleRejected"), std::string::npos);
+    CHECK_NE(oss.str().find("last_reason"), std::string::npos);
+  }
+
+  TEST_CASE("RequestedIncompatibleQos default fields and ostream") {
+    Status::RequestedIncompatibleQos s;
+    CHECK_EQ(s.get_type(), Status::kRequestedIncompatibleQos);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_EQ(s.last_policy_id, 0);
+
+    s.total_count = 2;
+    s.last_policy_id = 5;
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("RequestedIncompatibleQos"), std::string::npos);
+  }
+
+  TEST_CASE("SampleLost default fields and ostream") {
+    Status::SampleLost s;
+    CHECK_EQ(s.get_type(), Status::kSampleLost);
+    CHECK_EQ(s.total_count, 0);
+    CHECK_EQ(s.total_count_change, 0);
+    CHECK_FALSE(s.get_string().empty());
+
+    s.total_count = 8;
+    s.total_count_change = 3;
+    std::ostringstream oss;
+    oss << s;
+    CHECK_NE(oss.str().find("SampleLost"), std::string::npos);
+    CHECK_NE(oss.str().find("total_count"), std::string::npos);
+  }
+
+  TEST_CASE("BasePtr ostream writes non-empty text for concrete status types") {
+    SUBCASE("PublicationMatched") {
+      Status::BasePtr ptr = std::make_shared<Status::PublicationMatched>();
+      std::ostringstream oss;
+      oss << ptr;
+      CHECK_FALSE(oss.str().empty());
+    }
+
+    SUBCASE("SubscriptionMatched") {
+      Status::BasePtr ptr = std::make_shared<Status::SubscriptionMatched>();
+      std::ostringstream oss;
+      oss << ptr;
+      CHECK_FALSE(oss.str().empty());
+    }
+
+    SUBCASE("SampleRejected") {
+      Status::BasePtr ptr = std::make_shared<Status::SampleRejected>();
+      std::ostringstream oss;
+      oss << ptr;
+      CHECK_FALSE(oss.str().empty());
+    }
   }
 }
 

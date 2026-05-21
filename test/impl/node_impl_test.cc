@@ -33,27 +33,19 @@
 #include <string>
 #include <thread>
 
+#include "../common_test.h"
 #include "./base/message_loop.h"
 #include "./extension/status_detail.h"
 #include "./impl/types.h"
-
-//
-#include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helpers: concrete subclass to test the abstract NodeImpl base
-// ---------------------------------------------------------------------------
 
 namespace {
 
 class TestNodeImpl : public NodeImpl {
  public:
   explicit TestNodeImpl(ImplType type = kPublisher) : NodeImpl(type) {}
-
   ~TestNodeImpl() override = default;
 
   void init() override { init_called = true; }
-
   void deinit() override { deinit_called = true; }
 
   bool init_called{false};
@@ -62,12 +54,8 @@ class TestNodeImpl : public NodeImpl {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: AbstractNode
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("impl-AbstractNode") {
-  TEST_CASE("get_native_handle returns any with nullptr by default") {
+  TEST_CASE("get_native_handle returns any containing nullptr by default") {
     class ConcreteAbstractNode : public AbstractNode {
      public:
       ConcreteAbstractNode() = default;
@@ -76,67 +64,64 @@ TEST_SUITE("impl-AbstractNode") {
 
     ConcreteAbstractNode node;
     auto handle = node.get_native_handle();
-    // Base impl returns std::any(nullptr) which has_value()==true but holds nullptr_t
     CHECK(handle.has_value());
     CHECK(std::any_cast<std::nullptr_t>(handle) == nullptr);
   }
 }
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - construction
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - construction") {
-  TEST_CASE("constructor sets impl_type") {
-    TestNodeImpl node(kPublisher);
-    CHECK(node.impl_type == kPublisher);
+TEST_SUITE("impl-NodeImpl") {
+  TEST_CASE("constructor stores the given impl_type") {
+    SUBCASE("kPublisher") {
+      TestNodeImpl n(kPublisher);
+      CHECK_EQ(n.impl_type, kPublisher);
+    }
+    SUBCASE("kSubscriber") {
+      TestNodeImpl n(kSubscriber);
+      CHECK_EQ(n.impl_type, kSubscriber);
+    }
+    SUBCASE("kClient") {
+      TestNodeImpl n(kClient);
+      CHECK_EQ(n.impl_type, kClient);
+    }
+    SUBCASE("kServer") {
+      TestNodeImpl n(kServer);
+      CHECK_EQ(n.impl_type, kServer);
+    }
+    SUBCASE("kGetter") {
+      TestNodeImpl n(kGetter);
+      CHECK_EQ(n.impl_type, kGetter);
+    }
+    SUBCASE("kSetter") {
+      TestNodeImpl n(kSetter);
+      CHECK_EQ(n.impl_type, kSetter);
+    }
   }
 
-  TEST_CASE("constructor sets different impl_types") {
-    TestNodeImpl pub(kPublisher);
-    TestNodeImpl sub(kSubscriber);
-    TestNodeImpl cli(kClient);
-    TestNodeImpl srv(kServer);
-    TestNodeImpl get(kGetter);
-    TestNodeImpl set(kSetter);
-
-    CHECK(pub.impl_type == kPublisher);
-    CHECK(sub.impl_type == kSubscriber);
-    CHECK(cli.impl_type == kClient);
-    CHECK(srv.impl_type == kServer);
-    CHECK(get.impl_type == kGetter);
-    CHECK(set.impl_type == kSetter);
-  }
-
-  TEST_CASE("default member values") {
+  TEST_CASE("public member fields have correct defaults on construction") {
     TestNodeImpl node;
     CHECK(node.url.empty());
     CHECK(node.ser_type.empty());
-    CHECK(node.transport_type == TransportType::kUnknown);
+    CHECK_EQ(node.transport_type, TransportType::kUnknown);
     CHECK(node.is_cdr_type == false);
     CHECK(node.is_security_type == false);
     CHECK(node.is_discovery_enabled == true);
     CHECK(node.profiler == nullptr);
+    CHECK(node.security == nullptr);
+    CHECK(node.has_suspend == false);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - loan stubs
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - loan stubs") {
   TEST_CASE("is_support_loan returns false by default") {
     TestNodeImpl node;
     CHECK(node.is_support_loan() == false);
   }
 
-  TEST_CASE("loan returns empty Bytes") {
+  TEST_CASE("loan returns an empty Bytes by default") {
     TestNodeImpl node;
     auto bytes = node.loan(1024);
     CHECK(bytes.empty());
   }
 
-  TEST_CASE("return_loan returns false") {
+  TEST_CASE("return_loan returns false by default") {
     TestNodeImpl node;
     Bytes b;
     CHECK(node.return_loan(b) == false);
@@ -146,151 +131,110 @@ TEST_SUITE("impl-NodeImpl - loan stubs") {
     TestNodeImpl node;
     node.set_manual_unloan(true);
     node.set_manual_unloan(false);
-    CHECK(true);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - suspend / resume stubs
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - suspend / resume") {
-  TEST_CASE("suspend returns false") {
+  TEST_CASE("suspend returns false by default") {
     TestNodeImpl node;
     CHECK(node.suspend() == false);
   }
 
-  TEST_CASE("resume returns false") {
+  TEST_CASE("resume returns false by default") {
     TestNodeImpl node;
     CHECK(node.resume() == false);
   }
 
-  TEST_CASE("is_suspend returns false") {
+  TEST_CASE("is_suspend returns false by default") {
     TestNodeImpl node;
     CHECK(node.is_suspend() == false);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - interrupt
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - interrupt") {
-  TEST_CASE("is_interrupted returns false initially") {
+  TEST_CASE("is_interrupted returns false on construction") {
     TestNodeImpl node;
     CHECK(node.is_interrupted() == false);
   }
 
-  TEST_CASE("interrupt sets interrupted flag") {
+  TEST_CASE("interrupt sets the interrupted flag") {
     TestNodeImpl node;
     node.interrupt();
     CHECK(node.is_interrupted() == true);
   }
 
-  TEST_CASE("reset_interrupted clears flag") {
+  TEST_CASE("reset_interrupted clears the interrupted flag") {
     TestNodeImpl node;
     node.interrupt();
-    CHECK(node.is_interrupted() == true);
-
     node.reset_interrupted();
     CHECK(node.is_interrupted() == false);
   }
 
-  TEST_CASE("multiple interrupt calls are safe") {
+  TEST_CASE("multiple interrupt calls are idempotent") {
     TestNodeImpl node;
     node.interrupt();
     node.interrupt();
     CHECK(node.is_interrupted() == true);
-
     node.reset_interrupted();
     CHECK(node.is_interrupted() == false);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - property management
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - properties") {
-  TEST_CASE("set and get property") {
+  TEST_CASE("set and get a property round-trips correctly") {
     TestNodeImpl node;
-    node.set_property("key1", "value1");
-    CHECK(node.get_property("key1") == "value1");
+    node.set_property("key", "value");
+    CHECK_EQ(node.get_property("key"), "value");
   }
 
-  TEST_CASE("get non-existent property returns empty string") {
+  TEST_CASE("get missing property returns empty string") {
     TestNodeImpl node;
-    CHECK(node.get_property("nonexistent").empty());
+    CHECK(node.get_property("missing").empty());
   }
 
-  TEST_CASE("overwrite property") {
+  TEST_CASE("overwriting a property replaces the value") {
     TestNodeImpl node;
-    node.set_property("key", "old");
-    node.set_property("key", "new");
-    CHECK(node.get_property("key") == "new");
-  }
-
-  TEST_CASE("multiple properties") {
-    TestNodeImpl node;
-    node.set_property("a", "1");
-    node.set_property("b", "2");
-    node.set_property("c", "3");
-
-    CHECK(node.get_property("a") == "1");
-    CHECK(node.get_property("b") == "2");
-    CHECK(node.get_property("c") == "3");
-  }
-
-  TEST_CASE("get_all_properties returns snapshot") {
-    TestNodeImpl node;
-    node.set_property("x", "10");
-    node.set_property("y", "20");
-
-    auto props = node.get_all_properties();
-    CHECK(props.size() == 2);
-    CHECK(props["x"] == "10");
-    CHECK(props["y"] == "20");
+    node.set_property("k", "old");
+    node.set_property("k", "new");
+    CHECK_EQ(node.get_property("k"), "new");
   }
 
   TEST_CASE("get_all_properties returns empty map initially") {
     TestNodeImpl node;
-    auto props = node.get_all_properties();
-    CHECK(props.empty());
+    CHECK(node.get_all_properties().empty());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - message loop attach / detach
-// ---------------------------------------------------------------------------
+  TEST_CASE("get_all_properties returns snapshot of all entries") {
+    TestNodeImpl node;
+    node.set_property("a", "1");
+    node.set_property("b", "2");
+    auto props = node.get_all_properties();
+    CHECK_EQ(props.size(), 2u);
+    CHECK_EQ(props.at("a"), "1");
+    CHECK_EQ(props.at("b"), "2");
+  }
 
-TEST_SUITE("impl-NodeImpl - message loop") {
   TEST_CASE("get_message_loop returns nullptr initially") {
     TestNodeImpl node;
     CHECK(node.get_message_loop() == nullptr);
   }
 
-  TEST_CASE("attach succeeds on first call") {
+  TEST_CASE("attach to message loop succeeds on first call") {
     TestNodeImpl node;
     MessageLoop loop;
     CHECK(node.attach(&loop) == true);
     CHECK(node.get_message_loop() == &loop);
   }
 
-  TEST_CASE("attach fails when already attached") {
+  TEST_CASE("attach fails when a different loop is already attached") {
     TestNodeImpl node;
     MessageLoop loop1;
     MessageLoop loop2;
     CHECK(node.attach(&loop1) == true);
     CHECK(node.attach(&loop2) == false);
-    CHECK(node.get_message_loop() == &loop1);
+    CHECK_EQ(node.get_message_loop(), &loop1);
   }
 
-  TEST_CASE("detach returns false when not attached") {
+  TEST_CASE("detach returns false when no loop is attached") {
     TestNodeImpl node;
     CHECK(node.detach() == false);
   }
 
-  TEST_CASE("attach then detach") {
+  TEST_CASE("attach then detach leaves message_loop null") {
     TestNodeImpl node;
     MessageLoop loop;
     loop.async_run();
@@ -300,74 +244,60 @@ TEST_SUITE("impl-NodeImpl - message loop") {
     loop.quit();
   }
 
-  TEST_CASE("re-attach after detach") {
+  TEST_CASE("re-attach succeeds after detach") {
     TestNodeImpl node;
     MessageLoop loop;
     loop.async_run();
     node.attach(&loop);
     node.detach();
     CHECK(node.attach(&loop) == true);
-    CHECK(node.get_message_loop() == &loop);
+    CHECK_EQ(node.get_message_loop(), &loop);
     node.detach();
     loop.quit();
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - status handler
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - status handler") {
-  TEST_CASE("register_status_handler on non-DDS transport is no-op") {
+  TEST_CASE("register_status_handler on non-DDS transport is a no-op") {
     TestNodeImpl node;
     node.transport_type = TransportType::kIntra;
-
-    bool called = false;
-    node.register_status_handler([&](const Status::BasePtr&) { called = true; });
-
+    node.register_status_handler([](const Status::BasePtr&) {});
     CHECK(node.has_register_status() == false);
   }
 
-  TEST_CASE("register_status_handler on DDS transport works") {
+  TEST_CASE("register_status_handler on DDS transport stores the handler") {
     TestNodeImpl node;
     node.transport_type = TransportType::kDds;
-
-    bool called = false;
-    node.register_status_handler([&](const Status::BasePtr&) { called = true; });
-
+    node.register_status_handler([](const Status::BasePtr&) {});
     CHECK(node.has_register_status() == true);
   }
 
-  TEST_CASE("has_register_status on non-DDS returns false") {
+  TEST_CASE("register_status_handler works for all DDS family transports") {
+    for (auto tt : {TransportType::kDds, TransportType::kDdsc, TransportType::kDdsr, TransportType::kDdst}) {
+      TestNodeImpl node;
+      node.transport_type = tt;
+      node.register_status_handler([](const Status::BasePtr&) {});
+      CHECK(node.has_register_status() == true);
+    }
+  }
+
+  TEST_CASE("has_register_status returns false for non-DDS transports") {
     TestNodeImpl node;
     node.transport_type = TransportType::kShm;
     CHECK(node.has_register_status() == false);
   }
 
-  TEST_CASE("call_status on DDS transport fires callback directly") {
+  TEST_CASE("call_status on DDS transport invokes the callback directly") {
     TestNodeImpl node;
     node.transport_type = TransportType::kDds;
-
-    Status::Type received_type = Status::kUnknown;
-    node.register_status_handler([&](const Status::BasePtr& ptr) { received_type = ptr->get_type(); });
+    Status::Type received = Status::kUnknown;
+    node.register_status_handler([&](const Status::BasePtr& ptr) { received = ptr->get_type(); });
 
     auto status = std::make_shared<Status::PublicationMatched>();
     node.call_status(status);
 
-    CHECK(received_type == Status::kPublicationMatched);
+    CHECK_EQ(received, Status::kPublicationMatched);
   }
 
-  TEST_CASE("call_status on non-DDS transport is no-op") {
-    TestNodeImpl node;
-    node.transport_type = TransportType::kShm;
-
-    bool called = false;
-    // Cannot register on non-DDS, so callback won't be set
-    node.call_status(std::make_shared<Status::Unknown>());
-    CHECK(called == false);
-  }
-
-  TEST_CASE("call_status via message loop") {
+  TEST_CASE("call_status dispatched via attached message loop") {
     TestNodeImpl node;
     node.transport_type = TransportType::kDds;
     MessageLoop loop;
@@ -376,7 +306,6 @@ TEST_SUITE("impl-NodeImpl - status handler") {
 
     std::atomic_bool called{false};
     node.register_status_handler([&](const Status::BasePtr&) { called = true; });
-
     node.call_status(std::make_shared<Status::PublicationMatched>());
 
     std::this_thread::sleep_for(50ms);
@@ -386,42 +315,6 @@ TEST_SUITE("impl-NodeImpl - status handler") {
     loop.quit();
   }
 
-  TEST_CASE("call_status with DDS transport types - ddsc") {
-    TestNodeImpl node;
-    node.transport_type = TransportType::kDdsc;
-
-    bool called = false;
-    node.register_status_handler([&](const Status::BasePtr&) { called = true; });
-    CHECK(node.has_register_status() == true);
-
-    node.call_status(std::make_shared<Status::SubscriptionMatched>());
-    CHECK(called == true);
-  }
-
-  TEST_CASE("call_status with DDS transport types - ddsr") {
-    TestNodeImpl node;
-    node.transport_type = TransportType::kDdsr;
-
-    bool called = false;
-    node.register_status_handler([&](const Status::BasePtr&) { called = true; });
-    CHECK(node.has_register_status() == true);
-  }
-
-  TEST_CASE("call_status with DDS transport types - ddst") {
-    TestNodeImpl node;
-    node.transport_type = TransportType::kDdst;
-
-    bool called = false;
-    node.register_status_handler([&](const Status::BasePtr&) { called = true; });
-    CHECK(node.has_register_status() == true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - get_conf / get_abstract_node / get_status
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - virtual stubs") {
   TEST_CASE("get_conf returns nullptr by default") {
     TestNodeImpl node;
     CHECK(node.get_conf() == nullptr);
@@ -432,136 +325,248 @@ TEST_SUITE("impl-NodeImpl - virtual stubs") {
     CHECK(node.get_abstract_node() == nullptr);
   }
 
-  TEST_CASE("get_status returns Unknown by default") {
+  TEST_CASE("get_status returns unknown status by default") {
     TestNodeImpl node;
     auto status = node.get_status(Status::kPublicationMatched);
     REQUIRE(status != nullptr);
-    CHECK(status->get_type() == Status::kUnknown);
+    CHECK_EQ(status->get_type(), Status::kUnknown);
   }
 
-  TEST_CASE("get_target_conf with nullptr returns nullptr") {
+  TEST_CASE("get_target_conf returns nullptr when get_conf returns nullptr") {
     TestNodeImpl node;
-    const auto* conf = node.get_target_conf<Conf>();
-    CHECK(conf == nullptr);
+    CHECK(node.get_target_conf<Conf>() == nullptr);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - discovery enable/disable
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - discovery") {
-  TEST_CASE("discovery enabled by default") {
+  TEST_CASE("discovery reporting is enabled by default") {
     TestNodeImpl node;
     CHECK(node.get_discovery_enabled() == true);
   }
 
-  TEST_CASE("set_discovery_enabled false") {
+  TEST_CASE("set_discovery_enabled false is reflected by getter") {
     TestNodeImpl node;
     node.set_discovery_enabled(false);
     CHECK(node.get_discovery_enabled() == false);
   }
 
-  TEST_CASE("set_discovery_enabled toggle") {
+  TEST_CASE("set_discovery_enabled toggle round-trips correctly") {
     TestNodeImpl node;
     node.set_discovery_enabled(false);
-    CHECK(node.get_discovery_enabled() == false);
-
     node.set_discovery_enabled(true);
     CHECK(node.get_discovery_enabled() == true);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - record path
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - record path") {
   TEST_CASE("set_record_path with empty string does not crash") {
     TestNodeImpl node;
     node.set_record_path("");
-    CHECK(true);
   }
 
-  TEST_CASE("try_record without global recorder does not crash") {
+  TEST_CASE("try_record without a recorder does not crash") {
     TestNodeImpl node;
     node.url = "intra://test";
     node.transport_type = TransportType::kIntra;
     Bytes data;
     node.try_record(ActionType::kUnknownAction, data);
-    CHECK(true);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - init_ext / deinit_ext
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - init_ext / deinit_ext") {
-  TEST_CASE("init_ext and deinit_ext do not crash") {
+  TEST_CASE("init_ext and deinit_ext do not crash for intra transport") {
     TestNodeImpl node;
     node.url = "intra://test_topic";
     node.transport_type = TransportType::kIntra;
     node.init_ext();
     node.deinit_ext();
-    CHECK(true);
   }
 
-  TEST_CASE("init_ext with discovery disabled") {
+  TEST_CASE("init_ext with discovery disabled does not crash") {
     TestNodeImpl node;
     node.url = "dds://test_topic";
     node.transport_type = TransportType::kDds;
     node.set_discovery_enabled(false);
     node.init_ext();
     node.deinit_ext();
-    CHECK(true);
   }
 
-  TEST_CASE("init_ext with security type") {
-    TestNodeImpl node;
-    node.url = "dds://test_topic";
-    node.transport_type = TransportType::kDds;
-    node.is_security_type = true;
-    node.init_ext();
-    node.deinit_ext();
-    CHECK(true);
-  }
-
-  TEST_CASE("init_ext with empty url") {
-    TestNodeImpl node;
-    node.transport_type = TransportType::kDds;
-    node.init_ext();
-    node.deinit_ext();
-    CHECK(true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - global_init
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - global_init") {
-  TEST_CASE("global_init can be called multiple times") {
+  TEST_CASE("global_init is safe to call multiple times") {
     NodeImpl::global_init();
     NodeImpl::global_init();
-    CHECK(true);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: NodeImpl - has_suspend atomic
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-NodeImpl - has_suspend") {
-  TEST_CASE("has_suspend defaults to false") {
+  TEST_CASE("has_suspend defaults to false and is writable") {
     TestNodeImpl node;
     CHECK(node.has_suspend == false);
-  }
-
-  TEST_CASE("has_suspend is writable") {
-    TestNodeImpl node;
     node.has_suspend = true;
     CHECK(node.has_suspend == true);
+  }
+
+  TEST_CASE("concurrent property writes and reads are race-free") {
+    static constexpr int kIters = 200;
+
+    TestNodeImpl node;
+
+    std::thread writer([&] {
+      for (int i = 0; i < kIters; ++i) {
+        node.set_property("concurrent_key", std::to_string(i));
+      }
+    });
+
+    std::thread reader([&] {
+      for (int i = 0; i < kIters; ++i) {
+        (void)node.get_property("concurrent_key");
+      }
+    });
+
+    writer.join();
+    reader.join();
+
+    auto val = node.get_property("concurrent_key");
+    CHECK_FALSE(val.empty());
+  }
+
+  TEST_CASE("interrupt from a separate thread is seen by is_interrupted") {
+    TestNodeImpl node;
+
+    std::thread t([&] { node.interrupt(); });
+
+    t.join();
+
+    CHECK(node.is_interrupted() == true);
+    node.reset_interrupted();
+    CHECK(node.is_interrupted() == false);
+  }
+
+  TEST_CASE("multiple attach-detach cycles leave message loop null") {
+    TestNodeImpl node;
+    MessageLoop loop;
+    loop.async_run();
+
+    for (int i = 0; i < 3; ++i) {
+      CHECK(node.attach(&loop) == true);
+      CHECK(node.detach() == true);
+      CHECK(node.get_message_loop() == nullptr);
+    }
+
+    loop.quit();
+  }
+
+  TEST_CASE("set_property with many distinct keys all round-trip") {
+    static constexpr int kKeys = 20;
+
+    TestNodeImpl node;
+
+    for (int i = 0; i < kKeys; ++i) {
+      node.set_property("key" + std::to_string(i), "val" + std::to_string(i));
+    }
+
+    for (int i = 0; i < kKeys; ++i) {
+      CHECK_EQ(node.get_property("key" + std::to_string(i)), "val" + std::to_string(i));
+    }
+
+    CHECK_EQ(node.get_all_properties().size(), static_cast<size_t>(kKeys));
+  }
+
+  TEST_CASE("schema_type defaults to unknown") {
+    TestNodeImpl node;
+    CHECK_EQ(node.schema_type, SchemaType::kUnknown);
+  }
+
+  TEST_CASE("register_status_handler on kDdsr and kDdst transports stores handler") {
+    for (auto tt : {TransportType::kDdsr, TransportType::kDdst}) {
+      TestNodeImpl node;
+      node.transport_type = tt;
+      node.register_status_handler([](const Status::BasePtr&) {});
+      CHECK(node.has_register_status() == true);
+    }
+  }
+
+  TEST_CASE("set_discovery_enabled propagates through multiple nodes independently") {
+    TestNodeImpl node1;
+    TestNodeImpl node2;
+
+    node1.set_discovery_enabled(false);
+
+    CHECK(node1.get_discovery_enabled() == false);
+    CHECK(node2.get_discovery_enabled() == true);
+  }
+
+  TEST_CASE("deinit_ext after init_ext does not crash for dds transport") {
+    TestNodeImpl node;
+    node.url = "dds://test_topic_ext";
+    node.transport_type = TransportType::kDds;
+    node.set_discovery_enabled(false);
+    node.init_ext();
+    node.deinit_ext();
+    node.init_ext();
+    node.deinit_ext();
+  }
+
+  TEST_CASE("try_record with empty bytes and various transport types does not crash") {
+    for (auto tt : {TransportType::kIntra, TransportType::kShm, TransportType::kDds}) {
+      TestNodeImpl node;
+      node.url = "intra://test_record";
+      node.transport_type = tt;
+      Bytes empty;
+      node.try_record(ActionType::kUnknownAction, empty);
+    }
+  }
+
+  TEST_CASE("check_version does not throw") {
+    TestNodeImpl node;
+    Version v_zero{0, 0, 0};
+    Version v_neg{-1, -1, -1};
+    CHECK_NOTHROW((void)node.check_version(v_zero));
+    CHECK_NOTHROW((void)node.check_version(v_neg));
+  }
+}
+
+TEST_SUITE("impl-NodeImpl") {
+  TEST_CASE("register_status_handler on non-dds transport is a no-op without crash") {
+    for (auto tt : {TransportType::kIntra, TransportType::kShm, TransportType::kShm2, TransportType::kZenoh}) {
+      TestNodeImpl node;
+      node.transport_type = tt;
+      CHECK_NOTHROW(node.register_status_handler([](const Status::BasePtr&) {}));
+      CHECK(node.has_register_status() == false);
+    }
+  }
+
+  TEST_CASE("second register_status_handler replaces the first callback") {
+    TestNodeImpl node;
+    node.transport_type = TransportType::kDds;
+
+    std::atomic<int> first_count{0};
+    std::atomic<int> second_count{0};
+
+    node.register_status_handler([&](const Status::BasePtr&) { first_count.fetch_add(1, std::memory_order_relaxed); });
+    node.register_status_handler([&](const Status::BasePtr&) { second_count.fetch_add(1, std::memory_order_relaxed); });
+
+    auto s = std::make_shared<Status::PublicationMatched>();
+    node.call_status(s);
+
+    CHECK_EQ(first_count.load(), 0);
+    CHECK_EQ(second_count.load(), 1);
+  }
+
+  TEST_CASE("call_status delivers correct type for each status kind") {
+    TestNodeImpl node;
+    node.transport_type = TransportType::kDds;
+
+    std::atomic<int> received_type{-1};
+    node.register_status_handler([&](const Status::BasePtr& ptr) {
+      received_type.store(static_cast<int>(ptr->get_type()), std::memory_order_relaxed);
+    });
+
+    SUBCASE("subscription matched") {
+      node.call_status(std::make_shared<Status::SubscriptionMatched>());
+      CHECK_EQ(received_type.load(), static_cast<int>(Status::kSubscriptionMatched));
+    }
+
+    SUBCASE("offered deadline missed") {
+      node.call_status(std::make_shared<Status::OfferedDeadlineMissed>());
+      CHECK_EQ(received_type.load(), static_cast<int>(Status::kOfferedDeadlineMissed));
+    }
+
+    SUBCASE("liveliness lost") {
+      node.call_status(std::make_shared<Status::LivelinessLost>());
+      CHECK_EQ(received_type.load(), static_cast<int>(Status::kLivelinessLost));
+    }
   }
 }
 

@@ -26,10 +26,10 @@
         <mxCell id="cfg1" value="Security::Config cfg;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=12;fontFamily=Courier New;fontStyle=1;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="40" y="148" width="240" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="cfg2" value="cfg.encrypt_callback = xor_cipher::encrypt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="cfg2" value="cfg.encrypt_callback = xor_transform;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="40" y="194" width="500" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="cfg3" value="cfg.decrypt_callback = xor_cipher::decrypt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
+        <mxCell id="cfg3" value="cfg.decrypt_callback = xor_transform;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#c62828;strokeColor=#b71c1c;strokeWidth=1.5;fontSize=11;fontFamily=Courier New;fontStyle=1;fontColor=#ffffff;arcSize=10;" vertex="1" parent="1">
           <mxGeometry x="40" y="234" width="500" height="34" as="geometry" />
         </mxCell>
         <mxCell id="cfgSig" value="using Callback = vlink::Function&amp;lt;bool(const Bytes&amp;amp; in, Bytes&amp;amp; out)&amp;gt;;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcdd2;strokeColor=#b71c1c;strokeWidth=1.2;fontSize=10;fontFamily=Courier New;fontStyle=2;fontColor=#7f0000;arcSize=10;" vertex="1" parent="1">

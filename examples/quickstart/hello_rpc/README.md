@@ -1,245 +1,133 @@
-# Hello RPC -- VLink 方法模型入门（计算器服务）
+# hello_rpc — VLink 方法模型最小示例
 
-## 1. 概述
+`hello_rpc` 用一份 `intra://` 进程内示例展示 VLink 方法模型（Method Model）的最短可运行形态：Server 在一个 URL 上注册请求处理函数；Client 在同一 URL 上发起同步 RPC 调用，得到反序列化后的响应。读完本示例可以理解 VLink RPC 的"双类型模板（Req/Resp）+ in-place 填充响应 + `invoke()` 同步返回 `std::optional`"这一基础范式。
 
-本示例演示 VLink 的 **方法模型 (Method Model)**，即 RPC（远程过程调用）模式。通过一个计算器服务场景，展示 `Server` 注册处理函数、`Client` 发送请求并接收响应的完整流程。
+## 背景与适用场景
 
-本示例拆分为**两个独立程序**：
-- **calculator_server** -- 服务端，提供计算器 RPC 服务和通知服务
-- **calculator_client** -- 客户端，演示全部 **5 种调用模式**
+Method 模型是 1-对-1 的请求/响应模型，定位类似 gRPC / SOMEIP method / DDS-RPC。它解决的是"我需要拿到对端的明确返回，否则业务无法继续"这类需求：参数查询、控制命令的确认应答、状态切换的同步确认、安全关键路径上的握手等等。
 
-### 1.1 架构图
+VLink 中方法模型暴露五种调用形态：
+1. `invoke(req, resp&, timeout)` —— 同步、用输出引用接收。
+2. `invoke(req, timeout) -> std::optional<Resp>` —— 同步、`nullopt` 表示超时或错误。
+3. `invoke(req, callback)` —— 异步、回调里处理响应。
+4. `async_invoke(req) -> std::future<Resp>` —— 异步、用 `future` 同步等待。
+5. `send(req)` —— 单向（fire-and-forget），无响应（要求 `RespT == EmptyType`）。
 
-![RPC 数据流](images/quickstart-rpc-flow.png)
+本示例只演示形态 2（最常用、最简洁）。形态 1/3/4 在 `../../communication/method_sync/` 与 `../../communication/method_async/` 中演示。形态 5 在 `../../communication/method_fire_forget/` 中演示。
 
-```
-┌──────────────────────┐                    ┌───────────────────────────┐
-│  calculator_client   │                    │   calculator_server       │
-│                      │   invoke(req)      │                           │
-│  Client<Req,Resp> ──>│ =================> │  Server<Req,Resp>         │
-│                      │                    │    └─ listen(req, resp)   │
-│  auto resp = ...  <──│ <================= │       resp.result = ...   │
-│                      │   response         │                           │
-└──────────────────────┘                    └───────────────────────────┘
-           dds://hello/calculator
-```
+## 核心 API
 
-## 2. 文件结构
+| API | 签名（来自头文件） | 说明 |
+|-----|------|------|
+| `vlink::Server<ReqT, RespT>` | `explicit Server(const std::string& url_str, InitType type = InitType::kWithInit);` | 服务端节点 |
+| `Server::listen(ReqRespCallback&&)` | `bool listen(ReqRespCallback&& callback);`  `using ReqRespCallback = Function<void(const ReqT&, RespT&)>;` | 同步响应：回调内原地填 `resp` |
+| `vlink::Client<ReqT, RespT>` | `explicit Client(const std::string& url_str, InitType type = InitType::kWithInit);` | 客户端节点 |
+| `Client::wait_for_connected(timeout)` | `bool wait_for_connected(std::chrono::milliseconds timeout = Timeout::kDefaultInterval);` | 阻塞直到 Server 出现 |
+| `Client::invoke(req, timeout)` | `[[nodiscard]] std::optional<RespT> invoke(const ReqT& req, std::chrono::milliseconds timeout = Timeout::kDefaultInterval);` | 同步 RPC，返回 `optional<Resp>` |
+| `MessageLoop::async_run()` | `bool async_run();` | 后台线程启动循环 |
+| `Server::attach(MessageLoop*)` | （继承自 `Node`） | 把服务端回调派发到指定循环 |
 
-| 文件 | 说明 |
-|------|------|
-| `calculator_types.h` | 共享 POD 请求/响应结构体和 URL 常量 |
-| `calculator_server.cc` | 主程序：Server 端，提供计算器和通知服务 |
-| `calculator_client.cc` | 主程序：Client 端，演示 5 种调用模式 |
-| `CMakeLists.txt` | 构建两个可执行文件 |
+## 代码导读
 
-## 3. 5 种调用模式对比
+### 1. 请求 / 响应类型
 
-| 模式 | API | 阻塞 | 返回值 | 适用场景 |
-|------|-----|------|--------|---------|
-| 1. 引用输出 | `invoke(req, resp)` | 是 | `bool` | 最常用，简单同步调用 |
-| 2. Optional | `invoke(req)` | 是 | `optional<Resp>` | 函数式风格，无需预创建 resp |
-| 3. 回调 | `invoke(req, callback)` | 否 | `bool` | 非阻塞，响应到达时回调 |
-| 4. Future | `async_invoke(req)` | 否 | `future<Resp>` | 并行发起多个请求 |
-| 5. Fire-and-forget | `send(req)` | 否 | `bool` | 无需响应的单向通知 |
-
-## 4. POD 类型定义
+请求和响应都是 POD：
 
 ```cpp
-// calculator_types.h
 struct CalcRequest {
-  int a;    // Left operand
-  int b;    // Right operand
-  char op;  // '+', '-', '*', '/'
+  int a;
+  int b;
+  char op;
 };
 
 struct CalcResponse {
-  int result;  // Computation result
+  int result;
 };
 ```
 
-**重要**：POD 结构体不能使用默认成员初始化器（如 `int result{0};`）。VLink 使用 `kStandardType` 序列化器，通过 `memcpy` 直接传输 POD 数据，零序列化开销。
+### 2. 启动 Server
 
-## 5. 关键代码逐步解析
-
-### 5.1 calculator_server.cc -- 服务端
-
-#### 5.1.1 创建 Server 并注册处理函数
+服务端 `attach` 到 `loop`，然后 `listen()` 注册同步处理函数。回调签名是 `void(const Req&, Resp&)`——`resp` 是输出引用，框架在回调返回后自动序列化并发回客户端。
 
 ```cpp
-Server<example::CalcRequest, example::CalcResponse> server(example::kCalculatorUrl);
-server.attach(&server_loop);
+MessageLoop loop;
+loop.async_run();
 
-server.listen([](const example::CalcRequest& req, example::CalcResponse& resp) {
-    switch (req.op) {
-      case '+': resp.result = req.a + req.b; break;
-      case '-': resp.result = req.a - req.b; break;
-      case '*': resp.result = req.a * req.b; break;
-      case '/': resp.result = (req.b != 0) ? (req.a / req.b) : 0; break;
-      default:  resp.result = 0; break;
-    }
+Server<CalcRequest, CalcResponse> server(kUrl);
+server.attach(&loop);
+server.listen([](const CalcRequest& req, CalcResponse& resp) {
+  switch (req.op) {
+    case '+': resp.result = req.a + req.b; break;
+    case '-': resp.result = req.a - req.b; break;
+    case '*': resp.result = req.a * req.b; break;
+    default:  resp.result = 0; break;
+  }
+  VLOG_I("[server] ", req.a, " ", req.op, " ", req.b, " = ", resp.result);
 });
 ```
 
-- `Server<ReqT, RespT>` 的 `listen()` 接受签名为 `void(const ReqT&, RespT&)` 的回调
-- 回调中读取请求 (`req`)，填充响应 (`resp`)
-- 回调返回后，框架自动序列化 `resp` 并发回给 Client
-- `attach(&server_loop)` 将处理回调调度到 loop 线程上执行
+### 3. Client 端调用
 
-#### 5.1.2 创建 Fire-and-forget 通知服务
+`wait_for_connected()` 在分布式后端上等价于"等待发现 Server"，这里 `intra://` 几乎立即返回。`invoke(req)` 返回 `std::optional<CalcResponse>`：成功时含值，超时或错误时是 `nullopt`。
 
 ```cpp
-Server<example::CalcRequest> notify_server(example::kNotifyUrl);
-notify_server.listen([](const example::CalcRequest& req) {
-    // 只接收请求，无需返回响应
-});
-```
+Client<CalcRequest, CalcResponse> client(kUrl);
+client.wait_for_connected();
 
-当 `Server` 的模板参数只有 `ReqT`（不指定 `RespT`，默认为 `Traits::EmptyType`）时，`listen()` 接受 `void(const ReqT&)` 签名的回调。
+CalcRequest req{10, 3, '+'};
+auto resp = client.invoke(req);
 
-#### 5.1.3 信号处理与持续运行
-
-```cpp
-std::atomic<bool> running{true};
-Utils::register_terminate_signal([&running](int sig) { running = false; });
-
-while (running) {
-    std::this_thread::sleep_for(100ms);
+if (resp.has_value()) {
+  VLOG_I("[client] 10 + 3 = ", resp->result);
+} else {
+  VLOG_W("[client] invoke failed");
 }
 ```
 
-服务端通常持续运行，直到收到 SIGINT (Ctrl+C) 或 SIGTERM 信号。
+### 4. 优雅退出
 
-### 5.2 calculator_client.cc -- 客户端
-
-#### 5.2.1 模式 1：同步引用输出
+调用结束后用 `loop.quit()` 触发 server 端循环退出，`wait_for_quit()` 等待后台线程真正退出后再让 `main` 返回。
 
 ```cpp
-example::CalcRequest req{10, 3, '+'};
-example::CalcResponse resp{};
-bool ok = client.invoke(req, resp);
-// resp.result == 13
+loop.quit();
+loop.wait_for_quit();
 ```
 
-最直观的调用方式。`invoke()` 阻塞当前线程，等待服务端响应。默认超时为 `Timeout::kDefaultInterval`。返回 `true` 表示成功收到响应。
-
-#### 5.2.2 模式 2：Optional 返回
-
-```cpp
-auto result = client.invoke(req);  // -> std::optional<CalcResponse>
-if (result.has_value()) {
-    // result->result 即为计算结果
-}
-```
-
-更简洁的同步调用方式。不需要预创建 `resp` 对象。超时或错误时返回 `std::nullopt`。
-
-#### 5.2.3 模式 3：异步回调
-
-```cpp
-client.invoke(req, [](const example::CalcResponse& resp) {
-    // 在传输线程上异步调用
-});
-```
-
-调用立即返回，不阻塞。当服务端响应到达时，回调在传输线程（或 attach 的 MessageLoop）上执行。
-
-#### 5.2.4 模式 4：Future 异步
-
-```cpp
-auto future = client.async_invoke(req);
-// ... 做其他工作 ...
-example::CalcResponse resp = future.get();  // 需要结果时再阻塞
-```
-
-返回 `std::future<CalcResponse>`。适合并行发起多个请求，最后统一收集结果。
-
-#### 5.2.5 模式 5：Fire-and-forget
-
-```cpp
-Client<example::CalcRequest> notify_client(example::kNotifyUrl);
-notify_client.send(req);
-```
-
-使用不带 `RespT` 的 `Client`，调用 `send()` 而非 `invoke()`。请求发送后立即返回，不等待响应。适合日志通知、心跳等无需确认的场景。
-
-## 6. Server 的三种监听模式
-
-| 模式 | API | 说明 |
-|------|-----|------|
-| Fire-and-forget | `listen(ReqCallback)` | `RespT` 必须为 `EmptyType` |
-| 同步响应 | `listen(ReqRespCallback)` | 在回调中填充 resp，框架自动返回 |
-| 异步响应 | `listen_for_reply(ReqAsyncRespCallback)` | 回调获取 `req_id`，稍后调用 `reply(req_id, resp)` |
-
-## 7. 编译与运行
+## 运行
 
 ```bash
-# 编译两个目标
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_calculator_server example_calculator_client
-
-# 运行 Server（先启动，保持运行）
-VLINK_CALCULATOR_URL=dds://hello/calculator \
-VLINK_NOTIFY_URL=dds://hello/notify \
-  ./build/output/bin/example_calculator_server
-
-# 在另一个终端运行 Client
-VLINK_CALCULATOR_URL=dds://hello/calculator \
-VLINK_NOTIFY_URL=dds://hello/notify \
-  ./build/output/bin/example_calculator_client
+./build/output/bin/example_hello_rpc
 ```
 
-> **注意**：源码默认 URL 是 `intra://`，仅适合同一进程内联演示。两个独立可执行文件跨进程运行时，需要像上面一样用 `VLINK_CALCULATOR_URL` 和 `VLINK_NOTIFY_URL` 切换到 `dds://`、`shm://` 等跨进程传输。
+预期输出：
 
-## 8. 预期输出
-
-### 8.1 calculator_server 输出
 ```
-[I] === VLink Calculator Server ===
-[I] [Server] Calculator service listening on dds://hello/calculator
-[I] [Server] Notification service listening on dds://hello/notify
-[I] [Server] Ready -- waiting for client requests (Ctrl+C to stop)...
-[I] [Server] 10 + 3 = 13
-[I] [Server] 20 * 4 = 80
-[I] [Server] 15 - 7 = 8
-[I] [Server] 100 / 5 = 20
-[I] [NotifyServer] Fire-and-forget received: 42 ! 0
+[server] 10 + 3 = 13
+[client] 10 + 3 = 13
 ```
 
-### 8.2 calculator_client 输出
-```
-[I] === VLink Calculator Client ===
-[I] [Client] Connected to dds://hello/calculator
-[I] --- Mode 1: invoke(req, resp) ---
-[I] [Client] 10 + 3 = 13
-[I] --- Mode 2: invoke(req) -> optional ---
-[I] [Client] 20 * 4 = 80
-[I] --- Mode 3: invoke(req, callback) ---
-[I] [Client] 15 - 7 = 8 (via callback)
-[I] --- Mode 4: async_invoke(req) -> future ---
-[I] [Client] 100 / 5 = 20 (via future)
-[I] --- Mode 5: send(req) fire-and-forget ---
-[I] [Client] Fire-and-forget send: accepted
-[I] === Calculator Client complete ===
-```
+`intra://` 不需要任何环境变量；如果输出 "invoke failed"，多半是 Server 还没注册 listen 就发起调用——下一节有说明。
 
-## 9. 与其他模型的关系
+## 常见陷阱
 
-| 模型 | 原语 | 通信方向 | 特点 |
-|------|------|----------|------|
-| 事件模型 | Publisher / Subscriber | 单向 | 消息广播，不保留历史 |
-| 字段模型 | Setter / Getter | 单向 + 缓存 | 状态同步，保留最新值 |
-| 方法模型 | Server / Client | 双向 | 请求/响应，支持多种异步模式 |
+- **必须在 `client.invoke()` 之前完成 `server.listen()` 注册**。本示例通过先于 client 构造的顺序保证；但 `wait_for_connected()` 只检查传输层连接，不检查 listen 是否注册。多模块编排时建议双向检查。
+- **`listen()` 只能调用一次**。重复调用会致命错误退出。
+- **`invoke` 的 `[[nodiscard]]`**：返回值必须接收并判定 `has_value()`，否则编译器会给警告。
+- **`Server<Req>` （省略 `RespT`）走的是 fire-and-forget 路径**——`invoke()` 在此时会触发 `static_assert`。要单向无响应请用 `Client::send()`，详见 `method_fire_forget` 示例。
+- **超时**：默认超时是 `Timeout::kDefaultInterval`（项目级常量，通常为秒级）。传 `0` 会被记 warning 并按"无限等待"处理。
 
-三种模型可以在同一应用中混合使用，共享相同的传输基础设施。只需修改 URL 中的 transport 字段即可切换底层传输协议。
+## 设计要点
 
-## 10. 扩展思考
+- **类型安全的 RPC**：`ReqT` / `RespT` 在模板参数中固定，Server 与 Client 的类型不匹配会在编译期或初始化期被检测到。
+- **序列化按类型自动选择**：POD 走 `kStandardType`，自定义类型走 `kCustomType`，FlatBuffers/Protobuf 走专属路径。RPC 与 pub/sub 共用同一套序列化机制。
+- **线程模型**：Server 回调跑在 `loop` 所在线程；Client 的同步 `invoke()` 阻塞在调用方线程上，因此不需要为 Client 单独 `MessageLoop`。
+- **跨传输**：换成 `dds://hello/rpc`、`zenoh://hello/rpc`、`someip://...` 即可跑在真实分布式系统上，业务代码无须改动。
 
-- **超时控制**：`invoke()` 默认使用 `Timeout::kDefaultInterval`，可以通过第三个参数自定义超时时间
-- **异步响应**：服务端可以使用 `listen_for_reply()` 实现异步处理，适合耗时操作
-- **跨进程**：将 URL 改为 `shm://` 或 `dds://`，即可实现真正的跨进程 RPC 调用
-- **负载均衡**：多个 Server 监听同一 URL 时，Client 的请求会被分发到其中一个 Server
+## 参考
 
-## 11. 相关文档
-
-详细原理参见 [doc/04-method-model.md](../../../doc/04-method-model.md)。
+- `../../communication/method_sync/` — 三种同步 invoke 形态、`wait_for_connected` 完整使用。
+- `../../communication/method_async/` — 回调与 `std::future` 形式的异步调用、`listen_for_reply` + `reply`。
+- `../../communication/method_fire_forget/` — 单向无响应的 `Client::send()` + `Server<Req>`。
+- `vlink/include/vlink/client.h` — Client 完整 API 与五种调用形态对照表。
+- `vlink/include/vlink/server.h` — Server 完整 API。
+- 顶层 `doc/04-method-model.md` — 方法模型规范。

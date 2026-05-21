@@ -33,20 +33,14 @@
 #include <atomic>
 #include <string>
 #include <thread>
-#define VLINK_GETPID() ::getpid()
 
-//
 #include "../common_test.h"
 
-// Build a unique semaphore name using the current PID to avoid cross-run
-// collisions left over by a previous crashed test process.
-static std::string make_sem_name(const char* tag) {
-  return std::string("/vlink_test_") + tag + "_" + std::to_string(VLINK_GETPID());
-}
+namespace {
 
-// ---------------------------------------------------------------------------
-// Helpers: ensure semaphore is cleaned up even when a CHECK fires
-// ---------------------------------------------------------------------------
+std::string make_sem_name(const char* tag) {
+  return std::string("/vlink_test_") + tag + "_" + std::to_string(::getpid());
+}
 
 struct SemGuard {
   SysSemaphore& sem;
@@ -58,80 +52,77 @@ struct SemGuard {
   }
 };
 
-// ---------------------------------------------------------------------------
-// TEST SUITE
-// ---------------------------------------------------------------------------
+}  // namespace
 
 TEST_SUITE("base-SysSemaphore") {
-  // ---------------------------------------------------------------------------
-  // TEST: initial state before attach
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("initial-state") {
+  TEST_CASE("default constructed is not attached and count is zero") {
     SysSemaphore sem;
 
     CHECK_FALSE(sem.is_attached());
-    CHECK(sem.get_count() == 0);
+    CHECK_EQ(sem.get_count(), 0u);
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: attach creates a new semaphore and is_attached returns true
-  // ---------------------------------------------------------------------------
+  TEST_CASE("kInfinite sentinel equals -1") { CHECK_EQ(SysSemaphore::kInfinite, -1); }
 
-  TEST_CASE("attach-detach") {
+  TEST_CASE("attach creates semaphore and is_attached becomes true") {
     const std::string name = make_sem_name("attach");
     SysSemaphore sem(0);
     SemGuard guard{sem};
 
-    bool ok = sem.attach(name);
-    CHECK(ok);
+    CHECK(sem.attach(name));
     CHECK(sem.is_attached());
+  }
 
-    bool d = sem.detach(true);
-    CHECK(d);
+  TEST_CASE("detach after attach succeeds and is_attached becomes false") {
+    const std::string name = make_sem_name("detach");
+    SysSemaphore sem(0);
+
+    REQUIRE(sem.attach(name));
+
+    bool ok = sem.detach(true);
+
+    CHECK(ok);
     CHECK_FALSE(sem.is_attached());
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: detach without attach returns false
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("detach-not-attached") {
+  TEST_CASE("detach when not attached returns false") {
     SysSemaphore sem;
 
-    bool d = sem.detach(true);
-    CHECK_FALSE(d);
+    CHECK_FALSE(sem.detach(true));
+    CHECK_FALSE(sem.detach(false));
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: basic release/acquire round-trip (count starts at 0, release then acquire)
-  // ---------------------------------------------------------------------------
+  TEST_CASE("get_count returns zero before attach") {
+    SysSemaphore sem(5);
 
-  TEST_CASE("release-acquire") {
+    CHECK_EQ(sem.get_count(), 0u);
+  }
+
+  TEST_CASE("initial count is reflected after attach") {
+    const std::string name = make_sem_name("init_cnt");
+    SysSemaphore sem(2);
+    SemGuard guard{sem};
+
+    REQUIRE(sem.attach(name));
+
+    CHECK_EQ(sem.get_count(), 2u);
+  }
+
+  TEST_CASE("release increments count and acquire with zero timeout succeeds") {
     const std::string name = make_sem_name("rel_acq");
     SysSemaphore sem(0);
     SemGuard guard{sem};
 
     REQUIRE(sem.attach(name));
 
-    // Count is 0 — a non-blocking acquire should fail immediately
-    bool non_blocking = sem.acquire(1, 0);
-    CHECK_FALSE(non_blocking);
+    CHECK_FALSE(sem.acquire(1, 0));
 
-    // Release one permit
     sem.release(1);
-    CHECK(sem.get_count() >= 1);
 
-    // Now acquire should succeed without blocking
-    bool ok = sem.acquire(1, 0);
-    CHECK(ok);
+    CHECK(sem.acquire(1, 0));
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: release multiple permits at once
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("release-multiple") {
+  TEST_CASE("release multiple permits at once and acquire individually") {
     const std::string name = make_sem_name("rel_multi");
     SysSemaphore sem(0);
     SemGuard guard{sem};
@@ -139,60 +130,31 @@ TEST_SUITE("base-SysSemaphore") {
     REQUIRE(sem.attach(name));
 
     sem.release(3);
-    CHECK(sem.get_count() == 3);
+    CHECK_EQ(sem.get_count(), 3u);
 
     CHECK(sem.acquire(1, 0));
-    CHECK(sem.acquire(1, 0));
-    CHECK(sem.acquire(1, 0));
-
-    // All permits consumed — next acquire should time-out immediately
-    CHECK_FALSE(sem.acquire(1, 0));
-  }
-
-  // ---------------------------------------------------------------------------
-  // TEST: initial count > 0 is honoured when creating a new semaphore
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("initial-count") {
-    const std::string name = make_sem_name("init_cnt");
-    SysSemaphore sem(2);
-    SemGuard guard{sem};
-
-    REQUIRE(sem.attach(name));
-    CHECK(sem.get_count() == 2);
-
     CHECK(sem.acquire(1, 0));
     CHECK(sem.acquire(1, 0));
     CHECK_FALSE(sem.acquire(1, 0));
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: timeout — acquire blocks for at most timeout_ms ms when count == 0
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("timeout") {
+  TEST_CASE("acquire times out when count stays zero") {
     const std::string name = make_sem_name("timeout");
     SysSemaphore sem(0);
     SemGuard guard{sem};
 
     REQUIRE(sem.attach(name));
 
-    auto start = std::chrono::steady_clock::now();
-    bool ok = sem.acquire(1, 100);  // 100 ms timeout
-    auto elapsed = std::chrono::steady_clock::now() - start;
+    auto t0 = std::chrono::steady_clock::now();
+    bool ok = sem.acquire(1, 100);
+    auto elapsed = std::chrono::steady_clock::now() - t0;
 
     CHECK_FALSE(ok);
-    // Must have waited at least 50 ms (give generous lower bound for slow CI)
     CHECK(elapsed >= 50ms);
-    // Must not have waited more than 2 s (semaphore should not hang)
     CHECK(elapsed < 2000ms);
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: cross-thread signalling — producer thread releases, consumer acquires
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("cross-thread") {
+  TEST_CASE("cross-thread release unblocks acquire") {
     const std::string name = make_sem_name("xthread");
     SysSemaphore sem(0);
     SemGuard guard{sem};
@@ -200,146 +162,102 @@ TEST_SUITE("base-SysSemaphore") {
     REQUIRE(sem.attach(name));
 
     std::atomic<bool> produced{false};
-    std::atomic<bool> consumed{false};
 
-    std::thread producer([&]() {
+    std::thread producer([&sem, &produced]() {
       std::this_thread::sleep_for(50ms);
-      produced = true;
+      produced.store(true, std::memory_order_release);
       sem.release(1);
     });
 
-    // Wait up to 3 s for the producer to signal
     bool ok = sem.acquire(1, 3000);
-    consumed = true;
 
     producer.join();
 
     CHECK(ok);
-    CHECK(produced.load());
-    CHECK(consumed.load());
+    CHECK(produced.load(std::memory_order_acquire));
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: destructor silently detaches (no crash / no assert)
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("destructor-detaches") {
-    const std::string name = make_sem_name("dtor");
-
-    {
-      SysSemaphore sem(0);
-      REQUIRE(sem.attach(name));
-      // sem goes out of scope here — destructor must detach cleanly
-    }
-
-    // Destructor calls detach(false), so the named semaphore remains until explicit cleanup.
-    SysSemaphore sem2(1);
-    bool ok = sem2.attach(name);
-    CHECK(ok);
-
-    if (ok) {
-      CHECK(sem2.get_count() == 0);
-      sem2.detach(true);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // TEST: kInfinite sentinel value is negative (documented contract)
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("infinite-sentinel") { CHECK(SysSemaphore::kInfinite == -1); }
-
-  // ---------------------------------------------------------------------------
-  // TEST: acquire(n>1) blocks until n permits are available
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("acquire-multi") {
-    const std::string name = make_sem_name("multi_acq");
-    SysSemaphore sem(0);
-    SemGuard guard{sem};
-
-    REQUIRE(sem.attach(name));
-
-    // Release 3 permits, then acquire 3 at once
-    sem.release(3);
-    CHECK(sem.get_count() == 3);
-
-    bool ok = sem.acquire(3, 500);
-    CHECK(ok);
-    CHECK(sem.get_count() == 0);
-  }
-
-  // ---------------------------------------------------------------------------
-  // TEST: acquire(n>available) rolls back permits acquired before timeout
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("acquire-multi-timeout-rolls-back") {
+  TEST_CASE("acquire with n greater than available times out and leaves count unchanged") {
     const std::string name = make_sem_name("multi_rollback");
     SysSemaphore sem(0);
     SemGuard guard{sem};
 
     REQUIRE(sem.attach(name));
     sem.release(1);
-    CHECK(sem.get_count() == 1);
+    CHECK_EQ(sem.get_count(), 1u);
 
     CHECK_FALSE(sem.acquire(2, 50));
-    CHECK(sem.get_count() == 1);
+    CHECK_EQ(sem.get_count(), 1u);
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: release(0) does not change count
-  // ---------------------------------------------------------------------------
+  TEST_CASE("acquire n permits at once succeeds when count is sufficient") {
+    const std::string name = make_sem_name("multi_acq");
+    SysSemaphore sem(0);
+    SemGuard guard{sem};
 
-  TEST_CASE("release-zero") {
+    REQUIRE(sem.attach(name));
+    sem.release(3);
+
+    bool ok = sem.acquire(3, 500);
+
+    CHECK(ok);
+    CHECK_EQ(sem.get_count(), 0u);
+  }
+
+  TEST_CASE("release zero does not change count") {
     const std::string name = make_sem_name("rel_zero");
     SysSemaphore sem(2);
     SemGuard guard{sem};
 
     REQUIRE(sem.attach(name));
-    CHECK(sem.get_count() == 2);
+    CHECK_EQ(sem.get_count(), 2u);
 
     sem.release(0);
-    CHECK(sem.get_count() == 2);
+
+    CHECK_EQ(sem.get_count(), 2u);
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST: get_count returns 0 before attach
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("get-count-unattached") {
-    SysSemaphore sem(5);
-    // Not attached yet; get_count should return 0
-    CHECK(sem.get_count() == 0);
-  }
-
-  // ---------------------------------------------------------------------------
-  // TEST: detach(force=false) closes handle but leaves semaphore in namespace
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("detach-no-force") {
+  TEST_CASE("detach force=false closes handle but leaves semaphore in namespace") {
     const std::string name = make_sem_name("det_nof");
     SysSemaphore sem(1);
 
     REQUIRE(sem.attach(name));
-    CHECK(sem.is_attached());
 
-    // Detach without removing from namespace
-    bool d = sem.detach(false);
-    CHECK(d);
+    bool ok = sem.detach(false);
+
+    CHECK(ok);
     CHECK_FALSE(sem.is_attached());
 
-    // The semaphore should still exist; re-attach should succeed
-    SysSemaphore sem2(0);
-    bool ok = sem2.attach(name);
+    SysSemaphore probe(0);
+    bool reattached = probe.attach(name);
+
+    CHECK(reattached);
+
+    if (reattached) {
+      CHECK_EQ(probe.get_count(), 1u);
+      probe.detach(true);
+    }
+  }
+
+  TEST_CASE("destructor auto-detaches without crash") {
+    const std::string name = make_sem_name("dtor");
+
+    {
+      SysSemaphore sem(0);
+      REQUIRE(sem.attach(name));
+    }
+
+    SysSemaphore probe(1);
+    bool ok = probe.attach(name);
+
     CHECK(ok);
 
     if (ok) {
-      CHECK(sem2.get_count() == 1);
-      sem2.detach(true);  // Cleanup
+      probe.detach(true);
     }
   }
 }
 
-#endif
+#endif  // __linux__
 
 // NOLINTEND

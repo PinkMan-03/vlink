@@ -1,125 +1,149 @@
-# VLink SpinLock 示例
+# spin_lock — `vlink::SpinLock` 极短临界区自旋锁
 
-## 1. 概述
+`vlink::SpinLock` 是用户态自旋锁，用于**极短**临界区（几条指令、几十纳秒）。任何会阻塞 / 涉及系统调用 / 涉及内存分配的代码都不应该用 SpinLock —— 用 `std::mutex`。
 
-本示例演示了 VLink `SpinLock` 的用法，包括手动加解锁、RAII 守卫、try_lock、多线程并发保护以及与 `std::mutex` 的性能对比。SpinLock 是为极短临界区设计的用户空间自旋锁。
+读完本示例你能掌握：
 
-## 2. 文件说明
+- SpinLock 的基本 API（`lock` / `unlock` / `try_lock`）。
+- 配合 `SpinLockGuard` 或 `std::lock_guard` 的 RAII 用法。
+- 与 `std::mutex` 的性能权衡。
+- 适用 / 不适用场景的判断。
 
-| 文件 | 说明 |
-|------|------|
-| `spin_lock.cc` | SpinLock 功能演示源码 |
-| `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
+## 背景与适用场景
 
-## 3. 构建与运行
+适用：
 
-```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_spin_lock
-./build/output/bin/example_spin_lock
+- 极短临界区（cache-line 写入、原子计数无法表达的复合操作）。
+- 锁持有时间确定 < 几十纳秒。
+- 高频锁定 + 几乎无争抢。
+
+不适合：
+
+- 临界区里有任何 syscall（read/write/socket）、malloc、log 输出。
+- 持有时间长的场景。
+- 高争抢 —— 自旋会浪费 CPU。
+
+注意：SpinLock 在 vlink 内部仅在 hot path 的小数据结构上用；业务代码 99% 应该用 `std::mutex`。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `vlink::SpinLock` | 默认构造 | unlocked |
+| `lock` | `void lock()` | 自旋直到拿到锁 |
+| `unlock` | `void unlock()` | 释放 |
+| `try_lock` | `bool try_lock()` | 非阻塞，立刻返回 |
+| `vlink::SpinLockGuard(SpinLock&)` | RAII | 构造时 lock，析构时 unlock |
+| `std::lock_guard<SpinLock>` | RAII | SpinLock 满足 Lockable 概念 |
+
+## 代码导读
+
+### 1. 手动 lock/unlock
+
+```cpp
+SpinLock lock;
+lock.lock();
+// critical section
+lock.unlock();
 ```
 
-## 4. 核心概念
-
-### 4.1 SpinLock vs std::mutex
-
-| 特性 | SpinLock | std::mutex |
-|------|----------|-----------|
-| 等待方式 | 忙等自旋 | 内核上下文切换 |
-| 适用场景 | 极短临界区（几条指令） | 长临界区或 I/O 操作 |
-| CPU 开销 | 自旋期间消耗 CPU | 等待期间释放 CPU |
-| 缓存行对齐 | `alignas(64)` 防止 false sharing | 不保证 |
-
-### 4.2 自适应退避策略
-
-`SpinLock::lock()` 内部采用指数退避策略减少总线竞争：
-
-1. 尝试 `exchange(true, acquire)`，成功则返回
-2. 以 `load(relaxed)` 自旋等待，直到看到锁被释放
-3. 每 `backoff` 次自旋后调用 `Utils::yield_cpu()`（CPU PAUSE 指令）
-4. `backoff` 每轮翻倍，上限 1024
-5. 超过 50000 次自旋后，sleep 10 微秒并记录错误日志
-
-### 4.3 RAII 守卫
+### 2. SpinLockGuard / std::lock_guard
 
 ```cpp
 SpinLock lock;
 {
-    SpinLockGuard guard(lock);  // 构造时加锁
-    // 临界区
-}  // 析构时自动解锁
+  SpinLockGuard guard(lock);
+  // critical section
+}
+
+// C++17 CTAD：
+{
+  std::lock_guard guard(lock);     // std::lock_guard<SpinLock> 自动推导
+  // critical section
+}
 ```
 
-`SpinLockGuard` 类似于 `std::lock_guard`，确保异常安全。由于 SpinLock 满足 `Lockable` 要求，也可以直接 `std::lock_guard guard(lock)`（C++17 CTAD 自动推导出 `std::lock_guard<vlink::SpinLock>`）。
+### 3. try_lock
 
-## 5. 代码执行流程
-
-1. **手动加解锁**：基本的 lock/unlock 使用
-2. **RAII 守卫**：SpinLockGuard 自动管理锁生命周期
-3. **try_lock**：非阻塞尝试获取锁
-4. **多线程计数器**：4 个线程各递增 100000 次，验证线程安全
-5. **std::lock_guard 兼容**：演示与标准库的互操作性
-6. **性能测量**：SpinLock 与 std::mutex 的单线程无竞争开销对比
-
-## 6. 退避策略详解
-
-SpinLock 的 `lock()` 方法采用三级退避机制：
-
-### 6.1 第一级：快速尝试
-
-```
-尝试 exchange(true, acquire)
-  -> 成功：获取锁，返回
-  -> 失败：进入自旋
+```cpp
+if (lock.try_lock()) {
+  // 拿到锁
+  lock.unlock();
+} else {
+  // 别人持有
+}
 ```
 
-### 6.2 第二级：自旋 + yield
+### 4. 高并发计数器
 
-```
-while (flag.load(relaxed)):
-    ++total_spin
-    if ++spin_count >= backoff:
-        yield_cpu()        // CPU PAUSE 指令
-        backoff *= 2       // 指数增长，上限 1024
-        spin_count = 0
-```
+```cpp
+SpinLock lock;
+int64_t counter = 0;
 
-`yield_cpu()` 在不同架构上发出不同的 CPU 暂停指令：
-- x86/x86-64：`PAUSE`
-- ARMv7/AArch64：`YIELD`
-- RISC-V：`fence` hint
-- 回退：`std::this_thread::yield()`
-
-### 6.3 第三级：安全阀
-
-```
-if total_spin > 50000:
-    VLOG_E("exceeded max spin count")
-    sleep_for(10us)
+std::vector<std::thread> threads;
+for (int t = 0; t < 4; ++t) {
+  threads.emplace_back([&]() {
+    for (int i = 0; i < 100000; ++i) {
+      SpinLockGuard guard(lock);
+      counter++;
+    }
+  });
+}
+for (auto& th : threads) th.join();
 ```
 
-超过最大自旋次数是病态竞争的信号，通常意味着应该改用 `std::mutex`。
+4 线程各 10 万次递增；最终 counter=400000。
 
-## 7. 适用场景与限制
+注意：这种场景 `std::atomic<int64_t>` + `fetch_add` 是更优解，根本不需要锁。SpinLock 只在"无法用 atomic 表达的复合操作"（如同时改两个字段）时才合理。
 
-### 7.1 适合使用 SpinLock 的场景
+### 5. 与 std::mutex 微基准
 
-- 临界区只有几条指令（如递增计数器、修改指针）
-- 多核系统上竞争不激烈
-- 对延迟极度敏感的热路径
+示例代码里跑 1M 次 lock/unlock，对比 SpinLock 与 std::mutex 的无争抢 fast-path 延迟。典型差距约 2-5 倍（SpinLock 更快），但争抢下 SpinLock 急剧恶化。
 
-### 7.2 不适合使用 SpinLock 的场景
+## 运行
 
-- 临界区包含 I/O 操作
-- 临界区包含内存分配
-- 临界区执行时间不确定
-- 单核系统（自旋会阻止其他线程释放锁）
+```bash
+./build/output/bin/example_spin_lock
+```
 
-## 8. 注意事项
+预期输出（节选）：
 
-- SpinLock 不是递归锁，同一线程连续 lock 两次会死锁
-- 不要在长时间操作或 I/O 操作中使用 SpinLock
-- SpinLock 是 header-only 实现，完全内联
-- 64 字节对齐防止多个 SpinLock 对象之间的 false sharing
-- 超过最大自旋次数后会 sleep 并记录错误日志，这是病态竞争的安全阀
-- SpinLock 满足 `Lockable` 要求，可与 `std::lock_guard` 配合使用
+```
+=== Manual lock/unlock ===
+  ok
+=== RAII guard ===
+  guarded section done
+=== try_lock ===
+  free=1 held=0 after_release=1
+=== Counter (4 threads x 100000) ===
+  counter=400000
+=== std::lock_guard CTAD ===
+  ok
+=== Microbenchmark (1M cycles) ===
+  spinlock: ... ns
+  mutex:    ... ns
+```
+
+## 常见陷阱
+
+1. **忘记 unlock**：死锁；用 SpinLockGuard / std::lock_guard 防御。
+2. **临界区里阻塞**：极短临界区前提被破坏；所有其它线程都卡在自旋。
+3. **多 SpinLock 嵌套**：死锁概率剧增；避免嵌套或固定 lock order。
+4. **uncontended 微基准误导**：SpinLock 在无争抢下飞快，争抢下灾难；按真实负载测。
+5. **跨进程同步**：SpinLock 是进程内的；进程间用 `vlink::SysSemaphore` 或 shm。
+
+## 设计要点
+
+- vlink SpinLock 基于 `std::atomic_flag` + `pause` 指令。
+- 没有公平性保证（饥饿可能）。
+- 满足 C++ Lockable 概念，可与 `std::lock_guard` / `std::unique_lock` 联动。
+
+## 配图
+
+无专属配图。
+
+## 参考
+
+- `../message_loop_basic/` — 单线程串行天然无锁
+- `../object_pool/` / `../memory_pool/` — vlink 内部使用 SpinLock 的典型场景
+- `vlink/include/vlink/base/spin_lock.h` — SpinLock 接口

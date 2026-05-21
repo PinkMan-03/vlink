@@ -21,106 +21,101 @@
  * limitations under the License.
  */
 
-/// @file plugin_basic.cc
-/// @brief Host application that loads and exercises the greeter plugin at runtime.
-///
-/// Demonstrates:
-///   - Plugin::load<T>() with default and custom search paths
-///   - Calling virtual methods through the shared_ptr<T> handle
-///   - has_loaded<T>(), get_plugin_complex_id<T>()
-///   - Plugin::unload<T>() and reloading with a mismatched version
-///   - Error handling when the plugin is not found or version-incompatible
+// =============================================================================
+// File: plugin_basic.cc
+//
+// Host-side demo of vlink::Plugin: dlopen a user-defined interface from a
+// shared library, call methods through the abstract base, then unload.
+//
+// Walk-through:
+//   1. Print the loader's default search paths (so user knows where to drop
+//      libgreeter_plugin.so).
+//   2. Construct a vlink::Plugin (one Plugin instance owns a registry of
+//      loaded handles; destructing it unloads everything).
+//   3. load<GreeterInterface>("greeter_plugin", 1, 0) -> resolves to
+//      lib<name>.so, dlsym's the version info, validates major/minor, calls
+//      vlink_plugin_create, and wraps the raw pointer in a shared_ptr<T>
+//      whose custom deleter invokes vlink_plugin_destroy then dlclose().
+//      Order matters: destroy first (still inside the .so) then dlclose
+//      (unmaps the code that destroy lives in).
+//   4. Demonstrate introspection (has_loaded, complex_id, plugin_id).
+//   5. Demonstrate version-mismatch handling and reload.
+// =============================================================================
 
 #include <vlink/base/logger.h>
 #include <vlink/base/plugin.h>
 
-#include <iostream>
 #include <string>
 
 #include "greeter_interface.h"
 
 int main() {
-  // ======== Section 1: Default search paths ========
-  VLOG_I("=== [1] Default search paths ===");
-  {
-    auto paths = vlink::Plugin::default_search_path();
-    for (const auto& p : paths) {
-      VLOG_I("  search path: ", p);
-    }
+  // Section: print loader search paths so the user can verify lib placement.
+  // default_search_path() pulls from compiled-in defaults, LD_LIBRARY_PATH
+  // and VLINK_PLUGIN_PATH env vars, in priority order.
+  for (const auto& p : vlink::Plugin::default_search_path()) {
+    VLOG_I("search path: ", p);
   }
 
-  // ======== Section 2: Load the greeter plugin ========
-  VLOG_I("=== [2] Loading greeter_plugin (version 1.0) ===");
-
+  // Section: construct the loader and lower its log level so we can see
+  // dlopen / dlsym diagnostics during this demo.
   vlink::Plugin plugin;
   plugin.set_log_level(vlink::Logger::kInfo);
 
+  // Section: load the plugin. (1, 0) must match VLINK_PLUGIN_DECLARE in
+  // greeter_plugin.cc. The returned shared_ptr owns the dlopen handle via
+  // its deleter, so simply letting it go out of scope unloads cleanly.
   auto greeter = plugin.load<GreeterInterface>("greeter_plugin", 1, 0);
 
   if (!greeter) {
     VLOG_E("Failed to load greeter_plugin. Make sure libgreeter_plugin.so is in a search path.");
-    VLOG_I("Tip: run from the build/output/bin directory or set LD_LIBRARY_PATH.");
     return 1;
   }
 
-  VLOG_I("Plugin loaded successfully.");
+  // Section: call virtual methods through the abstract base. Behind the
+  // scenes these are normal C++ vtable calls; the vtable lives inside the
+  // .so so we must not call them after dlclose.
+  VLOG_I("plugin_name(): ", greeter->plugin_name());
+  VLOG_I("greet(\"VLink\"): ", greeter->greet("VLink"));
+  VLOG_I("greet(\"World\"): ", greeter->greet("World"));
 
-  // ======== Section 3: Call plugin methods ========
-  VLOG_I("=== [3] Calling plugin methods ===");
-  VLOG_I("  plugin_name(): ", greeter->plugin_name());
-  VLOG_I("  greet(\"VLink\"): ", greeter->greet("VLink"));
-  VLOG_I("  greet(\"World\"): ", greeter->greet("World"));
-  VLOG_I("  greet(\"Alice\"): ", greeter->greet("Alice"));
+  // Section: introspection helpers. complex_id encodes name+version+stable_id
+  // so two .so files with the same logical name but different builds can be
+  // distinguished. plugin_id is the cross-compiler stable identifier produced
+  // by VLINK_PLUGIN_REGISTER for the interface type.
+  VLOG_I("has_loaded: ", plugin.has_loaded<GreeterInterface>("greeter_plugin"));
+  VLOG_I("complex_id: ", plugin.get_plugin_complex_id<GreeterInterface>("greeter_plugin"));
+  VLOG_I("plugin_id:  ", std::string(GreeterInterface::get_plugin_id()));
 
-  // ======== Section 4: Introspection ========
-  VLOG_I("=== [4] Plugin introspection ===");
-
-  bool loaded = plugin.has_loaded<GreeterInterface>("greeter_plugin");
-  VLOG_I("  has_loaded: ", loaded ? "true" : "false");
-
-  std::string complex_id = plugin.get_plugin_complex_id<GreeterInterface>("greeter_plugin");
-  VLOG_I("  complex_id: ", complex_id);
-
-  VLOG_I("  plugin_id:  ", std::string(GreeterInterface::get_plugin_id()));
-  VLOG_I("  log_level:  ", static_cast<int>(plugin.get_log_level()));
-
-  // ======== Section 5: Unload ========
-  VLOG_I("=== [5] Unloading plugin ===");
-
-  // Release the shared_ptr first so the destroy callback can run.
+  // Section: explicit unload. Releasing the shared_ptr drops the last
+  // reference and the deleter runs; unload() then removes the bookkeeping
+  // entry from the Plugin registry. Order: shared_ptr.reset() FIRST so the
+  // destructor fires while the .so is still mapped; unload() merely tidies
+  // up the registry.
   greeter.reset();
+  VLOG_I("unload result: ", plugin.unload<GreeterInterface>("greeter_plugin"));
 
-  bool unloaded = plugin.unload<GreeterInterface>("greeter_plugin");
-  VLOG_I("  unload result: ", unloaded ? "true" : "false");
-
-  loaded = plugin.has_loaded<GreeterInterface>("greeter_plugin");
-  VLOG_I("  has_loaded after unload: ", loaded ? "true" : "false");
-
-  // ======== Section 6: Load with wrong version (should fail) ========
-  VLOG_I("=== [6] Attempting load with wrong version (2.0) ===");
-
+  // Section: version-mismatch path. The loader walks every candidate .so,
+  // reads its version info, and rejects (returns nullptr) if (major, minor)
+  // does not satisfy the request. This is the safety net that prevents the
+  // host from calling into an ABI-incompatible plugin build.
   auto bad = plugin.load<GreeterInterface>("greeter_plugin", 2, 0);
 
   if (!bad) {
-    VLOG_I("  Version mismatch -- load returned nullptr (expected).");
-  } else {
-    VLOG_W("  Unexpected success -- version check may not be working.");
-    bad.reset();
+    VLOG_I("version mismatch -> nullptr (expected)");
   }
 
-  // ======== Section 7: Reload correct version ========
-  VLOG_I("=== [7] Reloading with correct version (1.0) ===");
-
+  // Section: re-load the correct version to show the registry handles
+  // unload->load cycles.
   auto reloaded = plugin.load<GreeterInterface>("greeter_plugin", 1, 0);
 
   if (reloaded) {
-    VLOG_I("  Reload OK: ", reloaded->greet("Reload"));
+    VLOG_I("reload OK: ", reloaded->greet("Reload"));
     reloaded.reset();
-  } else {
-    VLOG_E("  Reload failed unexpectedly.");
   }
 
-  // ======== Cleanup ========
+  // Section: clear() releases every entry the Plugin still owns. The
+  // destructor would do the same, but explicit clear() is useful in tests.
   plugin.clear();
   VLOG_I("Plugin basic example complete.");
   return 0;

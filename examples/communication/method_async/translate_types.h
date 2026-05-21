@@ -23,17 +23,17 @@
 
 #pragma once
 
-/// POD translate RPC request for the method_async example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
+// Request / response types for method_async. Both PODs ("Standard" serializer).
+// The async server uses listen_for_reply, so a request can be parked by id and
+// answered later; word_id is echoed in the response so callers correlate
+// out-of-order replies. result_code: 0=ok, non-zero=error.
 struct TranslateRequest {
-  int word_id;      // Identifier of the word to translate
-  int target_lang;  // Target language: 0=English, 1=Chinese, 2=Japanese
+  int word_id;
+  int target_lang;
 };
 
-/// POD translate RPC response for the method_async example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
 struct TranslateResponse {
-  int word_id;      // Identifier of the translated word
-  int target_lang;  // Target language that was requested
-  int result_code;  // Result: 0=success, 1=not_found
+  int word_id;
+  int target_lang;
+  int result_code;
 };

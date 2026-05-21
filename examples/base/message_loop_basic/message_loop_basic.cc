@@ -21,101 +21,106 @@
  * limitations under the License.
  */
 
-// Example: MessageLoop basic - run/quit, async_run, post_task, spin_once, handlers
-
 #include <vlink/base/logger.h>
 #include <vlink/base/message_loop.h>
 
 #include <atomic>
 #include <thread>
 
+using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
+
+// -----------------------------------------------------------------------------
+// MessageLoop basic example
+//
+// Module:   vlink/base/message_loop.h
+// Scenario: Cover the four ways to drive a single-threaded MessageLoop:
+//             - async_run() spawns an owned worker thread (most common).
+//             - run()      blocks the caller's thread (use from main() or a
+//                          user-managed thread). quit() must come from elsewhere.
+//             - spin_once() lets an external event loop integrate with VLink
+//                          by manually pumping queued tasks one at a time.
+//           Also demonstrates lifecycle handlers (begin/end/idle) and the
+//           public state query surface (is_running, get_type, get_task_count).
+// Threading: every posted callback runs on the loop's owning thread.
+//            wait_for_idle() blocks until the queue drains; quit + wait_for_quit
+//            is the canonical shutdown sequence.
+// -----------------------------------------------------------------------------
 int main() {
-  // ---------------------------------------------------------------
-  // 1. Basic async_run and post_task usage.
-  // ---------------------------------------------------------------
+  // async_run: the loop owns a worker thread. post_task is non-blocking.
+  // wait_for_idle blocks the caller until the queue drains -- safe to call
+  // before quit() to ensure all submitted work has executed.
   {
-    VLOG_I("=== Section 1: async_run + post_task ===");
+    VLOG_I("=== async_run + post_task ===");
     vlink::MessageLoop loop;
     loop.set_name("basic_loop");
     loop.async_run();
 
-    // Post several tasks to be executed serially on the loop thread.
     for (int i = 0; i < 5; ++i) {
-      loop.post_task([i]() { MLOG_I("Task {} executed on loop thread", i); });
+      // The lambda is captured by value (i) and runs on the loop thread.
+      loop.post_task([i]() { MLOG_I("  task {} on loop thread", i); });
     }
 
-    // Wait until all tasks are processed.
     loop.wait_for_idle();
-    VLOG_I("All tasks completed");
+    VLOG_I("  all tasks completed");
 
     loop.quit();
     loop.wait_for_quit();
-    VLOG_I("Loop exited cleanly");
   }
 
-  // ---------------------------------------------------------------
-  // 2. Register begin/end/idle handlers.
-  // ---------------------------------------------------------------
+  // Lifecycle handlers: begin_handler fires once when the worker enters
+  // run(); end_handler fires once just before run() returns; idle_handler
+  // fires every time the queue drains. The idle hook MUST be cheap -- it
+  // runs every spin and a slow handler starves real tasks.
   {
-    VLOG_I("=== Section 2: Lifecycle handlers ===");
+    VLOG_I("=== Lifecycle handlers ===");
     vlink::MessageLoop loop;
     loop.set_name("handler_loop");
-
-    loop.register_begin_handler([]() { VLOG_I("  [begin_handler] Loop thread started"); });
-
-    loop.register_end_handler([]() { VLOG_I("  [end_handler] Loop thread exiting"); });
-
+    loop.register_begin_handler([]() { VLOG_I("  [begin] thread started"); });
+    loop.register_end_handler([]() { VLOG_I("  [end] thread exiting"); });
     loop.register_idle_handler([]() {
-      // Called each time the queue becomes empty.
-      // Avoid logging here in production as it fires frequently.
+      // fires every time the queue drains; keep it cheap
     });
 
     loop.async_run();
-    loop.post_task([]() { VLOG_I("  Task running between begin and end handlers"); });
+    loop.post_task([]() { VLOG_I("  task between begin/end handlers"); });
     loop.wait_for_idle();
 
     loop.quit();
     loop.wait_for_quit();
   }
 
-  // ---------------------------------------------------------------
-  // 3. Blocking run() on the calling thread.
-  //    Launch a helper thread to post tasks and then quit the loop.
-  // ---------------------------------------------------------------
+  // run(): blocking variant. The caller's thread becomes the loop thread.
+  // quit() must therefore come from another thread (here, the poster
+  // helper) or from a posted task.
   {
-    VLOG_I("=== Section 3: Blocking run() ===");
+    VLOG_I("=== Blocking run() ===");
     vlink::MessageLoop loop;
     loop.set_name("blocking_loop");
 
+    // The helper thread posts work and eventually requests quit. By that
+    // time, loop.run() has been blocking the main thread for 100ms.
     std::thread poster([&loop]() {
-      // Give the loop thread a moment to start.
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-      loop.post_task([]() { VLOG_I("  Task posted from helper thread"); });
-      loop.post_task([]() { VLOG_I("  Second task from helper thread"); });
-
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      std::this_thread::sleep_for(50ms);
+      loop.post_task([]() { VLOG_I("  posted from helper #1"); });
+      loop.post_task([]() { VLOG_I("  posted from helper #2"); });
+      std::this_thread::sleep_for(50ms);
       loop.quit();
     });
 
-    // run() blocks until quit() is called.
     loop.run();
     poster.join();
-    VLOG_I("Blocking run() returned after quit()");
+    VLOG_I("  run() returned after quit()");
   }
 
-  // ---------------------------------------------------------------
-  // 4. spin_once() for manual event processing.
-  //    Useful when integrating with an external event loop.
-  // ---------------------------------------------------------------
+  // spin_once: caller drives one round of task processing. Used to embed
+  // VLink into a foreign main loop (e.g. GUI toolkit, game engine) that
+  // already owns the thread.
   {
-    VLOG_I("=== Section 4: spin_once ===");
+    VLOG_I("=== spin_once ===");
     vlink::MessageLoop loop;
     loop.set_name("spin_loop");
 
     std::atomic<int> processed{0};
-
-    // Post tasks before starting to spin.
     for (int i = 0; i < 3; ++i) {
       loop.post_task([&processed, i]() {
         MLOG_I("  spin_once task {}", i);
@@ -123,31 +128,29 @@ int main() {
       });
     }
 
-    // Process tasks one batch at a time using spin_once (non-blocking).
+    // false = non-blocking spin: process whatever is queued and return.
     while (processed.load() < 3) {
       loop.spin_once(false);
     }
 
-    MLOG_I("spin_once processed {} tasks", processed.load());
+    MLOG_I("  processed {} tasks via spin_once", processed.load());
   }
 
-  // ---------------------------------------------------------------
-  // 5. Query loop state.
-  // ---------------------------------------------------------------
+  // Public state surface: is_running flips true after async_run/run and
+  // false after wait_for_quit. get_task_count is a snapshot of the queue
+  // depth -- racey by design (only meaningful as a coarse load indicator).
   {
-    VLOG_I("=== Section 5: State queries ===");
+    VLOG_I("=== State queries ===");
     vlink::MessageLoop loop;
 
-    MLOG_I("Before run - is_running: {}", loop.is_running());
-
+    MLOG_I("  before run: is_running={}", loop.is_running());
     loop.async_run();
-    MLOG_I("After async_run - is_running: {}", loop.is_running());
-    MLOG_I("Task count: {}", loop.get_task_count());
-    MLOG_I("Loop type: {}", static_cast<int>(loop.get_type()));
+    MLOG_I("  after async_run: is_running={} type={} tasks={}", loop.is_running(), static_cast<int>(loop.get_type()),
+           loop.get_task_count());
 
     loop.quit();
     loop.wait_for_quit();
-    MLOG_I("After quit - is_running: {}", loop.is_running());
+    MLOG_I("  after quit: is_running={}", loop.is_running());
   }
 
   VLOG_I("MessageLoop basic example finished.");

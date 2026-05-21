@@ -21,7 +21,6 @@
  * limitations under the License.
  */
 
-// VLink core communication API
 #include <vlink/base/logger.h>
 #include <vlink/extension/bag_writer.h>
 #include <vlink/vlink.h>
@@ -30,70 +29,71 @@
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// Basic recording example
-///
-/// Demonstrates two recording mechanisms:
-///   1. Per-node recording via set_record_path() -- each node writes to its own bag file
-///   2. Global recording via VLINK_BAG_PATH environment variable -- all nodes share one bag file
-///
-/// The VLINK_BAG_TAG environment variable can optionally add a tag string to recorded bag files.
-///
-/// Usage:
-///   # Per-node recording (default):
-///   ./example_record_basic
-///
-///   # Global recording via environment variable:
-///   VLINK_BAG_PATH=/tmp/global_record.vdb ./example_record_basic
-///
-///   # Global recording with a tag:
-///   VLINK_BAG_PATH=/tmp/global_record.vdb VLINK_BAG_TAG=test_session ./example_record_basic
+// ---------------------------------------------------------------------------
+// record_basic.cc
+//
+// VLink's "drop-in recording" surface: any Publisher/Subscriber/Server/
+// Client/Setter/Getter exposes set_record_path(path). Once set, every
+// message that flows through the node is appended to the named bag file,
+// completely transparently to the application logic.
+//
+// Two activation paths:
+//   * per-node    -- node.set_record_path("/tmp/foo.vdb") (this file).
+//   * global      -- export VLINK_BAG_PATH=/tmp/all.vdb at startup;
+//                    BagWriter::global_get() returns the shared instance
+//                    and every endpoint records into it automatically.
+//
+// File extension picks the format:
+//   * .vdb   -- VLink-native (SQLite-backed if VLINK_ENABLE_SQLITE, else
+//               raw fwrite) bag, optimised for VLink's serializer types.
+//   * .mcap  -- Foxglove MCAP (cross-tool, lower density, broader support).
+// Compression and other tunables go through the BagWriter::Config struct
+// (see record_compression).
+// ---------------------------------------------------------------------------
+
 int main() {
-  // ======== Per-Node Recording ========
-  // Create a Publisher and enable per-node recording.
-  // All messages published by this node will be recorded to the specified bag file.
+  // ---- Section 1: per-node recording via set_record_path() ----
+  // Both pub and sub record to separate files -- useful when verifying
+  // that the data leaves the publisher intact AND arrives at the sub.
   vlink::Publisher<vlink::Bytes> pub("dds://record_basic/event");
   pub.set_record_path("/tmp/record_basic_pub.vdb");
 
-  // Create a Subscriber and enable per-node recording on the subscriber side as well.
-  // This records all received messages independently of the publisher's recording.
   vlink::Subscriber<vlink::Bytes> sub("dds://record_basic/event");
   sub.set_record_path("/tmp/record_basic_sub.vdb");
+  // Listener runs on the DDS dispatch thread. Recording happens *after*
+  // delivery, so the user callback sees data even when disk is slow.
+  sub.listen([](const vlink::Bytes& msg) { VLOG_I("Subscriber received: ", msg.size(), " bytes"); });
 
-  // Register the subscriber callback
-  sub.listen([](const vlink::Bytes& msg) { VLOG_I("Subscriber received:", msg.size(), "bytes"); });
-
-  // Wait for the subscriber to be ready
   pub.wait_for_subscribers();
 
-  // Publish several messages -- each will be recorded by both pub and sub nodes
   for (int i = 0; i < 10; ++i) {
     std::string payload = "message_" + std::to_string(i);
     pub.publish(vlink::Bytes::from_string(payload));
-    VLOG_I("Published:", payload);
+    VLOG_I("Published: ", payload);
     std::this_thread::sleep_for(100ms);
   }
 
-  // ======== Global Recording via VLINK_BAG_PATH ========
-  // If the VLINK_BAG_PATH environment variable is set, VLink automatically creates
-  // a global BagWriter. All nodes in the process will record to that single bag file,
-  // even without calling set_record_path() on each node.
-  //
-  // Check whether the global writer is active:
+  // ---- Section 2: global recording via VLINK_BAG_PATH ----
+  // global_get() returns non-null iff VLINK_BAG_PATH was set at startup.
+  // Tools/agents use this pattern to silently capture an entire process's
+  // traffic without modifying application code.
   auto* global_writer = vlink::BagWriter::global_get();
 
   if (global_writer) {
-    VLOG_I("Global BagWriter is active. All traffic will be recorded.");
+    VLOG_I("Global BagWriter active -- all traffic is being recorded.");
   } else {
-    VLOG_I("No global BagWriter. Set VLINK_BAG_PATH to enable global recording.");
+    VLOG_I("No global BagWriter. Set VLINK_BAG_PATH to enable.");
   }
 
-  // ======== Method Model with Recording ========
-  // Recording also works for Server/Client RPC communications.
+  // ---- Section 3: method model with recording ----
+  // Both request and response are persisted. Server and client share the
+  // same path so the bag contains a complete RPC trace.
   vlink::Server<vlink::Bytes, vlink::Bytes> server("dds://record_basic/method");
   server.set_record_path("/tmp/record_basic_rpc.vdb");
-
+  // Listener runs on the DDS dispatch thread; resp is sent back when the
+  // callback returns.
   server.listen([](const vlink::Bytes& req, vlink::Bytes& resp) {
-    VLOG_I("Server received request:", req.size(), "bytes");
+    VLOG_I("Server received: ", req.size(), " bytes");
     resp = vlink::Bytes::from_string("response_ok");
   });
 
@@ -103,11 +103,12 @@ int main() {
   auto resp = client.invoke(vlink::Bytes::from_string("request_data"));
 
   if (resp.has_value()) {
-    VLOG_I("Client received response:", resp.value().to_string());
+    VLOG_I("Client received response: ", resp.value().to_string());
   }
 
-  // ======== Field Model with Recording ========
-  // Recording works for Setter/Getter field communications as well.
+  // ---- Section 4: field model with recording ----
+  // Setter writes a value; Getter pulls the latest. Both record into the
+  // same bag, so replay reconstructs the field's value timeline.
   vlink::Setter<vlink::Bytes> setter("dds://record_basic/field");
   setter.set_record_path("/tmp/record_basic_field.vdb");
 
@@ -120,13 +121,10 @@ int main() {
   auto val = getter.get();
 
   if (val.has_value()) {
-    VLOG_I("Getter value:", val.value().to_string());
+    VLOG_I("Getter value: ", val.value().to_string());
   }
 
-  // Allow time for async recording to complete
   std::this_thread::sleep_for(500ms);
-
   VLOG_I("Recording complete. Check /tmp/record_basic_*.vdb files.");
-
   return 0;
 }

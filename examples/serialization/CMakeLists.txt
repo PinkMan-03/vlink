@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)
@@ -16,10 +16,7 @@ if(NOT TARGET vlink)
   endif()
 endif()
 
-add_subdirectory(bytes_type)
-add_subdirectory(pod_type)
-add_subdirectory(string_type)
+add_subdirectory(basic_types)
 add_subdirectory(custom_type)
-add_subdirectory(stream_type)
 add_subdirectory(dynamic_data)
 add_subdirectory(intra_data)

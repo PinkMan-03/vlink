@@ -21,47 +21,42 @@
  * limitations under the License.
  */
 
-/**
- * @file method_sync.cc
- * @brief Synchronous RPC: Server listen(ReqRespCallback), Client invoke sync.
- *
- * Demonstrates the VLink Method Model with synchronous invocation:
- *   - Server<Req, Resp>: listen with ReqRespCallback -- fill response in-place
- *   - Client<Req, Resp>: invoke(req, resp) -- blocking, output reference
- *   - Client<Req, Resp>: invoke(req) -> optional<Resp> -- blocking, returns optional
- *   - wait_for_connected(): block until a server is available
- *   - is_connected(): non-blocking connection check
- */
-
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
 #include <cmath>
-#include <string>
-#include <thread>
+
+#include "math_types.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-// POD types defined in math_types.h -- see that file for field descriptions
-#include "math_types.h"
-
+// method_sync: synchronous Method-model (RPC) over DDS.
+//
+// Demonstrates:
+//   - Server::listen() with (req, resp&) -- response filled in-place, sent
+//     automatically when the callback returns.
+//   - Three Client::invoke() overloads:
+//       1) invoke(req, resp&)  -- bool ok, response via out-ref.
+//       2) invoke(req)         -- std::optional<Resp> (default timeout).
+//       3) invoke(req, timeout)-- std::optional<Resp> with custom timeout.
+//   - All three forms BLOCK the caller until reply or timeout.
+//
+// Typical scenarios: command/query RPC, configuration retrieval, math/utility
+// services where the caller wants the answer inline.
 int main() {
-  VLOG_I("=== VLink Method Sync Example ===");
+  static constexpr char kUrl[] = "dds://math/calculator";
 
   vlink::MessageLoop server_loop;
   server_loop.set_name("server_loop");
   server_loop.async_run();
 
-  // ---------------------------------------------------------------
-  // Step 1: Create a Server with synchronous handler
-  //
-  // listen(ReqRespCallback) receives (const Req&, Resp&).
-  // The handler fills the response in-place before returning.
-  // The framework automatically serializes and sends the response.
-  // ---------------------------------------------------------------
-  vlink::Server<MathRequest, MathResponse> server("dds://math/calculator");
+  // listen(ReqRespCallback) -- in-place reply variant. The framework sends
+  // the populated `resp` automatically when the callback returns. This is
+  // the synchronous server style; for deferred replies use listen_for_reply
+  // (see method_async.cc).
+  vlink::Server<MathRequest, MathResponse> server(kUrl);
   server.attach(&server_loop);
-
+  // Lambda fires on server_loop thread, one invocation per request.
   server.listen([](const MathRequest& req, MathResponse& resp) {
     resp.success = true;
     switch (req.operation) {
@@ -81,7 +76,6 @@ int main() {
           resp.result = 0.0;
           resp.success = false;
         }
-
         break;
       case 4:
         resp.result = std::pow(req.x, req.y);
@@ -91,108 +85,54 @@ int main() {
         resp.success = false;
         break;
     }
-    VLOG_I("[Server] op=", req.operation, " x=", req.x, " y=", req.y, " => ", resp.result);
+    VLOG_I("[server] op=", req.operation, " x=", req.x, " y=", req.y, " => ", resp.result);
   });
 
-  VLOG_I("[Server] Listening on dds://math/calculator");
+  vlink::Client<MathRequest, MathResponse> client(kUrl);
+  // Bounded discovery handshake before the first call.
+  VLOG_I("[client] wait_for_connected: ", client.wait_for_connected(2000ms));
+  VLOG_I("[client] is_connected: ", client.is_connected());
 
-  // ---------------------------------------------------------------
-  // Step 2: Create a Client and wait for connection
-  // ---------------------------------------------------------------
-  vlink::Client<MathRequest, MathResponse> client("dds://math/calculator");
-  VLOG_I("[Client] Created on dds://math/calculator");
-
-  // wait_for_connected() blocks until the server is available.
-  // Default timeout: Timeout::kDefaultInterval (5000ms)
-  bool connected = client.wait_for_connected(2000ms);
-  VLOG_I("[Client] wait_for_connected: ", connected);
-  VLOG_I("[Client] is_connected: ", client.is_connected());
-
-  // ---------------------------------------------------------------
-  // Step 3: invoke(req, resp) -- output reference variant
-  //
-  // Blocks until the server responds.  Returns true on success.
-  // The response is written into the resp output parameter.
-  // ---------------------------------------------------------------
-  VLOG_I("--- Mode 1: invoke(req, resp) ---");
+  // Mode 1: invoke(req, resp&) -- response via output parameter, bool ok.
   {
-    MathRequest req{10.0, 3.0, 0};  // 10 + 3
+    MathRequest req{10.0, 3.0, 0};
     MathResponse resp{};
     bool ok = client.invoke(req, resp);
-    VLOG_I("[Client] 10 + 3 = ", resp.result, " success=", resp.success, " ok=", ok);
-  }
-  {
-    MathRequest req{100.0, 7.0, 1};  // 100 - 7
-    MathResponse resp{};
-    bool ok = client.invoke(req, resp);
-    VLOG_I("[Client] 100 - 7 = ", resp.result, " success=", resp.success, " ok=", ok);
+    VLOG_I("[client] 10 + 3 = ", resp.result, " ok=", ok);
   }
 
-  // ---------------------------------------------------------------
-  // Step 4: invoke(req) -> optional<Resp>
-  //
-  // Returns std::optional<MathResponse>.
-  // Returns std::nullopt on timeout or error.
-  // ---------------------------------------------------------------
-  VLOG_I("--- Mode 2: invoke(req) -> optional ---");
+  // Mode 2: invoke(req) -> std::optional<Resp> using the framework default
+  // timeout. Cleanest for "I want the result or nothing" call sites.
   {
-    MathRequest req{6.0, 7.0, 2};  // 6 * 7
+    MathRequest req{6.0, 7.0, 2};
     auto result = client.invoke(req);
 
     if (result.has_value()) {
-      VLOG_I("[Client] 6 * 7 = ", result->result, " success=", result->success);
-    } else {
-      VLOG_E("[Client] invoke returned nullopt");
-    }
-  }
-  {
-    MathRequest req{2.0, 10.0, 4};  // 2^10
-    auto result = client.invoke(req);
-
-    if (result.has_value()) {
-      VLOG_I("[Client] 2^10 = ", result->result, " success=", result->success);
+      VLOG_I("[client] 6 * 7 = ", result->result);
     }
   }
 
-  // ---------------------------------------------------------------
-  // Step 5: invoke with custom timeout
-  //
-  // The timeout parameter controls how long invoke() waits for the
-  // server response. Default is Timeout::kDefaultInterval (5000ms).
-  // ---------------------------------------------------------------
-  VLOG_I("--- Mode 3: invoke with custom timeout ---");
+  // Mode 3: invoke with explicit per-call timeout. Use when the default is
+  // too strict/loose for this particular operation.
   {
-    MathRequest req{100.0, 0.0, 3};  // 100 / 0 (will fail gracefully)
-    MathResponse resp{};
-    bool ok = client.invoke(req, resp, 1000ms);
-    VLOG_I("[Client] 100 / 0 = ", resp.result, " success=", resp.success, " ok=", ok);
-  }
-  {
-    MathRequest req{15.0, 4.0, 3};  // 15 / 4
+    MathRequest req{100.0, 0.0, 3};
     auto result = client.invoke(req, 1000ms);
 
     if (result.has_value()) {
-      VLOG_I("[Client] 15 / 4 = ", result->result, " success=", result->success);
+      VLOG_I("[client] 100 / 0 success=", result->success);
     }
   }
 
-  // ---------------------------------------------------------------
-  // Step 6: Multiple sequential invocations
-  // ---------------------------------------------------------------
-  VLOG_I("--- Sequential invocations ---");
+  // Sequential invocations on the same client -- each blocks until reply.
   for (int i = 1; i <= 5; ++i) {
     MathRequest req{static_cast<double>(i), static_cast<double>(i), 2};
     auto result = client.invoke(req);
 
     if (result.has_value()) {
-      VLOG_I("[Client] ", i, " * ", i, " = ", result->result);
+      VLOG_I("[client] ", i, " * ", i, " = ", result->result);
     }
   }
 
-  // ---------------------------------------------------------------
-  // Cleanup
-  // ---------------------------------------------------------------
-  VLOG_I("=== Example complete ===");
   server_loop.quit();
   server_loop.wait_for_quit();
 

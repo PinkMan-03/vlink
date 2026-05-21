@@ -59,15 +59,13 @@
  * vlink::Security sec(cfg);
  * @endcode
  *
- * @par Example (asymmetric with sender authentication)
+ * @par Example (asymmetric from PEM files with sender authentication)
  * @code
- * vlink::Security::Config sender;
- * sender.public_key_pem = peer_pub_pem;
+ * auto sender = vlink::Security::from_public_key_path("peer_pub.pem");
  * sender.advanced.signing_key_pem = own_priv_pem;
  * vlink::Security sender_sec(sender);
  *
- * vlink::Security::Config receiver;
- * receiver.private_key_pem = own_priv_pem;
+ * auto receiver = vlink::Security::from_private_key_path("own_priv.pem");
  * receiver.advanced.verify_key_pem = peer_pub_pem;
  * vlink::Security receiver_sec(receiver);
  * @endcode
@@ -124,7 +122,9 @@ class VLINK_EXPORT Security final {
    * the corresponding slot is left empty.  If no explicit cryptographic field is supplied at all,
    * the constructor installs the built-in default symmetric slot when built-in algorithms are
    * enabled.  Invalid explicit fields do not fall back to the default; signing / verification PEM
-   * fields alone are not encrypt- or decrypt-capable.
+   * fields alone are not encrypt- or decrypt-capable.  PEM content may be assigned directly to the
+   * PEM fields or loaded from files via @c Security::from_private_key_path(),
+   * @c Security::from_public_key_path(), and @c Security::from_key_paths().
    *
    * @par Mode selection
    * - @c encrypt_callback and @c decrypt_callback override everything else when present.
@@ -161,6 +161,50 @@ class VLINK_EXPORT Security final {
 
     Config() = default;
   };
+
+  /**
+   * @brief Creates a @c Config by reading a private-key PEM file.
+   *
+   * @details
+   * The file content is loaded into @c Config::private_key_pem.  PEM parsing and RSA
+   * validation still happen later when constructing @c Security from the returned config.
+   * If the file cannot be read, the returned config leaves @c private_key_pem empty.
+   * The returned @c Config contains private key material; prefer moving it directly into
+   * @c Security to avoid caller-owned copies living longer than necessary.
+   *
+   * @param private_key_path Filesystem path to the private-key PEM file.
+   * @return A @c Config with @c private_key_pem populated when the file is readable.
+   */
+  [[nodiscard]] static Config from_private_key_path(const std::string& private_key_path);
+
+  /**
+   * @brief Creates a @c Config by reading a public-key PEM file.
+   *
+   * @details
+   * The file content is loaded into @c Config::public_key_pem.  PEM parsing and RSA
+   * validation still happen later when constructing @c Security from the returned config.
+   * If the file cannot be read, the returned config leaves @c public_key_pem empty.
+   *
+   * @param public_key_path Filesystem path to the public-key PEM file.
+   * @return A @c Config with @c public_key_pem populated when the file is readable.
+   */
+  [[nodiscard]] static Config from_public_key_path(const std::string& public_key_path);
+
+  /**
+   * @brief Creates a @c Config by reading public- and private-key PEM files.
+   *
+   * @details
+   * The public-key file is loaded into @c Config::public_key_pem and the private-key
+   * file is loaded into @c Config::private_key_pem.  Unreadable files leave only their
+   * corresponding config field empty; normal PEM validation remains in @c Security.
+   * The returned @c Config contains private key material; prefer moving it directly into
+   * @c Security to avoid caller-owned copies living longer than necessary.
+   *
+   * @param public_key_path Filesystem path to the public-key PEM file.
+   * @param private_key_path Filesystem path to the private-key PEM file.
+   * @return A @c Config populated from the readable key files.
+   */
+  [[nodiscard]] static Config from_key_paths(const std::string& public_key_path, const std::string& private_key_path);
 
   /**
    * @brief Constructs an empty @c Security instance.

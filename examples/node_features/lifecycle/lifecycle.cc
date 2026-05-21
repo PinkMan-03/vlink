@@ -21,122 +21,109 @@
  * limitations under the License.
  */
 
-// Node Lifecycle Example
-// Demonstrates kWithoutInit, manual init/deinit, interrupt, has_inited.
+// =============================================================================
+// File: lifecycle.cc
+//
+// Walk through every lifecycle knob shared by all six node primitives
+// (Publisher / Subscriber / Server / Client / Setter / Getter).
+//
+// Two construction-time modes control when transport resources are created:
+//   kWithInit (default) -- the constructor immediately calls init(). Suitable
+//                          when you do not need to tweak QoS / ser_type /
+//                          properties before the transport exists.
+//   kWithoutInit        -- the constructor only stores the URL + type info.
+//                          The user then calls set_property / set_ser_type /
+//                          set_discovery_enabled etc., and only then init().
+//
+// Recommended pattern (used in section "Recommended lifecycle pattern" below):
+//   construct(kWithoutInit) -> set_property() ... -> init() -> listen() ... -> deinit()
+//
+// Difference between deinit() and interrupt():
+//   deinit()    -- tears down the transport; has_inited() becomes false;
+//                  publish/listen become no-ops; re-callable.
+//   interrupt() -- wakes up any blocked wait_for_*() calls (returns false)
+//                  but leaves the transport up and callbacks active.
+// =============================================================================
 
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
-#include <iostream>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
 int main() {
-  // ======== Section 1: Default Construction (auto init) ========
+  // Section: default construction. Equivalent to passing kWithInit; init()
+  // runs inside the constructor so has_inited() is already true.
   {
-    std::cout << "\n[1] Default Construction (auto init)" << std::endl;
-
     vlink::Publisher<std::string> pub("dds://lifecycle/auto");
-    std::cout << "  has_inited: " << std::boolalpha << pub.has_inited() << std::endl;
-    std::cout << "  (Default constructor initialises the node automatically)" << std::endl;
+    VLOG_I("auto: has_inited=", pub.has_inited());
   }
 
-  // ======== Section 2: Deferred Initialisation with kWithoutInit ========
+  // Section: deferred init. kWithoutInit defers transport creation until
+  // init(), giving us a window to apply property-based QoS overrides that
+  // MUST be set before the transport is created (after init they are
+  // ignored for fields that are immutable at runtime).
   {
-    std::cout << "\n[2] Deferred Initialisation (kWithoutInit)" << std::endl;
-
-    // Create the node but do NOT initialise the transport yet
     vlink::Publisher<std::string> pub("dds://lifecycle/deferred", vlink::InitType::kWithoutInit);
-    std::cout << "  After construction: has_inited = " << std::boolalpha << pub.has_inited() << std::endl;
+    VLOG_I("deferred before init: has_inited=", pub.has_inited());
 
-    // Set properties before initialisation
     pub.set_property("qos.reliability.kind", "1");
     pub.set_property("qos.history.depth", "10");
-    std::cout << "  Properties set before init()" << std::endl;
 
-    // Now manually initialise the node
     pub.init();
-    std::cout << "  After init():      has_inited = " << std::boolalpha << pub.has_inited() << std::endl;
-
-    // Publish a message to verify the node is active
-    bool ok = pub.publish("Hello from deferred node");
-    std::cout << "  publish() returned: " << std::boolalpha << ok << std::endl;
+    VLOG_I("deferred after init: has_inited=", pub.has_inited());
+    VLOG_I("publish returned: ", pub.publish("Hello from deferred node"));
   }
 
-  // ======== Section 3: Manual deinit ========
+  // Section: explicit deinit / re-init. After deinit(), publish() should
+  // fail (false) because there is no transport behind the scenes. init()
+  // brings it back, with whatever properties were last configured.
   {
-    std::cout << "\n[3] Manual deinit()" << std::endl;
-
     vlink::Publisher<std::string> pub("dds://lifecycle/deinit_demo");
-    std::cout << "  Before deinit: has_inited = " << std::boolalpha << pub.has_inited() << std::endl;
-
-    // Deinitialise the node -- releases transport resources
     pub.deinit();
-    std::cout << "  After deinit:  has_inited = " << std::boolalpha << pub.has_inited() << std::endl;
-
-    // publish() on a deinited node returns false
-    bool ok = pub.publish("This should fail");
-    std::cout << "  publish() after deinit: " << std::boolalpha << ok << std::endl;
-
-    // Re-initialise the node
+    VLOG_I("after deinit: has_inited=", pub.has_inited(), " publish=", pub.publish("should fail"));
     pub.init();
-    std::cout << "  After re-init: has_inited = " << std::boolalpha << pub.has_inited() << std::endl;
+    VLOG_I("after re-init: has_inited=", pub.has_inited());
   }
 
-  // ======== Section 4: Interrupt ========
-  // interrupt() unblocks any active blocking wait on the node (e.g.
-  // wait_for_subscribers / wait_for_connected / wait_for_value), causing
-  // them to return false immediately. It does NOT pause callback delivery.
+  // Section: interrupt(). Demonstrates the non-destructive wake-up. A
+  // separate thread fires interrupt() 50ms in; the main thread is blocked
+  // in wait_for_subscribers(1000ms) and returns false immediately rather
+  // than after 1000ms. The transport is still live afterwards; only the
+  // waiter was unblocked.
   {
-    std::cout << "\n[4] Interrupt unblocks pending waits" << std::endl;
-
     vlink::Publisher<std::string> pub("dds://lifecycle/interrupt_demo");
 
-    // Schedule interrupt() from another thread to unblock wait_for_subscribers().
+    // Wake-up thread. Sleeps briefly then signals the publisher. Runs on a
+    // user-spawned std::thread, not on a vlink loop.
     std::thread waker([&pub]() {
       std::this_thread::sleep_for(50ms);
       pub.interrupt();
     });
 
     bool ok = pub.wait_for_subscribers(1000ms);
-    std::cout << "  wait_for_subscribers returned: " << std::boolalpha << ok
-              << " (false because interrupt() woke the wait)" << std::endl;
-
+    VLOG_I("wait_for_subscribers returned ", ok, " (false because interrupt() fired)");
     waker.join();
   }
 
-  // ======== Section 5: Lifecycle Pattern for Configuration ========
-  // Demonstrates the recommended lifecycle pattern using real API calls.
+  // Section: the recommended end-to-end pattern. construct(kWithoutInit) ->
+  // set_property -> init -> listen -> deinit.
   {
-    std::cout << "\n[5] Recommended Lifecycle Pattern" << std::endl;
-
-    // Step 1: Create with kWithoutInit to defer transport creation
     vlink::Subscriber<std::string> sub("dds://lifecycle/pattern", vlink::InitType::kWithoutInit);
-    VLOG_I("[Pattern] Step 1: Created subscriber with kWithoutInit, has_inited=", sub.has_inited());
-
-    // Step 2: Configure properties before transport is created
     sub.set_property("qos.reliability.kind", "1");
     sub.set_property("qos.history.depth", "50");
-    VLOG_I("[Pattern] Step 2: Properties configured before init()");
-
-    // Step 3: Initialise -- transport and discovery begin here
     sub.init();
-    VLOG_I("[Pattern] Step 3: init() called, has_inited=", sub.has_inited());
-
-    // Step 4: Register callback
-    sub.listen([](const std::string& msg) { VLOG_I("[Pattern] Received:", msg); });
-    VLOG_I("[Pattern] Step 4: listen() callback registered");
-
-    // Step 5: At shutdown, deinit releases transport resources
+    // listen() installs the data callback. It runs on the subscriber's
+    // delivery thread (or on the attached MessageLoop if one was attached).
+    sub.listen([](const std::string& msg) { VLOG_I("[Pattern] received: ", msg); });
     sub.deinit();
-    VLOG_I("[Pattern] Step 5: deinit() called, has_inited=", sub.has_inited());
   }
 
-  // ======== Section 6: All 6 Node Types ========
+  // Section: kWithoutInit applies uniformly to all six primitive types. Each
+  // can be constructed deferred and then init()-ed; has_inited() is false
+  // for every one of them prior to init.
   {
-    std::cout << "[6] kWithoutInit works on all 6 primitives" << std::endl;
-
     vlink::Publisher<std::string> pub("dds://lifecycle/all", vlink::InitType::kWithoutInit);
     vlink::Subscriber<std::string> sub("dds://lifecycle/all", vlink::InitType::kWithoutInit);
     vlink::Setter<int> setter("dds://lifecycle/all_field", vlink::InitType::kWithoutInit);
@@ -144,12 +131,9 @@ int main() {
     vlink::Server<int, int> server("dds://lifecycle/all_rpc", vlink::InitType::kWithoutInit);
     vlink::Client<int, int> client("dds://lifecycle/all_rpc", vlink::InitType::kWithoutInit);
 
-    std::cout << "  pub:    " << std::boolalpha << pub.has_inited() << std::endl;
-    std::cout << "  sub:    " << std::boolalpha << sub.has_inited() << std::endl;
-    std::cout << "  setter: " << std::boolalpha << setter.has_inited() << std::endl;
-    std::cout << "  getter: " << std::boolalpha << getter.has_inited() << std::endl;
-    std::cout << "  server: " << std::boolalpha << server.has_inited() << std::endl;
-    std::cout << "  client: " << std::boolalpha << client.has_inited() << std::endl;
+    VLOG_I("kWithoutInit on all 6 primitives: pub=", pub.has_inited(), " sub=", sub.has_inited(),
+           " setter=", setter.has_inited(), " getter=", getter.has_inited(), " server=", server.has_inited(),
+           " client=", client.has_inited());
   }
 
   VLOG_I("Lifecycle example complete.");

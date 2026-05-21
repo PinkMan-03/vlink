@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)
@@ -15,14 +15,7 @@ if(NOT TARGET vlink::vlink)
   message(FATAL_ERROR "Can not find_package for vlink.")
 endif()
 
-# Calculator server
-add_executable(example_calculator_server calculator_server.cc)
-target_include_directories(example_calculator_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(example_calculator_server PRIVATE vlink::all)
+add_executable(${PROJECT_NAME} hello_rpc.cc)
+target_link_libraries(${PROJECT_NAME} PRIVATE vlink::all)
 
-# Calculator client (demonstrates all 5 invocation modes)
-add_executable(example_calculator_client calculator_client.cc)
-target_include_directories(example_calculator_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(example_calculator_client PRIVATE vlink::all)
-
-install(TARGETS example_calculator_server example_calculator_client RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

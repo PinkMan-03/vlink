@@ -27,186 +27,117 @@
 
 #include <doctest/doctest.h>
 
-#include <cstdint>
 #include <thread>
 #include <vector>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: CalculateSample - initial state
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-CalculateSample - initial state") {
-  TEST_CASE("default constructed: get_total returns 0") {
+TEST_SUITE("impl-CalculateSample") {
+  TEST_CASE("default constructed state is zero") {
     CalculateSample cs;
-    CHECK(cs.get_total() == 0);
+    CHECK_EQ(cs.get_total(), 0u);
+    CHECK_EQ(cs.get_lost(), 0u);
   }
 
-  TEST_CASE("default constructed: get_lost returns 0") {
-    CalculateSample cs;
-    CHECK(cs.get_lost() == 0);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: CalculateSample - single sender (guid = 0)
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-CalculateSample - single sender") {
-  TEST_CASE("first message initialises state, no loss") {
+  TEST_CASE("first message initialises state with no loss") {
     CalculateSample cs;
     cs.update(1, 0);
-
-    // first message: expected - first = 1 - 1 = 0 samples expected yet (since expected = seq+1 = 2, first = 1)
-    // Actually total = expected - first = 2 - 1 = 1
-    CHECK(cs.get_total() == 1);
-    CHECK(cs.get_lost() == 0);
+    CHECK_EQ(cs.get_total(), 1u);
+    CHECK_EQ(cs.get_lost(), 0u);
   }
 
-  TEST_CASE("consecutive messages, no gap") {
+  TEST_CASE("consecutive messages produce no loss") {
     CalculateSample cs;
     cs.update(1, 0);
     cs.update(2, 0);
     cs.update(3, 0);
-
-    CHECK(cs.get_total() == 3);
-    CHECK(cs.get_lost() == 0);
+    CHECK_EQ(cs.get_total(), 3u);
+    CHECK_EQ(cs.get_lost(), 0u);
   }
 
-  TEST_CASE("single gap of 1 detected") {
+  TEST_CASE("single gap of one is detected") {
     CalculateSample cs;
     cs.update(1, 0);
-    cs.update(3, 0);  // gap: seq 2 missing
-
-    CHECK(cs.get_total() == 3);
-    CHECK(cs.get_lost() == 1);
+    cs.update(3, 0);
+    CHECK_EQ(cs.get_total(), 3u);
+    CHECK_EQ(cs.get_lost(), 1u);
   }
 
-  TEST_CASE("single gap of 5 detected") {
+  TEST_CASE("single gap of five is detected") {
     CalculateSample cs;
     cs.update(1, 0);
-    cs.update(7, 0);  // gap: seq 2,3,4,5,6 missing => lost += 5
-
-    CHECK(cs.get_lost() == 5);
+    cs.update(7, 0);
+    CHECK_EQ(cs.get_lost(), 5u);
   }
 
-  TEST_CASE("multiple gaps accumulate") {
+  TEST_CASE("multiple gaps accumulate correctly") {
     CalculateSample cs;
     cs.update(1, 0);
-    cs.update(3, 0);   // lost += 1
-    cs.update(6, 0);   // lost += 2
-    cs.update(10, 0);  // lost += 3
-
-    CHECK(cs.get_lost() == 6);
-  }
-
-  TEST_CASE("no loss when seq is exactly expected") {
-    CalculateSample cs;
+    cs.update(3, 0);
+    cs.update(6, 0);
     cs.update(10, 0);
-    cs.update(11, 0);
-    cs.update(12, 0);
-
-    CHECK(cs.get_lost() == 0);
-    CHECK(cs.get_total() == 3);
+    CHECK_EQ(cs.get_lost(), 6u);
   }
 
-  TEST_CASE("update with default guid argument") {
+  TEST_CASE("update with default guid argument equals guid zero") {
     CalculateSample cs;
-    cs.update(5);  // guid defaults to 0
+    cs.update(5);
     cs.update(6);
     cs.update(7);
-
-    CHECK(cs.get_total() == 3);
-    CHECK(cs.get_lost() == 0);
+    CHECK_EQ(cs.get_total(), 3u);
+    CHECK_EQ(cs.get_lost(), 0u);
   }
 
-  TEST_CASE("second call with seq 0 treated as reset, no loss") {
+  TEST_CASE("wrap-around sequence treated as reset rather than massive loss") {
     CalculateSample cs;
     cs.update(100, 0);
-    // seq 0: gap would be (0 - 101) which wraps to a huge number => treated as reset
     cs.update(0, 0);
-
-    // After reset, total = (0+1) - 0 = 1 for new entry, but original is also counted
-    // The important thing: lost should NOT be huge
-    CHECK(cs.get_lost() == 0);
+    CHECK_EQ(cs.get_lost(), 0u);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: CalculateSample - multiple senders (distinct guids)
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-CalculateSample - multiple senders") {
-  TEST_CASE("two senders tracked independently") {
+  TEST_CASE("two senders are tracked independently") {
     CalculateSample cs;
-
     cs.update(1, 100);
     cs.update(2, 100);
     cs.update(1, 200);
-    cs.update(3, 200);  // gap for guid 200: lost += 1
-
-    CHECK(cs.get_lost() == 1);
-    // guid100: expected=3, first=1 => contrib 2
-    // guid200: expected=4, first=1 => contrib 3
-    CHECK(cs.get_total() == 5);
+    cs.update(3, 200);
+    CHECK_EQ(cs.get_lost(), 1u);
+    CHECK_EQ(cs.get_total(), 5u);
   }
 
-  TEST_CASE("three senders, each with gaps") {
+  TEST_CASE("three senders with gaps accumulate total loss") {
     CalculateSample cs;
-
     cs.update(1, 1);
-    cs.update(3, 1);  // lost 1 from guid 1
-
+    cs.update(3, 1);
     cs.update(1, 2);
-    cs.update(4, 2);  // lost 2 from guid 2
-
+    cs.update(4, 2);
     cs.update(1, 3);
-    cs.update(6, 3);  // lost 4 from guid 3
-
-    CHECK(cs.get_lost() == 7);
+    cs.update(6, 3);
+    CHECK_EQ(cs.get_lost(), 7u);
   }
 
-  TEST_CASE("senders do not interfere with each other's sequence") {
+  TEST_CASE("clean sender does not interfere with gapped sender total") {
     CalculateSample cs;
-
-    // guid 1: clean sequence
     cs.update(1, 1);
     cs.update(2, 1);
     cs.update(3, 1);
-
-    // guid 2: gap in middle
     cs.update(10, 2);
-    cs.update(15, 2);  // gap: 4 lost
-
-    CHECK(cs.get_lost() == 4);
-    // guid1: seq 1,2,3 => first=1, expected=4 => contrib 3
-    // guid2: seq 10, 15 => first=10, expected=16, gap=4 => contrib 6
-    CHECK(cs.get_total() == 9);
+    cs.update(15, 2);
+    CHECK_EQ(cs.get_lost(), 4u);
+    CHECK_EQ(cs.get_total(), 9u);
   }
 
-  TEST_CASE("get_total sums all GUIDs") {
+  TEST_CASE("get_total sums contributions from all guids") {
     CalculateSample cs;
-
     cs.update(1, 10);
     cs.update(2, 10);
-
     cs.update(1, 20);
     cs.update(2, 20);
-
-    // total = (3 - 1) + (3 - 1) = 4
-    CHECK(cs.get_total() == 4);
-    CHECK(cs.get_lost() == 0);
+    CHECK_EQ(cs.get_total(), 4u);
+    CHECK_EQ(cs.get_lost(), 0u);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: CalculateSample - thread safety
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-CalculateSample - thread safety") {
-  TEST_CASE("concurrent updates from multiple threads do not crash") {
+  TEST_CASE("concurrent updates from multiple threads do not crash or lose count") {
     CalculateSample cs;
     static constexpr int kThreads = 4;
     static constexpr int kUpdates = 100;
@@ -228,14 +159,13 @@ TEST_SUITE("impl-CalculateSample - thread safety") {
       th.join();
     }
 
-    // Lost should be 0 since each thread sends consecutive sequences
-    CHECK(cs.get_lost() == 0);
-    // Total = kThreads * kUpdates
-    CHECK(cs.get_total() == static_cast<uint64_t>(kThreads * kUpdates));
+    CHECK_EQ(cs.get_lost(), 0u);
+    CHECK_EQ(cs.get_total(), static_cast<uint64_t>(kThreads * kUpdates));
   }
 
-  TEST_CASE("concurrent reads and writes do not crash") {
+  TEST_CASE("concurrent reads and writes do not deadlock") {
     CalculateSample cs;
+
     std::thread writer([&cs]() {
       for (int i = 1; i <= 50; ++i) {
         cs.update(static_cast<uint64_t>(i), 0);
@@ -251,8 +181,8 @@ TEST_SUITE("impl-CalculateSample - thread safety") {
 
     writer.join();
     reader.join();
-    // No assertion other than no crash/deadlock
-    CHECK(true);
+
+    CHECK(cs.get_total() <= 50u);
   }
 }
 

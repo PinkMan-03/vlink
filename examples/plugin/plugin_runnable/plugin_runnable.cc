@@ -21,17 +21,26 @@
  * limitations under the License.
  */
 
-/// @file plugin_runnable.cc
-/// @brief Host application that loads, runs, and shuts down a RunablePluginInterface plugin.
-///
-/// Lifecycle:
-///   1. Plugin::load<RunablePluginInterface>("monitor_plugin", 1, 0)
-///   2. async_run()      -- start the plugin's MessageLoop on a background thread
-///   3. on_init()        -- plugin creates timers, subscribers, etc.
-///   4. (application runs for ~3 seconds while the plugin processes events)
-///   5. on_deinit()      -- plugin stops timers and releases resources
-///   6. quit()           -- request the event loop to stop
-///   7. wait_for_quit()  -- block until the loop thread has exited
+// =============================================================================
+// File: plugin_runnable.cc
+//
+// Standalone host that exercises a RunablePluginInterface plugin manually
+// (without involving ProxyServer). This is useful for unit-testing a plugin
+// in isolation: you can construct it, drive its lifecycle, and tear it down
+// the same way ProxyServer would, but with full control over timing.
+//
+// Sequence:
+//   load()         -- dlopen and instantiate
+//   async_run()    -- spawn the plugin's internal MessageLoop thread
+//   on_init()      -- run plugin setup (registers timer in this example)
+//   sleep(3s)      -- let the timer fire a few times
+//   on_deinit()    -- run plugin teardown
+//   quit()         -- ask the loop to stop
+//   wait_for_quit()-- join the worker thread
+//   reset()        -- destroy the plugin instance (deleter runs in .so,
+//                      then dlclose() unmaps the .so)
+//   clear()        -- drop bookkeeping in the Plugin registry
+// =============================================================================
 
 #include <vlink/base/logger.h>
 #include <vlink/base/plugin.h>
@@ -42,13 +51,15 @@
 #include <thread>
 
 int main() {
-  VLOG_I("=== RunablePluginInterface example ===");
+  // Print the interface's stable plugin_id so the user can correlate it with
+  // VLINK_PLUGIN_REGISTER in monitor_plugin.cc.
   VLOG_I("RunablePluginInterface plugin_id: ", std::string(vlink::RunablePluginInterface::get_plugin_id()));
 
-  // ======== Load the plugin ========
+  // Section: open the loader and reduce verbosity so the demo output is clean.
   vlink::Plugin plugin;
   plugin.set_log_level(vlink::Logger::kInfo);
 
+  // Section: load monitor_plugin v1.0 -- must match VLINK_PLUGIN_DECLARE.
   auto monitor = plugin.load<vlink::RunablePluginInterface>("monitor_plugin", 1, 0);
 
   if (!monitor) {
@@ -56,32 +67,24 @@ int main() {
     return 1;
   }
 
-  VLOG_I("Plugin loaded.");
-
-  // ======== Start the plugin's event loop ========
-  VLOG_I("Calling async_run() -- starting plugin event loop thread.");
+  // Section: drive the runnable lifecycle by hand.
+  // async_run starts the loop thread inside the .so; subsequent on_init/
+  // on_deinit calls can install timers / subscribers that use that thread.
   monitor->async_run();
-
-  // ======== Initialise the plugin (creates timers, etc.) ========
-  VLOG_I("Calling on_init().");
   monitor->on_init();
 
-  // ======== Let the plugin run for 3 seconds ========
-  VLOG_I("Sleeping 3 seconds while plugin runs...");
+  // Let the plugin's timer tick about 6 times (500ms interval).
   std::this_thread::sleep_for(std::chrono::seconds(3));
 
-  // ======== Shutdown sequence ========
-  VLOG_I("Calling on_deinit() -- plugin releases resources.");
+  // Tear down in the reverse order. on_deinit releases plugin-owned state
+  // first, then quit() flags the loop to stop, then wait_for_quit() joins.
   monitor->on_deinit();
-
-  VLOG_I("Calling quit() -- requesting event loop stop.");
   monitor->quit();
-
-  VLOG_I("Calling wait_for_quit() -- waiting for loop thread exit.");
   monitor->wait_for_quit();
 
-  // ======== Cleanup ========
-  VLOG_I("Releasing shared_ptr and clearing plugin loader.");
+  // Section: release. monitor.reset() invokes the shared_ptr deleter which
+  // calls vlink_plugin_destroy inside the .so then dlclose's it. clear()
+  // removes the now-empty entry from the registry.
   monitor.reset();
   plugin.clear();
 

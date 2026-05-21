@@ -23,81 +23,121 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_SHM2
+
+#include "./modules/shm2_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_SHM2
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-Shm2Conf - constants") {
-  TEST_CASE("kDefaultMemSize is 128") { CHECK(Shm2Conf::kDefaultMemSize == 128u); }
+TEST_SUITE("modules-Shm2Conf") {
+  TEST_CASE("kDefaultMemSize is 128 bytes") { CHECK_EQ(Shm2Conf::kDefaultMemSize, 128u); }
 
-  TEST_CASE("kMaxMemSize is 32 MiB") { CHECK(Shm2Conf::kMaxMemSize == 1024UL * 1024UL * 32UL); }
-}
+  TEST_CASE("kMaxMemSize is 32 mib") { CHECK_EQ(Shm2Conf::kMaxMemSize, 1024UL * 1024UL * 32UL); }
 
-TEST_SUITE("modules-Shm2Conf - construction") {
-  TEST_CASE("construct with address only uses defaults") {
+  TEST_CASE("all integer fields default correctly when only address supplied") {
     Shm2Conf conf("my_topic");
-    CHECK(conf.address == "my_topic");
+
+    CHECK_EQ(conf.address, "my_topic");
     CHECK(conf.event.empty());
-    CHECK(conf.domain == 0);
-    CHECK(conf.depth == 0);
-    CHECK(conf.history == 0);
-    CHECK(conf.wait == 0);
-    CHECK(conf.size == Shm2Conf::kDefaultMemSize);
+    CHECK_EQ(conf.domain, 0);
+    CHECK_EQ(conf.depth, 0);
+    CHECK_EQ(conf.history, 0);
+    CHECK_EQ(conf.wait, 0);
+    CHECK_EQ(conf.size, Shm2Conf::kDefaultMemSize);
   }
 
-  TEST_CASE("construct with custom size") {
-    Shm2Conf conf("topic", "", 0, 0, 0, 0, 1024 * 1024);
-    CHECK(conf.size == 1024 * 1024u);
+  TEST_CASE("custom size is stored") {
+    Shm2Conf conf("topic", "", 0, 0, 0, 0, 1024u * 1024u);
+
+    CHECK_EQ(conf.size, 1024u * 1024u);
   }
 
-  TEST_CASE("construct with all params") {
-    Shm2Conf conf("addr", "evt", 2, 8, 3, 1, 512);
-    CHECK(conf.address == "addr");
-    CHECK(conf.event == "evt");
-    CHECK(conf.domain == 2);
-    CHECK(conf.depth == 8);
-    CHECK(conf.history == 3);
-    CHECK(conf.wait == 1);
-    CHECK(conf.size == 512u);
-  }
-}
+  TEST_CASE("all parameters are stored") {
+    Shm2Conf conf("addr", "evt", 2, 8, 3, 100, 512u);
 
-TEST_SUITE("modules-Shm2Conf - equality operators") {
-  TEST_CASE("equal configs compare equal") {
-    Shm2Conf a("addr", "evt", 0, 0, 0, 0, 256);
-    Shm2Conf b("addr", "evt", 0, 0, 0, 0, 256);
+    CHECK_EQ(conf.address, "addr");
+    CHECK_EQ(conf.event, "evt");
+    CHECK_EQ(conf.domain, 2);
+    CHECK_EQ(conf.depth, 8);
+    CHECK_EQ(conf.history, 3);
+    CHECK_EQ(conf.wait, 100);
+    CHECK_EQ(conf.size, 512u);
+  }
+
+  TEST_CASE("operator== holds when all seven fields match") {
+    Shm2Conf a("addr", "evt", 0, 0, 0, 0, 256u);
+    Shm2Conf b("addr", "evt", 0, 0, 0, 0, 256u);
+
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
   }
 
-  TEST_CASE("different size compares not equal") {
-    Shm2Conf a("addr", "", 0, 0, 0, 0, 128);
-    Shm2Conf b("addr", "", 0, 0, 0, 0, 256);
-    CHECK(a != b);
-  }
-
-  TEST_CASE("different address compares not equal") {
+  TEST_CASE("operator!= detects differing address") {
     Shm2Conf a("addr_a");
     Shm2Conf b("addr_b");
+
+    CHECK(a != b);
+    CHECK_FALSE(a == b);
+  }
+
+  TEST_CASE("operator!= detects differing event") {
+    Shm2Conf a("addr", "evt_a");
+    Shm2Conf b("addr", "evt_b");
+
     CHECK(a != b);
   }
-}
 
-TEST_SUITE("modules-Shm2Conf - transport type") {
+  TEST_CASE("operator!= detects differing domain") {
+    Shm2Conf a("addr", "", 0);
+    Shm2Conf b("addr", "", 1);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing depth") {
+    Shm2Conf a("addr", "", 0, 1);
+    Shm2Conf b("addr", "", 0, 2);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing history") {
+    Shm2Conf a("addr", "", 0, 0, 0);
+    Shm2Conf b("addr", "", 0, 0, 1);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing wait") {
+    Shm2Conf a("addr", "", 0, 0, 0, 0);
+    Shm2Conf b("addr", "", 0, 0, 0, 1);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing size") {
+    Shm2Conf a("addr", "", 0, 0, 0, 0, 128u);
+    Shm2Conf b("addr", "", 0, 0, 0, 0, 256u);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("self equality") {
+    Shm2Conf a("addr", "evt", 1, 4, 2, 50, 512u);
+
+    CHECK(a == a);
+    CHECK_FALSE(a != a);
+  }
+
   TEST_CASE("get_transport_type returns kShm2") {
     Shm2Conf conf("topic");
+
     CHECK(conf.get_transport_type() == TransportType::kShm2);
   }
-}
-
-#else
-
-TEST_SUITE("modules-Shm2Conf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_SHM2 not defined - skip") { CHECK(true); }
 }
 
 #endif  // VLINK_SUPPORT_SHM2

@@ -23,9 +23,10 @@
 
 #pragma once
 
-/// POD gear state for the field_basic example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
+// Cached "field" value for field_basic. POD, "Standard" serializer.
+// Represents vehicle gear state; the field model retains the latest value so
+// any late-joining Getter still observes it via wait_for_value().
 struct GearState {
-  int gear;      // Gear position: 0=Park, 1=Reverse, 2=Neutral, 3-8=Drive gears
-  bool engaged;  // Whether the gear is currently engaged
+  int gear;
+  bool engaged;
 };

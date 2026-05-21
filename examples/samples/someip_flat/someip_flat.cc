@@ -21,6 +21,25 @@
  * limitations under the License.
  */
 
+// SOME/IP + FlatBuffers sample.
+//
+// Exercises all three VLink models (Method / Event / Field) over the
+// someip:// transport (vsomeip backend) with FlatBuffers payloads. SOME/IP
+// URL format:
+//   someip://ServiceID/InstanceID?method=MethodID        -- method model
+//   someip://ServiceID/InstanceID?groups=GID&event=EID   -- event/field model
+//   add &field=1                                         -- field semantics
+// FlatBuffers exposes two flavours that VLink picks up automatically:
+//   - fbs::RequestT (NativeTable / Object API) maps to kFlatTableType: value
+//     semantics, data is copied during (de)serialization.
+//   - fbs::Request* (Table pointer) maps to kFlatPtrType: zero-copy read of
+//     the wire buffer; pointer is only valid for the duration of the callback.
+// Typical engineering scenario: AUTOSAR Adaptive / automotive Ethernet service
+// stack where SOME/IP is mandated and FlatBuffers' zero-copy read minimises
+// per-frame CPU cost.
+//
+// Prerequisite: the vsomeip daemon must be running.
+
 // VLink core communication API
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
@@ -35,70 +54,59 @@
 #include "./someip_flat_generated.h"
 #endif
 
-using namespace vlink;                 // NOLINT(build/namespaces, google-build-using-namespace)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// SOME/IP + FlatBuffers example
-///
-/// This example demonstrates all three VLink communication models using FlatBuffers
-/// serialization over the SOME/IP transport backend.
-///
-/// SOME/IP URL format:
-///   someip://ServiceID/InstanceID?method=MethodID        -- method model
-///   someip://ServiceID/InstanceID?groups=GID&event=EID   -- event/field model
-///   field=1 parameter indicates field mode (Getter/Setter)
-///
-/// FlatBuffers serialization types:
-///   - fbs::RequestT  (NativeTable) -> kFlatTableType  -- value type, data is copied
-///   - fbs::Request*  (Table pointer) -> kFlatPtrType  -- zero-copy read pointer
-///
-/// Prerequisite: the vsomeip daemon must be running in the background
 int main() {
-  // ======== Method Model (RPC) ========
-  // Using fire-and-forget mode (Server only receives requests, no response)
+  // ======== Method model (RPC, fire-and-forget) ========
+  // Server-only-receives mode: Server<ReqT> without a RespT template parameter.
   std::atomic_bool flag{false};
 
-  // Server receives FlatBuffers pointer type (zero-copy read, no deserialization needed)
-  // kFlatPtrType: directly obtains a read-only pointer to the FlatBuffers Table
-  Server<fbs::Request*> server("someip://0x1/0x2?method=0x3");
+  // Server receives a FlatBuffers Table pointer -- kFlatPtrType -- so the
+  // callback reads directly from the wire buffer with no copy.
+  vlink::Server<fbs::Request*> server("someip://0x1/0x2?method=0x3");
 
+  // Callback fires on a vsomeip worker thread; the req pointer is only valid
+  // inside the callback (lifetime tied to the incoming SOME/IP frame).
   server.listen([&flag](const fbs::Request* req) {
-    VLOG_I("type:", req->type());  // Read field via FlatBuffers accessor
+    VLOG_I("type:", req->type());
     flag = true;
   });
 
-  // Client uses NativeTable type (object API, automatically serialized)
-  // kFlatTableType: uses the FlatBuffers object API, operates like a regular struct
-  Client<fbs::RequestT> client("someip://0x1/0x2?method=0x3");
+  // Client uses NativeTable type (Object API) -- VLink serializes it for us.
+  vlink::Client<fbs::RequestT> client("someip://0x1/0x2?method=0x3");
 
   fbs::RequestT req;
   req.type = 100;
 
-  // Wait for the Server to come online
+  // Block until SOME/IP service discovery sees the Server.
   client.wait_for_connected();
 
-  // Fire-and-forget send (Client<ReqT> with no RespT template parameter -> send mode)
+  // Fire-and-forget send (Client<ReqT> with no RespT -> send-mode).
   client.send(req);
 
-  // Wait for the Server to finish processing
+  // Wait for the Server callback to flip the flag.
   while (!flag) {
     std::this_thread::sleep_for(1s);
   }
 
-  // ======== Event Model (Pub/Sub) ========
-  // Subscriber uses pointer type for receiving (zero-copy), Publisher uses value type for sending
-  Subscriber<fbs::Message*> sub("someip://0x1/0x3?groups=0x1,0x2&event=0x3");
+  // ======== Event model (Pub/Sub) ========
+  // Asymmetric typing is idiomatic: Subscriber takes a pointer (zero-copy
+  // read), Publisher takes the value type (Object API for easy construction).
+  vlink::Subscriber<fbs::Message*> sub("someip://0x1/0x3?groups=0x1,0x2&event=0x3");
 
-  // FlatBuffers pointer type is valid within the callback; it must not be used outside the callback
+  // Pointer lifetime: valid only inside the callback. Do not capture, cache,
+  // or hand off to other threads -- the underlying buffer is recycled on
+  // return.
   sub.listen([](const fbs::Message* msg) { VLOG_I("event:", msg->type(), ", value:", msg->value()->c_str()); });
 
-  Publisher<fbs::MessageT> pub("someip://0x1/0x3?groups=0x1,0x2&event=0x3");
+  vlink::Publisher<fbs::MessageT> pub("someip://0x1/0x3?groups=0x1,0x2&event=0x3");
 
   fbs::MessageT msg;
 
+  // Give SOME/IP service discovery time to match subscribers.
   std::this_thread::sleep_for(1s);
 
-  // Publish three FlatBuffers messages in succession
+  // Publish three FlatBuffers events back to back.
   msg.type = 1;
   msg.value = "one";
   pub.publish(msg);
@@ -114,20 +122,23 @@ int main() {
   msg.value = "three";
   pub.publish(msg);
 
-  // ======== Field Model (Getter/Setter) ========
-  // field=1 in the URL indicates field mode
-  Setter<fbs::MessageT> setter("someip://0x1/0x4?groups=0x1,0x2&event=0x4&field=1");
+  // ======== Field model (Getter/Setter) ========
+  // The &field=1 query parameter switches SOME/IP into field semantics
+  // (notifier + getter pattern): a late-joining Getter receives the latest
+  // value immediately.
+  vlink::Setter<fbs::MessageT> setter("someip://0x1/0x4?groups=0x1,0x2&event=0x4&field=1");
 
   fbs::MessageT value;
   value.type = 1000;
   value.value = "hi";
-  setter.set(value);  // Write the field value
+  setter.set(value);
 
-  Getter<fbs::MessageT> getter("someip://0x1/0x4?groups=0x1,0x2&event=0x4&field=1");
+  vlink::Getter<fbs::MessageT> getter("someip://0x1/0x4?groups=0x1,0x2&event=0x4&field=1");
 
+  // Allow the notifier to settle before reading back.
   std::this_thread::sleep_for(100ms);
 
-  // Read the latest field value
+  // Read the latest field value.
   auto ret = getter.get();
 
   if (ret.has_value()) {

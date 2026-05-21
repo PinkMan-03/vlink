@@ -23,132 +23,127 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_DDSR
+
+#include "./modules/ddsr_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_DDSR
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-DdsrConf - construction") {
-  TEST_CASE("construct with topic only uses defaults") {
+TEST_SUITE("modules-DdsrConf") {
+  TEST_CASE("default domain depth and qos when only topic supplied") {
     DdsrConf conf("vehicle/speed");
-    CHECK(conf.topic == "vehicle/speed");
-    CHECK(conf.domain == 0);
-    CHECK(conf.depth == 0);
+
+    CHECK_EQ(conf.topic, "vehicle/speed");
+    CHECK_EQ(conf.domain, 0);
+    CHECK_EQ(conf.depth, 0);
+    CHECK(conf.qos.empty());
+    CHECK(conf.qos_ext.empty());
+  }
+
+  TEST_CASE("explicit domain and depth are stored") {
+    DdsrConf conf("my_topic", 2, 15);
+
+    CHECK_EQ(conf.topic, "my_topic");
+    CHECK_EQ(conf.domain, 2);
+    CHECK_EQ(conf.depth, 15);
     CHECK(conf.qos.empty());
   }
 
-  TEST_CASE("construct with topic, domain, depth") {
-    DdsrConf conf("my_topic", 2, 15);
-    CHECK(conf.topic == "my_topic");
-    CHECK(conf.domain == 2);
-    CHECK(conf.depth == 15);
-  }
-
-  TEST_CASE("construct with named QoS") {
+  TEST_CASE("named qos profile is stored") {
     DdsrConf conf("my_topic", 0, 0, "rti_qos");
-    CHECK(conf.qos == "rti_qos");
-  }
-}
 
-TEST_SUITE("modules-DdsrConf - equality operators") {
-  TEST_CASE("equal configs compare equal") {
-    DdsrConf a("topic", 1, 5, "event");
-    DdsrConf b("topic", 1, 5, "event");
-    CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_EQ(conf.qos, "rti_qos");
+    CHECK(conf.qos_ext.empty());
   }
 
-  TEST_CASE("different topic compares not equal") {
-    DdsrConf a("topic_a");
-    DdsrConf b("topic_b");
-    CHECK(a != b);
-  }
-
-  TEST_CASE("different domain compares not equal") {
-    DdsrConf a("topic", 0);
-    DdsrConf b("topic", 3);
-    CHECK(a != b);
-  }
-}
-
-TEST_SUITE("modules-DdsrConf - transport type") {
-  TEST_CASE("get_transport_type returns kDdsr") {
-    DdsrConf conf("topic");
-    CHECK(conf.get_transport_type() == TransportType::kDdsr);
-  }
-}
-
-TEST_SUITE("modules-DdsrConf - qos_ext constructor") {
-  TEST_CASE("construct with qos_ext map") {
+  TEST_CASE("qos_ext constructor stores property map") {
     DdsrConf::PropertiesMap ext;
     ext["writer"] = "writer_profile";
     ext["reader"] = "reader_profile";
 
     DdsrConf conf("my_topic", 2, ext);
-    CHECK(conf.topic == "my_topic");
-    CHECK(conf.domain == 2);
-    CHECK(conf.depth == 0);
-    CHECK(conf.qos.empty());
-    CHECK(!conf.qos_ext.empty());
-    CHECK(conf.qos_ext.at("writer") == "writer_profile");
-  }
-}
 
-TEST_SUITE("modules-DdsrConf - equality edge cases") {
-  TEST_CASE("different depth compares not equal") {
-    DdsrConf a("topic", 0, 5);
-    DdsrConf b("topic", 0, 10);
+    CHECK_EQ(conf.topic, "my_topic");
+    CHECK_EQ(conf.domain, 2);
+    CHECK_EQ(conf.depth, 0);
+    CHECK(conf.qos.empty());
+    CHECK_FALSE(conf.qos_ext.empty());
+    CHECK_EQ(conf.qos_ext.at("writer"), "writer_profile");
+    CHECK_EQ(conf.qos_ext.at("reader"), "reader_profile");
+  }
+
+  TEST_CASE("operator== holds when all fields match") {
+    DdsrConf a("topic", 1, 5, "q");
+    DdsrConf b("topic", 1, 5, "q");
+
+    CHECK(a == b);
+    CHECK_FALSE(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing topic") {
+    DdsrConf a("topic_a");
+    DdsrConf b("topic_b");
+
+    CHECK(a != b);
+    CHECK_FALSE(a == b);
+  }
+
+  TEST_CASE("operator!= detects differing domain") {
+    DdsrConf a("topic", 0, 0);
+    DdsrConf b("topic", 3, 0);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different qos string compares not equal") {
+  TEST_CASE("operator!= detects differing depth") {
+    DdsrConf a("topic", 0, 5);
+    DdsrConf b("topic", 0, 10);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing qos name") {
     DdsrConf a("topic", 0, 0, "qos_a");
     DdsrConf b("topic", 0, 0, "qos_b");
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing qos_ext") {
+    DdsrConf::PropertiesMap ext_a;
+    ext_a["writer"] = "x";
+    DdsrConf::PropertiesMap ext_b;
+    ext_b["writer"] = "y";
+
+    DdsrConf a("topic", 0, ext_a);
+    DdsrConf b("topic", 0, ext_b);
+
     CHECK(a != b);
   }
 
   TEST_CASE("self equality") {
     DdsrConf a("topic", 1, 5, "qos");
+
     CHECK(a == a);
-    CHECK(!(a != a));
+    CHECK_FALSE(a != a);
   }
 
-  TEST_CASE("empty topic configs are equal") {
-    DdsrConf a("");
-    DdsrConf b("");
-    CHECK(a == b);
-  }
-}
-
-TEST_SUITE("modules-DdsrConf - default values") {
-  TEST_CASE("default domain is 0") {
+  TEST_CASE("get_transport_type returns kDdsr") {
     DdsrConf conf("topic");
-    CHECK(conf.domain == 0);
+
+    CHECK(conf.get_transport_type() == TransportType::kDdsr);
   }
 
-  TEST_CASE("default depth is 0") {
-    DdsrConf conf("topic");
-    CHECK(conf.depth == 0);
+  TEST_CASE("register_qos accepts a valid profile name") {
+    Qos qos;
+    qos.reliability.kind = Qos::Reliability::kReliable;
+
+    CHECK_NOTHROW(DdsrConf::register_qos("ddsr_test_profile", qos));
   }
-
-  TEST_CASE("default qos is empty") {
-    DdsrConf conf("topic");
-    CHECK(conf.qos.empty());
-  }
-
-  TEST_CASE("qos_ext is empty by default for basic constructor") {
-    DdsrConf conf("topic", 0, 0, "");
-    CHECK(conf.qos_ext.empty());
-  }
-}
-
-#else
-
-TEST_SUITE("modules-DdsrConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_DDSR not defined - skip") { CHECK(true); }
 }
 
 #endif  // VLINK_SUPPORT_DDSR

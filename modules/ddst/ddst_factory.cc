@@ -642,7 +642,18 @@ void DdstFactory::set_participant_qos(ddst::DomainParticipantQos& dds_qos, const
     ip_str_list = Helpers::get_split_string(prop_ip_str, ';');
   }
 
-  dds_qos.network_interface.interface_whitelist = ip_str_list;
+  std::vector<std::string> dev_name_list;
+  dev_name_list.reserve(ip_str_list.size());
+
+  for (const auto& ip : ip_str_list) {
+    std::string dev = Utils::get_interface_name_by_ipv4(ip);
+
+    if (!dev.empty()) {
+      dev_name_list.emplace_back(std::move(dev));
+    }
+  }
+
+  dds_qos.network_interface.interface_whitelist = std::move(dev_name_list);
 }
 
 std::string DdstFactory::get_qos_ext(const Conf::PropertiesMap& ext, const std::string& key) {

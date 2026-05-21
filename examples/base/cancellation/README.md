@@ -1,71 +1,190 @@
-# cancellation -- 协作取消三件套
+# cancellation — vlink 协作式取消三件套
 
-## 1. 概述
+vlink 协作式取消机制由四个组件组成：
 
-`vlink::CancellationSource` / `CancellationToken` / `CancellationRegistration` 与
-`vlink::OperationCancelled` 异常组成 VLink 的协作取消（cooperative cancellation）
-原语。本示例**完整展示** 12 种典型用法、边界场景、并发竞态。
+- `vlink::CancellationSource`：取消源，持有者；`request_cancel()` 翻转状态。
+- `vlink::CancellationToken`：可观察句柄；可拷贝、可跨线程共享。
+- `vlink::CancellationRegistration`：注册的回调句柄，可 `.reset()` 取消订阅。
+- `vlink::Exception::OperationCancelled`：取消异常，用于 RAII 退栈。
 
-## 2. 头文件
+"协作式"意味着：vlink 不强制中断线程，而是提供"被取消时应该如何反应"的统一约定。被取消方负责定期 poll 或 throw 来响应。
+
+读完本示例你能掌握：
+
+- 三种典型协作模式（poll / throw / callback）。
+- source / token / registration 三者的生命周期关系。
+- 与 `TaskHandle::PostTaskOptions::cancellation_token` 的集成。
+
+## 背景与适用场景
+
+适用：
+
+- 长时间任务的中途取消（用户按取消按钮、连接断开、超时）。
+- 同一组任务的级联取消（一组 worker 共享一个 token）。
+- 与 IO 操作的协作（取消时 wake_up 阻塞的 epoll）。
+
+不适合：
+
+- 强制 kill 线程（C++ 没有标准方式做到，vlink 也不提供）。
+- 业务自己用 atomic_bool 就能搞定的简单中断信号（小项目用 atomic_bool 更轻）。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `CancellationSource()` | 构造 | 默认未取消 |
+| `CancellationSource::request_cancel` | `bool request_cancel()` | 翻转状态；首次 true，后续 false |
+| `CancellationSource::token` | `CancellationToken token() const` | 取观察句柄 |
+| `CancellationToken::is_cancellation_requested` | `bool` | 轮询 |
+| `CancellationToken::throw_if_cancellation_requested` | `void` | 已取消则抛 `OperationCancelled` |
+| `CancellationToken::register_callback` | `CancellationRegistration register_callback(Function<void()>&&)` | 注册回调，单次 |
+| `CancellationRegistration::reset` | `void reset()` | 触发前取消订阅 |
+| `Exception::OperationCancelled` | 类 | 派生自 `std::exception` |
+
+## 代码导读
+
+### 1. Poll 模式
 
 ```cpp
-#include <vlink/base/cancellation.h>
-#include <vlink/base/exception.h>     // OperationCancelled
-#include <vlink/base/message_loop.h>  // 集成示例
-#include <vlink/base/task_handle.h>   // 集成示例
+CancellationSource source;
+auto token = source.token();
+std::thread worker([token]() {
+  int i = 0;
+  while (!token.is_cancellation_requested()) {
+    std::this_thread::sleep_for(20ms);
+    ++i;
+  }
+  VLOG_I("  poll: stopped at iter ", i);
+});
+
+std::this_thread::sleep_for(100ms);
+source.request_cancel();
+worker.join();
 ```
 
-## 3. 三种协作模式速览
+适合 tight loop、栈浅、能频繁 poll 的场景。
 
-![三种协作模式](images/cancellation-usage-modes.png)
+### 2. Throw 模式
 
-| 模式 | 调用形式 | 何时用 |
-|------|----------|--------|
-| 轮询  | `while (!token.is_cancellation_requested()) { ... }` | 紧密循环、无深调用栈 |
-| 抛异常 | `token.throw_if_cancellation_requested();` | 需要 RAII 自动展开、跨多层调用 |
-| 回调   | `token.register_callback([]{ wake_io_thread(); });` | 唤醒阻塞 I/O / epoll / 文件操作 |
+```cpp
+auto deep = [&token]() {
+  std::this_thread::sleep_for(50ms);
+  token.throw_if_cancellation_requested();   // 抛 OperationCancelled
+  // ... 后续逻辑不会执行 ...
+};
 
-## 4. 示例覆盖范围（12 段）
+try {
+  deep();
+} catch (const vlink::Exception::OperationCancelled&) {
+  VLOG_I("  throw: caught at top");
+}
+```
 
-| 段落 | 主题 |
-|------|------|
-| 1  | 轮询式取消：`is_cancellation_requested` |
-| 2  | 结构化取消：`throw_if_cancellation_requested` + RAII 析构展开 |
-| 3  | 异步触发：`register_callback` 在 producer 线程触发 |
-| 4  | 同步触发：注册时已 cancelled → 当前线程同步触发，registration 为空 |
-| 5  | `CancellationRegistration::reset()` 在触发前取消订阅 |
-| 6  | 多 token 同源 fan-out（6 个并发观察者） |
-| 7  | 三级父子级联取消 |
-| 8  | 回调内取消兄弟 source 不会自死锁（内部 mtx 已释放） |
-| 9  | 回调异常被吞噬，后续回调仍触发 |
-| 10 | 默认构造的 token 永远不报取消、注册返回空 |
-| 11 | 并发注册 + 并发 cancel 的竞态（同步/异步触发混合） |
-| 12 | 与 `TaskHandle` 集成：父级 token 自动透传到队列任务 |
+适合 RAII 资源清理 / 深栈调用：抛异常让上层 try/catch 统一处理。
 
-## 5. 构建与运行
+### 3. Callback 模式
+
+```cpp
+auto reg = token.register_callback([]() {
+  VLOG_I("  callback fired (wake_io / cleanup hook)");
+});
+
+source.request_cancel();   // 立即触发 reg 的回调
+```
+
+适合"取消时唤醒阻塞 IO"的场景。
+
+### 4. 注册时序
+
+```cpp
+source.request_cancel();
+auto reg = token.register_callback([]() { VLOG_I("  fired sync on caller thread"); });
+// 已取消的 token register 会立即同步触发回调
+```
+
+注册前先取消：回调同步在 register 调用方线程触发。
+
+### 5. 提前 reset
+
+```cpp
+auto reg = token.register_callback([]() { VLOG_I("  this won't run"); });
+reg.reset();             // 取消订阅
+source.request_cancel(); // 不会触发上面那个回调
+```
+
+### 6. 多 token 扇出 + 父子级联
+
+```cpp
+CancellationSource root;
+auto root_token = root.token();
+
+CancellationSource middle;
+auto middle_reg = root_token.register_callback([&middle]() { middle.request_cancel(); });
+
+CancellationSource leaf;
+auto leaf_reg = middle.token().register_callback([&leaf]() { leaf.request_cancel(); });
+
+root.request_cancel();   // 触发 middle 取消，再触发 leaf 取消
+```
+
+7. **TaskHandle 集成**
+
+```cpp
+PostTaskOptions opts;
+opts.cancellation_token = source.token();
+loop.post_task_handle([token = source.token()]() {
+  while (!token.is_cancellation_requested()) {
+    // ...
+  }
+}, opts);
+
+source.request_cancel();
+```
+
+`PostTaskOptions::cancellation_token` 让 TaskHandle 直接绑定取消语义。详见 `../task_handle/`。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_cancellation
 ./build/output/bin/example_cancellation
 ```
 
-## 6. 锁与语义要点
+预期输出（节选）：
 
-- **一次性触发**：`request_cancel()` 首次返回 `true`，后续返回 `false`。
-- **同步 vs 异步**：register 时若已 cancelled，回调在**当前线程同步执行**，返回的 registration 为空；否则回调在 producer 线程上触发。
-- **锁不持有触发**：内部 mutex 在触发前已释放，回调可自由 register / unregister / 触发兄弟 source。
-- **异常隔离**：回调抛出的异常通过 `CLOG_E` 记录并被吞噬，不传播至 `request_cancel()` 或注册方。
-- **生命周期**：所有类型经 `shared_ptr<State>` 共享内部状态；`CancellationRegistration` 析构 / `reset()` 在回调未触发时取消订阅，已触发则为 no-op。
-- **`CancellationToken` 默认构造**：`valid()==false`，`is_cancellation_requested()` 永返 `false`，`register_callback()` 返回空。
+```
+poll: stopped at iter ...
+throw: caught at top
+callback fired (wake_io / cleanup hook)
+fired sync on caller thread
+reset before cancel: not fired
+... fan-out / cascade / sibling / exception swallowed ...
+default token: never cancelled
+PostTaskOptions::cancellation_token: ok
+```
 
-## 7. 与其他组件的集成
+## 常见陷阱
 
-- `vlink::TaskHandle` / `vlink::PostTaskOptions::cancellation_token`：dispatcher 在排队和出队阶段感知取消（示例 §12，详见 `examples/base/task_handle`）。
-- `vlink::Co::*` 协程：`await_graph` 等场景在投递失败 / loop 死亡时抛 `OperationCancelled`（参见 `examples/base/message_loop_coroutine`）。
+1. **request_cancel 不是 sticky**：首次调用 true、后续 false；适合配合 if 判断。
+2. **callback 抛异常**：vlink 吞掉并打日志；后续 callback 继续执行。不要假设异常会传播。
+3. **reset 在触发之后**：no-op；不要假设能"取消已经发生的事件"。
+4. **CancellationRegistration 析构**：默认会调 `.reset()`；保留 reg 句柄 till 取消触发。
+5. **跨进程不可用**：取消机制是进程内的；跨进程取消请用业务级 RPC。
 
-## 8. 相关文档与图
+## 设计要点
 
-- 章节：[doc/11-base-library.md §11.14 协作取消 Cancellation](../../../doc/11-base-library.md)
-- 模型图：[doc/images/cancellation-model.png](../../../doc/images/cancellation-model.png)
-- 接口：`include/vlink/base/cancellation.h`、`include/vlink/base/exception.h`
+- source 与 token 通过 control block 共享状态；token 拷贝零开销。
+- mutex 在触发回调前释放；callback 内可安全注册新 callback / 触发其它 source。
+- `OperationCancelled` 派生自 `std::exception`；可被通用 try/catch 捕获。
+
+## 配图
+
+![Three modes](./images/cancellation-usage-modes.png)
+
+图中对比三种使用模式（poll / throw / callback）的代码骨架和适用场景。
+
+## 参考
+
+- `../task_handle/` — 带 cancellation_token 的 TaskHandle
+- `../deadline_timer/` — 与"超时"互补的"取消"
+- `vlink/include/vlink/base/cancellation.h` — 完整接口
+- `vlink/include/vlink/base/exception.h` — `OperationCancelled`

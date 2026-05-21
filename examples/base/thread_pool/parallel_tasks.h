@@ -23,33 +23,30 @@
 
 #pragma once
 
-/**
- * @file parallel_tasks.h
- * @brief Task definitions for the ThreadPool example.
- *
- * Contains helper functions that demonstrate common parallel patterns:
- * basic parallel execution, future-based result collection, and
- * lockfree queue summation.
- */
-
 #include <vlink/base/logger.h>
 #include <vlink/base/thread_pool.h>
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <thread>
 #include <vector>
 
+// -----------------------------------------------------------------------------
+// parallel_tasks: reusable ThreadPool demo blocks. Header-only so the same
+// patterns can be embedded in other tests / examples without a separate
+// compilation unit.
+// -----------------------------------------------------------------------------
 namespace parallel_tasks {
 
-// Demonstrate basic parallel task execution: post 10 tasks to a 4-thread pool.
+// 10 quick-sleep tasks: a fan-out followed by a polling barrier. The
+// atomic counter doubles as the "all done" signal so we don't need any
+// extra synchronisation primitive.
 inline void demo_basic_parallel(vlink::ThreadPool& pool) {
-  VLOG_I("=== Basic parallel execution ===");
   std::atomic<int> completed{0};
-
   for (int i = 0; i < 10; ++i) {
     pool.post_task([i, &completed]() {
-      MLOG_I("  Task {} running on pool thread", i);
+      MLOG_I("  task {} running", i);
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
       completed.fetch_add(1);
     });
@@ -58,13 +55,17 @@ inline void demo_basic_parallel(vlink::ThreadPool& pool) {
   while (completed.load() < 10) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  MLOG_I("  All {} tasks completed", completed.load());
+
+  MLOG_I("  completed={}/10", completed.load());
 }
 
-// Demonstrate invoke_task with std::future to retrieve results.
+// invoke_task: classic "scatter, then gather via futures" pattern. SAFE
+// only when the caller is NOT itself a pool worker; the worker thread
+// calling future.get() needs another worker to actually run the body --
+// see the deadlock note in thread_pool.cc.
 inline void demo_invoke_tasks(vlink::ThreadPool& pool) {
-  VLOG_I("=== invoke_task with future ===");
   std::vector<std::future<int>> futures;
+  futures.reserve(8);
   for (int i = 0; i < 8; ++i) {
     futures.push_back(pool.invoke_task([i]() -> int {
       std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -73,22 +74,23 @@ inline void demo_invoke_tasks(vlink::ThreadPool& pool) {
   }
 
   for (int i = 0; i < 8; ++i) {
-    MLOG_I("  invoke_task result[{}] = {}", i, futures[i].get());
+    MLOG_I("  invoke[{}] = {}", i, futures[i].get());
   }
 }
 
-// Demonstrate lockfree queue type by computing sum 1..100.
+// Lockfree pool variant: same workload, different queue. Useful when many
+// producers want low-latency posting without contending on a single mutex.
+// The sleep at the end is a coarse barrier; production code should use
+// invoke_task / TaskHandle::wait for deterministic joins.
 inline void demo_lockfree_sum() {
-  VLOG_I("=== Lockfree queue type ===");
   vlink::ThreadPool pool(4, vlink::ThreadPool::kLockfreeType);
-
   std::atomic<int> sum{0};
   for (int i = 1; i <= 100; ++i) {
     pool.post_task([i, &sum]() { sum.fetch_add(i); });
   }
 
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  MLOG_I("  Sum of 1..100 = {} (expected 5050)", sum.load());
+  MLOG_I("  sum 1..100 = {} (expected 5050)", sum.load());
 }
 
 }  // namespace parallel_tasks

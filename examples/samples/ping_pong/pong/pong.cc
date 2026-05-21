@@ -21,44 +21,37 @@
  * limitations under the License.
  */
 
-// VLink message loop and utility library
+// Pong side of a latency benchmark.
+//
+// Trivial echo node: subscribes to the ping topic and republishes every payload
+// verbatim on the pong topic. Pairs with ping.cc to form a round-trip latency
+// rig over any transport selected by ping_pong_common.h. Typical engineering
+// scenario: deploy on the peer host/process of the system under test.
+
 #include <vlink/base/message_loop.h>
 #include <vlink/base/utils.h>
-// VLink core communication API
 #include <vlink/vlink.h>
 
-// Common configuration header providing helper functions for selecting transport URLs based on environment variables
 #include "../ping_pong_common.h"
 
-using namespace vlink;                 // NOLINT(build/namespaces, google-build-using-namespace)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// Pong endpoint program: receives data sent by the Ping endpoint and echoes it back
-/// How it works:
-///   1. Subscribe to ping endpoint messages
-///   2. Upon receiving a message, immediately publish it back to the ping endpoint
-///   3. The ping endpoint uses this to calculate round-trip time (RTT)
 int main(int argc, char* argv[]) {
   (void)argc;
   (void)argv;
 
-  // Create a message loop to keep the process running
-  MessageLoop message_loop;
+  // Park on the loop until Ctrl+C; ensures pub/sub destructors run cleanly.
+  vlink::MessageLoop message_loop;
+  vlink::Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
 
-  // Register Ctrl+C signal handler for graceful shutdown
-  Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
+  vlink::Subscriber<vlink::Bytes> sub(Common::get_ping_url());
+  vlink::Publisher<vlink::Bytes> pub(Common::get_pong_url());
 
-  // Create a Subscriber to receive messages from the ping endpoint
-  Subscriber<Bytes> sub(Common::get_ping_url());
+  // Echo: callback runs on transport worker thread; pub.publish() is safe to
+  // call from any thread, so we forward directly without bouncing onto the
+  // MessageLoop -- this minimises the added latency contribution of pong.
+  sub.listen([&pub](const vlink::Bytes& data) { pub.publish(data); });
 
-  // Create a Publisher to send received data back to the ping endpoint
-  Publisher<Bytes> pub(Common::get_pong_url());
-
-  // Register receive callback: echo back the received ping data immediately (echo mode)
-  sub.listen([&pub](const Bytes& data) { pub.publish(data); });
-
-  // Block and run the message loop
   message_loop.run();
-
   return 0;
 }

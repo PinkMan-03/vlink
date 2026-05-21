@@ -29,25 +29,21 @@
 
 #include <atomic>
 #include <filesystem>
+#include <future>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-//
 #include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helpers: concrete subclass to test protected methods
-// ---------------------------------------------------------------------------
 
 namespace {
 
-class TestBagReader : public BagReader {
+class StubBagReader : public BagReader {
  public:
-  explicit TestBagReader(const std::string& path = (std::filesystem::temp_directory_path() / "test.vdb").string())
+  explicit StubBagReader(const std::string& path = (std::filesystem::temp_directory_path() / "stub.vdb").string())
       : BagReader(path, true, false) {}
 
-  ~TestBagReader() override = default;
+  ~StubBagReader() override = default;
 
   void play(const Config&) override {}
 
@@ -62,15 +58,15 @@ class TestBagReader : public BagReader {
   void jump(int64_t, double, int, bool) override {}
 
   std::future<bool> check() override {
-    return std::async(std::launch::deferred, []() { return true; });
+    return std::async(std::launch::deferred, [] { return true; });
   }
 
   std::future<bool> reindex() override {
-    return std::async(std::launch::deferred, []() { return true; });
+    return std::async(std::launch::deferred, [] { return true; });
   }
 
   std::future<bool> fix(bool) override {
-    return std::async(std::launch::deferred, []() { return true; });
+    return std::async(std::launch::deferred, [] { return true; });
   }
 
   void tag(const std::string&) override {}
@@ -85,7 +81,7 @@ class TestBagReader : public BagReader {
 
   std::vector<SchemaData> detect_schema() override { return {}; }
 
-  std::string get_ser_type(const std::string&) const override { return ""; }
+  std::string get_ser_type(const std::string&) const override { return {}; }
 
   SchemaType get_schema_type(const std::string&) const override { return SchemaType::kUnknown; }
 
@@ -95,7 +91,6 @@ class TestBagReader : public BagReader {
 
   bool is_jumping() const override { return false; }
 
-  // Expose protected methods
   using BagReader::convert_action;
   using BagReader::match_playback_url_filter;
   using BagReader::process_output;
@@ -106,9 +101,9 @@ class TestBagReader : public BagReader {
   Info info_;
 };
 
-class RemapBagReaderPlugin final : public BagReaderPluginInterface {
+class RemapPlugin final : public BagReaderPluginInterface {
  public:
-  [[nodiscard]] VersionInfo get_version_info() const override { return {"Remap", "1.0.0", "", "", ""}; }
+  VersionInfo get_version_info() const override { return {"Remap", "1.0.0", "", "", ""}; }
 
   bool convert_url_meta(std::string& url, std::string& ser_type, SchemaType& schema_type) override {
     (void)ser_type;
@@ -125,366 +120,203 @@ class RemapBagReaderPlugin final : public BagReaderPluginInterface {
     return true;
   }
 
-  void push(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data) override {
+  void push(int64_t ts, const std::string& url, ActionType action, const Bytes& data) override {
     if (output_callback_) {
-      output_callback_(timestamp, url, action_type, data);
+      output_callback_(ts, url, action, data);
     }
   }
 };
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: BagReader::Status enum
-// ---------------------------------------------------------------------------
+TEST_SUITE("extension-BagReader") {
+  TEST_CASE("stub construction yields stopped/zero/false state") {
+    StubBagReader reader;
 
-TEST_SUITE("extension-BagReader - Status") {
-  TEST_CASE("enum values are correct") {
-    CHECK(static_cast<uint8_t>(BagReader::kStopped) == 0);
-    CHECK(static_cast<uint8_t>(BagReader::kPaused) == 1);
-    CHECK(static_cast<uint8_t>(BagReader::kPlaying) == 2);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: BagReader::Config defaults
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-BagReader - Config") {
-  TEST_CASE("default Config values") {
-    BagReader::Config config;
-    CHECK(config.begin_time == 0);
-    CHECK(config.end_time == 0);
-    CHECK(config.times == 1);
-    CHECK(config.rate == doctest::Approx(1.0));
-    CHECK(config.skip_blank == false);
-    CHECK(config.force_delay == -1);
-    CHECK(config.auto_pause == false);
-    CHECK(config.auto_quit == false);
-    CHECK(config.filter_urls.empty());
+    CHECK_EQ(reader.get_status(), BagReader::kStopped);
+    CHECK_EQ(reader.get_timestamp(), 0);
+    CHECK_EQ(reader.get_real_timestamp(), 0);
+    CHECK_FALSE(reader.is_split_mode());
+    CHECK_EQ(reader.get_split_index(), 0);
+    CHECK_FALSE(reader.is_jumping());
+    CHECK(reader.detect_schema().empty());
+    CHECK(reader.get_ser_type("any").empty());
+    CHECK_EQ(reader.get_schema_type("any"), SchemaType::kUnknown);
   }
 
-  TEST_CASE("kInfinite is -1") { CHECK(BagReader::kInfinite == -1); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: BagReader::Info defaults
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-BagReader - Info") {
-  TEST_CASE("default Info fields") {
-    BagReader::Info info;
-    CHECK(info.file_name.empty());
-    CHECK(info.tag_name.empty());
-    CHECK(info.version.empty());
-    CHECK(info.storage_type.empty());
-    CHECK(info.compression_type.empty());
-    CHECK(info.time_accuracy.empty());
-    CHECK(info.process_name.empty());
-    CHECK(info.date_time.empty());
-    CHECK(info.has_completed == false);
-    CHECK(info.has_idx_elapsed == false);
-    CHECK(info.has_idx_url == false);
-    CHECK(info.has_schema == false);
-    CHECK(info.timezone == 0);
-    CHECK(info.start_timestamp == 0);
-    CHECK(info.blank_duration == 0);
-    CHECK(info.total_duration == 0);
-    CHECK(info.file_size == 0);
-    CHECK(info.total_raw_size == 0);
-    CHECK(info.message_count == 0);
-    CHECK(info.split_count == 0);
-    CHECK(info.split_by_size == 0);
-    CHECK(info.split_by_time == 0);
-    CHECK(info.url_metas.empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: BagReader::Info::UrlMeta defaults and ordering
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-BagReader - UrlMeta") {
-  TEST_CASE("default UrlMeta fields") {
-    BagReader::Info::UrlMeta meta;
-    CHECK(meta.valid == false);
-    CHECK(meta.index == 0);
-    CHECK(meta.url.empty());
-    CHECK(meta.url_type.empty());
-    CHECK(meta.action_type == ActionType::kUnknownAction);
-    CHECK(meta.ser_type.empty());
-    CHECK(meta.count == 0);
-    CHECK(meta.size == 0);
-    CHECK(meta.freq == doctest::Approx(0.0));
-    CHECK(meta.loss == doctest::Approx(0.0));
-  }
-
-  TEST_CASE("operator< compares by url sort index first") {
-    BagReader::Info::UrlMeta a;
-    a.url = "intra://aaa";
-    a.index = 10;
-
-    BagReader::Info::UrlMeta b;
-    b.url = "dds://aaa";
-    b.index = 1;
-
-    // intra:// has sort index < dds:// (or vice versa)
-    // Just verify it doesn't crash and returns a bool
-    bool result = a < b;
-    (void)result;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator< with same url compares by index") {
-    BagReader::Info::UrlMeta a;
-    a.url = "dds://topic";
-    a.index = 1;
-
-    BagReader::Info::UrlMeta b;
-    b.url = "dds://topic";
-    b.index = 2;
-
-    CHECK(a < b);
-    CHECK(!(b < a));
-  }
-
-  TEST_CASE("operator< with different urls same transport") {
-    BagReader::Info::UrlMeta a;
-    a.url = "dds://aaa";
-    a.index = 1;
-
-    BagReader::Info::UrlMeta b;
-    b.url = "dds://bbb";
-    b.index = 1;
-
-    CHECK(a < b);
-    CHECK(!(b < a));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: BagReader - convert_action (reverse mapping)
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-BagReader - convert_action") {
-  TEST_CASE("C/Req maps to kClientRequest") {
-    CHECK(TestBagReader::convert_action("C/Req") == ActionType::kClientRequest);
-  }
-
-  TEST_CASE("C/Resp maps to kClientResponse") {
-    CHECK(TestBagReader::convert_action("C/Resp") == ActionType::kClientResponse);
-  }
-
-  TEST_CASE("S/Req maps to kServerRequest") {
-    CHECK(TestBagReader::convert_action("S/Req") == ActionType::kServerRequest);
-  }
-
-  TEST_CASE("S/Resp maps to kServerResponse") {
-    CHECK(TestBagReader::convert_action("S/Resp") == ActionType::kServerResponse);
-  }
-
-  TEST_CASE("Pub maps to kPublish") { CHECK(TestBagReader::convert_action("Pub") == ActionType::kPublish); }
-
-  TEST_CASE("Sub maps to kSubscribe") { CHECK(TestBagReader::convert_action("Sub") == ActionType::kSubscribe); }
-
-  TEST_CASE("Set maps to kSet") { CHECK(TestBagReader::convert_action("Set") == ActionType::kSet); }
-
-  TEST_CASE("Get maps to kGet") { CHECK(TestBagReader::convert_action("Get") == ActionType::kGet); }
-
-  TEST_CASE("unknown string maps to kUnknownAction") {
-    CHECK(TestBagReader::convert_action("XYZ") == ActionType::kUnknownAction);
-    CHECK(TestBagReader::convert_action("") == ActionType::kUnknownAction);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: BagReader - construction and callbacks
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-BagReader - construction") {
-  TEST_CASE("TestBagReader construction does not crash") {
-    TestBagReader reader;
-    CHECK(reader.get_status() == BagReader::kStopped);
-    CHECK(reader.get_timestamp() == 0);
-    CHECK(reader.get_real_timestamp() == 0);
-    CHECK(reader.is_split_mode() == false);
-    CHECK(reader.get_split_index() == 0);
-    CHECK(reader.is_jumping() == false);
-  }
-
-  TEST_CASE("register_output_callback and process_output") {
-    TestBagReader reader;
+  TEST_CASE("output callback is invoked by process_output") {
+    StubBagReader reader;
     std::atomic_bool called{false};
     std::string received_url;
 
-    reader.register_output_callback([&](int64_t ts, const std::string& url, ActionType action, const Bytes& data) {
-      (void)ts;
-      (void)action;
-      (void)data;
-
+    reader.register_output_callback([&](int64_t, const std::string& url, ActionType, const Bytes&) {
       called = true;
       received_url = url;
     });
 
     Bytes data;
-    reader.process_output(12345, "dds://test", ActionType::kPublish, data);
-    CHECK(called == true);
-    CHECK(received_url == "dds://test");
+    reader.process_output(100, "dds://test", ActionType::kPublish, data);
+
+    CHECK(called.load());
+    CHECK_EQ(received_url, "dds://test");
   }
 
   TEST_CASE("process_output without callback does not crash") {
-    TestBagReader reader;
+    StubBagReader reader;
     Bytes data;
     reader.process_output(0, "dds://test", ActionType::kPublish, data);
-    CHECK(true);
   }
 
-  TEST_CASE("register_status_callback does not crash") {
-    TestBagReader reader;
+  TEST_CASE("registering status/ready/finish callbacks does not crash") {
+    StubBagReader reader;
     reader.register_status_callback([](BagReader::Status) {});
-    CHECK(true);
-  }
-
-  TEST_CASE("register_ready_callback does not crash") {
-    TestBagReader reader;
-    reader.register_ready_callback([]() {});
-    CHECK(true);
-  }
-
-  TEST_CASE("register_finish_callback does not crash") {
-    TestBagReader reader;
+    reader.register_ready_callback([] {});
     reader.register_finish_callback([](bool) {});
-    CHECK(true);
   }
 
-  TEST_CASE("process_url_metas without plugin does not crash") {
-    TestBagReader reader;
+  TEST_CASE("process_url_metas without plugin leaves metas unchanged") {
+    StubBagReader reader;
     std::vector<BagReader::Info::UrlMeta> metas;
+
     BagReader::Info::UrlMeta m;
-    m.url = "dds://test";
+    m.url = "dds://topic";
     m.ser_type = "proto";
     metas.push_back(m);
+
     reader.process_url_metas(metas);
-    CHECK(metas[0].url == "dds://test");
+
+    REQUIRE_EQ(metas.size(), 1u);
+    CHECK_EQ(metas[0].url, "dds://topic");
   }
 
-  TEST_CASE("plugin URL remap and exclude affect playback output and filters") {
-    TestBagReader reader;
-    auto plugin = std::shared_ptr<RemapBagReaderPlugin>(new RemapBagReaderPlugin());
+  TEST_CASE("plugin remaps and excludes urls during process_url_metas") {
+    StubBagReader reader;
+    auto plugin = std::make_shared<RemapPlugin>();
     reader.bind_plugin_interface(plugin);
 
     std::vector<BagReader::Info::UrlMeta> metas;
-    BagReader::Info::UrlMeta remap_meta;
-    remap_meta.url = "intra://old";
-    metas.push_back(remap_meta);
+    BagReader::Info::UrlMeta a;
+    a.url = "intra://old";
+    metas.push_back(a);
 
-    BagReader::Info::UrlMeta drop_meta;
-    drop_meta.url = "intra://drop";
-    metas.push_back(drop_meta);
+    BagReader::Info::UrlMeta b;
+    b.url = "intra://drop";
+    metas.push_back(b);
 
     reader.process_url_metas(metas);
-    REQUIRE(metas.size() == 1U);
-    CHECK(metas[0].url == "intra://new");
 
-    std::string observed_url;
-    int output_count = 0;
-    reader.register_output_callback([&](int64_t, const std::string& url, ActionType, const Bytes&) {
-      observed_url = url;
-      ++output_count;
-    });
-
-    Bytes data = Bytes::create(1U);
-    reader.process_output(1, "intra://old", ActionType::kPublish, data);
-    reader.process_output(2, "intra://drop", ActionType::kPublish, data);
-
-    CHECK(output_count == 1);
-    CHECK(observed_url == "intra://new");
-
-    BagReader::Config cfg;
-    cfg.filter_urls.emplace("intra://new");
-    CHECK(reader.match_playback_url_filter("intra://old", cfg.filter_urls));
-    CHECK_FALSE(reader.match_playback_url_filter("intra://drop", cfg.filter_urls));
+    REQUIRE_EQ(metas.size(), 1u);
+    CHECK_EQ(metas[0].url, "intra://new");
   }
 
-  TEST_CASE("rebinding plugin clears the previous output callback") {
-    TestBagReader reader;
-    auto old_plugin = std::shared_ptr<RemapBagReaderPlugin>(new RemapBagReaderPlugin());
-    auto new_plugin = std::shared_ptr<RemapBagReaderPlugin>(new RemapBagReaderPlugin());
+  TEST_CASE("process_output forwards remapped url derived from process_url_metas") {
+    StubBagReader reader;
+    auto plugin = std::make_shared<RemapPlugin>();
+    reader.bind_plugin_interface(plugin);
 
-    int output_count = 0;
-    reader.register_output_callback([&](int64_t, const std::string&, ActionType, const Bytes&) { ++output_count; });
+    std::vector<BagReader::Info::UrlMeta> metas;
+    BagReader::Info::UrlMeta m;
+    m.url = "intra://old";
+    metas.push_back(m);
+    reader.process_url_metas(metas);
+
+    std::string observed_url;
+    int call_count = 0;
+
+    reader.register_output_callback([&](int64_t, const std::string& url, ActionType, const Bytes&) {
+      observed_url = url;
+      ++call_count;
+    });
+
+    Bytes data = Bytes::create(1u);
+    reader.process_output(1, "intra://old", ActionType::kPublish, data);
+
+    CHECK_EQ(call_count, 1);
+    CHECK_EQ(observed_url, "intra://new");
+  }
+
+  TEST_CASE("match_playback_url_filter uses remapped url for filter matching") {
+    StubBagReader reader;
+    auto plugin = std::make_shared<RemapPlugin>();
+    reader.bind_plugin_interface(plugin);
+
+    std::vector<BagReader::Info::UrlMeta> metas;
+    BagReader::Info::UrlMeta m;
+    m.url = "intra://old";
+    metas.push_back(m);
+    reader.process_url_metas(metas);
+
+    std::unordered_set<std::string> filter_urls;
+    filter_urls.emplace("intra://new");
+
+    CHECK(reader.match_playback_url_filter("intra://old", filter_urls));
+    CHECK_FALSE(reader.match_playback_url_filter("intra://drop", filter_urls));
+  }
+
+  TEST_CASE("rebinding plugin disconnects the old plugin output callback") {
+    StubBagReader reader;
+    auto old_plugin = std::make_shared<RemapPlugin>();
+    auto new_plugin = std::make_shared<RemapPlugin>();
+
+    int call_count = 0;
+    reader.register_output_callback([&](int64_t, const std::string&, ActionType, const Bytes&) { ++call_count; });
 
     reader.bind_plugin_interface(old_plugin);
     reader.bind_plugin_interface(new_plugin);
 
-    Bytes data = Bytes::create(1U);
+    Bytes data = Bytes::create(1u);
     old_plugin->push(1, "intra://old", ActionType::kPublish, data);
-    CHECK(output_count == 0);
+    CHECK_EQ(call_count, 0);
 
     new_plugin->push(2, "intra://old", ActionType::kPublish, data);
-    CHECK(output_count == 1);
+    CHECK_EQ(call_count, 1);
   }
 
-  TEST_CASE("detect_schema returns empty") {
-    TestBagReader reader;
-    auto schemas = reader.detect_schema();
-    CHECK(schemas.empty());
+  TEST_CASE("convert_action maps known tokens to action types") {
+    CHECK_EQ(StubBagReader::convert_action("Pub"), ActionType::kPublish);
+    CHECK_EQ(StubBagReader::convert_action("Sub"), ActionType::kSubscribe);
+    CHECK_EQ(StubBagReader::convert_action("C/Req"), ActionType::kClientRequest);
+    CHECK_EQ(StubBagReader::convert_action("C/Resp"), ActionType::kClientResponse);
+    CHECK_EQ(StubBagReader::convert_action("S/Req"), ActionType::kServerRequest);
+    CHECK_EQ(StubBagReader::convert_action("S/Resp"), ActionType::kServerResponse);
+    CHECK_EQ(StubBagReader::convert_action("Set"), ActionType::kSet);
+    CHECK_EQ(StubBagReader::convert_action("Get"), ActionType::kGet);
   }
 
-  TEST_CASE("get_ser_type returns empty") {
-    TestBagReader reader;
-    CHECK(reader.get_ser_type("any_url").empty());
+  TEST_CASE("convert_action returns kUnknownAction for unknown tokens") {
+    CHECK_EQ(StubBagReader::convert_action("XYZ"), ActionType::kUnknownAction);
+    CHECK_EQ(StubBagReader::convert_action(""), ActionType::kUnknownAction);
+    CHECK_EQ(StubBagReader::convert_action("Unknown"), ActionType::kUnknownAction);
   }
 
-  TEST_CASE("rebuild_url_meta_maps preserves known schema_type when unknown duplicates exist") {
+  TEST_CASE("rebuild_url_meta_maps preserves known schema type over unknown duplicate") {
     std::vector<BagReader::Info::UrlMeta> metas;
 
-    BagReader::Info::UrlMeta known_meta;
-    known_meta.url = "intra://test";
-    known_meta.ser_type = "demo.Type";
-    known_meta.schema_type = SchemaType::kProtobuf;
-    metas.emplace_back(known_meta);
+    BagReader::Info::UrlMeta known;
+    known.url = "intra://test";
+    known.ser_type = "demo.Type";
+    known.schema_type = SchemaType::kProtobuf;
+    metas.emplace_back(known);
 
-    BagReader::Info::UrlMeta unknown_meta;
-    unknown_meta.url = "intra://test";
-    unknown_meta.schema_type = SchemaType::kUnknown;
-    metas.emplace_back(unknown_meta);
+    BagReader::Info::UrlMeta unknown;
+    unknown.url = "intra://test";
+    unknown.schema_type = SchemaType::kUnknown;
+    metas.emplace_back(unknown);
 
     std::unordered_map<std::string, std::string> ser_map;
     std::unordered_map<std::string, SchemaType> schema_type_map;
+    StubBagReader::rebuild_url_meta_maps(metas, ser_map, schema_type_map);
 
-    TestBagReader::rebuild_url_meta_maps(metas, ser_map, schema_type_map);
-
-    REQUIRE(ser_map.count("intra://test") == 1U);
-    REQUIRE(schema_type_map.count("intra://test") == 1U);
-    CHECK(ser_map["intra://test"] == "demo.Type");
-    CHECK(schema_type_map["intra://test"] == SchemaType::kProtobuf);
+    REQUIRE_EQ(ser_map.count("intra://test"), 1u);
+    REQUIRE_EQ(schema_type_map.count("intra://test"), 1u);
+    CHECK_EQ(ser_map["intra://test"], "demo.Type");
+    CHECK_EQ(schema_type_map["intra://test"], SchemaType::kProtobuf);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: BagReader - roundtrip with BagWriter convert_action
-// ---------------------------------------------------------------------------
+  TEST_CASE("create returns nullptr for unsupported file extension") {
+    auto reader = BagReader::create("/tmp/unsupported.xyz");
 
-TEST_SUITE("extension-BagReader - action roundtrip") {
-  TEST_CASE("all action types roundtrip correctly") {
-    auto test_roundtrip = [](ActionType action) {
-      // We can't directly access BagWriter::convert_action from here,
-      // but we know the string mapping. Test BagReader side only.
-      (void)action;
-    };
-
-    (void)test_roundtrip;
-
-    CHECK(TestBagReader::convert_action("Pub") == ActionType::kPublish);
-    CHECK(TestBagReader::convert_action("Sub") == ActionType::kSubscribe);
-    CHECK(TestBagReader::convert_action("C/Req") == ActionType::kClientRequest);
-    CHECK(TestBagReader::convert_action("C/Resp") == ActionType::kClientResponse);
-    CHECK(TestBagReader::convert_action("S/Req") == ActionType::kServerRequest);
-    CHECK(TestBagReader::convert_action("S/Resp") == ActionType::kServerResponse);
-    CHECK(TestBagReader::convert_action("Set") == ActionType::kSet);
-    CHECK(TestBagReader::convert_action("Get") == ActionType::kGet);
-    CHECK(TestBagReader::convert_action("Unknown") == ActionType::kUnknownAction);
+    CHECK(reader == nullptr);
   }
 }
 

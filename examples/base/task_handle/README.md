@@ -1,105 +1,214 @@
-# task_handle -- Tracked 任务投递
+# task_handle — 带追踪/取消能力的任务提交
 
-`MessageLoop::post_task_handle()` / `ThreadPool::post_task_handle()` /
-`MessageLoop::post_task_with_priority_handle()` 是 fire-and-forget 投递的 **tracked**
-对应版本，返回 `vlink::TaskHandle` 共享句柄，可：
+`vlink::TaskHandle` 是 `post_task` 的"带追踪"版本。`post_task_handle()` 返回 TaskHandle，让调用方可以 `wait()` 等任务完成、`cancel()` 取消、查询 `state()` 状态、传入 cancellation_token。
 
-- `wait(timeout_ms)`：阻塞直至任务进入终态。
-- `cancel()`：协作取消（已排队 → kCancelled；运行中 → 触发其 `cancellation_token`）。
-- `state()` / `is_done()`：查询当前状态。
-- `cancellation_token()`：在回调内部用于轮询取消。
+读完本示例你能掌握：
 
-## 1. 头文件
+- 何时该用 `post_task_handle` 而非 `post_task`。
+- 8 种 `TaskExecutionState` 的转换条件。
+- `PostTaskOptions` 的 cancellation_token、overflow_policy、drop_policy 三组配置。
+- 在 MessageLoop / MultiLoop / ThreadPool 上的一致接口。
+
+## 背景与适用场景
+
+适用：
+
+- 需要等任务完成 → `wait()` / `wait(timeout_ms)`。
+- 任务可能要取消 → `cancel()` + `cancellation_token`。
+- 监控任务执行状态、统计成功率。
+- 多个任务共享同一取消源（批量取消）。
+
+不适合：
+
+- 简单"投递就完事"（用 post_task，省一次堆分配）。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `post_task_handle` | `TaskHandle post_task_handle(Function<void()>&&, const PostTaskOptions& = {})` | 返回带 handle 的任务 |
+| `post_task_with_priority_handle` | 同上 + Priority | 优先级版本 |
+| `PostTaskOptions::cancellation_token` | `CancellationToken` | 父 token；触发时任务被 cancel |
+| `PostTaskOptions::overflow_policy` | enum | 队列满时的策略 |
+| `PostTaskOptions::drop_policy` | enum | `kDroppable` vs `kProtected` |
+| `TaskHandle::wait` | `bool wait(std::chrono::milliseconds = -1)` | -1 等无限；返回 true=完成 |
+| `TaskHandle::cancel` | `bool cancel()` | 申请取消 |
+| `TaskHandle::state` | `TaskExecutionState state() const` | 当前状态 |
+| `TaskHandle::is_done` | `bool is_done() const` | 是否终态 |
+| `TaskHandle::cancellation_token` | `CancellationToken cancellation_token() const` | 任务自己的 token，供回调内 poll |
+
+## TaskExecutionState 状态转换
+
+| 状态 | 终态？ | 进入条件 |
+|------|------|---------|
+| `kInvalid`   | 否 | 默认构造 |
+| `kQueued`    | 否 | dispatcher 接受 |
+| `kRunning`   | 否 | callback 开始执行 |
+| `kCompleted` | 是 | callback 正常返回 |
+| `kCancelled` | 是 | `cancel()` 在 queued 期间 / 父 token 触发 |
+| `kDropped`   | 是 | overflow drop-oldest 选中 |
+| `kRejected`  | 是 | dispatcher 拒绝（quit / 队满 + kReject） |
+| `kFailed`    | 是 | callback 抛异常 |
+
+## 代码导读
+
+### 1. 基础 post_task_handle + wait
 
 ```cpp
-#include <vlink/base/task_handle.h>    // TaskHandle / PostTaskOptions / 枚举
-#include <vlink/base/cancellation.h>   // 父级 token
+MessageLoop loop;
+loop.async_run();
+
+auto h = loop.post_task_handle([]() {
+  std::this_thread::sleep_for(50ms);
+  VLOG_I("  task body done");
+});
+
+h.wait();
+MLOG_I("  state={} done={}", static_cast<int>(h.state()), h.is_done());
 ```
 
-## 2. 调用方与 dispatcher 时序
+`wait()` 阻塞到任务终态。
 
-![TaskHandle 调用方/Dispatcher 时序](images/task-handle-timeline.png)
+### 2. 父 cancellation_token 级联
 
-## 3. 示例覆盖范围（13 段）
+```cpp
+CancellationSource src;
+PostTaskOptions opts;
+opts.cancellation_token = src.token();
 
-| 段落 | 主题 |
-|------|------|
-| 1  | `post_task_handle` 最简 + `wait()` |
-| 2  | `PostTaskOptions::cancellation_token` 父级 token 触发 |
-| 3  | 任务尚未执行时 `cancel()` -> `kCancelled` |
-| 4  | 任务**运行中** `cancel()`：状态不变，需任务自行轮询自己的 `cancellation_token()`，最终通常落地为 `kCompleted` |
-| 5  | 回调抛出异常 -> `kFailed` |
-| 6  | 三个优先级 `post_task_with_priority_handle` |
-| 7  | `TaskOverflowPolicy::kReject`：quit 后 post 立即 `kRejected` |
-| 8  | `TaskDropPolicy::kProtected` vs `kDroppable`（API 演示） |
-| 9  | `ThreadPool::post_task_handle` + 一次 cancel 整批 8 个 worker |
-| 10 | `wait(timeout_ms)` 超时 vs 完成 |
-| 11 | 句柄析构**不会**取消任务（dispatcher 自有强引用） |
-| 12 | 句柄是共享句柄：copy 出来的句柄与原句柄共享同一 state，相互可见 |
-| 13 | 默认构造的 `TaskHandle` 各 API 的安全语义（`valid=false`、`state=kInvalid`、`wait`/`cancel`返回 false） |
+auto h = loop.post_task_handle([token = src.token()]() {
+  while (!token.is_cancellation_requested()) {
+    std::this_thread::sleep_for(20ms);
+  }
+}, opts);
 
-## 4. 构建与运行
+std::this_thread::sleep_for(50ms);
+src.request_cancel();
+h.wait();
+MLOG_I("  state after cancel={}", static_cast<int>(h.state()));
+```
+
+`PostTaskOptions::cancellation_token` 把外部 token 绑定到任务；触发时任务被 cancel。同时回调内通过 `h.cancellation_token().is_cancellation_requested()` poll。
+
+### 3. cancel() 队列中 vs 执行中
+
+```cpp
+auto h_queued = loop.post_task_handle([]() {
+  std::this_thread::sleep_for(100ms);
+});
+h_queued.cancel();                                  // 在 queued 期间取消
+h_queued.wait();
+// state == kCancelled
+
+auto h_running = loop.post_task_handle([&](){
+  std::this_thread::sleep_for(50ms);                 // 已 Running
+  // poll 不到取消信号则继续完成
+});
+std::this_thread::sleep_for(10ms);
+h_running.cancel();
+h_running.wait();
+// state == kCompleted（任务没主动 poll cancel）
+```
+
+`cancel()` 是协作式：vlink 不会强行打断 Running 任务；只在 Queued 期间能"挡掉"。
+
+### 4. 任务抛异常 -> kFailed
+
+```cpp
+auto h_fail = loop.post_task_handle([]() {
+  throw std::runtime_error("boom");
+});
+h_fail.wait();
+MLOG_I("  state={}", static_cast<int>(h_fail.state()));   // kFailed
+```
+
+### 5. 优先级 + handle
+
+```cpp
+auto h_low = pri_loop.post_task_with_priority_handle([](){ /*...*/ }, MessageLoop::kLowestPriority);
+auto h_high = pri_loop.post_task_with_priority_handle([](){ /*...*/ }, MessageLoop::kHighestPriority);
+```
+
+### 6. 拒绝 + 丢弃策略
+
+```cpp
+PostTaskOptions opts_reject;
+opts_reject.overflow_policy = PostTaskOptions::kReject;
+
+// loop.quit() 之后再投递
+auto h = loop.post_task_handle([]() {}, opts_reject);
+// state == kRejected
+```
+
+### 7. ThreadPool 群组取消
+
+```cpp
+ThreadPool pool(8);
+CancellationSource src;
+PostTaskOptions opts;
+opts.cancellation_token = src.token();
+
+std::vector<TaskHandle> handles;
+for (int i = 0; i < 8; ++i) {
+  handles.push_back(pool.post_task_handle([token = src.token(), i]() {
+    while (!token.is_cancellation_requested()) {
+      std::this_thread::sleep_for(20ms);
+    }
+  }, opts));
+}
+
+std::this_thread::sleep_for(100ms);
+src.request_cancel();
+for (auto& h : handles) {
+  h.wait();
+}
+```
+
+一个 source 控制 8 个 worker 任务的取消，典型 fan-out 取消模式。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_task_handle
 ./build/output/bin/example_task_handle
 ```
 
-## 5. 关键枚举一览
-
-`vlink::TaskExecutionState`：
-
-![TaskHandle 状态机](../../../doc/images/task-handle-state-machine.png)
-
-| 状态        | 终态？ | 进入条件                                                       |
-|-------------|--------|----------------------------------------------------------------|
-| `kInvalid`  | 否     | 默认构造或未关联任务                                           |
-| `kQueued`   | 否     | dispatcher 已接受                                              |
-| `kRunning`  | 否     | 回调正在执行                                                   |
-| `kCompleted`| 是     | 回调正常返回                                                   |
-| `kCancelled`| 是     | 在 `kQueued` 阶段被 `cancel()` 或 parent token 触发            |
-| `kDropped`  | 是     | overflow drop-oldest 选中此任务，在执行前丢弃                   |
-| `kRejected` | 是     | dispatcher 拒收（quit / 无可丢任务 / `kReject` 队列满）         |
-| `kFailed`   | 是     | 回调抛出异常                                                   |
-
-`vlink::TaskOverflowPolicy`：
-
-| 取值                       | 行为 |
-|----------------------------|------|
-| `kUseDispatcherStrategy`   | 沿用 dispatcher 的 `Strategy` 配置（默认） |
-| `kReject`                  | 队列满立即拒绝，返回 `kRejected` 句柄 |
-| `kBlock`                   | 持续 1ms sleep 重试直到入队 |
-
-`vlink::TaskDropPolicy`：
-
-| 取值          | 行为 |
-|---------------|------|
-| `kDroppable`  | 可被 drop-oldest 选中（默认） |
-| `kProtected`  | 永不被 drop-oldest 选中；队列全 protected 时 post 失败 |
-
-> **lock-free 队列**：`kProtected` 仅打印警告日志，**不能**阻止 overflow drop。
-> 需要严格保护请用 `kNormalType` / `kPriorityType` 队列。
-
-## 6. 整体管道架构
-
-![post_task_handle Tracked 管道](../../../doc/images/task-handle-pipeline.png)
-
-## 7. 锁顺序
+预期输出（节选）：
 
 ```
-MessageLoopAliveState::mtx  ->  MessageLoop::Impl::mtx  ->  TaskHandle::State::mtx
-                                                              ↓（释放后再取）
-                                                CancellationSource::State::mtx
+task body done
+state=3 done=1                                       # 3=kCompleted
+state after cancel=4                                 # 4=kCancelled
+state=3                                              # 5=kFailed
+[LOW] [NORMAL] [HIGH] —— priority queue order
+state=6                                              # 6=kRejected
+8 workers cancelled in unison
+wait(timeout) returned without completion
+default handle state=0                               # 0=kInvalid
 ```
 
-`wait()` / 终态 cv 在 `TaskHandle::State::mtx` 上等待，回调释放该 mtx 后再触发，因此回调内可
-再次调用 `cancel()` / `wait()` 而不会死锁。
+## 常见陷阱
 
-## 8. 相关文档与图
+1. **handle 析构 ≠ 取消**：dispatcher 持有强引用；handle 析构后任务仍会跑。
+2. **lockfree 队列 + kProtected**：lockfree 不支持 protected，只是打警告；要保护用 kNormal/kPriority。
+3. **wait(timeout) 返回 false**：可能仍在跑；不要假设 timeout 就是失败。
+4. **kRejected 与 kDropped 区别**：Rejected 是入队失败；Dropped 是入队后被新任务挤掉。
+5. **cancellation_token 不阻断 Running 任务**：必须任务自己 poll。
 
-- 章节：[doc/11-base-library.md §11.5 Tracked 任务投递](../../../doc/11-base-library.md)
-- 状态机图：[doc/images/task-handle-state-machine.png](../../../doc/images/task-handle-state-machine.png)
-- 管道图：  [doc/images/task-handle-pipeline.png](../../../doc/images/task-handle-pipeline.png)
-- 协作取消：[examples/base/cancellation](../cancellation/README.md)
-- 协程：    [examples/base/message_loop_coroutine](../message_loop_coroutine/README.md)
+## 设计要点
+
+- TaskHandle 内部 State 用 mutex 保护；wait 用 cv 通知。
+- 状态机一旦进入终态不再变化。
+- vlink lock order：`MessageLoopAliveState::mtx → MessageLoop::Impl::mtx → TaskHandle::State::mtx`；callback 在所有 mtx 释放后触发。
+
+## 配图
+
+![TaskHandle timeline](./images/task-handle-timeline.png)
+
+图中展示从 `post_task_handle` 投递 → Queued → Running → 终态的完整时间线，含 cancel / wait / state 的时序关系。
+
+## 参考
+
+- `../cancellation/` — 取消三件套
+- `../schedule/` — `Schedule::Config` 调度（无 handle，链式回调）
+- `../message_loop_advanced/` — 队列类型对 handle 行为的影响
+- `vlink/include/vlink/base/task_handle.h` — TaskHandle 接口

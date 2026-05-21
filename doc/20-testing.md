@@ -88,7 +88,8 @@ test/
 ├── extension/               # bag / discovery / qos / schema / security / dynamic_data / status / terminal_stream / url_remap 等扩展测试
 ├── impl/                    # NodeImpl / Url / Ssl / AckManager / *Impl 等实现层测试
 ├── modules/                 # 各 transport Conf 解析测试（dds/ddsc/ddsr/ddst/intra/shm/shm2/zenoh/someip/mqtt/fdbus/qnx）
-├── zerocopy/                # CameraFrame / PointCloud / ProxyData / Header / RawData 等测试
+├── zerocopy/                # Header / RawData / CameraFrame / PointCloud / ProxyData /
+│                            # OccupancyGrid / Tensor / ObjectArray / AudioFrame 测试
 ├── serializer_test.cc       # Serializer 单元测试
 ├── intra_test.cc            # intra:// 传输后端
 ├── shm_test.cc              # shm:// 传输后端（iceoryx）

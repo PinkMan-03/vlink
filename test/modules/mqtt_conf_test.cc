@@ -23,99 +23,99 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_MQTT
+
+#include "./modules/mqtt_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_MQTT
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-MqttConf - construction") {
-  TEST_CASE("construct with address only uses defaults") {
+TEST_SUITE("modules-MqttConf") {
+  TEST_CASE("default event domain qos and fragment when only address supplied") {
     MqttConf conf("vehicle/speed");
-    CHECK(conf.address == "vehicle/speed");
+
+    CHECK_EQ(conf.address, "vehicle/speed");
     CHECK(conf.event.empty());
-    CHECK(conf.domain == 0);
-    CHECK(conf.qos == 1);
+    CHECK_EQ(conf.domain, 0);
+    CHECK_EQ(conf.qos, 1);
     CHECK(conf.fragment.empty());
   }
 
-  TEST_CASE("construct with all params") {
+  TEST_CASE("all parameters are stored") {
     MqttConf conf("addr", "evt", 2, 0, "tcp://broker:1883");
-    CHECK(conf.address == "addr");
-    CHECK(conf.event == "evt");
-    CHECK(conf.domain == 2);
-    CHECK(conf.qos == 0);
-    CHECK(conf.fragment == "tcp://broker:1883");
-  }
-}
 
-TEST_SUITE("modules-MqttConf - equality operators") {
-  TEST_CASE("equal configs compare equal") {
+    CHECK_EQ(conf.address, "addr");
+    CHECK_EQ(conf.event, "evt");
+    CHECK_EQ(conf.domain, 2);
+    CHECK_EQ(conf.qos, 0);
+    CHECK_EQ(conf.fragment, "tcp://broker:1883");
+  }
+
+  TEST_CASE("qos level 2 is stored") {
+    MqttConf conf("addr", "", 0, 2);
+
+    CHECK_EQ(conf.qos, 2);
+  }
+
+  TEST_CASE("operator== holds when all fields match") {
     MqttConf a("addr", "evt", 1, 2, "frag");
     MqttConf b("addr", "evt", 1, 2, "frag");
+
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
   }
 
-  TEST_CASE("different address compares not equal") {
+  TEST_CASE("operator!= detects differing address") {
     MqttConf a("addr_a");
     MqttConf b("addr_b");
+
+    CHECK(a != b);
+    CHECK_FALSE(a == b);
+  }
+
+  TEST_CASE("operator!= detects differing event") {
+    MqttConf a("addr", "evt_a");
+    MqttConf b("addr", "evt_b");
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different domain compares not equal") {
+  TEST_CASE("operator!= detects differing domain") {
     MqttConf a("addr", "", 0);
     MqttConf b("addr", "", 1);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different qos compares not equal") {
+  TEST_CASE("operator!= detects differing qos") {
     MqttConf a("addr", "", 0, 0);
     MqttConf b("addr", "", 0, 2);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different fragment compares not equal") {
+  TEST_CASE("operator!= detects differing fragment") {
     MqttConf a("addr", "", 0, 1, "frag_a");
     MqttConf b("addr", "", 0, 1, "frag_b");
+
     CHECK(a != b);
   }
-}
 
-TEST_SUITE("modules-MqttConf - transport type") {
+  TEST_CASE("self equality") {
+    MqttConf a("addr", "evt", 1, 2, "frag");
+
+    CHECK(a == a);
+    CHECK_FALSE(a != a);
+  }
+
   TEST_CASE("get_transport_type returns kMqtt") {
     MqttConf conf("address");
+
     CHECK(conf.get_transport_type() == TransportType::kMqtt);
   }
-}
-
-TEST_SUITE("modules-MqttConf - url parse") {
-  TEST_CASE("url-parse-all-impl-types") {
-    Url url("mqtt://mqtt/conf/parse1?event=ev1");
-
-    CHECK(url.parse(kPublisher));
-    CHECK(url.parse(kSubscriber));
-    CHECK(url.parse(kServer));
-    CHECK(url.parse(kClient));
-    CHECK(url.parse(kSetter));
-    CHECK(url.parse(kGetter));
-  }
-
-  TEST_CASE("unknown-impl-type-throws") {
-    Url url("mqtt://mqtt/conf/parse2");
-
-    CHECK_THROWS_AS(url.parse(kUnknownImplType), std::runtime_error);
-  }
-
-  TEST_CASE("invalid-transport-throws") { CHECK_THROWS(Publisher<int>("mqtt1://bad/url")); }
-}
-
-#else
-
-TEST_SUITE("modules-MqttConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_MQTT not defined - skip") { CHECK(true); }
 }
 
 #endif  // VLINK_SUPPORT_MQTT

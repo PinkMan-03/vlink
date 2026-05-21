@@ -1,211 +1,120 @@
-# Hello Field -- VLink 字段模型入门（配置同步）
+# hello_field — VLink 字段模型最小示例
 
-## 1. 概述
+`hello_field` 是 VLink 字段模型（Field Model）的最简版本，使用 `intra://` 进程内传输演示 `Setter<T>` / `Getter<T>` 这一对节点：Setter 持久化最近一次写入，Getter 即使在 Setter 写入之后才创建，依然能够通过 `wait_for_value()` + `get()` 拿到当前状态。读完本示例可以理解 VLink 中的"状态同步"语义和 Event 模型的关键差别。
 
-本示例演示 VLink 的 **字段模型 (Field Model)**，通过一个传感器配置同步场景，展示 Setter/Getter 的跨程序用法。与事件模型（PubSub）不同，字段模型会**保留最新值**，迟到的 Getter 也能立即获取当前状态。
+## 背景与适用场景
 
-本示例拆分为**两个独立程序**：
-- **config_setter** -- 写入端，模拟配置管理系统写入传感器参数
-- **config_getter** -- 读取端，演示三种读取模式（阻塞等待、轮询、回调通知）
+字段模型对应自动驾驶/机器人系统中的"状态"概念：当前档位、当前传感器配置、当前节点健康度、当前参数表……。这类数据的特点是：
+- 总有一个"最新值"，新加入的读者应当立刻拿到该值，而不是等下一次写入。
+- 读者数量可以是 0 到多个，写者通常只有 1 个（也支持多个，但一般会引入仲裁逻辑）。
+- 旧值通常没有意义，丢失中间过程的写入不影响最终一致性。
 
-### 1.1 架构图
+与 Event 模型最关键的区别：晚加入的 `Subscriber` 收不到此前的消息；而晚加入的 `Getter` 通过 `wait_for_value()` 可以拿到 Setter 最近一次写入的值——这是字段模型的"latest value retention"语义，由底层传输的 `sync()` 回调机制实现。
 
-![Field 数据流](images/quickstart-field-flow.png)
+字段模型同时支持回调驱动（`Getter::listen()`）和拉取（`Getter::get()`）两种使用方式，本示例只演示拉取；回调形式见 `../../communication/field_basic/`。
 
-```
-┌──────────────────────┐                    ┌──────────────────────────┐
-│    config_setter     │                    │     config_getter        │
-│   (config_setter.cc) │                    │    (config_getter.cc)    │
-│                      │                    │                          │
-│  Setter<SensorConfig>│                    │  Getter<SensorConfig>    │
-│       │              │                    │    ├─ wait_for_value()   │
-│   set(cfg) ─────────>│ dds://sensor/...   │<───├─ get() -> optional  │
-│                      │   (Transport)      │    └─ listen(callback)   │
-└──────────────────────┘                    └──────────────────────────┘
-```
+## 核心 API
 
-## 2. 文件结构
+| API | 签名（来自头文件） | 说明 |
+|-----|------|------|
+| `vlink::Setter<ValueT>` | `explicit Setter(const std::string& url_str, InitType type = InitType::kWithInit);` | 字段写者，构造即 init |
+| `Setter::set(const ValueT&)` | `void set(const ValueT& value);` | 写入新值，同时缓存供晚加入 Getter 使用 |
+| `vlink::Getter<ValueT>` | `explicit Getter(const std::string& url_str, InitType type = InitType::kWithInit);` | 字段读者 |
+| `Getter::wait_for_value(timeout)` | `bool wait_for_value(std::chrono::milliseconds timeout = Timeout::kDefaultInterval);` | 阻塞直到收到首个值 |
+| `Getter::get()` | `[[nodiscard]] std::optional<ValueT> get() const;` | 非阻塞读取最近一次值；尚未收到值时返回 `nullopt` |
 
-| 文件 | 说明 |
-|------|------|
-| `config_types.h` | 共享 POD 配置结构体 `SensorConfig` 和 URL 常量 |
-| `config_setter.cc` | 主程序：Setter 端，写入配置值 |
-| `config_getter.cc` | 主程序：Getter 端，读取配置值 |
-| `CMakeLists.txt` | 构建两个可执行文件 |
+## 代码导读
 
-## 3. 字段模型 vs 事件模型
+### 1. 字段值类型
 
-| 特性 | 字段模型 (Setter/Getter) | 事件模型 (Publisher/Subscriber) |
-|------|--------------------------|--------------------------------|
-| 值保留 | 保留最新值，迟到的 Getter 可读取 | 不保留，Subscriber 只收实时消息 |
-| 读取方式 | `get()` 轮询 / `wait_for_value()` 阻塞 / `listen()` 回调 | 仅 `listen()` 回调 |
-| 典型场景 | 配置参数、车速、档位等**状态量** | 事件通知、日志流等**事件流** |
-| 迟到连接 | Setter 自动同步最新值给新 Getter | 无同步机制 |
-
-## 4. POD 类型定义
+`SensorConfig` 描述一个传感器的运行配置：
 
 ```cpp
-// config_types.h
 struct SensorConfig {
-  int sample_rate_hz;       // Sampling rate in Hz
-  int filter_window_size;   // Moving-average filter window
-  float threshold_low;      // Low alarm threshold (Celsius)
-  float threshold_high;     // High alarm threshold (Celsius)
-  int64_t updated_at_ms;    // Timestamp of last update
+  int sample_rate_hz;
+  float threshold;
 };
 ```
 
-**重要**：POD 结构体不能使用默认成员初始化器（如 `int x{0};`），必须使用 `int x;` 的形式。VLink 使用 `kStandardType` 序列化器，通过 `memcpy` 直接传输 POD 数据。
+POD 结构体走 `kStandardType` 序列化路径，无需任何额外编排。
 
-## 5. 关键代码逐步解析
+### 2. Setter 写入初值
 
-### 5.1 config_setter.cc -- 写入端
-
-#### 5.1.1 创建 Setter 并设置初始值
+注意本示例没有 `MessageLoop`。Setter 不需要消息循环——它只负责写。`set()` 会立即把值序列化、发送，并缓存起来以便后续晚加入的 Getter 同步。
 
 ```cpp
-Setter<example::SensorConfig> setter(example::kConfigUrl);
-
-example::SensorConfig initial_cfg{};
-initial_cfg.sample_rate_hz = 100;
-initial_cfg.filter_window_size = 5;
-initial_cfg.threshold_low = 15.0f;
-initial_cfg.threshold_high = 35.0f;
-initial_cfg.updated_at_ms = now_ms();
-
-setter.set(initial_cfg);
+Setter<SensorConfig> setter(kUrl);
+setter.set({100, 25.0F});
+VLOG_I("[setter] rate=100 threshold=25.0");
 ```
 
-`set()` 做了两件事：
-1. 将值缓存到 Setter 内部的 `std::optional<ValueT>` 中
-2. 序列化后通过传输层发送给所有已连接的 Getter
+### 3. 晚加入的 Getter 通过 `wait_for_value` 拿到缓存
 
-当新的 Getter 连接时，Setter 会通过内部 `sync()` 回调**自动重发**缓存的值，这就是迟到连接（Late Join）的实现原理。
-
-#### 5.1.2 模拟周期性配置更新
+`Getter` 构造时与 Setter 同一 URL。`wait_for_value(1000ms)` 阻塞当前线程，最多等 1 秒。`intra://` 上传输层会立即把 Setter 的缓存值同步过来，所以这里几乎立即返回。
 
 ```cpp
-for (const auto& u : updates) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    example::SensorConfig cfg{};
-    cfg.sample_rate_hz = u.sample_rate_hz;
-    // ...
-    setter.set(cfg);
+Getter<SensorConfig> getter(kUrl);
+getter.wait_for_value(1000ms);
+
+auto value = getter.get();
+if (value.has_value()) {
+  VLOG_I("[getter] rate=", value->sample_rate_hz, " threshold=", value->threshold);
+} else {
+  VLOG_W("[getter] no value");
 }
 ```
 
-每次调用 `set()` 都会触发已连接的 Getter 的 `listen()` 回调。
+`get()` 返回 `std::optional<SensorConfig>`，没有收到任何值时为 `nullopt`。
 
-### 5.2 config_getter.cc -- 读取端
+### 4. Setter 更新值，Getter 再次读取
 
-#### 5.2.1 三种读取模式
+短暂 `sleep` 用于让传输层完成异步派发；之后 `get()` 应返回新值。
 
-**模式一：阻塞等待 (wait_for_value)**
 ```cpp
-if (getter.wait_for_value(std::chrono::milliseconds(3000))) {
-    // 有值了
+setter.set({500, 30.5F});
+std::this_thread::sleep_for(50ms);
+
+value = getter.get();
+if (value.has_value()) {
+  VLOG_I("[getter] rate=", value->sample_rate_hz, " threshold=", value->threshold);
 }
 ```
-阻塞调用线程，直到收到第一个值或超时。内部使用 `vlink::ConditionVariable` 实现。这是最适合初始化阶段的读取方式。
 
-**模式二：轮询 (get)**
-```cpp
-auto current = getter.get();  // 返回 std::optional<SensorConfig>
-if (current.has_value()) {
-    // 使用 current.value()
-}
-```
-非阻塞调用，返回最近一次缓存的值。如果还没收到任何值，返回 `std::nullopt`。
-
-**方式三：回调通知 (listen)**
-```cpp
-getter.listen([](const example::SensorConfig& cfg) {
-    // 每次 Setter 调用 set() 都会触发
-});
-```
-注册回调函数，每次值变化时自动触发。如果 Getter 通过 `attach()` 绑定了 MessageLoop，回调在 loop 线程上执行。
-
-### 5.3 迟到连接演示
-
-本示例中，Setter **先于** Getter 设置了初始值。当 Getter 创建并连接后，Setter 自动同步最新值，所以 `wait_for_value()` 几乎立刻返回成功。这是字段模型与事件模型的核心区别。
-
-## 6. intra:// 传输限制
-
-使用 `intra://` 传输时，Setter 和 Getter 必须在**同一进程**内。本示例的两个 `main()` 函数分别独立编译，如果使用 `intra://` 传输，它们无法跨进程通信。
-
-实际部署中应切换到跨进程传输：
-
-```cpp
-// 共享内存（同一台机器）
-static const char* const kConfigUrl = "shm://sensor/config";
-
-// DDS（跨网络）
-static const char* const kConfigUrl = "dds://sensor/config";
-```
-
-在同一进程内测试时，可以在一个 main() 中同时创建 Setter 和 Getter，或者直接使用 `intra://`。
-
-## 7. 编译与运行
+## 运行
 
 ```bash
-# 编译两个目标
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_config_setter example_config_getter
-
-# 运行 Setter（先启动）
-VLINK_CONFIG_URL=dds://sensor/config ./build/output/bin/example_config_setter
-
-# 在另一个终端运行 Getter
-VLINK_CONFIG_URL=dds://sensor/config ./build/output/bin/example_config_getter
+./build/output/bin/example_hello_field
 ```
 
-> **注意**：源码默认 URL 是 `intra://`，仅适合同一进程内联演示。两个独立可执行文件跨进程运行时，需要像上面一样用 `VLINK_CONFIG_URL` 切换到 `dds://`、`shm://` 等跨进程传输。
+预期输出：
 
-## 8. 预期输出
-
-### 8.1 config_setter 输出
 ```
-[I] === VLink Config Setter ===
-[I] [Setter] Created on dds://sensor/config
-[I] [Setter] Initial config: rate=100Hz filter=5 low=15 high=35
-[I] [Setter] Updated config: rate=200Hz filter=10 low=10 high=40
-[I] [Setter] Updated config: rate=100Hz filter=3 low=18 high=30
-[I] [Setter] Updated config: rate=500Hz filter=8 low=12 high=38
-[I] [Setter] Updated config: rate=50Hz filter=15 low=20 high=28
-[I] === Config Setter complete ===
+[setter] rate=100 threshold=25.0
+[getter] rate=100 threshold=25
+[getter] rate=500 threshold=30.5
 ```
 
-### 8.2 config_getter 输出
-```
-[I] === VLink Config Getter ===
-[I] [Getter] Created on dds://sensor/config
-[I] [Getter] Waiting for initial value...
-[I] [Getter] Change #1:
-[I]   rate=100Hz filter=5 low=15 high=35 ts=...
-[I] [Getter] wait_for_value() succeeded
-[I] [Getter] Current config: rate=100Hz filter=5 low=15 high=35 ts=...
-[I] [Getter] Listening for configuration changes...
-[I] [Getter] Change #2:
-[I]   rate=200Hz filter=10 low=10 high=40 ts=...
-...
-[I] [Getter] Final config: rate=50Hz filter=15 low=20 high=28 ts=...
-[I] [Getter] Total changes received: 5
-[I] === Config Getter complete ===
-```
+无需任何环境变量。
 
-## 9. 典型应用场景
+## 常见陷阱
 
-- **传感器配置同步**：管理程序写入配置，多个采集节点读取最新参数
-- **车辆状态监控**：车速、档位、电池电量等持续变化的状态量
-- **系统参数热更新**：运行时修改系统参数，所有消费者自动收到更新
-- **设备注册表**：设备上线时写入自身信息，监控系统随时查询
+- **`get()` 在第一次 `set()` 之前是 `nullopt`**。即使后续传输层立刻送达，`Getter` 必须等回调跑完才会更新内部缓存——建议读之前先 `wait_for_value()`。
+- **`wait_for_value(0)` 会被记 warning 并按无限等待处理**。务必传一个正数毫秒。
+- **`set()` 不阻塞**。它是写入并立即返回；如果需要确认对端是否收到，应使用 Event 模型 + 应用层 ACK。
+- **本示例没有 `listen()` 回调**。若希望每次 `set()` 都被通知，应改用 `Getter::listen(cb)`，详见 `../../communication/field_basic/`。
+- **`Setter` / `Getter` 析构时机**：`Getter` 析构会自动调用 `deinit()` 排空在途回调，但用户对象（lambda 捕获）应保证生命周期覆盖整个回调期间。
 
-## 10. 扩展思考
+## 设计要点
 
-- **变化过滤**：调用 `getter.set_change_reporting(true)` 后，只有值真正变化时才触发 listen 回调，避免处理重复值
-- **多 Getter**：可以创建多个 Getter 读取同一字段，所有 Getter 都能获取最新值
-- **跨进程**：将 URL 改为 `shm://` 或 `dds://`，即可实现真正的跨进程配置同步
+- **状态最近值缓存**：`Setter::set()` 内部使用 `std::optional<ValueT>` + `std::mutex` 维护最近值，传输层有 `sync()` 钩子在新 Getter 接入时自动回放最新值。
+- **零消息循环开销**：本示例完全不使用 `MessageLoop`，主线程直接 `set` + `get`，适合简单状态查询场景。
+- **跨传输**：与 Event/Method 模型一样，仅改 URL 协议前缀即可换后端（`dds://`、`ddsc://`、`shm://` 等）。`dds://` 上 Field 模型对应 DDS 的 `TransientLocal` 配置。
+- **与 Subscriber 共享底层**：`Getter` 实际上是 `Subscriber` 的角色变形（`mark_as_getter()`），享受同样的传输 API 与序列化路径。
 
-## 11. 相关文档
+## 参考
 
-详细原理参见 [doc/05-field-model.md](../../../doc/05-field-model.md)。
+- `../../communication/field_basic/` — `listen()` 回调形式，演示每次值变更的回调触发。
+- `../../communication/field_advanced/` — 变化上报（`set_change_reporting`）、延迟统计、多 Getter 扇出。
+- `vlink/include/vlink/setter.h` — `Setter<T>` 完整 API 与 Field/Event 模型对比表。
+- `vlink/include/vlink/getter.h` — `Getter<T>` 完整 API。
+- 顶层 `doc/05-field-model.md` — 字段模型规范。

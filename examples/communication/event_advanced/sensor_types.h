@@ -23,9 +23,10 @@
 
 #pragma once
 
-/// POD sensor reading for the event_advanced example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
+// Sample payload for event_advanced. POD, "Standard" serializer (raw memcpy).
+// Kept intentionally tiny so the fan-out / latency demo focuses on framework
+// behavior rather than serialization cost.
 struct SensorReading {
-  int sensor_id;  // Unique identifier for the sensor
-  double value;   // Measured value from the sensor
+  int sensor_id;
+  double value;
 };

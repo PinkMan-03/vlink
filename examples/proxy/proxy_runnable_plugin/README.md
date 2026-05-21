@@ -1,70 +1,147 @@
-# Proxy Runnable 插件开发示例
+# proxy_runnable_plugin — ProxyServer 加载 RunablePlugin 的集成模式
 
-![ProxyServer Runnable Plugin](images/proxy-runnable-plugin.png)
+本示例演示如何把 `RunablePluginInterface` 插件交给 `ProxyServer` 统一管理：ProxyServer 在启动时自动 load、async_run、on_init；停止时自动 on_deinit、quit、unload。同时示例也演示了独立 load（不通过 ProxyServer）的对照路径。
 
-## 1. 概述
+读完本示例你能掌握：
 
-本示例展示如何为 ProxyServer 开发 `RunablePluginInterface` 插件。这类插件拥有独立的事件循环，可以订阅主题、创建定时器，并由 ProxyServer 自动管理生命周期。
+- ProxyServer 怎么管理一组 RunablePlugin 的 lifecycle。
+- 怎么把自己的 RunablePlugin 接入 ProxyServer（写法约定 + Config 字段）。
+- `VLINK_PLUGIN_DIR` 环境变量在 ProxyServer 集成中的角色。
 
-## 2. 开发流程
+## 背景与适用场景
 
-### 2.1 实现接口
+适用：
 
-```cpp
-class AnalysisPlugin : public vlink::RunablePluginInterface {
-public:
-  void on_init() override {
-    // 创建订阅者和定时器
-    sub_ = std::make_unique<Subscriber<Bytes>>("dds://topic");
-    sub_->attach(this);  // 绑定到插件自身的 MessageLoop
-    sub_->listen([this](const Bytes& d) { process(d); });
-  }
+- ProxyServer 既要做远程观察，又要在 server 进程内挂几个常驻业务模块。
+- 想用 Server 的进程作为"插件 host"，把插件 lifecycle 与 server 的 start/stop 绑定。
+- 自家的"插件总线"架构：Server 是入口，插件实现各自业务。
 
-  void on_deinit() override {
-    sub_.reset();
-  }
-};
+不适合：
 
-VLINK_PLUGIN_DECLARE(AnalysisPlugin, 1, 0)
-```
+- 简单的 standalone 插件（直接用 `vlink::Plugin::load`，见 `../../plugin/plugin_runnable/`）。
+- 不需要 Proxy 远程观察能力。
 
-### 2.2 编译为共享库
+## 插件要求
 
-```cmake
-add_library(analysis_plugin SHARED analysis_plugin.cpp)
-target_link_libraries(analysis_plugin vlink::all)
-```
+RunablePlugin 要满足：
 
-### 2.3 配置 ProxyServer 加载
+1. 继承 `vlink::RunablePluginInterface`。
+2. 类内：`VLINK_PLUGIN_REGISTER(vlink::RunablePluginInterface)`。
+3. 覆写 `on_init()` / `on_deinit()`。
+4. 文件末尾：`VLINK_PLUGIN_DECLARE(ClassName, Major, Minor)`。
+
+参考实现：`../../plugin/plugin_runnable/monitor_plugin.cc`，编译为 `libmonitor_plugin.so`。
+
+## ProxyServer 集成
 
 ```cpp
-ProxyServer::Config cfg;
-cfg.runnable_list = {"analysis_plugin"};   // 只填插件名，不带前缀和扩展名
-cfg.runnable_version_major = 1;            // 必填，与插件 VLINK_PLUGIN_DECLARE 中的 major 匹配
-cfg.runnable_version_minor = 0;            // 必填，与插件 VLINK_PLUGIN_DECLARE 中的 minor 匹配
-cfg.runnable_prefix = "";                  // 可选，库名前缀（默认空）
+vlink::ProxyServer::Config cfg;
+cfg.runnable_list           = {"monitor_plugin", "analysis_plugin"};   // 库名，不带前缀后缀
+cfg.runnable_version_major  = 1;
+cfg.runnable_version_minor  = 0;
+cfg.runnable_prefix         = "";       // 可选库名前缀，默认空
 ```
 
-## 3. ProxyServer 自动管理生命周期
+Server 启动后会对每个插件：
 
-1. 构造时加载插件
-2. `async_run()` 时启动插件事件循环
-3. 调用 `on_init()` 初始化
-4. 运行期间插件处理事件
-5. 停止时调用 `on_deinit()` + `quit()` + `wait_for_quit()`
+```
+load → async_run → on_init → ... → on_deinit → quit → wait_for_quit → unload
+```
 
-## 4. 编译与运行
+## 核心 API
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ProxyServer::Config::runnable_list` | `std::vector<std::string>` | 要加载的插件库名（不带 `lib` / `.so`） |
+| `ProxyServer::Config::runnable_version_major` / `_minor` | `uint16_t` | 期望版本 |
+| `ProxyServer::Config::runnable_prefix` | `std::string` | 可选前缀（一些项目用统一前缀） |
+
+## 代码导读
+
+### 1. 通过 ProxyServer 加载
+
+```cpp
+vlink::ProxyServer::Config cfg;
+cfg.dds_impl = "dds";
+cfg.domain_id = 0;
+cfg.runnable_list = {"monitor_plugin"};
+cfg.runnable_version_major = 1;
+cfg.runnable_version_minor = 0;
+
+vlink::ProxyServer server(cfg);
+if (!server.start()) {
+  VLOG_E("failed to start server (monitor_plugin not found?)");
+  return 1;
+}
+
+// 主程序做事
+std::this_thread::sleep_for(3s);
+
+server.stop();   // 自动 deinit 所有插件
+```
+
+### 2. 独立 load（对照）
+
+```cpp
+vlink::Plugin plugin;
+auto p = plugin.load<vlink::RunablePluginInterface>("monitor_plugin", 1, 0);
+if (p) {
+  p->async_run();
+  p->on_init();
+  std::this_thread::sleep_for(3s);
+  p->on_deinit();
+  p->quit();
+  p->wait_for_quit();
+}
+```
+
+这条路径上插件 lifecycle 由调用方手动管理；ProxyServer 集成则统一管理。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_proxy_runnable_plugin
 ./build/output/bin/example_proxy_runnable_plugin
 ```
 
-## 5. 最佳实践
+如果 `libmonitor_plugin.so` 不在 search path：
 
-1. 使用插件的 MessageLoop（`this`）绑定所有回调
-2. 在 `on_init()` 创建资源，在 `on_deinit()` 释放
-3. 不要在 `on_init()` / `on_deinit()` 中阻塞
-4. 使用 `VLINK_PLUGIN_DIR` 设置插件搜索路径
-5. 匹配版本号确保 ABI 兼容
+```bash
+VLINK_PLUGIN_DIR=/work/vlink/build/output/lib ./build/output/bin/example_proxy_runnable_plugin
+```
+
+预期输出（节选）：
+
+```
+ProxyServer started with 1 runnable plugins
+tick #1
+tick #2
+...
+ProxyServer stopping, deiniting plugins
+```
+
+## 最佳实践
+
+1. **所有回调绑到插件自己的 loop**：Timer / Subscriber 都用 `this` 作为 loop 指针。
+2. **on_init 不阻塞**：长任务用 `post_task` 异步派到 loop。
+3. **on_deinit 释放所有资源**：Timer.stop、Subscriber/Server 析构、线程 join。
+4. **VLINK_PLUGIN_DIR 控制搜索路径**：CI 部署时显式指定，避免依赖系统默认路径。
+5. **版本匹配**：runnable_version_major/minor 与插件 `VLINK_PLUGIN_DECLARE` 必须一致。
+
+## 设计要点
+
+- ProxyServer 持有插件的 shared_ptr<RunablePluginInterface>；引用计数 → 0 时 unload。
+- 多个 runnable 插件按 list 顺序顺序 load / init；deinit 是逆序。
+- 如果某个插件 load 失败（version 不匹配 / .so 不存在），`server.start()` 返回 false。
+
+## 配图
+
+![ProxyServer runnable plugin](./images/proxy-runnable-plugin.png)
+
+图中展示 ProxyServer 与多个 RunablePlugin 之间的 lifecycle 协作。
+
+## 参考
+
+- `../../plugin/plugin_runnable/` — 构建 monitor_plugin.so
+- `../proxy_server_basic/` — ProxyServer 基础
+- 顶层 `doc/16-proxy.md` — Proxy 章节
+- 顶层 `doc/19-extensions.md` — 插件系统章节

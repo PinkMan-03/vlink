@@ -32,287 +32,138 @@
 #include <limits>
 #include <ostream>
 #include <string>
+#include <string_view>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - singleton
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-TerminalStream - singleton") {
-  TEST_CASE("get() returns reference to same instance") {
+TEST_SUITE("extension-TerminalStream") {
+  TEST_CASE("get returns the same singleton reference on every call") {
     TerminalStream& a = TerminalStream::get();
     TerminalStream& b = TerminalStream::get();
-    CHECK(&a == &b);
+    CHECK_EQ(&a, &b);
   }
 
-  TEST_CASE("kDefaultBufferSize is 1 MiB") { CHECK(TerminalStream::kDefaultBufferSize == 1024u * 1024u * 1u); }
-}
+  TEST_CASE("kDefaultBufferSize equals 1 MiB") { CHECK_EQ(TerminalStream::kDefaultBufferSize, 1024u * 1024u * 1u); }
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - init / TTY detection
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-TerminalStream - init") {
-  TEST_CASE("init() is idempotent") {
+  TEST_CASE("init is idempotent and sets is_initialized") {
     TerminalStream& ts = TerminalStream::get();
-
-    // First call sets is_initialized
     ts.init();
-    CHECK(ts.is_initialized() == true);
-
-    // Second call must not crash or reset state
+    CHECK(ts.is_initialized());
     ts.init();
-    CHECK(ts.is_initialized() == true);
+    CHECK(ts.is_initialized());
   }
 
-  TEST_CASE("is_initialized() returns true after init()") {
+  TEST_CASE("is_tty is accessible after init without crash") {
     TerminalStream& ts = TerminalStream::get();
     ts.init();
-    CHECK(ts.is_initialized() == true);
-  }
-
-  TEST_CASE("is_tty() is accessible after init()") {
-    TerminalStream& ts = TerminalStream::get();
-    ts.init();
-
-    // In a test environment stdout is typically not a TTY.
-    // We just check that the call does not crash.
     [[maybe_unused]] bool tty = ts.is_tty();
-    CHECK(true);  // just ensure no exception/crash
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - flush
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-TerminalStream - flush") {
-  TEST_CASE("flush() does not crash on empty buffer") {
+  TEST_CASE("flush does not crash on empty buffer") {
     TerminalStream& ts = TerminalStream::get();
     ts.flush();
-    CHECK(true);
   }
 
-  TEST_CASE("flush() does not crash after writing content") {
+  TEST_CASE("flush does not crash after writing content") {
     TerminalStream& ts = TerminalStream::get();
     ts << "test flush";
     ts.flush();
-    CHECK(true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - operator<< basic types
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-TerminalStream - operator<< basic types") {
-  TEST_CASE("operator<< char does not crash") {
-    TerminalStream& ts = TerminalStream::get();
-    ts << 'X';
-    CHECK(true);
   }
 
-  TEST_CASE("operator<< const char* does not crash") {
-    TerminalStream& ts = TerminalStream::get();
-    ts << "hello terminal";
-    CHECK(true);
-  }
+  TEST_CASE("operator<< char writes without crash") { TerminalStream::get() << 'X'; }
 
-  TEST_CASE("operator<< null const char* is no-op") {
-    TerminalStream& ts = TerminalStream::get();
+  TEST_CASE("operator<< null const char pointer is a no-op") {
     const char* null_str = nullptr;
-    ts << null_str;
-    CHECK(true);
+    TerminalStream::get() << null_str;
   }
 
-  TEST_CASE("operator<< std::string does not crash") {
+  TEST_CASE("operator<< string types write without crash") {
     TerminalStream& ts = TerminalStream::get();
-    std::string s = "std string test";
-    ts << s;
-    CHECK(true);
+    SUBCASE("const char*") { ts << "hello terminal"; }
+    SUBCASE("std::string") {
+      const std::string s = "std string";
+      ts << s;
+    }
+    SUBCASE("std::string_view") {
+      const std::string_view sv = "string view";
+      ts << sv;
+    }
   }
 
-  TEST_CASE("operator<< std::string_view does not crash") {
-    TerminalStream& ts = TerminalStream::get();
-    std::string_view sv = "string view test";
-    ts << sv;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< bool (true) does not crash") {
+  TEST_CASE("operator<< bool writes true and false without crash") {
     TerminalStream& ts = TerminalStream::get();
     ts << true;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< bool (false) does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << false;
-    CHECK(true);
   }
 
-  TEST_CASE("operator<< int does not crash") {
+  TEST_CASE("operator<< integer types write without crash") {
     TerminalStream& ts = TerminalStream::get();
     ts << 42;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< negative int does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << -999;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< zero does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << 0;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< unsigned int does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << 100u;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< long does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << 123456L;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< long long does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << 9876543210LL;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< unsigned long long does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << 18446744073709551615ULL;
-    CHECK(true);
   }
 
-  TEST_CASE("operator<< float does not crash") {
+  TEST_CASE("operator<< floating-point types write without crash") {
     TerminalStream& ts = TerminalStream::get();
     ts << 3.14f;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< double does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << 2.718281828;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< long double does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << 1.41421356237L;
-    CHECK(true);
   }
 
-  TEST_CASE("operator<< void pointer does not crash") {
+  TEST_CASE("operator<< pointer writes without crash") {
     TerminalStream& ts = TerminalStream::get();
     void* ptr = &ts;
     ts << ptr;
-    CHECK(true);
-  }
-
-  TEST_CASE("operator<< nullptr void pointer does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     const void* null_ptr = nullptr;
     ts << null_ptr;
-    CHECK(true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - manipulators
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-TerminalStream - manipulators") {
-  TEST_CASE("endl manipulator flushes and appends newline") {
-    TerminalStream& ts = TerminalStream::get();
-    ts << "before endl" << TerminalStream::endl;
-    CHECK(true);
   }
 
-  TEST_CASE("flush_manip manipulator flushes buffer") {
-    TerminalStream& ts = TerminalStream::get();
-    ts << "before flush_manip" << TerminalStream::flush_manip;
-    CHECK(true);
+  TEST_CASE("endl manipulator appends newline and flushes") {
+    TerminalStream::get() << "before endl" << TerminalStream::endl;
   }
 
-  TEST_CASE("std::endl is accepted as manipulator") {
-    TerminalStream& ts = TerminalStream::get();
-    ts << "before std::endl" << std::endl;
-    CHECK(true);
+  TEST_CASE("flush_manip manipulator flushes without newline") {
+    TerminalStream::get() << "before flush_manip" << TerminalStream::flush_manip;
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - write_raw
-// ---------------------------------------------------------------------------
+  TEST_CASE("std endl is accepted as manipulator alias") { TerminalStream::get() << "before std::endl" << std::endl; }
 
-TEST_SUITE("extension-TerminalStream - write_raw") {
-  TEST_CASE("write_raw with valid pointer does not crash") {
+  TEST_CASE("write_raw with non-zero length writes without crash") {
     TerminalStream& ts = TerminalStream::get();
     const char data[] = "raw write test";
     ts.write_raw(data, sizeof(data) - 1);
-    CHECK(true);
   }
 
-  TEST_CASE("write_raw with zero length does not crash") {
+  TEST_CASE("write_raw with zero length is a no-op") {
     TerminalStream& ts = TerminalStream::get();
     const char data[] = "ignored";
     ts.write_raw(data, 0);
-    CHECK(true);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - chaining
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-TerminalStream - chaining") {
   TEST_CASE("operator<< returns self for chaining") {
     TerminalStream& ts = TerminalStream::get();
     TerminalStream& ref = (ts << "a" << 1 << ' ' << 3.14f);
-    CHECK(&ref == &ts);
+    CHECK_EQ(&ref, &ts);
   }
 
-  TEST_CASE("VLINK_TERM_OUT macro works") {
+  TEST_CASE("VLINK_TERM_OUT macro expands to the singleton") {
     VLINK_TERM_OUT << "VLINK_TERM_OUT test" << TerminalStream::endl;
-    CHECK(true);
+    CHECK_EQ(&VLINK_TERM_OUT, &TerminalStream::get());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: TerminalStream - MIN INT handling
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-TerminalStream - integer edge cases") {
-  TEST_CASE("INT_MIN does not crash") {
+  TEST_CASE("integer boundary values write without crash or UB") {
     TerminalStream& ts = TerminalStream::get();
     ts << std::numeric_limits<int>::min() << TerminalStream::endl;
-    CHECK(true);
-  }
-
-  TEST_CASE("INT_MAX does not crash") {
-    TerminalStream& ts = TerminalStream::get();
     ts << std::numeric_limits<int>::max() << TerminalStream::endl;
-    CHECK(true);
-  }
-
-  TEST_CASE("LLONG_MIN does not crash") {
-    TerminalStream& ts = TerminalStream::get();
-    ts << std::numeric_limits<long long>::min() << TerminalStream::endl;  // NOLINT(runtime/int, google-runtime-int)
-    CHECK(true);
+    ts << std::numeric_limits<long long>::min() << TerminalStream::endl;  // NOLINT(runtime/int,google-runtime-int)
+    ts << std::numeric_limits<long long>::max() << TerminalStream::endl;  // NOLINT(runtime/int,google-runtime-int)
   }
 }
 
-#endif
+#endif  // __unix__ && !__CYGWIN__
 
 // NOLINTEND

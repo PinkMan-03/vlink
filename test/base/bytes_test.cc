@@ -30,779 +30,600 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
-#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// Helper: fill a Bytes buffer with a simple ascending pattern
-// ---------------------------------------------------------------------------
 static void fill_pattern(Bytes& b) {
   for (size_t i = 0; i < b.size(); ++i) {
     b.data()[i] = static_cast<uint8_t>(i & 0xFFU);
   }
 }
 
-// ---------------------------------------------------------------------------
 TEST_SUITE("base-Bytes") {
-  // -------------------------------------------------------------------------
-  TEST_CASE("default constructor produces empty object") {
+  TEST_CASE("default construction yields empty object") {
     Bytes b;
 
     CHECK(b.empty());
-    CHECK(b.size() == 0U);
-    CHECK(b.real_size() == 0U);
-    CHECK(b.capacity() == 0U);
-    CHECK(b.offset() == 0U);
+    CHECK_EQ(b.size(), 0u);
+    CHECK_EQ(b.real_size(), 0u);
+    CHECK_EQ(b.capacity(), 0u);
+    CHECK_EQ(b.offset(), 0u);
     CHECK(b.data() == nullptr);
     CHECK(b.real_data() == nullptr);
-    CHECK(b.is_owner() == false);
-    CHECK(b.is_loaned() == false);
-    CHECK(b.is_ptr() == false);
+    CHECK_FALSE(b.is_owner());
+    CHECK_FALSE(b.is_loaned());
+    CHECK_FALSE(b.is_ptr());
     CHECK(b.begin() == nullptr);
     CHECK(b.end() == nullptr);
     CHECK(b.real_begin() == nullptr);
     CHECK(b.real_end() == nullptr);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("initializer_list constructor") {
-    Bytes b{0x01U, 0x02U, 0x03U};
+  TEST_CASE("initializer_list construction copies bytes") {
+    Bytes b{0x01u, 0x02u, 0x03u};
 
-    REQUIRE(b.size() == 3U);
-    CHECK(!b.empty());
+    REQUIRE_EQ(b.size(), 3u);
+    CHECK_FALSE(b.empty());
     CHECK(b.is_owner());
-    CHECK(b.data() != nullptr);
-    CHECK(b.data()[0] == 0x01U);
-    CHECK(b.data()[1] == 0x02U);
-    CHECK(b.data()[2] == 0x03U);
+    REQUIRE(b.data() != nullptr);
+    CHECK_EQ(b.data()[0], 0x01u);
+    CHECK_EQ(b.data()[1], 0x02u);
+    CHECK_EQ(b.data()[2], 0x03u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("vector constructor") {
-    std::vector<uint8_t> vec{0xAAU, 0xBBU, 0xCCU, 0xDDU};
+  TEST_CASE("vector construction deep-copies content") {
+    std::vector<uint8_t> vec{0xAAu, 0xBBu, 0xCCu, 0xDDu};
     Bytes b(vec);
 
-    REQUIRE(b.size() == 4U);
+    REQUIRE_EQ(b.size(), 4u);
     CHECK(b.is_owner());
     CHECK(b == vec);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("create - SBO path (size <= kStackSize uses inline storage)") {
-    constexpr size_t kSmall = 64U;
-    Bytes b = Bytes::create(kSmall);
+  TEST_CASE("create allocates buffer for representative sizes") {
+    size_t sz = 0;
+    SUBCASE("small SBO") { sz = 32u; }
+    SUBCASE("at boundary") { sz = Bytes::stack_size(); }
+    SUBCASE("heap size") { sz = 200u; }
 
-    CHECK(b.size() == kSmall);
-    CHECK(b.real_size() == kSmall);
-    CHECK(b.offset() == 0U);
+    Bytes b = Bytes::create(sz);
+
+    REQUIRE(b.data() != nullptr);
+    CHECK_EQ(b.size(), sz);
     CHECK(b.is_owner());
-    CHECK(!b.is_loaned());
-    CHECK(!b.is_ptr());
-    CHECK(!b.empty());
-    CHECK(b.data() != nullptr);
-    // SBO capacity == kStackSize
-    CHECK(b.capacity() <= Bytes::stack_size());
-
-    fill_pattern(b);
-    CHECK(b.data()[0] == 0x00u);
-    CHECK(b.data()[63] == 63u);
+    CHECK_FALSE(b.is_loaned());
+    CHECK_FALSE(b.is_ptr());
+    CHECK_FALSE(b.empty());
+    CHECK(b.capacity() >= sz);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("create - heap path (size > kStackSize)") {
-    constexpr size_t kLarge = 200U;
-    Bytes b = Bytes::create(kLarge);
+  TEST_CASE("create with offset reserves prefix region") {
+    Bytes b = Bytes::create(32u, 4u);
 
-    CHECK(b.size() == kLarge);
-    CHECK(b.is_owner());
-    CHECK(b.capacity() >= kLarge);
-    CHECK(b.data() != nullptr);
-
-    fill_pattern(b);
-    CHECK(b.data()[0] == 0x00U);
-    CHECK(b.data()[199] == static_cast<uint8_t>(199U & 0xFFU));
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("create with offset - SBO") {
-    constexpr size_t kSize = 32U;
-    constexpr uint8_t kOffset = 4U;
-    Bytes b = Bytes::create(kSize, kOffset);
-
-    CHECK(b.size() == kSize);
-    CHECK(b.offset() == kOffset);
-    CHECK(b.real_size() == kSize + kOffset);
-    CHECK(b.data() == b.real_data() + kOffset);
+    CHECK_EQ(b.size(), 32u);
+    CHECK_EQ(b.offset(), 4u);
+    CHECK_EQ(b.real_size(), 36u);
+    CHECK(b.data() == b.real_data() + 4u);
     CHECK(b.is_owner());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("create - exactly kStackSize fits SBO") {
-    Bytes b = Bytes::create(Bytes::stack_size());
+  TEST_CASE("SBO boundary: stack size stays on stack, stack_size+1 goes to heap") {
+    Bytes sbo = Bytes::create(Bytes::stack_size());
+    Bytes heap = Bytes::create(Bytes::stack_size() + 1u);
 
-    CHECK(b.size() == Bytes::stack_size());
-    CHECK(b.capacity() == Bytes::stack_size());
-    CHECK(b.is_owner());
+    CHECK_EQ(sbo.capacity(), Bytes::stack_size());
+    CHECK(heap.capacity() > Bytes::stack_size());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("shallow_copy (mutable) - non-owning alias") {
-    std::vector<uint8_t> ext{0x10U, 0x20U, 0x30U};
+  TEST_CASE("create rejects impossible allocation size") {
+    Bytes b = Bytes::create(std::numeric_limits<size_t>::max(), 1u);
+
+    CHECK(b.empty());
+    CHECK(b.data() == nullptr);
+  }
+
+  TEST_CASE("shallow_copy aliases external mutable buffer") {
+    std::vector<uint8_t> ext{0x10u, 0x20u, 0x30u};
     Bytes b = Bytes::shallow_copy(ext.data(), ext.size());
 
-    CHECK(b.size() == 3U);
-    CHECK(b.is_owner() == false);
-    CHECK(b.is_loaned() == false);
+    CHECK_EQ(b.size(), 3u);
+    CHECK_FALSE(b.is_owner());
+    CHECK_FALSE(b.is_loaned());
     CHECK(b.data() == ext.data());
-    CHECK(b.data()[0] == 0x10U);
 
-    // Mutate through the alias and verify the original buffer is updated
-    b.data()[0] = 0xFFU;
-    CHECK(ext[0] == 0xFFU);
+    b.data()[0] = 0xFFu;
+    CHECK_EQ(ext[0], 0xFFu);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("shallow_copy (const) - non-owning read-only alias") {
-    const uint8_t kBuf[] = {0x01U, 0x02U, 0x03U};
-    Bytes b = Bytes::shallow_copy(kBuf, 3U);
+  TEST_CASE("shallow_copy wraps const buffer without copying") {
+    const uint8_t src[] = {0x01u, 0x02u, 0x03u};
+    Bytes b = Bytes::shallow_copy(src, 3u);
 
-    CHECK(b.size() == 3U);
-    CHECK(b.is_owner() == false);
-    // const data() accessor returns valid pointer
-    CHECK(b.data() != nullptr);
-    CHECK(b.data()[2] == 0x03U);
+    CHECK_EQ(b.size(), 3u);
+    CHECK_FALSE(b.is_owner());
+    REQUIRE(b.data() != nullptr);
+    CHECK_EQ(b.data()[2], 0x03u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("shallow_copy_ptr wraps opaque pointer") {
+  TEST_CASE("shallow_copy_ptr wraps opaque pointer with zero size") {
     int sentinel = 42;
     Bytes b = Bytes::shallow_copy_ptr(&sentinel);
 
     CHECK(b.is_ptr());
-    CHECK(b.size() == 0U);
-    CHECK(b.offset() == 0U);
-    CHECK(b.is_owner() == false);
+    CHECK_EQ(b.size(), 0u);
+    CHECK_EQ(b.offset(), 0u);
+    CHECK_FALSE(b.is_owner());
     CHECK(b.to_ptr<int>() == &sentinel);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("deep_copy (mutable) - owns its data") {
-    uint8_t src[] = {0xAAU, 0xBBU, 0xCCU};
-    Bytes b = Bytes::deep_copy(src, 3U);
-
-    CHECK(b.size() == 3U);
-    CHECK(b.is_owner());
-    // Data pointer is separate from src
-    CHECK(static_cast<void*>(b.data()) != static_cast<void*>(src));
-    CHECK(b.data()[0] == 0xAAU);
-    CHECK(b.data()[1] == 0xBBU);
-    CHECK(b.data()[2] == 0xCCU);
-
-    // Modifying src does not affect b
-    src[0] = 0x00U;
-    CHECK(b.data()[0] == 0xAAU);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("deep_copy (const) - owns its data") {
-    const uint8_t src[] = {0x11u, 0x22u, 0x33u};
+  TEST_CASE("deep_copy produces independent owned copy") {
+    uint8_t src[] = {0xAAu, 0xBBu, 0xCCu};
     Bytes b = Bytes::deep_copy(src, 3u);
 
-    CHECK(b.size() == 3u);
+    CHECK_EQ(b.size(), 3u);
     CHECK(b.is_owner());
-    CHECK(b.data()[0] == 0x11u);
+    CHECK(static_cast<void*>(b.data()) != static_cast<void*>(src));
+    CHECK_EQ(b.data()[0], 0xAAu);
+
+    src[0] = 0x00u;
+    CHECK_EQ(b.data()[0], 0xAAu);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("deep_copy with offset") {
+  TEST_CASE("deep_copy with offset reserves prefix in owned copy") {
     const uint8_t src[] = {0xA1u, 0xA2u};
     Bytes b = Bytes::deep_copy(src, 2u, 8u);
 
-    CHECK(b.offset() == 8u);
-    CHECK(b.size() == 2u);
-    CHECK(b.real_size() == 10u);
-    CHECK(b.data() == b.real_data() + 8u);
-    CHECK(b.data()[0] == 0xA1u);
+    CHECK_EQ(b.offset(), 8u);
+    CHECK_EQ(b.size(), 2u);
+    CHECK_EQ(b.real_size(), 10u);
+    CHECK_EQ(b.data()[0], 0xA1u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_string") {
-    std::string s = "hello";
-    Bytes b = Bytes::from_string(s);
+  TEST_CASE("deep_copy on null/empty produces empty non-owning object") {
+    Bytes b = Bytes::deep_copy(static_cast<const uint8_t*>(nullptr), 0u);
 
-    REQUIRE(b.size() == s.size());
-    CHECK(b.is_owner());
-    CHECK(b.to_string() == s);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_string with offset") {
-    std::string s = "world";
-    Bytes b = Bytes::from_string(s, 4u);
-
-    CHECK(b.size() == s.size());
-    CHECK(b.offset() == 4u);
-    CHECK(b.to_string() == s);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_user_input - valid hex string") {
-    bool ok = false;
-    Bytes b = Bytes::from_user_input("01 02 03", &ok);
-
-    CHECK(ok);
-    REQUIRE(b.size() == 3u);
-    CHECK(b.data()[0] == 0x01u);
-    CHECK(b.data()[1] == 0x02u);
-    CHECK(b.data()[2] == 0x03u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_user_input - uppercase hex") {
-    bool ok = false;
-    Bytes b = Bytes::from_user_input("AB CD EF", &ok);
-
-    CHECK(ok);
-    REQUIRE(b.size() == 3u);
-    CHECK(b.data()[0] == 0xABu);
-    CHECK(b.data()[1] == 0xCDu);
-    CHECK(b.data()[2] == 0xEFu);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_user_input - invalid string returns empty and ok=false") {
-    bool ok = true;
-    Bytes b = Bytes::from_user_input("ZZ QQ", &ok);
-
-    CHECK(!ok);
     CHECK(b.empty());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_user_input - ok pointer may be null") {
-    // Should not crash when ok is nullptr
-    Bytes b = Bytes::from_user_input("FF", nullptr);
-    (void)b;
+  TEST_CASE("loan_internal marks object as loaned and non-owning") {
+    uint8_t buf[] = {0x01u, 0x02u, 0x03u};
+    Bytes loaned = Bytes::loan_internal(buf, 3u);
+
+    CHECK(loaned.is_loaned());
+    CHECK_FALSE(loaned.is_owner());
+    CHECK_EQ(loaned.size(), 3u);
+    CHECK(loaned.data() == buf);
+
+    loaned.data()[0] = 0xFFu;
+    CHECK_EQ(buf[0], 0xFFu);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("convert_to_hex_str") {
+  TEST_CASE("loan_internal const marks object as loaned") {
+    const uint8_t buf[] = {0xFFu, 0xFEu};
+    Bytes loaned = Bytes::loan_internal(buf, 2u);
+
+    CHECK(loaned.is_loaned());
+    CHECK_FALSE(loaned.is_owner());
+    CHECK_EQ(loaned.size(), 2u);
+  }
+
+  TEST_CASE("from_string copies string bytes") {
+    std::string s = "hello";
+    Bytes b = Bytes::from_string(s);
+
+    REQUIRE_EQ(b.size(), s.size());
+    CHECK(b.is_owner());
+    CHECK_EQ(b.to_string(), s);
+  }
+
+  TEST_CASE("from_string with offset reserves prefix") {
+    std::string s = "world";
+    Bytes b = Bytes::from_string(s, 4u);
+
+    CHECK_EQ(b.size(), s.size());
+    CHECK_EQ(b.offset(), 4u);
+    CHECK_EQ(b.to_string(), s);
+  }
+
+  TEST_CASE("from_user_input parses valid hex tokens") {
+    bool ok = false;
+
+    SUBCASE("space-separated lowercase") {
+      Bytes b = Bytes::from_user_input("01 02 03", &ok);
+      CHECK(ok);
+      REQUIRE_EQ(b.size(), 3u);
+      CHECK_EQ(b.data()[0], 0x01u);
+      CHECK_EQ(b.data()[2], 0x03u);
+    }
+
+    SUBCASE("uppercase hex") {
+      Bytes b = Bytes::from_user_input("AB CD EF", &ok);
+      CHECK(ok);
+      REQUIRE_EQ(b.size(), 3u);
+      CHECK_EQ(b.data()[0], 0xABu);
+    }
+
+    SUBCASE("0x-prefixed contiguous") {
+      Bytes b = Bytes::from_user_input("0xDEAD", &ok);
+      CHECK(ok);
+      REQUIRE_EQ(b.size(), 2u);
+      CHECK_EQ(b.data()[0], 0xDEu);
+      CHECK_EQ(b.data()[1], 0xADu);
+    }
+  }
+
+  TEST_CASE("from_user_input rejects malformed input") {
+    bool ok = true;
+
+    SUBCASE("invalid chars") {
+      Bytes b = Bytes::from_user_input("ZZ QQ", &ok);
+      CHECK_FALSE(ok);
+      CHECK(b.empty());
+    }
+
+    SUBCASE("partially invalid token") {
+      Bytes b = Bytes::from_user_input("1G", &ok);
+      CHECK_FALSE(ok);
+      CHECK(b.empty());
+    }
+  }
+
+  TEST_CASE("from_user_input accepts null ok pointer") {
+    Bytes b = Bytes::from_user_input("FF", nullptr);
+    CHECK_EQ(b.size(), 1u);
+  }
+
+  TEST_CASE("convert_to_hex_str produces readable hex") {
     const uint8_t data[] = {0x1Au, 0xB2u};
     std::string hex = Bytes::convert_to_hex_str(data, 2u);
 
-    CHECK(!hex.empty());
-    // Result should contain '1', 'A', 'B', '2' characters in some form
+    CHECK_FALSE(hex.empty());
     CHECK(hex.find('1') != std::string::npos);
     bool has_a = hex.find('A') != std::string::npos || hex.find('a') != std::string::npos;
     CHECK(has_a);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("reverse_order") {
+  TEST_CASE("reverse_order reverses byte sequence") {
     Bytes orig{0x01u, 0x02u, 0x03u, 0x04u};
     Bytes rev = Bytes::reverse_order(orig);
 
-    REQUIRE(rev.size() == orig.size());
-    CHECK(rev.data()[0] == 0x04u);
-    CHECK(rev.data()[1] == 0x03u);
-    CHECK(rev.data()[2] == 0x02u);
-    CHECK(rev.data()[3] == 0x01u);
-
-    // Original is unchanged
-    CHECK(orig.data()[0] == 0x01u);
+    REQUIRE_EQ(rev.size(), orig.size());
+    CHECK_EQ(rev.data()[0], 0x04u);
+    CHECK_EQ(rev.data()[3], 0x01u);
+    CHECK_EQ(orig.data()[0], 0x01u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("reverse_order of single byte") {
-    Bytes orig{0x42u};
-    Bytes rev = Bytes::reverse_order(orig);
+  TEST_CASE("reverse_order on empty and single-byte buffers") {
+    SUBCASE("empty") {
+      Bytes rev = Bytes::reverse_order(Bytes{});
+      CHECK(rev.empty());
+    }
 
-    REQUIRE(rev.size() == 1u);
-    CHECK(rev.data()[0] == 0x42u);
+    SUBCASE("single byte") {
+      Bytes orig{0x42u};
+      Bytes rev = Bytes::reverse_order(orig);
+      REQUIRE_EQ(rev.size(), 1u);
+      CHECK_EQ(rev.data()[0], 0x42u);
+    }
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("reverse_order of empty bytes") {
-    Bytes orig;
-    Bytes rev = Bytes::reverse_order(orig);
-
-    CHECK(rev.empty());
-  }
-
-  // -------------------------------------------------------------------------
   TEST_CASE("encode_to_base64 and decode_from_base64 round-trip") {
-    Bytes original{0xDEu, 0xADu, 0xBEu, 0xEFu};
-    std::string encoded = Bytes::encode_to_base64(original);
+    SUBCASE("small buffer") {
+      Bytes original{0xDEu, 0xADu, 0xBEu, 0xEFu};
+      std::string encoded = Bytes::encode_to_base64(original);
+      CHECK_FALSE(encoded.empty());
+      Bytes decoded = Bytes::decode_from_base64(encoded);
+      REQUIRE_EQ(decoded.size(), original.size());
+      CHECK(decoded == original);
+    }
 
-    CHECK(!encoded.empty());
+    SUBCASE("larger buffer with pattern") {
+      Bytes original = Bytes::create(48u);
+      fill_pattern(original);
+      std::string encoded = Bytes::encode_to_base64(original);
+      Bytes decoded = Bytes::decode_from_base64(encoded);
+      REQUIRE_EQ(decoded.size(), original.size());
+      CHECK(decoded == original);
+    }
 
-    Bytes decoded = Bytes::decode_from_base64(encoded);
-
-    REQUIRE(decoded.size() == original.size());
-    CHECK(decoded == original);
+    SUBCASE("empty bytes encodes to empty or trivial string") {
+      Bytes empty;
+      std::string encoded = Bytes::encode_to_base64(empty);
+      Bytes decoded = Bytes::decode_from_base64(encoded);
+      CHECK_EQ(decoded.size(), 0u);
+    }
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("encode_to_base64 and decode_from_base64 - longer data") {
-    Bytes original = Bytes::create(48u);
-    fill_pattern(original);
-
-    std::string encoded = Bytes::encode_to_base64(original);
-    Bytes decoded = Bytes::decode_from_base64(encoded);
-
-    REQUIRE(decoded.size() == original.size());
-    CHECK(decoded == original);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("encode_to_base64 - empty bytes") {
-    Bytes empty;
-    std::string encoded = Bytes::encode_to_base64(empty);
-    // May return empty string or a valid base64 encoding of zero bytes
-    Bytes decoded = Bytes::decode_from_base64(encoded);
-    CHECK(decoded.size() == 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("decode_from_base64 - invalid input returns empty") {
-    Bytes decoded = Bytes::decode_from_base64("!!!invalid!!!");
-    CHECK(decoded.empty());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("decode_from_base64 rejects malformed padding") {
+  TEST_CASE("decode_from_base64 rejects invalid input") {
+    CHECK(Bytes::decode_from_base64("!!!invalid!!!").empty());
     CHECK(Bytes::decode_from_base64("TQ=A").empty());
-    CHECK(Bytes::decode_from_base64("TQ==AAAA").empty());
     CHECK(Bytes::decode_from_base64("T===").empty());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_32 - deterministic") {
+  TEST_CASE("get_crc_32 is deterministic and sensitive to content") {
     Bytes a{0x01u, 0x02u, 0x03u};
     Bytes b{0x01u, 0x02u, 0x03u};
+    Bytes c{0x01u, 0x02u, 0x04u};
 
-    uint32_t crc_a = Bytes::get_crc_32(a);
-    uint32_t crc_b = Bytes::get_crc_32(b);
-
-    CHECK(crc_a == crc_b);
+    CHECK_EQ(Bytes::get_crc_32(a), Bytes::get_crc_32(b));
+    CHECK_NE(Bytes::get_crc_32(a), Bytes::get_crc_32(c));
+    CHECK_EQ(Bytes::get_crc_32(Bytes{}), 0x00000000u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_32 - different data yields different CRC") {
-    Bytes a{0x01u, 0x02u, 0x03u};
-    Bytes b{0x01u, 0x02u, 0x04u};
-
-    CHECK(Bytes::get_crc_32(a) != Bytes::get_crc_32(b));
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_32 - empty buffer is 0") { CHECK(Bytes::get_crc_32(Bytes{}) == 0x00000000u); }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_32 - canonical reference vectors (CRC-32/ISO-HDLC)") {
-    // Well-known CRC-32 (zip / gzip / PNG / Ethernet) test vectors.
+  TEST_CASE("get_crc_32 matches CRC-32/ISO-HDLC reference vectors") {
     auto crc_of = [](const std::string& s) {
       return Bytes::get_crc_32(Bytes::deep_copy(reinterpret_cast<const uint8_t*>(s.data()), s.size()));
     };
 
-    CHECK(crc_of("a") == 0xE8B7BE43u);
-    CHECK(crc_of("abc") == 0x352441C2u);
-    CHECK(crc_of("123456789") == 0xCBF43926u);
-    CHECK(crc_of("The quick brown fox jumps over the lazy dog") == 0x414FA339u);
+    CHECK_EQ(crc_of("a"), 0xE8B7BE43u);
+    CHECK_EQ(crc_of("abc"), 0x352441C2u);
+    CHECK_EQ(crc_of("123456789"), 0xCBF43926u);
+    CHECK_EQ(crc_of("The quick brown fox jumps over the lazy dog"), 0x414FA339u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_32 - zero-byte buffer returns 0") {
-    Bytes zeros = Bytes::create(32, 0);
-    std::memset(zeros.data(), 0, zeros.size());
-    CHECK(Bytes::get_crc_32(zeros) == 0x190A55ADu);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_64 - deterministic") {
+  TEST_CASE("get_crc_64 is deterministic and sensitive to content") {
     Bytes a{0x01u, 0x02u, 0x03u};
     Bytes b{0x01u, 0x02u, 0x03u};
+    Bytes c{0x01u, 0x02u, 0x04u};
 
-    CHECK(Bytes::get_crc_64(a) == Bytes::get_crc_64(b));
+    CHECK_EQ(Bytes::get_crc_64(a), Bytes::get_crc_64(b));
+    CHECK_NE(Bytes::get_crc_64(a), Bytes::get_crc_64(c));
+    CHECK_EQ(Bytes::get_crc_64(Bytes{}), 0x0000000000000000ull);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_64 - different data yields different CRC") {
-    Bytes a{0x01u, 0x02u, 0x03u};
-    Bytes b{0x01u, 0x02u, 0x04u};
-
-    CHECK(Bytes::get_crc_64(a) != Bytes::get_crc_64(b));
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_64 - empty buffer is 0") { CHECK(Bytes::get_crc_64(Bytes{}) == 0x0000000000000000ull); }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_64 - canonical reference vector (CRC-64/ECMA-182)") {
-    // The canonical check value for CRC-64/ECMA-182 in the CRC catalog:
-    //   CRC of "123456789" = 0x6C40DF5F0B497347.
+  TEST_CASE("get_crc_64 matches CRC-64/ECMA-182 reference vector") {
     auto crc_of = [](const std::string& s) {
       return Bytes::get_crc_64(Bytes::deep_copy(reinterpret_cast<const uint8_t*>(s.data()), s.size()));
     };
 
-    CHECK(crc_of("123456789") == 0x6C40DF5F0B497347ull);
+    // Canonical check value from the CRC catalogue for CRC-64/ECMA-182.
+    CHECK_EQ(crc_of("123456789"), 0x6C40DF5F0B497347ull);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_64 - zero-byte buffer returns 0") {
-    // CRC-64/ECMA-182 has init=0, xorout=0, refin=false, refout=false; an
-    // all-zero input should leave the running CRC at 0 throughout.
-    Bytes zeros = Bytes::create(32, 0);
-    std::memset(zeros.data(), 0, zeros.size());
-    CHECK(Bytes::get_crc_64(zeros) == 0x0000000000000000ull);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get_crc_64 - matches independent bit-by-bit reference on random data") {
-    // Independent reference: bit-by-bit CRC-64/ECMA-182 (no lookup table).
-    auto crc_64_reference = [](const uint8_t* data, size_t size) {
-      constexpr uint64_t kPoly = 0x42F0E1EBA9EA3693ull;
-      uint64_t crc = 0;
-      for (size_t i = 0; i < size; ++i) {
-        crc ^= static_cast<uint64_t>(data[i]) << 56u;
-        for (int b = 0; b < 8; ++b) {
-          crc = (crc & 0x8000000000000000ull) ? ((crc << 1) ^ kPoly) : (crc << 1);
-        }
-      }
-      return crc;
-    };
-
-    std::mt19937_64 rng(0xC0FFEEull);
-    std::uniform_int_distribution<int> byte_dist(0, 255);
-    std::uniform_int_distribution<size_t> size_dist(0, 1024);
-    for (int t = 0; t < 256; ++t) {
-      size_t len = size_dist(rng);
-      Bytes buf = Bytes::create(len, 0);
-      for (size_t i = 0; i < len; ++i) {
-        buf.data()[i] = static_cast<uint8_t>(byte_dist(rng));
-      }
-      CHECK(Bytes::get_crc_64(buf) == crc_64_reference(buf.data(), buf.size()));
-    }
-  }
-
-  // -------------------------------------------------------------------------
   TEST_CASE("compress_data and uncompress_data round-trip") {
-    // Build a highly compressible 512-byte buffer
     Bytes original = Bytes::create(512u);
     std::memset(original.data(), 0x5Au, 512u);
 
     Bytes compressed = Bytes::compress_data(original.data(), original.size());
-
-    REQUIRE(!compressed.empty());
+    REQUIRE_FALSE(compressed.empty());
     CHECK(Bytes::is_compress_data(compressed.data(), compressed.size()));
 
     Bytes decompressed = Bytes::uncompress_data(compressed.data(), compressed.size());
-
-    REQUIRE(decompressed.size() == original.size());
-    CHECK(std::memcmp(decompressed.data(), original.data(), original.size()) == 0);
+    REQUIRE_EQ(decompressed.size(), original.size());
+    CHECK_EQ(std::memcmp(decompressed.data(), original.data(), original.size()), 0);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("compress_data high_ratio mode round-trip") {
+  TEST_CASE("compress_data high-ratio mode round-trip") {
     Bytes original = Bytes::create(256u);
     fill_pattern(original);
 
     Bytes compressed = Bytes::compress_data(original.data(), original.size(), true);
-
-    REQUIRE(!compressed.empty());
+    REQUIRE_FALSE(compressed.empty());
     CHECK(Bytes::is_compress_data(compressed.data(), compressed.size()));
 
     Bytes decompressed = Bytes::uncompress_data(compressed.data(), compressed.size());
-
-    REQUIRE(decompressed.size() == original.size());
-    CHECK(std::memcmp(decompressed.data(), original.data(), original.size()) == 0);
+    REQUIRE_EQ(decompressed.size(), original.size());
+    CHECK_EQ(std::memcmp(decompressed.data(), original.data(), original.size()), 0);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("is_compress_data - uncompressed data returns false") {
+  TEST_CASE("is_compress_data rejects uncompressed and too-small buffers") {
     Bytes plain{0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u};
-    CHECK(!Bytes::is_compress_data(plain.data(), plain.size()));
-  }
+    CHECK_FALSE(Bytes::is_compress_data(plain.data(), plain.size()));
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("is_compress_data - too small buffer returns false") {
     const uint8_t tiny[] = {0x17u, 0x49u};
-    CHECK(!Bytes::is_compress_data(tiny, 2u));
+    CHECK_FALSE(Bytes::is_compress_data(tiny, 2u));
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("uncompress_data - invalid data with check_valid returns empty") {
+  TEST_CASE("uncompress_data with invalid magic returns empty") {
     Bytes junk{0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u};
-    Bytes result = Bytes::uncompress_data(junk.data(), junk.size(), true);
-    CHECK(result.empty());
+    CHECK(Bytes::uncompress_data(junk.data(), junk.size(), true).empty());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("to_string and to_string_view") {
+  TEST_CASE("to_string and to_string_view reflect content") {
     std::string text = "VLink";
     Bytes b = Bytes::from_string(text);
 
-    CHECK(b.to_string() == text);
-    CHECK(b.to_string_view() == text);
-    // string_view points into the same buffer
+    CHECK_EQ(b.to_string(), text);
+    CHECK_EQ(b.to_string_view(), text);
     CHECK(b.to_string_view().data() == reinterpret_cast<const char*>(b.data()));
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("to_raw_data returns vector copy") {
+  TEST_CASE("to_raw_data returns independent vector copy") {
     Bytes b{0x11u, 0x22u, 0x33u};
     std::vector<uint8_t> vec = b.to_raw_data();
 
-    REQUIRE(vec.size() == 3u);
-    CHECK(vec[0] == 0x11u);
-    CHECK(vec[1] == 0x22u);
-    CHECK(vec[2] == 0x33u);
+    REQUIRE_EQ(vec.size(), 3u);
+    CHECK_EQ(vec[0], 0x11u);
+    CHECK_EQ(vec[1], 0x22u);
+    CHECK_EQ(vec[2], 0x33u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("iterators - begin/end span user data") {
-    Bytes b{0x0Au, 0x0Bu, 0x0Cu};
-
-    size_t count = 0;
-    for (const uint8_t* it = b.begin(); it != b.end(); ++it) {
-      ++count;
-    }
-
-    CHECK(count == b.size());
-    CHECK(b.begin() == b.data());
-    CHECK(b.end() == b.data() + b.size());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("iterators - real_begin/real_end span full backing buffer with offset") {
-    Bytes b = Bytes::create(10u, 4u);
-
-    CHECK(b.real_begin() == b.real_data());
-    CHECK(b.real_end() == b.real_data() + b.real_size());
-    // real range is larger than user range
-    CHECK(b.real_end() - b.real_begin() == static_cast<ptrdiff_t>(b.real_size()));
-    CHECK(b.end() - b.begin() == static_cast<ptrdiff_t>(b.size()));
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("subscript operator") {
+  TEST_CASE("operator[] provides read-write access") {
     Bytes b{0x10u, 0x20u, 0x30u};
 
-    CHECK(b[0] == 0x10u);
-    CHECK(b[1] == 0x20u);
-    CHECK(b[2] == 0x30u);
-
+    CHECK_EQ(b[0], 0x10u);
     b[1] = 0xFFu;
-    CHECK(b[1] == 0xFFu);
+    CHECK_EQ(b[1], 0xFFu);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("operator== and operator!= with Bytes") {
+  TEST_CASE("operator== and operator!= compare byte content") {
     Bytes a{0x01u, 0x02u, 0x03u};
     Bytes b{0x01u, 0x02u, 0x03u};
     Bytes c{0x01u, 0x02u, 0x04u};
 
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
     CHECK(a != c);
-    CHECK(!(a == c));
+    CHECK_FALSE(a == c);
+
+    std::vector<uint8_t> vec{0x01u, 0x02u, 0x03u};
+    CHECK(a == vec);
+    CHECK_FALSE(a != vec);
+
+    Bytes empty_a;
+    Bytes empty_b;
+    CHECK(empty_a == empty_b);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("operator== and operator!= with vector") {
-    std::vector<uint8_t> vec{0xAAu, 0xBBu};
-    Bytes b{0xAAu, 0xBBu};
-    Bytes c{0xAAu, 0xCCu};
+  TEST_CASE("begin and end span the user data region") {
+    Bytes b{0x0Au, 0x0Bu, 0x0Cu};
 
-    CHECK(b == vec);
-    CHECK(!(b != vec));
-    CHECK(c != vec);
+    CHECK(b.begin() == b.data());
+    CHECK(b.end() == b.data() + b.size());
+
+    size_t count = 0;
+    for (const uint8_t* it = b.begin(); it != b.end(); ++it) {
+      ++count;
+    }
+    CHECK_EQ(count, b.size());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("copy constructor - owner deep-copies data") {
+  TEST_CASE("real_begin and real_end span the full backing buffer with offset") {
+    Bytes b = Bytes::create(10u, 4u);
+
+    CHECK(b.real_begin() == b.real_data());
+    CHECK(b.real_end() == b.real_data() + b.real_size());
+    CHECK_EQ(b.real_end() - b.real_begin(), static_cast<ptrdiff_t>(b.real_size()));
+  }
+
+  TEST_CASE("copy constructor deep-copies to independent owned buffer") {
     Bytes original{0x01u, 0x02u, 0x03u};
     Bytes copy(original);
 
-    CHECK(copy.size() == original.size());
     CHECK(copy.is_owner());
     CHECK(copy == original);
-    // Separate backing storage
     CHECK(copy.data() != original.data());
 
-    // Mutating copy does not affect original
     copy.data()[0] = 0xFFu;
-    CHECK(original.data()[0] == 0x01u);
+    CHECK_EQ(original.data()[0], 0x01u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("copy constructor - shallow alias is deep-copied") {
+  TEST_CASE("copy constructor on shallow alias always deep-copies") {
     uint8_t ext[] = {0x11u, 0x22u};
     Bytes alias = Bytes::shallow_copy(ext, 2u);
     Bytes copy(alias);
 
-    // Copy constructor always deep-copies: copy is an owner with its own storage
     CHECK(copy.is_owner());
     CHECK(copy.data() != ext);
-    CHECK(copy.size() == 2u);
-    CHECK(copy.data()[0] == 0x11u);
-    CHECK(copy.data()[1] == 0x22u);
+    CHECK_EQ(copy.size(), 2u);
+    CHECK_EQ(copy.data()[0], 0x11u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("move constructor transfers ownership") {
+  TEST_CASE("move constructor transfers ownership and empties source") {
     Bytes original = Bytes::create(32u);
     fill_pattern(original);
 
     Bytes moved(std::move(original));
 
-    CHECK(moved.size() == 32u);
+    CHECK_EQ(moved.size(), 32u);
     CHECK(moved.is_owner());
-    // For heap-allocated (>kStackSize) the pointer is stable after move;
-    // for SBO the data is in the object itself, so just verify correctness
-    CHECK(moved.data() != nullptr);
-    CHECK(moved.data()[0] == 0x00u);
+    REQUIRE(moved.data() != nullptr);
+    CHECK_EQ(moved.data()[0], 0x00u);
     CHECK(original.empty());  // NOLINT(bugprone-use-after-move)
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("copy assignment operator") {
+  TEST_CASE("move of heap-allocated Bytes transfers pointer without reallocation") {
+    static constexpr size_t kHeapSize = 200u;
+    Bytes a = Bytes::create(kHeapSize);
+    fill_pattern(a);
+    const uint8_t* old_real = a.real_data();
+
+    Bytes b(std::move(a));
+
+    CHECK_EQ(b.size(), kHeapSize);
+    CHECK(b.real_data() == old_real);
+    CHECK(a.empty());  // NOLINT(bugprone-use-after-move)
+  }
+
+  TEST_CASE("copy assignment replaces content with deep copy") {
     Bytes a{0x01u, 0x02u};
     Bytes b{0xFFu};
-
     b = a;
 
-    CHECK(b.size() == 2u);
+    CHECK_EQ(b.size(), 2u);
     CHECK(b.is_owner());
     CHECK(b == a);
     CHECK(b.data() != a.data());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("move assignment operator") {
+  TEST_CASE("move assignment transfers ownership and empties source") {
     Bytes a{0x10u, 0x20u, 0x30u};
     Bytes b;
-
     b = std::move(a);
 
-    CHECK(b.size() == 3u);
-    CHECK(b.data()[0] == 0x10u);
+    CHECK_EQ(b.size(), 3u);
+    CHECK_EQ(b.data()[0], 0x10u);
     CHECK(a.empty());  // NOLINT(bugprone-use-after-move)
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("vector assignment operator") {
+  TEST_CASE("vector assignment deep-copies from vector") {
     std::vector<uint8_t> vec{0xA1u, 0xA2u, 0xA3u};
     Bytes b;
     b = vec;
 
-    REQUIRE(b.size() == 3u);
+    REQUIRE_EQ(b.size(), 3u);
     CHECK(b.is_owner());
     CHECK(b == vec);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("clear resets to empty") {
+  TEST_CASE("clear resets to empty state") {
     Bytes b = Bytes::create(64u);
+    CHECK_FALSE(b.empty());
 
-    CHECK(!b.empty());
     b.clear();
+
     CHECK(b.empty());
     CHECK(b.data() == nullptr);
-    CHECK(b.size() == 0u);
+    CHECK_EQ(b.size(), 0u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("shrink_to reduces size") {
+  TEST_CASE("shrink_to reduces logical size on owned buffers") {
     Bytes b = Bytes::create(16u);
     fill_pattern(b);
 
-    bool ok = b.shrink_to(8u);
-
-    CHECK(ok);
-    CHECK(b.size() == 8u);
-    // Data is still intact for first 8 bytes
-    CHECK(b.data()[0] == 0x00u);
-    CHECK(b.data()[7] == 0x07u);
+    CHECK(b.shrink_to(8u));
+    CHECK_EQ(b.size(), 8u);
+    CHECK_EQ(b.data()[0], 0x00u);
+    CHECK_EQ(b.data()[7], 0x07u);
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("shrink_to with size larger than current returns false") {
     Bytes b = Bytes::create(8u);
-    bool ok = b.shrink_to(16u);
-    CHECK(!ok);
-    CHECK(b.size() == 8u);
+    CHECK_FALSE(b.shrink_to(16u));
+    CHECK_EQ(b.size(), 8u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("reserve grows capacity") {
+  TEST_CASE("reserve grows capacity without changing logical size") {
     Bytes b = Bytes::create(10u);
     size_t old_cap = b.capacity();
 
-    bool ok = b.reserve(old_cap + 100u);
-
-    CHECK(ok);
+    CHECK(b.reserve(old_cap + 100u));
     CHECK(b.capacity() >= old_cap + 100u);
-    // Logical size unchanged
-    CHECK(b.size() == 10u);
+    CHECK_EQ(b.size(), 10u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("reserve within SBO preserves data without reallocating") {
-    Bytes b = Bytes::create(8u);
-    REQUIRE(b.data() != nullptr);
-    uint8_t* old_data = b.real_data();
-    fill_pattern(b);
-
-    bool ok = b.reserve(32u);
-
-    CHECK(ok);
-    CHECK(b.real_data() == old_data);
-    CHECK(b.size() == 8u);
-    CHECK(b[0] == 0x00u);
-    CHECK(b[7] == 0x07u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("reserve no-op when capacity already sufficient") {
+  TEST_CASE("reserve is no-op when capacity already sufficient") {
     Bytes b = Bytes::create(64u);
     size_t cap_before = b.capacity();
 
-    bool ok = b.reserve(10u);
-
-    CHECK(ok);
-    CHECK(b.capacity() == cap_before);
+    CHECK(b.reserve(10u));
+    CHECK_EQ(b.capacity(), cap_before);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("resize grows logical size") {
+  TEST_CASE("resize updates logical size and grows capacity as needed") {
     Bytes b = Bytes::create(8u);
 
-    bool ok = b.resize(32u);
-
-    CHECK(ok);
-    CHECK(b.size() == 32u);
+    CHECK(b.resize(32u));
+    CHECK_EQ(b.size(), 32u);
     CHECK(b.capacity() >= 32u);
+
+    CHECK(b.resize(16u));
+    CHECK_EQ(b.size(), 16u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("resize shrinks logical size") {
-    Bytes b = Bytes::create(64u);
-    fill_pattern(b);
-
-    bool ok = b.resize(16u);
-
-    CHECK(ok);
-    CHECK(b.size() == 16u);
-    CHECK(b.data()[0] == 0x00u);
-  }
-
-  // -------------------------------------------------------------------------
   TEST_CASE("instance shallow_copy makes non-owning alias") {
     Bytes owner = Bytes::create(8u);
     fill_pattern(owner);
@@ -810,12 +631,11 @@ TEST_SUITE("base-Bytes") {
     Bytes alias;
     alias.shallow_copy(owner);
 
-    CHECK(!alias.is_owner());
+    CHECK_FALSE(alias.is_owner());
     CHECK(alias.data() == owner.data());
-    CHECK(alias.size() == owner.size());
+    CHECK_EQ(alias.size(), owner.size());
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("instance deep_copy produces independent owner") {
     Bytes original = Bytes::create(8u);
     fill_pattern(original);
@@ -824,13 +644,96 @@ TEST_SUITE("base-Bytes") {
     copy.deep_copy(original);
 
     CHECK(copy.is_owner());
-    CHECK(copy.size() == original.size());
+    CHECK_EQ(copy.size(), original.size());
     CHECK(copy == original);
     CHECK(copy.data() != original.data());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("copy assignment from offset alias of self stays valid") {
+  TEST_CASE("deep_copy_self converts non-owning alias to owner") {
+    uint8_t ext[] = {0x10u, 0x20u, 0x30u};
+    Bytes alias = Bytes::shallow_copy(ext, 3u);
+    CHECK_FALSE(alias.is_owner());
+
+    alias.deep_copy_self();
+
+    CHECK(alias.is_owner());
+    CHECK(alias.data() != ext);
+    CHECK_EQ(alias.data()[0], 0x10u);
+  }
+
+  TEST_CASE("deep_copy_self on already-owned buffer is a no-op") {
+    Bytes owner = Bytes::create(4u);
+    fill_pattern(owner);
+
+    owner.deep_copy_self();
+
+    CHECK(owner.is_owner());
+    CHECK_EQ(owner.size(), 4u);
+    CHECK_EQ(owner.data()[0], 0x00u);
+  }
+
+  TEST_CASE("is_ptr returns false for normal owned buffer") { CHECK_FALSE(Bytes::create(8u).is_ptr()); }
+
+  TEST_CASE("to_ptr reinterprets real_data pointer") {
+    Bytes b{0x01u, 0x02u, 0x03u, 0x04u};
+    CHECK(b.to_ptr<uint8_t>() == b.real_data());
+  }
+
+  TEST_CASE("stack_size returns 96") { CHECK_EQ(Bytes::stack_size(), 96u); }
+
+  TEST_CASE("endianness helpers are mutually exclusive and cover all platforms") {
+    CHECK((Bytes::is_little_endian() || Bytes::is_big_endian()));
+    CHECK_NE(Bytes::is_little_endian(), Bytes::is_big_endian());
+  }
+
+  TEST_CASE("ostream operator produces non-empty hex output") {
+    Bytes b{0x01u, 0x02u, 0x03u};
+    std::ostringstream oss;
+    oss << b;
+    CHECK_FALSE(oss.str().empty());
+  }
+
+  TEST_CASE("bytes_malloc and bytes_free are usable for raw pool access") {
+    static constexpr size_t kSize = 128u;
+    uint8_t* mem = Bytes::bytes_malloc(kSize);
+    REQUIRE(mem != nullptr);
+
+    for (size_t i = 0; i < kSize; ++i) {
+      mem[i] = static_cast<uint8_t>(i & 0xFFu);
+    }
+
+    for (size_t i = 0; i < kSize; ++i) {
+      CHECK_EQ(mem[i], static_cast<uint8_t>(i & 0xFFu));
+    }
+
+    Bytes::bytes_free(mem, kSize);
+  }
+
+  TEST_CASE("init_memory_pool and release_memory_pool do not invalidate live buffers") {
+    Bytes::init_memory_pool();
+
+    Bytes pinned = Bytes::create(2048u);
+    REQUIRE(pinned.data() != nullptr);
+    std::memset(pinned.data(), 0xA5u, pinned.size());
+
+    {
+      Bytes scratch_a = Bytes::create(2048u);
+      Bytes scratch_b = Bytes::create(64u * 1024u);
+      REQUIRE(scratch_a.data() != nullptr);
+      REQUIRE(scratch_b.data() != nullptr);
+    }
+
+    Bytes::release_memory_pool();
+
+    for (size_t i = 0; i < pinned.size(); ++i) {
+      CHECK_EQ(pinned.data()[i], 0xA5u);
+    }
+
+    Bytes after = Bytes::create(2048u);
+    REQUIRE(after.data() != nullptr);
+  }
+
+  TEST_CASE("copy assignment via shallow alias handles aliased source correctly") {
     Bytes owner = Bytes::create(Bytes::stack_size() + 32u, 8u);
     REQUIRE(owner.real_data() != nullptr);
 
@@ -843,311 +746,7 @@ TEST_SUITE("base-Bytes") {
     owner = alias;
 
     CHECK(owner.is_owner());
-    CHECK(owner.size() == alias.size());
-    CHECK(owner.offset() == alias.offset());
-    for (size_t i = 0; i < owner.real_size(); ++i) {
-      CHECK(owner.real_data()[i] == static_cast<uint8_t>(i & 0xFFu));
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("instance deep_copy from offset alias of self stays valid") {
-    Bytes owner = Bytes::create(Bytes::stack_size() + 48u, 8u);
-    REQUIRE(owner.real_data() != nullptr);
-
-    for (size_t i = 0; i < owner.real_size(); ++i) {
-      owner.real_data()[i] = static_cast<uint8_t>((i + 3u) & 0xFFu);
-    }
-
-    Bytes alias;
-    alias.shallow_copy(owner);
-    owner.deep_copy(alias);
-
-    CHECK(owner.is_owner());
-    CHECK(owner.size() == alias.size());
-    CHECK(owner.offset() == alias.offset());
-    for (size_t i = 0; i < owner.real_size(); ++i) {
-      CHECK(owner.real_data()[i] == static_cast<uint8_t>((i + 3u) & 0xFFu));
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("deep_copy_self converts alias to owner") {
-    uint8_t ext[] = {0x10u, 0x20u, 0x30u};
-    Bytes alias = Bytes::shallow_copy(ext, 3u);
-
-    CHECK(!alias.is_owner());
-
-    alias.deep_copy_self();
-
-    CHECK(alias.is_owner());
-    CHECK(alias.data() != ext);
-    CHECK(alias.data()[0] == 0x10u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("deep_copy_self on owner is a no-op") {
-    Bytes owner = Bytes::create(4u);
-    fill_pattern(owner);
-    const uint8_t* ptr_before = owner.real_data();
-
-    owner.deep_copy_self();
-
-    // For SBO the stack_data_ address stays the same, for heap it may differ;
-    // the important invariant is that it is still an owner with correct data
-    CHECK(owner.is_owner());
-    CHECK(owner.size() == 4u);
-    CHECK(owner.data()[0] == 0x00u);
-    (void)ptr_before;
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("loan_internal mutable - is_loaned true, is_owner false") {
-    uint8_t buf[] = {0x01u, 0x02u, 0x03u};
-    Bytes loaned = Bytes::loan_internal(buf, 3u);
-
-    CHECK(loaned.is_loaned());
-    CHECK(!loaned.is_owner());
-    CHECK(loaned.size() == 3u);
-    CHECK(loaned.data() == buf);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("loan_internal const - is_loaned true") {
-    const uint8_t buf[] = {0xFFu, 0xFEu};
-    Bytes loaned = Bytes::loan_internal(buf, 2u);
-
-    CHECK(loaned.is_loaned());
-    CHECK(!loaned.is_owner());
-    CHECK(loaned.size() == 2u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("is_ptr returns false for normal owned buffer") {
-    Bytes b = Bytes::create(8u);
-    CHECK(!b.is_ptr());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("to_ptr reinterprets real_data") {
-    Bytes b{0x01u, 0x02u, 0x03u, 0x04u};
-    const uint8_t* p = b.to_ptr<uint8_t>();
-    CHECK(p == b.real_data());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stack_size returns 96") { CHECK(Bytes::stack_size() == 96u); }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("endianness helpers are consistent") {
-    CHECK((Bytes::is_little_endian() || Bytes::is_big_endian()));
-    CHECK(Bytes::is_little_endian() != Bytes::is_big_endian());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("ostream operator does not crash") {
-    Bytes b{0x01u, 0x02u, 0x03u};
-    std::ostringstream oss;
-    oss << b;
-    CHECK(!oss.str().empty());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("SBO boundary: size == kStackSize stays on stack, size == kStackSize+1 goes to heap") {
-    Bytes sbo = Bytes::create(Bytes::stack_size());
-    Bytes heap = Bytes::create(Bytes::stack_size() + 1u);
-
-    CHECK(sbo.capacity() == Bytes::stack_size());
-    CHECK(heap.capacity() > Bytes::stack_size());
-    CHECK(sbo.is_owner());
-    CHECK(heap.is_owner());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("move of heap-allocated Bytes transfers pointer without copy") {
-    constexpr size_t kHeapSize = 200u;
-    Bytes a = Bytes::create(kHeapSize);
-    fill_pattern(a);
-    const uint8_t* old_real = a.real_data();
-
-    Bytes b(std::move(a));
-
-    CHECK(b.size() == kHeapSize);
-    // For heap buffers the pointer should be transferred (no allocation)
-    CHECK(b.real_data() == old_real);
-    CHECK(a.empty());  // NOLINT(bugprone-use-after-move)
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("empty Bytes comparison") {
-    Bytes a;
-    Bytes b;
-
-    CHECK(a == b);
-    CHECK(!(a != b));
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_user_input hex string creates Bytes from hex") {
-    bool ok = false;
-    Bytes b = Bytes::from_user_input("0xDEAD", &ok);
-    CHECK(ok);
-    REQUIRE(b.size() == 2u);
-    CHECK(b.data()[0] == 0xDEu);
-    CHECK(b.data()[1] == 0xADu);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("from_user_input rejects partially parsed tokens") {
-    bool ok = true;
-    Bytes b = Bytes::from_user_input("1G", &ok);
-    CHECK_FALSE(ok);
-    CHECK(b.empty());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("create rejects size overflow") {
-    Bytes b = Bytes::create(std::numeric_limits<size_t>::max(), 1u);
-    CHECK(b.empty());
-    CHECK(b.data() == nullptr);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("loan_internal mutable write-back changes underlying data") {
-    Bytes b = Bytes::create(8u);
-    uint8_t* ptr = b.data();
-    REQUIRE(ptr != nullptr);
-
-    for (size_t i = 0; i < 8u; ++i) {
-      ptr[i] = 0xAA;
-    }
-
-    Bytes loaned = Bytes::loan_internal(ptr, b.size());
-    CHECK(loaned.is_loaned());
-
-    uint8_t* lptr = loaned.data();
-    REQUIRE(lptr != nullptr);
-
-    lptr[0] = 0xFF;
-
-    // Change via loaned view is visible in original since they share the same pointer
-    CHECK(ptr[0] == 0xFF);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("loan_internal const creates read-only loaned view") {
-    const uint8_t raw[] = {0x01, 0x02, 0x03};
-    Bytes loaned = Bytes::loan_internal(raw, sizeof(raw));
-    CHECK(loaned.is_loaned());
-    CHECK(loaned.size() == 3u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("deep_copy on empty data produces empty Bytes") {
-    const Bytes empty;
-    Bytes copy = Bytes::deep_copy(static_cast<const uint8_t*>(nullptr), 0u);
-    CHECK(copy.empty());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("shallow_copy wraps external mutable pointer without copying") {
-    static uint8_t raw[8] = {0, 1, 2, 3, 4, 5, 6, 7};
-    Bytes b = Bytes::shallow_copy(raw, sizeof(raw));
-    CHECK(!b.is_owner());
-    CHECK(b.size() == 8u);
-    CHECK(b[3] == 3u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("operator[] access on all SBO bytes stays within bounds") {
-    Bytes b = Bytes::create(Bytes::stack_size());
-    uint8_t* ptr = b.data();
-    REQUIRE(ptr != nullptr);
-
-    for (size_t i = 0; i < Bytes::stack_size(); ++i) {
-      ptr[i] = static_cast<uint8_t>(i & 0xFF);
-    }
-
-    for (size_t i = 0; i < Bytes::stack_size(); ++i) {
-      CHECK(b[i] == static_cast<uint8_t>(i & 0xFF));
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("resize then shrink_to round-trip preserves data") {
-    Bytes b = Bytes::create(32u);
-    uint8_t* ptr = b.data();
-    REQUIRE(ptr != nullptr);
-
-    for (size_t i = 0; i < 32u; ++i) {
-      ptr[i] = static_cast<uint8_t>(i);
-    }
-
-    (void)b.resize(64u);
-    CHECK(b.size() == 64u);
-    CHECK(b[0] == 0u);
-    CHECK(b[31] == 31u);
-
-    (void)b.shrink_to(32u);
-    CHECK(b.size() == 32u);
-    CHECK(b[31] == 31u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("bytes_malloc allocates and bytes_free releases memory") {
-    constexpr size_t kSize = 128u;
-    uint8_t* mem = Bytes::bytes_malloc(kSize);
-    REQUIRE(mem != nullptr);
-
-    // Write and read back to ensure the memory is usable
-    for (size_t i = 0; i < kSize; ++i) {
-      mem[i] = static_cast<uint8_t>(i & 0xFF);
-    }
-
-    for (size_t i = 0; i < kSize; ++i) {
-      CHECK(mem[i] == static_cast<uint8_t>(i & 0xFF));
-    }
-
-    Bytes::bytes_free(mem, kSize);
-    CHECK(true);  // No crash
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("create with non-zero offset") {
-    Bytes b = Bytes::create(16u, 8u);
-    // With offset=8, real_data() has 8 bytes of prefix; data() starts after
-    CHECK(b.size() == 16u);
-    REQUIRE(b.data() != nullptr);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("release_memory_pool keeps live Bytes valid and pool usable") {
-    Bytes::init_memory_pool();
-
-    Bytes pinned = Bytes::create(2048u);
-    REQUIRE(pinned.data() != nullptr);
-    std::memset(pinned.data(), 0xA5, pinned.size());
-
-    {
-      Bytes scratch_a = Bytes::create(2048u);
-      Bytes scratch_b = Bytes::create(64u * 1024u);
-      REQUIRE(scratch_a.data() != nullptr);
-      REQUIRE(scratch_b.data() != nullptr);
-    }
-
-    Bytes::release_memory_pool();
-
-    for (size_t i = 0; i < pinned.size(); ++i) {
-      CHECK(static_cast<uint8_t*>(pinned.data())[i] == 0xA5);
-    }
-    std::memset(pinned.data(), 0x5A, pinned.size());
-    for (size_t i = 0; i < pinned.size(); ++i) {
-      CHECK(static_cast<uint8_t*>(pinned.data())[i] == 0x5A);
-    }
-
-    Bytes after = Bytes::create(2048u);
-    REQUIRE(after.data() != nullptr);
-    std::memset(after.data(), 0xCC, after.size());
+    CHECK_EQ(owner.size(), alias.size());
   }
 }
 

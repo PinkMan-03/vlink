@@ -28,17 +28,15 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <type_traits>
+
+#include "./extension/schema_plugin_base.h"
+#include "./extension/schema_plugin_manager.h"
 
 #if __has_include(<google/protobuf/any.pb.h>)
 #include <google/protobuf/any.pb.h>
 #endif
 
-#define VLINK_ENABLE_CLI_EPROTO
-#define VLINK_ENABLE_CLI_EFBS
-#include "./extension/schema_plugin_base.h"
-#include "./extension/schema_plugin_manager.h"
-
-//
 #include "../common_test.h"
 
 namespace {
@@ -79,12 +77,8 @@ VLINK_REGISTER_FLATBUFFERS("invalid.Schema.second", InvalidBinarySchema);
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: SchemaPluginInterface::VersionInfo - struct fields
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-SchemaPluginInterface::VersionInfo") {
-  TEST_CASE("default construction has empty fields") {
+TEST_SUITE("extension-SchemaPluginInterface") {
+  TEST_CASE("VersionInfo default construction has all empty fields") {
     SchemaPluginInterface::VersionInfo vi;
     CHECK(vi.name.empty());
     CHECK(vi.version.empty());
@@ -93,110 +87,99 @@ TEST_SUITE("extension-SchemaPluginInterface::VersionInfo") {
     CHECK(vi.commit_id.empty());
   }
 
-  TEST_CASE("fields are assignable") {
+  TEST_CASE("VersionInfo fields are independently assignable") {
     SchemaPluginInterface::VersionInfo vi;
     vi.name = "TestPlugin";
     vi.version = "1.0.0";
     vi.timestamp = "2026-01-01";
     vi.tag = "v1.0.0";
     vi.commit_id = "abc123";
+    CHECK_EQ(vi.name, "TestPlugin");
+    CHECK_EQ(vi.version, "1.0.0");
+    CHECK_EQ(vi.timestamp, "2026-01-01");
+    CHECK_EQ(vi.tag, "v1.0.0");
+    CHECK_EQ(vi.commit_id, "abc123");
+  }
 
-    CHECK(vi.name == "TestPlugin");
-    CHECK(vi.version == "1.0.0");
-    CHECK(vi.timestamp == "2026-01-01");
-    CHECK(vi.tag == "v1.0.0");
-    CHECK(vi.commit_id == "abc123");
+  TEST_CASE("concrete plugin returns version info from get_version_info") {
+    TestSchemaPlugin plugin;
+    auto vi = plugin.get_version_info();
+    CHECK_EQ(vi.name, "TestSchemaPlugin");
+    CHECK_EQ(vi.version, "1.0.0");
   }
 }
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: SchemaPluginManager - no plugin loaded
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-SchemaPluginManager - no plugin") {
-  TEST_CASE("get() returns a valid reference") {
-    // Access without a real plugin path — uses env var or nothing.
-    // The singleton must be accessible without crashing.
+TEST_SUITE("extension-SchemaPluginManager") {
+  TEST_CASE("get returns a valid singleton reference") {
     SchemaPluginManager& mgr = SchemaPluginManager::get("");
-    // Just verify the reference is valid by checking is_valid()
-    bool valid = mgr.is_valid();
-    // valid may be true or false depending on environment; we just check no crash.
-    (void)valid;
-    CHECK(true);
+    (void)mgr.is_valid();
   }
 
-  TEST_CASE("get_interface returns nullptr when no plugin loaded") {
-    SchemaPluginManager& mgr = SchemaPluginManager::get("");
+  TEST_CASE("repeated get calls return the same singleton") {
+    SchemaPluginManager& a = SchemaPluginManager::get();
+    SchemaPluginManager& b = SchemaPluginManager::get();
+    CHECK_EQ(&a, &b);
+  }
 
+  TEST_CASE("get_interface returns nullptr when no plugin is loaded") {
+    SchemaPluginManager& mgr = SchemaPluginManager::get();
     if (!mgr.is_valid()) {
-      CHECK(mgr.get_interface() == nullptr);
+      CHECK_EQ(mgr.get_interface(), nullptr);
     } else {
-      CHECK(mgr.get_interface() != nullptr);
+      CHECK_NE(mgr.get_interface(), nullptr);
     }
   }
 
-  TEST_CASE("repeated get() calls return same singleton") {
-    SchemaPluginManager& a = SchemaPluginManager::get();
-    SchemaPluginManager& b = SchemaPluginManager::get();
-    CHECK(&a == &b);
-  }
-
-  TEST_CASE("is_valid returns false when no plugin is installed") {
-    // In CI without a schema plugin .so, is_valid() must return false.
-    // We cannot force it to be true here, but we can verify the API.
-    SchemaPluginManager& mgr = SchemaPluginManager::get();
-    bool valid = mgr.is_valid();
-    // Either branch is acceptable; test just verifies the call doesn't throw.
-    (void)valid;
-    CHECK(true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: SchemaPluginManager - conditional protobuf tests
-// ---------------------------------------------------------------------------
-
 #if defined(VLINK_TEST_SUPPORT_PROTOBUF)
-
-TEST_SUITE("extension-SchemaPluginManager - with protobuf support") {
-  TEST_CASE("SchemaPluginManager is accessible with protobuf enabled") {
-    // Even with protobuf compiled in, the manager only loads a plugin
-    // from an .so file; without that file it remains invalid.
+  TEST_CASE("manager is accessible when protobuf support is enabled") {
     SchemaPluginManager& mgr = SchemaPluginManager::get();
     (void)mgr.is_valid();
-    CHECK(true);
   }
-}
-
 #endif  // VLINK_TEST_SUPPORT_PROTOBUF
+}
 
 #if !defined(_WIN32) && !defined(__CYGWIN__) && defined(VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF) && \
     defined(VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS)
-TEST_SUITE("extension-SchemaPluginBase - linked schema registration") {
-  TEST_CASE("registers protobuf schemas from linked generated descriptors") {
+
+TEST_SUITE("extension-SchemaPluginBase") {
+  TEST_CASE("protobuf schema lookup finds linked generated descriptor") {
     TestSchemaPlugin plugin;
     const auto* descriptor =
         google::protobuf::DescriptorPool::generated_pool()->FindMessageTypeByName("google.protobuf.Any");
     REQUIRE(descriptor != nullptr);
 
     const auto schema = plugin.search_schema("google.protobuf.Any", SchemaType::kProtobuf);
-    CHECK(schema.name == "google.protobuf.Any");
-    CHECK(schema.encoding == "protobuf");
-    CHECK(schema.schema_type == SchemaType::kProtobuf);
+    CHECK_EQ(schema.name, "google.protobuf.Any");
+    CHECK_EQ(schema.encoding, "protobuf");
+    CHECK_EQ(schema.schema_type, SchemaType::kProtobuf);
     CHECK_FALSE(schema.data.empty());
-
-    const auto wrong_schema = plugin.search_schema("google.protobuf.Any", SchemaType::kFlatbuffers);
-    CHECK(wrong_schema.encoding.empty());
-    CHECK(wrong_schema.data.empty());
-
-    CHECK(plugin.search_protobuf_descriptor("google.protobuf.Any") != nullptr);
-    CHECK(plugin.create_protobuf_message("google.protobuf.Any") != nullptr);
-
-    const auto all_schemas = plugin.get_all_schemas(SchemaType::kProtobuf);
-    CHECK_FALSE(all_schemas.empty());
   }
 
-  TEST_CASE("registers embedded BFBS and exposes flatbuffers runtime handles") {
+  TEST_CASE("protobuf schema lookup with wrong family returns empty schema") {
+    TestSchemaPlugin plugin;
+    const auto schema = plugin.search_schema("google.protobuf.Any", SchemaType::kFlatbuffers);
+    CHECK(schema.encoding.empty());
+    CHECK(schema.data.empty());
+  }
+
+  TEST_CASE("search_protobuf_descriptor returns non-null for linked type") {
+    TestSchemaPlugin plugin;
+    CHECK_NE(plugin.search_protobuf_descriptor("google.protobuf.Any"), nullptr);
+  }
+
+  TEST_CASE("create_protobuf_message returns non-null for linked type") {
+    TestSchemaPlugin plugin;
+    CHECK_NE(plugin.create_protobuf_message("google.protobuf.Any"), nullptr);
+  }
+
+  TEST_CASE("get_all_schemas returns non-empty list for protobuf family") {
+    TestSchemaPlugin plugin;
+    (void)plugin.search_schema("google.protobuf.Any", SchemaType::kProtobuf);
+    const auto all = plugin.get_all_schemas(SchemaType::kProtobuf);
+    CHECK_FALSE(all.empty());
+  }
+
+  TEST_CASE("flatbuffers bfbs blob enables runtime schema and parser access") {
     auto fbs_path = test_idl_dir() / "test.fbs";
     REQUIRE(std::filesystem::exists(fbs_path));
 
@@ -223,35 +206,29 @@ TEST_SUITE("extension-SchemaPluginBase - linked schema registration") {
     TestSchemaPlugin plugin;
 
     const auto schema = plugin.search_schema("fbs.Message", SchemaType::kFlatbuffers);
-    CHECK(schema.name == "fbs.Message");
-    CHECK(schema.encoding == "flatbuffers");
-    CHECK(schema.schema_type == SchemaType::kFlatbuffers);
+    CHECK_EQ(schema.name, "fbs.Message");
+    CHECK_EQ(schema.encoding, "flatbuffers");
+    CHECK_EQ(schema.schema_type, SchemaType::kFlatbuffers);
     CHECK_FALSE(schema.data.empty());
-
-    const auto wrong_schema = plugin.search_schema("fbs.Message", SchemaType::kProtobuf);
-    CHECK(wrong_schema.encoding.empty());
-    CHECK(wrong_schema.data.empty());
 
     auto* reflection_schema = static_cast<const reflection::Schema*>(plugin.search_flatbuffers_schema("fbs.Message"));
     REQUIRE(reflection_schema != nullptr);
-    CHECK(reflection_schema->root_table() != nullptr);
+    CHECK_NE(reflection_schema->root_table(), nullptr);
 
-    auto* runtime_parser = static_cast<flatbuffers::Parser*>(plugin.create_flatbuffers_parser("fbs.Message"));
-    REQUIRE(runtime_parser != nullptr);
-    auto* second_runtime_parser = static_cast<flatbuffers::Parser*>(plugin.create_flatbuffers_parser("fbs.Message"));
-    REQUIRE(second_runtime_parser != nullptr);
-    CHECK(second_runtime_parser != runtime_parser);
-    REQUIRE(runtime_parser->root_struct_def_ != nullptr);
-    CHECK(runtime_parser->root_struct_def_->defined_namespace != nullptr);
-    CHECK(runtime_parser->root_struct_def_->defined_namespace->GetFullyQualifiedName(
-              runtime_parser->root_struct_def_->name) == "fbs.Message");
+    auto* p1 = static_cast<flatbuffers::Parser*>(plugin.create_flatbuffers_parser("fbs.Message"));
+    auto* p2 = static_cast<flatbuffers::Parser*>(plugin.create_flatbuffers_parser("fbs.Message"));
+    REQUIRE(p1 != nullptr);
+    REQUIRE(p2 != nullptr);
+    CHECK_NE(p1, p2);
 
-    const auto all_schemas = plugin.get_all_schemas(SchemaType::kFlatbuffers);
-    CHECK_FALSE(all_schemas.empty());
+    REQUIRE(p1->root_struct_def_ != nullptr);
+    const auto fqn = p1->root_struct_def_->defined_namespace->GetFullyQualifiedName(p1->root_struct_def_->name);
+    CHECK_EQ(fqn, "fbs.Message");
+
+    const auto all = plugin.get_all_schemas(SchemaType::kFlatbuffers);
+    CHECK_FALSE(all.empty());
   }
-}
 
-TEST_SUITE("extension-SchemaPluginBase - schema family disambiguation") {
   TEST_CASE("family-agnostic lookup refuses ambiguous same-name schemas") {
     auto fbs_path = test_idl_dir() / "test.fbs";
     REQUIRE(std::filesystem::exists(fbs_path));
@@ -278,17 +255,17 @@ TEST_SUITE("extension-SchemaPluginBase - schema family disambiguation") {
 
     TestSchemaPlugin plugin;
 
-    const auto ambiguous_schema = plugin.search_schema("vlink::zerocopy::Collision");
-    CHECK(ambiguous_schema.encoding.empty());
-    CHECK(ambiguous_schema.data.empty());
+    const auto ambiguous = plugin.search_schema("vlink::zerocopy::Collision");
+    CHECK(ambiguous.encoding.empty());
+    CHECK(ambiguous.data.empty());
 
     const auto resolved_fbs = plugin.search_schema("vlink::zerocopy::Collision", SchemaType::kFlatbuffers);
-    CHECK(resolved_fbs.schema_type == SchemaType::kFlatbuffers);
-    CHECK(resolved_fbs.encoding == "flatbuffers");
+    CHECK_EQ(resolved_fbs.schema_type, SchemaType::kFlatbuffers);
+    CHECK_EQ(resolved_fbs.encoding, "flatbuffers");
 
-    const auto resolved_zerocopy = plugin.search_schema("vlink::zerocopy::Collision", SchemaType::kZeroCopy);
-    CHECK(resolved_zerocopy.schema_type == SchemaType::kZeroCopy);
-    CHECK(resolved_zerocopy.encoding == "vlink_msg");
+    const auto resolved_zc = plugin.search_schema("vlink::zerocopy::Collision", SchemaType::kZeroCopy);
+    CHECK_EQ(resolved_zc.schema_type, SchemaType::kZeroCopy);
+    CHECK_EQ(resolved_zc.encoding, "vlink_msg");
   }
 }
 

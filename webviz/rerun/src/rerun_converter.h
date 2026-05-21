@@ -47,9 +47,13 @@
 #include <vlink/extension/message_convert_plugin.h>
 #include <vlink/extension/schema_plugin_interface.h>
 #include <vlink/extension/schema_plugin_manager.h>
+#include <vlink/zerocopy/audio_frame.h>
 #include <vlink/zerocopy/camera_frame.h>
+#include <vlink/zerocopy/object_array.h>
+#include <vlink/zerocopy/occupancy_grid.h>
 #include <vlink/zerocopy/point_cloud.h>
 #include <vlink/zerocopy/raw_data.h>
+#include <vlink/zerocopy/tensor.h>
 
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -129,6 +133,25 @@ class RerunConverter final {
   static bool log_raw_data(::rerun::RecordingStream& rec, const std::string& entity_path, const zerocopy::RawData& rd);
 
   static bool log_raw_data(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw);
+
+  static bool log_occupancy_grid(::rerun::RecordingStream& rec, const std::string& entity_path,
+                                 const zerocopy::OccupancyGrid& grid);
+
+  static bool log_occupancy_grid(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw);
+
+  static bool log_tensor(::rerun::RecordingStream& rec, const std::string& entity_path, const zerocopy::Tensor& tensor);
+
+  static bool log_tensor(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw);
+
+  static bool log_object_array(::rerun::RecordingStream& rec, const std::string& entity_path,
+                               const zerocopy::ObjectArray& arr);
+
+  static bool log_object_array(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw);
+
+  static bool log_audio_frame(::rerun::RecordingStream& rec, const std::string& entity_path,
+                              const zerocopy::AudioFrame& frame);
+
+  static bool log_audio_frame(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw);
 
   static bool log_proto_with_mapping(::rerun::RecordingStream& rec, const std::string& entity_path,
                                      const RerunMap& mapping, const google::protobuf::Message& msg);

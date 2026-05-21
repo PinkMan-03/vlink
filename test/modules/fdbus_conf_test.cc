@@ -23,137 +23,96 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_FDBUS
+
+#include "./modules/fdbus_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_FDBUS
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-FdbusConf - construction") {
-  TEST_CASE("construct with address only uses defaults") {
+TEST_SUITE("modules-FdbusConf") {
+  TEST_CASE("default event and transport when only address supplied") {
     FdbusConf conf("my_service");
-    CHECK(conf.address == "my_service");
+
+    CHECK_EQ(conf.address, "my_service");
     CHECK(conf.event.empty());
-    CHECK(conf.transport == "svc");
+    CHECK_EQ(conf.transport, "svc");
   }
 
-  TEST_CASE("construct with address and event") {
+  TEST_CASE("event parameter is stored") {
     FdbusConf conf("my_service", "my_event");
-    CHECK(conf.address == "my_service");
-    CHECK(conf.event == "my_event");
-    CHECK(conf.transport == "svc");
+
+    CHECK_EQ(conf.address, "my_service");
+    CHECK_EQ(conf.event, "my_event");
+    CHECK_EQ(conf.transport, "svc");
   }
 
-  TEST_CASE("construct with ipc transport") {
+  TEST_CASE("ipc transport mode is stored") {
     FdbusConf conf("addr", "", "ipc");
-    CHECK(conf.transport == "ipc");
+
+    CHECK_EQ(conf.transport, "ipc");
   }
 
-  TEST_CASE("svc is default transport") {
-    FdbusConf conf("addr");
-    CHECK(conf.transport == "svc");
-  }
-}
+  TEST_CASE("all three parameters are stored") {
+    FdbusConf conf("my_address", "my_event", "ipc");
 
-TEST_SUITE("modules-FdbusConf - equality (transport excluded)") {
-  TEST_CASE("same address and event are equal regardless of transport") {
+    CHECK_EQ(conf.address, "my_address");
+    CHECK_EQ(conf.event, "my_event");
+    CHECK_EQ(conf.transport, "ipc");
+  }
+
+  TEST_CASE("operator== holds when address and event match regardless of transport") {
     FdbusConf a("service", "event", "svc");
     FdbusConf b("service", "event", "ipc");
 
-    // NOTE: transport is intentionally excluded from equality
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
   }
 
-  TEST_CASE("different address compares not equal") {
+  TEST_CASE("operator!= detects differing address") {
     FdbusConf a("service_a");
     FdbusConf b("service_b");
+
     CHECK(a != b);
+    CHECK_FALSE(a == b);
   }
 
-  TEST_CASE("different event compares not equal") {
+  TEST_CASE("operator!= detects differing event") {
     FdbusConf a("service", "event_a");
     FdbusConf b("service", "event_b");
+
     CHECK(a != b);
   }
 
-  TEST_CASE("equal address and event compare equal") {
+  TEST_CASE("equal address and event with same transport compare equal") {
     FdbusConf a("service", "event");
     FdbusConf b("service", "event");
+
     CHECK(a == b);
-  }
-}
-
-TEST_SUITE("modules-FdbusConf - transport type") {
-  TEST_CASE("get_transport_type returns kFdbus") {
-    FdbusConf conf("addr");
-    CHECK(conf.get_transport_type() == TransportType::kFdbus);
-  }
-}
-
-TEST_SUITE("modules-FdbusConf - edge cases") {
-  TEST_CASE("empty address") {
-    FdbusConf conf("");
-    CHECK(conf.address.empty());
-    CHECK(conf.event.empty());
-    CHECK(conf.transport == "svc");
   }
 
   TEST_CASE("self equality") {
     FdbusConf a("service", "event", "svc");
+
     CHECK(a == a);
-    CHECK(!(a != a));
+    CHECK_FALSE(a != a);
   }
 
-  TEST_CASE("both empty address and event are equal") {
+  TEST_CASE("empty address and event compare equal") {
     FdbusConf a("");
     FdbusConf b("");
+
     CHECK(a == b);
   }
 
-  TEST_CASE("transport field stores custom value") {
-    FdbusConf conf("addr", "evt", "custom_transport");
-    CHECK(conf.transport == "custom_transport");
+  TEST_CASE("get_transport_type returns kFdbus") {
+    FdbusConf conf("addr");
+
+    CHECK(conf.get_transport_type() == TransportType::kFdbus);
   }
-
-  TEST_CASE("long address string") {
-    std::string long_addr(256, 'a');
-    FdbusConf conf(long_addr);
-    CHECK(conf.address == long_addr);
-  }
-
-  TEST_CASE("construct with all parameters") {
-    FdbusConf conf("my_address", "my_event", "ipc");
-    CHECK(conf.address == "my_address");
-    CHECK(conf.event == "my_event");
-    CHECK(conf.transport == "ipc");
-  }
-
-  TEST_CASE("equality ignores transport difference") {
-    FdbusConf a("addr", "evt", "svc");
-    FdbusConf b("addr", "evt", "custom");
-    CHECK(a == b);
-  }
-
-  TEST_CASE("inequality when address differs but event same") {
-    FdbusConf a("addr_a", "evt");
-    FdbusConf b("addr_b", "evt");
-    CHECK(a != b);
-  }
-
-  TEST_CASE("inequality when event differs but address same") {
-    FdbusConf a("addr", "evt_a");
-    FdbusConf b("addr", "evt_b");
-    CHECK(a != b);
-  }
-}
-
-#else
-
-TEST_SUITE("modules-FdbusConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_FDBUS not defined - skip") { CHECK(true); }
 }
 
 #endif  // VLINK_SUPPORT_FDBUS

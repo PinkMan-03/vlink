@@ -27,65 +27,42 @@
 
 #include <doctest/doctest.h>
 
-#include <atomic>
 #include <thread>
+#include <type_traits>
 
+#include "../common_test.h"
 #include "./base/cpu_profiler.h"
 
-//
-#include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: CpuProfilerGuard
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("base-CpuProfilerGuard") {
-  TEST_CASE("construction with nullptr does not crash") {
-    CpuProfilerGuard guard(nullptr);
-    CHECK(true);
-  }
+  TEST_CASE("construction with nullptr does not crash") { CpuProfilerGuard guard(nullptr); }
 
-  TEST_CASE("construction with valid profiler calls begin/end") {
+  TEST_CASE("construction with valid profiler calls begin and end automatically") {
     CpuProfiler profiler;
-    {
-      CpuProfilerGuard guard(&profiler);
-      // Simulate work
-      std::this_thread::sleep_for(1ms);
-    }
-    // After guard goes out of scope, end() was called
-    CHECK(true);
-  }
-
-  TEST_CASE("multiple guards on same profiler") {
-    CpuProfiler profiler;
-    {
-      CpuProfilerGuard guard1(&profiler);
-      std::this_thread::sleep_for(1ms);
-    }
-    {
-      CpuProfilerGuard guard2(&profiler);
-      std::this_thread::sleep_for(1ms);
-    }
-    double cpu_usage = profiler.get();
-    // Just verify it returns a valid number
-    CHECK(cpu_usage >= 0.0);
-  }
-
-  TEST_CASE("guard with profiler tracks non-zero usage") {
-    CpuProfiler profiler;
-    profiler.begin();
-    profiler.end();
 
     {
       CpuProfilerGuard guard(&profiler);
-      // Do some work to register CPU time
-      std::atomic<int> sum = 0;
-      for (int i = 0; i < 10000; ++i) {
-        sum += i;
-      }
-      (void)sum;
+      std::this_thread::sleep_for(1ms);
     }
-    CHECK(true);
+
+    CHECK(profiler.get() >= 0.0);
+  }
+
+  TEST_CASE("multiple guards on the same profiler accumulate correctly") {
+    CpuProfiler profiler;
+
+    for (int i = 0; i < 3; ++i) {
+      CpuProfilerGuard guard(&profiler);
+      std::this_thread::sleep_for(1ms);
+    }
+
+    CHECK(profiler.get() >= 0.0);
+  }
+
+  TEST_CASE("guard is non-copyable and non-movable") {
+    CHECK_FALSE(std::is_copy_constructible_v<CpuProfilerGuard>);
+    CHECK_FALSE(std::is_copy_assignable_v<CpuProfilerGuard>);
+    CHECK_FALSE(std::is_move_constructible_v<CpuProfilerGuard>);
+    CHECK_FALSE(std::is_move_assignable_v<CpuProfilerGuard>);
   }
 }
 

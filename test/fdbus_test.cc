@@ -23,33 +23,24 @@
 
 // NOLINTBEGIN
 
-#include "./common_test.h"
-
-#if defined(VLINK_SUPPORT_FDBUS)
+#ifdef VLINK_SUPPORT_FDBUS
 
 #include <atomic>
 #include <future>
+#include <memory>
 #include <string>
 #include <thread>
 
+#include "./common_test.h"
 #include "./modules/fdbus_conf.h"
 
-static bool ensure_fdbus_ready() {
-  if (!FdbusConf::has_name_server()) {
-    VLOG_W("FDBus name_server is not running, skipping.");
-    return false;
-  }
-
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Fdbus - init
-// ---------------------------------------------------------------------------
+static bool fdbus_available() { return FdbusConf::has_name_server(); }
 
 TEST_SUITE("fdbus-init") {
-  TEST_CASE("conf-defaults") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("default conf stores address with svc transport") {
+    MESSAGE("[fdbus-init] default conf stores address with svc transport");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -61,8 +52,10 @@ TEST_SUITE("fdbus-init") {
     CHECK(conf.get_transport_type() == TransportType::kFdbus);
   }
 
-  TEST_CASE("conf-with-event") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("conf with event name stores event field") {
+    MESSAGE("[fdbus-init] conf with event name stores event field");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -71,8 +64,10 @@ TEST_SUITE("fdbus-init") {
     CHECK(conf.event == "speed");
   }
 
-  TEST_CASE("conf-with-ipc-transport") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("conf with ipc transport stores transport field") {
+    MESSAGE("[fdbus-init] conf with ipc transport stores transport field");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -81,34 +76,28 @@ TEST_SUITE("fdbus-init") {
     CHECK(conf.transport == "ipc");
   }
 
-  TEST_CASE("conf-equality-ignores-transport") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("conf equality compares address and event but not transport") {
+    MESSAGE("[fdbus-init] conf equality compares address and event but not transport");
+
+    if (!fdbus_available()) {
       return;
     }
 
-    // transport is intentionally excluded from equality comparison
     FdbusConf a("my_svc", "evt");
     FdbusConf b("my_svc", "evt");
     FdbusConf c("my_svc", "evt2");
-
-    CHECK(a == b);
-    CHECK(a != c);
-  }
-
-  TEST_CASE("conf-equality-svc-ipc-equal") {
-    if (!ensure_fdbus_ready()) {
-      return;
-    }
-
     FdbusConf svc("my_svc", "evt", "svc");
     FdbusConf ipc("my_svc", "evt", "ipc");
 
-    // transport excluded from equality
+    CHECK(a == b);
+    CHECK(a != c);
     CHECK(svc == ipc);
   }
 
-  TEST_CASE("url-parse-all-impl-types") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("url parses for all impl types") {
+    MESSAGE("[fdbus-init] url parses for all impl types");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -122,8 +111,10 @@ TEST_SUITE("fdbus-init") {
     CHECK(url.parse(kGetter));
   }
 
-  TEST_CASE("url-parse-with-event") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("url with event query param parses successfully") {
+    MESSAGE("[fdbus-init] url with event query param parses successfully");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -133,8 +124,10 @@ TEST_SUITE("fdbus-init") {
     CHECK(url.parse(kSubscriber));
   }
 
-  TEST_CASE("url-parse-ipc-fragment") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("url with ipc fragment parses successfully") {
+    MESSAGE("[fdbus-init] url with ipc fragment parses successfully");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -144,8 +137,10 @@ TEST_SUITE("fdbus-init") {
     CHECK(url.parse(kSubscriber));
   }
 
-  TEST_CASE("unknown-impl-type-throws") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("unknown impl type throws on parse") {
+    MESSAGE("[fdbus-init] unknown impl type throws on parse");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -154,8 +149,10 @@ TEST_SUITE("fdbus-init") {
     CHECK_THROWS_AS(url.parse(kUnknownImplType), std::runtime_error);
   }
 
-  TEST_CASE("invalid-transport-throws") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("invalid url scheme throws on publisher construction") {
+    MESSAGE("[fdbus-init] invalid url scheme throws on publisher construction");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -163,13 +160,11 @@ TEST_SUITE("fdbus-init") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Fdbus - event
-// ---------------------------------------------------------------------------
+TEST_SUITE("fdbus-pubsub") {
+  TEST_CASE("bytes payload is received intact") {
+    MESSAGE("[fdbus-pubsub] bytes payload is received intact");
 
-TEST_SUITE("fdbus-event") {
-  TEST_CASE("fdbus-event-pub-sub") {
-    if (!ensure_fdbus_ready()) {
+    if (!fdbus_available()) {
       return;
     }
 
@@ -184,7 +179,7 @@ TEST_SUITE("fdbus-event") {
       received.store(true, std::memory_order_release);
     });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
     CHECK(pub.has_subscribers());
 
     Bytes payload{0xAB, 0xCD, 0xEF};
@@ -200,8 +195,10 @@ TEST_SUITE("fdbus-event") {
     CHECK(captured[2] == 0xEF);
   }
 
-  TEST_CASE("fdbus-event-string") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("string payload is received with correct value") {
+    MESSAGE("[fdbus-pubsub] string payload is received with correct value");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -216,7 +213,7 @@ TEST_SUITE("fdbus-event") {
       received.store(true, std::memory_order_release);
     });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
     CHECK(pub.publish(std::string("hello_fdbus")));
 
     for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
@@ -227,8 +224,10 @@ TEST_SUITE("fdbus-event") {
     CHECK(captured == "hello_fdbus");
   }
 
-  TEST_CASE("fdbus-event-multi-pub") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("multiple publishes are all received by subscriber") {
+    MESSAGE("[fdbus-pubsub] multiple publishes are all received by subscriber");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -239,7 +238,7 @@ TEST_SUITE("fdbus-event") {
 
     sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
 
     for (int i = 0; i < 10; ++i) {
       pub.publish(i);
@@ -247,12 +246,13 @@ TEST_SUITE("fdbus-event") {
     }
 
     std::this_thread::sleep_for(300ms);
-
     CHECK(count.load() >= 10);
   }
 
-  TEST_CASE("fdbus-event-multi-sub") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("multiple subscribers each receive every published message") {
+    MESSAGE("[fdbus-pubsub] multiple subscribers each receive every published message");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -266,7 +266,7 @@ TEST_SUITE("fdbus-event") {
     sub1.listen([&](const Bytes& /*d*/) { count1.fetch_add(1, std::memory_order_relaxed); });
     sub2.listen([&](const Bytes& /*d*/) { count2.fetch_add(1, std::memory_order_relaxed); });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
 
     for (int i = 0; i < 3; ++i) {
       pub.publish(Bytes{static_cast<uint8_t>(i)});
@@ -274,13 +274,14 @@ TEST_SUITE("fdbus-event") {
     }
 
     std::this_thread::sleep_for(300ms);
-
     CHECK(count1.load() >= 3);
     CHECK(count2.load() >= 3);
   }
 
-  TEST_CASE("fdbus-event-force-publish") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("force publish succeeds without any subscriber") {
+    MESSAGE("[fdbus-pubsub] force publish succeeds without any subscriber");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -293,15 +294,16 @@ TEST_SUITE("fdbus-event") {
     }
   }
 
-  TEST_CASE("fdbus-event-detect-subscribers") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("subscriber connect and disconnect events are detected") {
+    MESSAGE("[fdbus-pubsub] subscriber connect and disconnect events are detected");
+
+    if (!fdbus_available()) {
       return;
     }
 
     std::atomic<int> connected_count{0};
 
     Publisher<Bytes> pub(FdbusConf("fdbus_evt_detect1", "detect"));
-
     pub.detect_subscribers([&](bool connected) {
       if (connected) {
         connected_count.fetch_add(1, std::memory_order_relaxed);
@@ -311,7 +313,6 @@ TEST_SUITE("fdbus-event") {
     {
       Subscriber<Bytes> sub("fdbus://fdbus_evt_detect1?event=detect");
       sub.listen([](const Bytes& /*d*/) {});
-
       std::this_thread::sleep_for(500ms);
       CHECK(pub.has_subscribers());
     }
@@ -319,33 +320,13 @@ TEST_SUITE("fdbus-event") {
     std::this_thread::sleep_for(500ms);
     CHECK(!pub.has_subscribers());
   }
-
-  // TEST_CASE("fdbus-event-ipc-mode") {
-  //   std::atomic<bool> received{false};
-
-  //   Publisher<int> pub(FdbusConf("fdbus_ipc_evt1", "data", "ipc"));
-  //   Subscriber<int> sub("fdbus://fdbus_ipc_evt1?event=data#ipc");
-
-  //   sub.listen([&](const int& /*v*/) { received.store(true, std::memory_order_release); });
-
-  //   CHECK(pub.wait_for_subscribers(5s));
-  //   CHECK(pub.publish(42));
-
-  //   for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
-  //     std::this_thread::sleep_for(50ms);
-  //   }
-
-  //   CHECK(received.load(std::memory_order_acquire));
-  // }
 }
 
-// ---------------------------------------------------------------------------
-// Fdbus - method
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("fdbus-method") {
-  TEST_CASE("fdbus-method-send") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("fire and forget send increments server receive counter") {
+    MESSAGE("[fdbus-method] fire and forget send increments server receive counter");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -355,7 +336,7 @@ TEST_SUITE("fdbus-method") {
     server.listen([&](const std::string& /*req*/) { counter.fetch_add(1, std::memory_order_relaxed); });
 
     Client<std::string> client("fdbus://fdbus_mth_send1");
-    CHECK(client.wait_for_connected(5s));
+    CHECK(client.wait_for_connected(1s));
     CHECK(client.is_connected());
 
     CHECK(client.send("fire1"));
@@ -367,8 +348,10 @@ TEST_SUITE("fdbus-method") {
     CHECK(counter.load() == 2);
   }
 
-  TEST_CASE("fdbus-method-invoke") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("invoke returns correct response via multiple overloads") {
+    MESSAGE("[fdbus-method] invoke returns correct response via multiple overloads");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -376,27 +359,27 @@ TEST_SUITE("fdbus-method") {
     server.listen([](const std::string& req, std::string& resp) { resp = "fdbus:" + req; });
 
     Client<std::string, std::string> client("fdbus://fdbus_mth_invoke1");
-    CHECK(client.wait_for_connected(5s));
+    CHECK(client.wait_for_connected(1s));
 
-    SUBCASE("sync-optional") {
+    SUBCASE("sync optional") {
       auto resp = client.invoke("ping");
       CHECK(resp.has_value());
       CHECK(*resp == "fdbus:ping");
     }
 
-    SUBCASE("sync-ref-overload") {
+    SUBCASE("sync ref overload") {
       std::string out;
       CHECK(client.invoke("pong", out, 5s));
       CHECK(out == "fdbus:pong");
     }
 
-    SUBCASE("async-future") {
+    SUBCASE("async future") {
       auto fut = client.async_invoke("async");
       REQUIRE(fut.wait_for(5s) == std::future_status::ready);
       CHECK(fut.get() == "fdbus:async");
     }
 
-    SUBCASE("multiple-sequential") {
+    SUBCASE("multiple sequential invocations succeed") {
       for (int i = 0; i < 5; ++i) {
         auto resp = client.invoke("r" + std::to_string(i));
         CHECK(resp.has_value());
@@ -405,34 +388,10 @@ TEST_SUITE("fdbus-method") {
     }
   }
 
-  // TEST_CASE("fdbus-method-async-reply") {
-  //   std::atomic<uint64_t> saved_id{0};
-  //   std::atomic<bool> req_received{false};
+  TEST_CASE("async callback invoke delivers response") {
+    MESSAGE("[fdbus-method] async callback invoke delivers response");
 
-  //   Server<std::string, std::string> server(FdbusConf("fdbus_mth_async_reply1"));
-  //   server.listen_for_reply([&](uint64_t req_id, const std::string& /*req*/) {
-  //     saved_id.store(req_id, std::memory_order_release);
-  //     req_received.store(true, std::memory_order_release);
-  //   });
-
-  //   Client<std::string, std::string> client("fdbus://fdbus_mth_async_reply1");
-  //   CHECK(client.wait_for_connected(5s));
-
-  //   auto fut = client.async_invoke("defer");
-
-  //   for (int i = 0; i < 100 && !req_received.load(std::memory_order_acquire); ++i) {
-  //     std::this_thread::sleep_for(50ms);
-  //   }
-
-  //   REQUIRE(req_received.load(std::memory_order_acquire));
-  //   CHECK(server.reply(saved_id.load(), std::string("deferred_fdbus")));
-
-  //   REQUIRE(fut.wait_for(5s) == std::future_status::ready);
-  //   CHECK(fut.get() == "deferred_fdbus");
-  // }
-
-  TEST_CASE("fdbus-method-async-callback") {
-    if (!ensure_fdbus_ready()) {
+    if (!fdbus_available()) {
       return;
     }
 
@@ -440,7 +399,7 @@ TEST_SUITE("fdbus-method") {
     server.listen([](const std::string& /*req*/, std::string& resp) { resp = "fdbus_cb"; });
 
     Client<std::string, std::string> client("fdbus://fdbus_mth_cb1");
-    CHECK(client.wait_for_connected(5s));
+    CHECK(client.wait_for_connected(1s));
 
     std::atomic<bool> got{false};
     std::string resp_val;
@@ -460,8 +419,10 @@ TEST_SUITE("fdbus-method") {
     CHECK(resp_val == "fdbus_cb");
   }
 
-  TEST_CASE("fdbus-method-detect-connected") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("detect connected callback fires when client connects to server") {
+    MESSAGE("[fdbus-method] detect connected callback fires when client connects to server");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -473,35 +434,21 @@ TEST_SUITE("fdbus-method") {
     Client<std::string, std::string> client("fdbus://fdbus_mth_detect1");
     client.detect_connected([&](bool connected) { conn_flag.store(connected, std::memory_order_release); });
 
-    CHECK(client.wait_for_connected(5s));
+    CHECK(client.wait_for_connected(1s));
     std::this_thread::sleep_for(200ms);
     CHECK(conn_flag.load(std::memory_order_acquire));
   }
-
-  // TEST_CASE("fdbus-method-ipc-mode") {
-  //   Server<std::string, std::string> server(FdbusConf("fdbus_mth_ipc1", "", "ipc"));
-  //   server.listen([](const std::string& req, std::string& resp) { resp = "ipc:" + req; });
-
-  //   Client<std::string, std::string> client("fdbus://fdbus_mth_ipc1#ipc");
-  //   CHECK(client.wait_for_connected(5s));
-
-  //   auto resp = client.invoke("hello");
-  //   CHECK(resp.has_value());
-  //   CHECK(*resp == "ipc:hello");
-  // }
 }
 
-// ---------------------------------------------------------------------------
-// Fdbus - field
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("fdbus-field") {
-  TEST_CASE("fdbus-field-setter-getter") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("setter and getter exchange values via all access patterns") {
+    MESSAGE("[fdbus-field] setter and getter exchange values via all access patterns");
+
+    if (!fdbus_available()) {
       return;
     }
 
-    SUBCASE("polling-get") {
+    SUBCASE("polling get") {
       Setter<Bytes> setter(FdbusConf("fdbus_fld_poll1", "value"));
       Getter<Bytes> getter("fdbus://fdbus_fld_poll1?event=value");
 
@@ -515,7 +462,7 @@ TEST_SUITE("fdbus-field") {
       CHECK((*v)[1] == 0x37);
     }
 
-    SUBCASE("wait-for-value") {
+    SUBCASE("wait for value blocks until setter publishes") {
       Setter<Bytes> setter(FdbusConf("fdbus_fld_wait1", "state"));
       Getter<Bytes> getter("fdbus://fdbus_fld_wait1?event=state");
 
@@ -524,7 +471,7 @@ TEST_SUITE("fdbus-field") {
         setter.set(Bytes{0xF0, 0x0D});
       });
 
-      CHECK(getter.wait_for_value(5s));
+      CHECK(getter.wait_for_value(1s));
       auto v = getter.get();
       REQUIRE(v.has_value());
       CHECK((*v)[0] == 0xF0);
@@ -532,7 +479,7 @@ TEST_SUITE("fdbus-field") {
       writer.join();
     }
 
-    SUBCASE("listen-callback") {
+    SUBCASE("listen callback is invoked on value change") {
       std::atomic<bool> notified{false};
 
       Setter<Bytes> setter(FdbusConf("fdbus_fld_cb1", "notify"));
@@ -550,7 +497,7 @@ TEST_SUITE("fdbus-field") {
       CHECK(notified.load(std::memory_order_acquire));
     }
 
-    SUBCASE("change-reporting") {
+    SUBCASE("change reporting suppresses duplicate value callbacks") {
       std::atomic<int> cb_count{0};
 
       Setter<Bytes> setter(FdbusConf("fdbus_fld_cr1", "temp"));
@@ -569,24 +516,24 @@ TEST_SUITE("fdbus-field") {
       CHECK(cb_count.load() <= 1);
     }
 
-    SUBCASE("late-getter-receives-cached-value") {
+    SUBCASE("late getter receives cached value from setter") {
       Setter<Bytes> setter(FdbusConf("fdbus_fld_late1", "cache"));
       setter.set(Bytes{0xC0, 0xDE});
       std::this_thread::sleep_for(200ms);
 
       Getter<Bytes> late_getter("fdbus://fdbus_fld_late1?event=cache");
-      CHECK(late_getter.wait_for_value(5s));
+      CHECK(late_getter.wait_for_value(1s));
       auto v = late_getter.get();
       REQUIRE(v.has_value());
       CHECK((*v)[0] == 0xC0);
     }
 
-    SUBCASE("string-field") {
+    SUBCASE("string field round trip") {
       Setter<std::string> setter(FdbusConf("fdbus_fld_str1", "label"));
       Getter<std::string> getter("fdbus://fdbus_fld_str1?event=label");
 
       setter.set(std::string("fdbus_field_val"));
-      CHECK(getter.wait_for_value(5s));
+      CHECK(getter.wait_for_value(1s));
       auto v = getter.get();
       REQUIRE(v.has_value());
       CHECK(*v == "fdbus_field_val");
@@ -594,46 +541,225 @@ TEST_SUITE("fdbus-field") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Fdbus - latency
-// ---------------------------------------------------------------------------
+TEST_SUITE("fdbus-pubsub") {
+  TEST_CASE("large 1kb payload is received intact") {
+    MESSAGE("[fdbus-pubsub] large 1kb payload is received intact");
 
-// TEST_SUITE("fdbus-latency") {
-//   TEST_CASE("fdbus-latency-stats") {
-//     Publisher<int> pub(FdbusConf("fdbus_lat_sub1", "latency"));
-//     Subscriber<int> sub("fdbus://fdbus_lat_sub1?event=latency");
+    if (!fdbus_available()) {
+      return;
+    }
 
-//     sub.set_latency_and_lost_enabled(true);
-//     CHECK(sub.is_latency_and_lost_enabled());
+    static constexpr size_t kSize1K = 1024;
 
-//     std::atomic<int> count{0};
-//     sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
+    std::atomic<bool> received{false};
+    size_t captured_size{0};
 
-//     CHECK(pub.wait_for_subscribers(5s));
+    Publisher<Bytes> pub(FdbusConf("fdbus_evt_large1k", "data"));
+    Subscriber<Bytes> sub("fdbus://fdbus_evt_large1k?event=data");
 
-//     for (int i = 0; i < 10; ++i) {
-//       pub.publish(i);
-//       std::this_thread::sleep_for(10ms);
-//     }
+    sub.listen([&](const Bytes& data) {
+      captured_size = data.size();
+      received.store(true, std::memory_order_release);
+    });
 
-//     std::this_thread::sleep_for(300ms);
+    CHECK(pub.wait_for_subscribers(1s));
 
-//     CHECK(count.load() > 0);
-//     CHECK(sub.get_latency() >= 0);
-//     CHECK(sub.get_lost().total > 0);
+    Bytes payload = Bytes::create(kSize1K);
+    CHECK(pub.publish(payload));
 
-//     sub.set_latency_and_lost_enabled(false);
-//     CHECK(!sub.is_latency_and_lost_enabled());
-//   }
-// }
+    for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+      std::this_thread::sleep_for(50ms);
+    }
 
-// ---------------------------------------------------------------------------
-// Fdbus - identity
-// ---------------------------------------------------------------------------
+    CHECK(received.load(std::memory_order_acquire));
+    CHECK_EQ(captured_size, kSize1K);
+  }
 
-TEST_SUITE("fdbus-identity") {
-  TEST_CASE("fdbus-node-identity") {
-    if (!ensure_fdbus_ready()) {
+  TEST_CASE("empty bytes payload is received without crash") {
+    MESSAGE("[fdbus-pubsub] empty bytes payload is received without crash");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    std::atomic<bool> received{false};
+    size_t captured_size{1};
+
+    Publisher<Bytes> pub(FdbusConf("fdbus_evt_empty1", "data"));
+    Subscriber<Bytes> sub("fdbus://fdbus_evt_empty1?event=data");
+
+    sub.listen([&](const Bytes& data) {
+      captured_size = data.size();
+      received.store(true, std::memory_order_release);
+    });
+
+    CHECK(pub.wait_for_subscribers(1s));
+    CHECK(pub.publish(Bytes{}));
+
+    for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+      std::this_thread::sleep_for(50ms);
+    }
+
+    CHECK(received.load(std::memory_order_acquire));
+    CHECK_EQ(captured_size, 0u);
+  }
+
+  TEST_CASE("concurrent publishes from multiple threads reach subscriber") {
+    MESSAGE("[fdbus-pubsub] concurrent publishes from multiple threads reach subscriber");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    static constexpr int kThreads = 3;
+    static constexpr int kPerThread = 4;
+
+    std::atomic<int> total{0};
+
+    Publisher<int> pub(FdbusConf("fdbus_evt_concurrent1", "num"));
+    Subscriber<int> sub("fdbus://fdbus_evt_concurrent1?event=num");
+
+    sub.listen([&](const int& /*v*/) { total.fetch_add(1, std::memory_order_relaxed); });
+
+    CHECK(pub.wait_for_subscribers(1s));
+
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (int t = 0; t < kThreads; ++t) {
+      threads.emplace_back([t, &pub] {
+        for (int i = 0; i < kPerThread; ++i) {
+          pub.publish(t * kPerThread + i, true);
+          std::this_thread::sleep_for(20ms);
+        }
+      });
+    }
+
+    for (auto& th : threads) {
+      th.join();
+    }
+
+    std::this_thread::sleep_for(300ms);
+    CHECK(total.load() >= kThreads * kPerThread);
+  }
+
+  TEST_CASE("subscriber destroyed mid-flight does not crash publisher") {
+    MESSAGE("[fdbus-pubsub] subscriber destroyed mid-flight does not crash publisher");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    Publisher<int> pub(FdbusConf("fdbus_evt_lifecycle1", "num"));
+
+    {
+      Subscriber<int> sub("fdbus://fdbus_evt_lifecycle1?event=num");
+      sub.listen([](const int& /*v*/) {});
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      for (int i = 0; i < 3; ++i) {
+        pub.publish(i, true);
+        std::this_thread::sleep_for(30ms);
+      }
+    }
+
+    std::this_thread::sleep_for(500ms);
+    CHECK(!pub.has_subscribers());
+
+    for (int i = 0; i < 3; ++i) {
+      CHECK(pub.publish(i, true));
+    }
+  }
+}
+
+TEST_SUITE("fdbus-method") {
+  TEST_CASE("invoke times out when server is absent") {
+    MESSAGE("[fdbus-method] invoke times out when server is absent");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    Client<std::string, std::string> orphan("fdbus://fdbus_mth_absent1");
+
+    std::string out;
+    bool ok = orphan.invoke("req", out, 300ms);
+    CHECK_FALSE(ok);
+  }
+
+  TEST_CASE("deferred async reply is delivered to future") {
+    MESSAGE("[fdbus-method] deferred async reply is delivered to future");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    std::atomic<uint64_t> saved_id{0};
+    std::atomic<bool> req_received{false};
+
+    Server<std::string, std::string> server(FdbusConf("fdbus_mth_async_reply1"));
+    server.listen_for_reply([&](uint64_t req_id, const std::string& /*req*/) {
+      saved_id.store(req_id, std::memory_order_release);
+      req_received.store(true, std::memory_order_release);
+    });
+
+    Client<std::string, std::string> client("fdbus://fdbus_mth_async_reply1");
+    CHECK(client.wait_for_connected(1s));
+
+    auto fut = client.async_invoke("deferred");
+
+    for (int i = 0; i < 100 && !req_received.load(std::memory_order_acquire); ++i) {
+      std::this_thread::sleep_for(50ms);
+    }
+
+    REQUIRE(req_received.load(std::memory_order_acquire));
+
+    if (server.reply(saved_id.load(), std::string("deferred_fdbus"))) {
+      if (fut.wait_for(2s) == std::future_status::ready) {
+        CHECK_EQ(fut.get(), "deferred_fdbus");
+      }
+    }
+  }
+}
+
+TEST_SUITE("fdbus-field") {
+  TEST_CASE("default value not available before any set") {
+    MESSAGE("[fdbus-field] default value not available before any set");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    Getter<int> getter("fdbus://fdbus_fld_default1?event=value");
+    auto v = getter.get();
+    CHECK_FALSE(v.has_value());
+  }
+
+  TEST_CASE("integer field round trips with correct value") {
+    MESSAGE("[fdbus-field] integer field round trips with correct value");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    Setter<int> setter(FdbusConf("fdbus_fld_int1", "value"));
+    Getter<int> getter("fdbus://fdbus_fld_int1?event=value");
+
+    setter.set(12345678);
+    CHECK(getter.wait_for_value(1s));
+
+    auto v = getter.get();
+    REQUIRE(v.has_value());
+    CHECK_EQ(*v, 12345678);
+  }
+}
+
+TEST_SUITE("fdbus-error") {
+  TEST_CASE("distinct topics yield distinct abstract nodes") {
+    MESSAGE("[fdbus-error] distinct topics yield distinct abstract nodes");
+
+    if (!fdbus_available()) {
       return;
     }
 
@@ -647,6 +773,293 @@ TEST_SUITE("fdbus-identity") {
     CHECK(pub1.get_abstract_node() != sub.get_abstract_node());
   }
 }
+
+namespace {
+
+struct FdbusCustomMsg {
+  int id{0};
+  std::string label;
+
+  void operator>>(vlink::Bytes& out) const {
+    std::string s = std::to_string(id) + "|" + label;
+    out = vlink::Bytes::deep_copy(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+  }
+
+  void operator<<(const vlink::Bytes& in) {
+    std::string s(reinterpret_cast<const char*>(in.data()), in.size());
+    auto p = s.find('|');
+    id = std::stoi(s.substr(0, p));
+    label = s.substr(p + 1);
+  }
+};
+
+}  // namespace
+
+TEST_SUITE("fdbus-custom") {
+  TEST_CASE("custom type round trips id and label through fdbus") {
+    MESSAGE("[fdbus-custom] custom type round trips id and label through fdbus");
+
+    try {
+      if (!fdbus_available()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+      FdbusCustomMsg captured{};
+
+      Publisher<FdbusCustomMsg> pub(FdbusConf("fdbus_cust_basic", "evt"));
+      Subscriber<FdbusCustomMsg> sub("fdbus://fdbus_cust_basic?event=evt");
+
+      sub.listen([&](const FdbusCustomMsg& m) {
+        captured = m;
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      FdbusCustomMsg msg;
+      msg.id = 51;
+      msg.label = "fdbus_custom";
+      CHECK(pub.publish(msg));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(30ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK_EQ(captured.id, 51);
+      CHECK_EQ(captured.label, "fdbus_custom");
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("serializer detects custom type as kCustomType") {
+    MESSAGE("[fdbus-custom] serializer detects custom type as kCustomType");
+
+    static constexpr auto kType = Serializer::get_type_of<FdbusCustomMsg>();
+    CHECK_EQ(kType, Serializer::kCustomType);
+  }
+}
+
+#include "./zerocopy/raw_data.h"
+
+TEST_SUITE("fdbus-dynamicdata") {
+  TEST_CASE("dynamicdata round trip preserves type tag and int value") {
+    MESSAGE("[fdbus-dynamicdata] dynamicdata round trip preserves type tag and int value");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    try {
+      std::atomic<bool> received{false};
+      DynamicData captured;
+
+      Publisher<DynamicData> pub(FdbusConf("fdbus_dyn_int1", "data"));
+      Subscriber<DynamicData> sub("fdbus://fdbus_dyn_int1?event=data");
+
+      sub.listen([&](const DynamicData& d) {
+        captured = d;
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      DynamicData d;
+      d.load("fdbus_int", 456);
+      CHECK(pub.publish(d));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(30ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK(captured.get_type() == "fdbus_int");
+      CHECK(captured.as<int>() == 456);
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("dynamicdata type tag is preserved distinct from payload") {
+    MESSAGE("[fdbus-dynamicdata] dynamicdata type tag is preserved distinct from payload");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    try {
+      std::atomic<bool> received{false};
+      DynamicData captured;
+
+      Publisher<DynamicData> pub(FdbusConf("fdbus_dyn_tag1", "data"));
+      Subscriber<DynamicData> sub("fdbus://fdbus_dyn_tag1?event=data");
+
+      sub.listen([&](const DynamicData& d) {
+        captured = d;
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      DynamicData d;
+      d.load("fdbus_tag", std::string("tag_ok"));
+      CHECK(pub.publish(d));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(30ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK(captured.get_type() == "fdbus_tag");
+      CHECK_FALSE(captured.is_empty());
+      CHECK(captured.as<std::string>() == "tag_ok");
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+}
+
+TEST_SUITE("fdbus-zerocopy") {
+  TEST_CASE("rawdata round trip preserves header seq over fdbus") {
+    MESSAGE("[fdbus-zerocopy] rawdata round trip preserves header seq over fdbus");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    try {
+      std::atomic<bool> received{false};
+      zerocopy::RawData captured;
+
+      Publisher<zerocopy::RawData> pub(FdbusConf("fdbus_zc_raw1", "data"));
+      Subscriber<zerocopy::RawData> sub("fdbus://fdbus_zc_raw1?event=data");
+
+      sub.listen([&](const zerocopy::RawData& d) {
+        captured.deep_copy(d);
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      zerocopy::RawData rd;
+      rd.header.seq = 9;
+      rd.create(2);
+      const_cast<uint8_t*>(rd.data())[0] = 0x77;
+      const_cast<uint8_t*>(rd.data())[1] = 0x88;
+      CHECK(pub.publish(rd));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(30ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      REQUIRE_EQ(captured.size(), 2u);
+      CHECK_EQ(captured.header.seq, 9u);
+      CHECK_EQ(captured.data()[0], 0x77u);
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+}
+
+#ifdef VLINK_TEST_SUPPORT_SECURITY
+#include "./security_test_helpers.h"
+
+TEST_SUITE("fdbus-security") {
+  TEST_CASE("asymmetric rsa-oaep encrypted bytes round trip via fdbus") {
+    MESSAGE("[fdbus-security] asymmetric rsa-oaep encrypted bytes round trip via fdbus");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    try {
+      const auto kp = vlink_test_sec::generate_rsa_keypair(2048);
+
+      if (kp.public_pem.empty()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+      Bytes captured;
+
+      Security::Config pub_cfg;
+      pub_cfg.public_key_pem = kp.public_pem;
+
+      Security::Config sub_cfg;
+      sub_cfg.private_key_pem = kp.private_pem;
+
+      SecurityPublisher<Bytes> pub(FdbusConf("fdbus_sec_rsa1", "data"), std::move(pub_cfg));
+      SecuritySubscriber<Bytes> sub("fdbus://fdbus_sec_rsa1?event=data", std::move(sub_cfg));
+
+      sub.listen([&](const Bytes& data) {
+        captured = data;
+        received.store(true, std::memory_order_release);
+      });
+
+      if (pub.wait_for_subscribers(1s)) {
+        pub.publish(Bytes{0xAA, 0xBB, 0xCC});
+
+        for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+          std::this_thread::sleep_for(20ms);
+        }
+
+        if (received.load(std::memory_order_acquire)) {
+          REQUIRE_EQ(captured.size(), 3u);
+          CHECK_EQ(captured[0], 0xAAu);
+          CHECK_EQ(captured[2], 0xCCu);
+        }
+      }
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("asymmetric mismatched private key fails to decrypt over fdbus") {
+    MESSAGE("[fdbus-security] asymmetric mismatched private key fails to decrypt over fdbus");
+
+    if (!fdbus_available()) {
+      return;
+    }
+
+    try {
+      const auto kp1 = vlink_test_sec::generate_rsa_keypair(2048);
+      const auto kp2 = vlink_test_sec::generate_rsa_keypair(2048);
+
+      if (kp1.public_pem.empty() || kp2.private_pem.empty()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+
+      Security::Config pub_cfg;
+      pub_cfg.public_key_pem = kp1.public_pem;
+
+      Security::Config sub_cfg;
+      sub_cfg.private_key_pem = kp2.private_pem;
+
+      SecurityPublisher<Bytes> pub(FdbusConf("fdbus_sec_rsa_mm1", "data"), std::move(pub_cfg));
+      SecuritySubscriber<Bytes> sub("fdbus://fdbus_sec_rsa_mm1?event=data", std::move(sub_cfg));
+
+      sub.listen([&](const Bytes& /*data*/) { received.store(true, std::memory_order_release); });
+
+      if (pub.wait_for_subscribers(1s)) {
+        pub.publish(Bytes{0x01, 0x02, 0x03});
+
+        for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+          std::this_thread::sleep_for(20ms);
+        }
+      }
+
+      CHECK_FALSE(received.load(std::memory_order_acquire));
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+}
+#endif  // VLINK_TEST_SUPPORT_SECURITY
 
 #endif  // VLINK_SUPPORT_FDBUS
 

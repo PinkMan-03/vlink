@@ -23,68 +23,97 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_DDSC
+
+#include "./modules/ddsc_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_DDSC
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-DdscConf - construction") {
-  TEST_CASE("construct with topic only uses defaults") {
+TEST_SUITE("modules-DdscConf") {
+  TEST_CASE("default domain depth and qos when only topic supplied") {
     DdscConf conf("vehicle/speed");
-    CHECK(conf.topic == "vehicle/speed");
-    CHECK(conf.domain == 0);
-    CHECK(conf.depth == 0);
+
+    CHECK_EQ(conf.topic, "vehicle/speed");
+    CHECK_EQ(conf.domain, 0);
+    CHECK_EQ(conf.depth, 0);
     CHECK(conf.qos.empty());
   }
 
-  TEST_CASE("construct with topic, domain, depth") {
-    DdscConf conf("my_topic", 3, 20);
-    CHECK(conf.topic == "my_topic");
-    CHECK(conf.domain == 3);
-    CHECK(conf.depth == 20);
+  TEST_CASE("explicit domain and depth are stored") {
+    DdscConf conf("my_topic", 3, 8);
+
+    CHECK_EQ(conf.topic, "my_topic");
+    CHECK_EQ(conf.domain, 3);
+    CHECK_EQ(conf.depth, 8);
+    CHECK(conf.qos.empty());
   }
 
-  TEST_CASE("construct with named QoS") {
-    DdscConf conf("my_topic", 0, 0, "my_qos");
-    CHECK(conf.qos == "my_qos");
-  }
-}
+  TEST_CASE("named qos profile is stored") {
+    DdscConf conf("my_topic", 1, 0, "cyclone_profile");
 
-TEST_SUITE("modules-DdscConf - equality operators") {
-  TEST_CASE("equal configs compare equal") {
-    DdscConf a("topic", 1, 5, "event");
-    DdscConf b("topic", 1, 5, "event");
+    CHECK_EQ(conf.qos, "cyclone_profile");
+  }
+
+  TEST_CASE("operator== holds when all fields match") {
+    DdscConf a("topic", 2, 4, "q");
+    DdscConf b("topic", 2, 4, "q");
+
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
   }
 
-  TEST_CASE("different topic compares not equal") {
+  TEST_CASE("operator!= detects differing topic") {
     DdscConf a("topic_a");
     DdscConf b("topic_b");
+
+    CHECK(a != b);
+    CHECK_FALSE(a == b);
+  }
+
+  TEST_CASE("operator!= detects differing domain") {
+    DdscConf a("topic", 0, 0);
+    DdscConf b("topic", 1, 0);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different domain compares not equal") {
-    DdscConf a("topic", 0);
-    DdscConf b("topic", 2);
+  TEST_CASE("operator!= detects differing depth") {
+    DdscConf a("topic", 0, 1);
+    DdscConf b("topic", 0, 2);
+
     CHECK(a != b);
   }
-}
 
-TEST_SUITE("modules-DdscConf - transport type") {
+  TEST_CASE("operator!= detects differing qos name") {
+    DdscConf a("topic", 0, 0, "qos_a");
+    DdscConf b("topic", 0, 0, "qos_b");
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("self equality") {
+    DdscConf a("topic", 1, 5, "qos");
+
+    CHECK(a == a);
+    CHECK_FALSE(a != a);
+  }
+
   TEST_CASE("get_transport_type returns kDdsc") {
     DdscConf conf("topic");
+
     CHECK(conf.get_transport_type() == TransportType::kDdsc);
   }
-}
 
-#else
+  TEST_CASE("register_qos accepts a valid profile name") {
+    Qos qos;
+    qos.reliability.kind = Qos::Reliability::kReliable;
 
-TEST_SUITE("modules-DdscConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_DDSC not defined - skip") { CHECK(true); }
+    CHECK_NOTHROW(DdscConf::register_qos("ddsc_test_profile", qos));
+  }
 }
 
 #endif  // VLINK_SUPPORT_DDSC

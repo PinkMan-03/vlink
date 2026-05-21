@@ -27,15 +27,9 @@
 
 #include <doctest/doctest.h>
 
+#include "../common_test.h"
 #include "./base/bytes.h"
 #include "./impl/types.h"
-
-//
-#include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helpers: concrete subclass to test GetterImpl
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -53,7 +47,7 @@ class TestGetterImpl : public GetterImpl {
     return true;
   }
 
-  void fire_value(const Bytes& data) {
+  void fire(const Bytes& data) {
     if (callback_) {
       callback_(data);
     }
@@ -65,92 +59,198 @@ class TestGetterImpl : public GetterImpl {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: GetterImpl - construction
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-GetterImpl - construction") {
+TEST_SUITE("impl-GetterImpl") {
   TEST_CASE("constructor sets kGetter impl_type") {
     TestGetterImpl getter;
-    CHECK(getter.impl_type == kGetter);
+    CHECK_EQ(getter.impl_type, kGetter);
   }
 
   TEST_CASE("is_listened defaults to false") {
     TestGetterImpl getter;
     CHECK(getter.is_listened == false);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: GetterImpl - listen
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-GetterImpl - listen") {
-  TEST_CASE("listen sets is_listened") {
+  TEST_CASE("listen sets is_listened to true") {
     TestGetterImpl getter;
-
     getter.listen([](const Bytes&) {});
-
     CHECK(getter.is_listened == true);
   }
 
-  TEST_CASE("listen callback fires on value update") {
+  TEST_CASE("listen returns true on success") {
     TestGetterImpl getter;
+    bool result = getter.listen([](const Bytes&) {});
+    CHECK(result == true);
+  }
 
+  TEST_CASE("listen callback fires when value is updated") {
+    TestGetterImpl getter;
     bool received = false;
     getter.listen([&](const Bytes&) { received = true; });
 
     Bytes data;
-    getter.fire_value(data);
+    getter.fire(data);
 
     CHECK(received == true);
   }
 
-  TEST_CASE("listen callback receives correct data") {
+  TEST_CASE("listen callback receives the correct payload") {
     TestGetterImpl getter;
-
-    Bytes received_data;
-    getter.listen([&](const Bytes& data) { received_data = data; });
+    size_t received_size = 0;
+    getter.listen([&](const Bytes& b) { received_size = b.size(); });
 
     Bytes msg = {10, 20, 30};
-    getter.fire_value(msg);
+    getter.fire(msg);
 
-    CHECK(received_data.size() == 3);
+    CHECK_EQ(received_size, 3u);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: GetterImpl - latency and lost tracking
-// ---------------------------------------------------------------------------
+  TEST_CASE("callback fires multiple times for multiple updates") {
+    TestGetterImpl getter;
+    int count = 0;
+    getter.listen([&](const Bytes&) { ++count; });
 
-TEST_SUITE("impl-GetterImpl - latency and lost") {
-  TEST_CASE("set_latency_and_lost_enabled is no-op") {
+    Bytes data;
+    getter.fire(data);
+    getter.fire(data);
+    getter.fire(data);
+
+    CHECK_EQ(count, 3);
+  }
+
+  TEST_CASE("base set_latency_and_lost_enabled is a no-op") {
     TestGetterImpl getter;
     getter.set_latency_and_lost_enabled(true);
     CHECK(getter.is_latency_and_lost_enabled() == false);
   }
 
-  TEST_CASE("is_latency_and_lost_enabled returns false") {
+  TEST_CASE("is_latency_and_lost_enabled returns false by default") {
     TestGetterImpl getter;
     CHECK(getter.is_latency_and_lost_enabled() == false);
   }
 
-  TEST_CASE("get_latency returns 0") {
+  TEST_CASE("get_latency returns zero by default") {
     TestGetterImpl getter;
-    CHECK(getter.get_latency() == 0);
+    CHECK_EQ(getter.get_latency(), 0);
   }
 
-  TEST_CASE("get_lost returns zeroed SampleLostInfo") {
+  TEST_CASE("get_lost returns zero-initialised SampleLostInfo by default") {
     TestGetterImpl getter;
     auto info = getter.get_lost();
-    CHECK(info.total == 0);
-    CHECK(info.lost == 0);
+    CHECK_EQ(info.total, 0u);
+    CHECK_EQ(info.lost, 0u);
   }
 
-  TEST_CASE("set_latency_and_lost_enabled false is also no-op") {
+  TEST_CASE("disabling latency tracking when it was never enabled is a no-op") {
     TestGetterImpl getter;
     getter.set_latency_and_lost_enabled(false);
     CHECK(getter.is_latency_and_lost_enabled() == false);
+  }
+
+  TEST_CASE("impl_type is kGetter not other roles") {
+    TestGetterImpl getter;
+
+    CHECK_NE(getter.impl_type, kPublisher);
+    CHECK_NE(getter.impl_type, kSubscriber);
+    CHECK_NE(getter.impl_type, kServer);
+    CHECK_NE(getter.impl_type, kClient);
+    CHECK_NE(getter.impl_type, kSetter);
+    CHECK_EQ(getter.impl_type, kGetter);
+  }
+
+  TEST_CASE("fire without listen does not crash") {
+    TestGetterImpl getter;
+    Bytes data = {1, 2, 3};
+
+    CHECK_NOTHROW(getter.fire(data));
+  }
+
+  TEST_CASE("is_listened becomes true after listen is called") {
+    TestGetterImpl getter;
+    CHECK_FALSE(getter.is_listened);
+
+    getter.listen([](const Bytes&) {});
+    CHECK(getter.is_listened);
+  }
+
+  TEST_CASE("listen callback receives payload with correct content") {
+    TestGetterImpl getter;
+    Bytes captured;
+
+    getter.listen([&](const Bytes& data) { captured = data; });
+
+    Bytes msg = {0xDE, 0xAD, 0xBE, 0xEF};
+    getter.fire(msg);
+
+    REQUIRE_EQ(captured.size(), 4u);
+    CHECK_EQ(captured[0], 0xDEu);
+    CHECK_EQ(captured[3], 0xEFu);
+  }
+
+  TEST_CASE("listen callback fires for empty bytes without crash") {
+    TestGetterImpl getter;
+    bool called = false;
+    size_t received_size = 99;
+
+    getter.listen([&](const Bytes& data) {
+      called = true;
+      received_size = data.size();
+    });
+
+    Bytes empty;
+    getter.fire(empty);
+
+    CHECK(called);
+    CHECK_EQ(received_size, 0u);
+  }
+
+  TEST_CASE("set_property and get_property round trip on getter") {
+    TestGetterImpl getter;
+
+    getter.set_property("field.name", "temperature");
+    CHECK_EQ(getter.get_property("field.name"), "temperature");
+  }
+
+  TEST_CASE("get_property returns empty for unset key") {
+    TestGetterImpl getter;
+
+    CHECK(getter.get_property("unknown.key").empty());
+  }
+
+  TEST_CASE("interrupt and reset_interrupted work on getter") {
+    TestGetterImpl getter;
+
+    CHECK_FALSE(getter.is_interrupted());
+
+    getter.interrupt();
+    CHECK(getter.is_interrupted());
+
+    getter.reset_interrupted();
+    CHECK_FALSE(getter.is_interrupted());
+  }
+
+  TEST_CASE("large payload fires callback once with correct size") {
+    static constexpr size_t kSize = 65536u;
+    TestGetterImpl getter;
+    size_t received_size = 0;
+
+    getter.listen([&](const Bytes& data) { received_size = data.size(); });
+
+    Bytes large = Bytes::create(kSize);
+    getter.fire(large);
+
+    CHECK_EQ(received_size, kSize);
+  }
+
+  TEST_CASE("get_all_properties returns map containing set keys") {
+    TestGetterImpl getter;
+
+    getter.set_property("x", "10");
+    getter.set_property("y", "20");
+
+    auto props = getter.get_all_properties();
+
+    CHECK_EQ(props.count("x"), 1u);
+    CHECK_EQ(props.count("y"), 1u);
   }
 }
 

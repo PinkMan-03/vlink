@@ -31,199 +31,99 @@
 #include <thread>
 #include <vector>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
 TEST_SUITE("base-SpinLock") {
-  // -------------------------------------------------------------------------
-  TEST_CASE("default-constructed lock is unlocked - try_lock succeeds") {
+  TEST_CASE("default constructed lock is unlocked so try_lock succeeds") {
     SpinLock lk;
-
     bool acquired = lk.try_lock();
     CHECK(acquired);
-
-    // Clean up
     lk.unlock();
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("lock and unlock basic sequence") {
+  TEST_CASE("lock and unlock basic sequence leaves lock acquirable again") {
     SpinLock lk;
-
     lk.lock();
-    // We are now inside the critical section.
-    // Unlock must succeed without hanging.
     lk.unlock();
-
-    // After unlock, try_lock must succeed again
     CHECK(lk.try_lock());
     lk.unlock();
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("try_lock returns false when lock is already held") {
     SpinLock lk;
-
     lk.lock();
-
-    // The lock is currently held by this thread; try_lock from the same
-    // context (without unlock) must fail.
     bool second = lk.try_lock();
-    CHECK(!second);
-
+    CHECK_FALSE(second);
     lk.unlock();
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("try_lock returns true on unlocked lock") {
     SpinLock lk;
-
     CHECK(lk.try_lock());
     lk.unlock();
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("repeated lock/unlock cycles work correctly") {
+  TEST_CASE("repeated lock unlock cycles work correctly") {
     SpinLock lk;
-
     for (int i = 0; i < 100; ++i) {
       lk.lock();
       lk.unlock();
     }
-
-    // After 100 cycles the lock should still be acquirable
     CHECK(lk.try_lock());
     lk.unlock();
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("SpinLockGuard acquires on construction and releases on destruction") {
     SpinLock lk;
-
     {
       SpinLockGuard guard(lk);
-      // Inside this scope the lock is held; try_lock from same thread
-      // should fail
-      CHECK(!lk.try_lock());
-    }  // guard destructor releases the lock here
-
-    // After scope the lock must be free again
+      CHECK_FALSE(lk.try_lock());
+    }
     CHECK(lk.try_lock());
     lk.unlock();
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("SpinLockGuard - nested scope releases inner guard first") {
+  TEST_CASE("SpinLockGuard usable in lambda for increments") {
     SpinLock lk;
-
-    lk.lock();
-    lk.unlock();
-
-    {
-      SpinLockGuard g1(lk);
-      // g1 holds the lock; a second try must fail
-      CHECK(!lk.try_lock());
-    }
-
-    // g1 is destroyed; lock is free
-    CHECK(lk.try_lock());
-    lk.unlock();
+    int value = 0;
+    auto inc = [&]() {
+      SpinLockGuard guard(lk);
+      ++value;
+    };
+    inc();
+    inc();
+    inc();
+    CHECK_EQ(value, 3);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("concurrent increments with SpinLock produce correct total") {
-    // Shared counter protected by a SpinLock.
-    // Multiple threads each increment it N times; total must be threads * N.
-    SpinLock lk;
-    int counter = 0;
-
-    constexpr int kThreads = 8;
-    constexpr int kIncrementsPerThread = 10000;
-
-    std::vector<std::thread> workers;
-    workers.reserve(kThreads);
-
-    for (int i = 0; i < kThreads; ++i) {
-      workers.emplace_back([&]() {
-        for (int j = 0; j < kIncrementsPerThread; ++j) {
-          SpinLockGuard guard(lk);
-          ++counter;
-        }
-      });
-    }
-
-    for (auto& w : workers) {
-      w.join();
-    }
-
-    CHECK(counter == kThreads * kIncrementsPerThread);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("concurrent increments with manual lock/unlock produce correct total") {
-    SpinLock lk;
-    int counter = 0;
-
-    constexpr int kThreads = 4;
-    constexpr int kIncrementsPerThread = 5000;
-
-    std::vector<std::thread> workers;
-    workers.reserve(kThreads);
-
-    for (int i = 0; i < kThreads; ++i) {
-      workers.emplace_back([&]() {
-        for (int j = 0; j < kIncrementsPerThread; ++j) {
-          lk.lock();
-          ++counter;
-          lk.unlock();
-        }
-      });
-    }
-
-    for (auto& w : workers) {
-      w.join();
-    }
-
-    CHECK(counter == kThreads * kIncrementsPerThread);
-  }
-
-  // -------------------------------------------------------------------------
   TEST_CASE("try_lock under contention from another thread fails") {
     SpinLock lk;
     std::atomic<bool> lock_held{false};
     std::atomic<bool> can_release{false};
 
-    // Thread A holds the lock and signals that it is held.
     std::thread holder([&]() {
       lk.lock();
       lock_held.store(true, std::memory_order_release);
-      // Spin until the test signals it is OK to release
       while (!can_release.load(std::memory_order_acquire)) {
         std::this_thread::yield();
       }
       lk.unlock();
     });
 
-    // Wait until the holder actually has the lock
     while (!lock_held.load(std::memory_order_acquire)) {
       std::this_thread::yield();
     }
 
-    // Now try_lock from this thread must fail
     bool acquired = lk.try_lock();
-    CHECK(!acquired);
+    CHECK_FALSE(acquired);
 
-    // Signal the holder to release
     can_release.store(true, std::memory_order_release);
     holder.join();
 
-    // After the holder releases, try_lock must succeed
     CHECK(lk.try_lock());
     lk.unlock();
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("lock acquires after another thread releases") {
     SpinLock lk;
     std::atomic<bool> ready{false};
@@ -237,41 +137,70 @@ TEST_SUITE("base-SpinLock") {
       lk.unlock();
     });
 
-    // Wait until helper holds the lock
     while (!ready.load(std::memory_order_acquire)) {
       std::this_thread::yield();
     }
 
-    // This will block until the helper releases
     lk.lock();
-    // We got the lock; the helper must have released it by now
     CHECK(released.load(std::memory_order_acquire));
     lk.unlock();
 
     helper.join();
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("kInterferenceSize constant is 64") {
-    // Verify the documented cache-line size constant via the header.
-    // We access it through a local helper since it is private; the size of
-    // the class itself is at least kInterferenceSize due to alignas(64).
-    CHECK(alignof(SpinLock) == 64u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("kMaxSpinCount constant - no observable deadlock under normal contention") {
-    // Stress-test: many short critical sections should complete without
-    // hitting the 50000-spin safety valve in practice.
+  TEST_CASE("concurrent increments with SpinLockGuard produce correct total") {
     SpinLock lk;
-    std::atomic<int> total{0};
-
-    constexpr int kThreads = 16;
-    constexpr int kOps = 2000;
+    int counter = 0;
+    static constexpr int kThreads = 8;
+    static constexpr int kIncrementsPerThread = 10000;
 
     std::vector<std::thread> workers;
     workers.reserve(kThreads);
+    for (int i = 0; i < kThreads; ++i) {
+      workers.emplace_back([&]() {
+        for (int j = 0; j < kIncrementsPerThread; ++j) {
+          SpinLockGuard guard(lk);
+          ++counter;
+        }
+      });
+    }
+    for (auto& w : workers) {
+      w.join();
+    }
+    CHECK_EQ(counter, kThreads * kIncrementsPerThread);
+  }
 
+  TEST_CASE("concurrent increments with manual lock unlock produce correct total") {
+    SpinLock lk;
+    int counter = 0;
+    static constexpr int kThreads = 4;
+    static constexpr int kIncrementsPerThread = 5000;
+
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
+    for (int i = 0; i < kThreads; ++i) {
+      workers.emplace_back([&]() {
+        for (int j = 0; j < kIncrementsPerThread; ++j) {
+          lk.lock();
+          ++counter;
+          lk.unlock();
+        }
+      });
+    }
+    for (auto& w : workers) {
+      w.join();
+    }
+    CHECK_EQ(counter, kThreads * kIncrementsPerThread);
+  }
+
+  TEST_CASE("high contention stress test completes without deadlock") {
+    SpinLock lk;
+    std::atomic<int> total{0};
+    static constexpr int kThreads = 16;
+    static constexpr int kOps = 2000;
+
+    std::vector<std::thread> workers;
+    workers.reserve(kThreads);
     for (int i = 0; i < kThreads; ++i) {
       workers.emplace_back([&]() {
         for (int j = 0; j < kOps; ++j) {
@@ -280,37 +209,16 @@ TEST_SUITE("base-SpinLock") {
         }
       });
     }
-
     for (auto& w : workers) {
       w.join();
     }
-
-    CHECK(total.load() == kThreads * kOps);
+    CHECK_EQ(total.load(), kThreads * kOps);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("SpinLockGuard usable with std::lock_guard-like pattern in lambda") {
+  TEST_CASE("SpinLock alignment is 64 bytes for cache-line separation") { CHECK_EQ(alignof(SpinLock), 64u); }
+
+  TEST_CASE("unlock on already-unlocked lock does not crash") {
     SpinLock lk;
-    int value = 0;
-
-    auto inc = [&]() {
-      SpinLockGuard guard(lk);
-      ++value;
-    };
-
-    inc();
-    inc();
-    inc();
-
-    CHECK(value == 3);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("unlock without lock does not crash (implementation-defined but must not hang)") {
-    SpinLock lk;
-    // Calling unlock on an unlocked SpinLock is technically undefined in the
-    // Lockable contract; however the implementation simply stores false, which
-    // is idempotent and should not crash.
     lk.unlock();
     CHECK(lk.try_lock());
     lk.unlock();

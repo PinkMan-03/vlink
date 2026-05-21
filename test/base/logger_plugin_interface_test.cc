@@ -31,13 +31,7 @@
 #include <string_view>
 #include <type_traits>
 
-//
 #include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helper: a concrete LoggerPluginInterface implementation used to verify
-// the interface contract (init, log, polymorphic destruction).
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -69,30 +63,21 @@ class FakeLoggerPlugin final : public LoggerPluginInterface {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: LoggerPluginInterface - type traits
-// ---------------------------------------------------------------------------
+TEST_SUITE("base-LoggerPluginInterface") {
+  TEST_CASE("interface is abstract and not directly instantiable") { CHECK(std::is_abstract_v<LoggerPluginInterface>); }
 
-TEST_SUITE("base-LoggerPluginInterface - traits") {
-  TEST_CASE("interface itself is not directly instantiable") { CHECK(std::is_abstract_v<LoggerPluginInterface>); }
+  TEST_CASE("interface is not copyable") {
+    CHECK_FALSE(std::is_copy_constructible_v<LoggerPluginInterface>);
+    CHECK_FALSE(std::is_copy_assignable_v<LoggerPluginInterface>);
+  }
 
-  TEST_CASE("interface is not copy-constructible") { CHECK_FALSE(std::is_copy_constructible_v<LoggerPluginInterface>); }
-
-  TEST_CASE("interface is not copy-assignable") { CHECK_FALSE(std::is_copy_assignable_v<LoggerPluginInterface>); }
-
-  TEST_CASE("concrete subclass is constructible") { CHECK(std::is_default_constructible_v<FakeLoggerPlugin>); }
+  TEST_CASE("concrete subclass is default constructible") { CHECK(std::is_default_constructible_v<FakeLoggerPlugin>); }
 
   TEST_CASE("concrete subclass derives from interface") {
     CHECK((std::is_base_of_v<LoggerPluginInterface, FakeLoggerPlugin>));
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: LoggerPluginInterface - subclass behaviour
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-LoggerPluginInterface - subclass behaviour") {
-  TEST_CASE("init forwards application name and return value") {
+  TEST_CASE("init forwards app name and returns success") {
     FakeLoggerPlugin plugin;
     plugin.init_return_value = true;
 
@@ -100,7 +85,7 @@ TEST_SUITE("base-LoggerPluginInterface - subclass behaviour") {
 
     CHECK(ok);
     CHECK(plugin.init_called);
-    CHECK(plugin.last_app_name == "my_app");
+    CHECK_EQ(plugin.last_app_name, "my_app");
   }
 
   TEST_CASE("init can return false to signal failure") {
@@ -113,7 +98,7 @@ TEST_SUITE("base-LoggerPluginInterface - subclass behaviour") {
     CHECK(plugin.init_called);
   }
 
-  TEST_CASE("log records level, message and call count") {
+  TEST_CASE("log records level and message on each call") {
     FakeLoggerPlugin plugin;
 
     bool ok1 = plugin.log(static_cast<int>(Logger::Level::kInfo), "hello");
@@ -121,9 +106,9 @@ TEST_SUITE("base-LoggerPluginInterface - subclass behaviour") {
 
     CHECK(ok1);
     CHECK(ok2);
-    CHECK(plugin.log_call_count == 2);
-    CHECK(plugin.last_level == static_cast<int>(Logger::Level::kWarn));
-    CHECK(plugin.last_message == "world");
+    CHECK_EQ(plugin.log_call_count, 2);
+    CHECK_EQ(plugin.last_level, static_cast<int>(Logger::Level::kWarn));
+    CHECK_EQ(plugin.last_message, "world");
   }
 
   TEST_CASE("log accepts empty payload") {
@@ -135,14 +120,14 @@ TEST_SUITE("base-LoggerPluginInterface - subclass behaviour") {
     CHECK(plugin.last_message.empty());
   }
 
-  TEST_CASE("virtual dispatch via base pointer") {
+  TEST_CASE("virtual dispatch via base pointer works correctly") {
     FakeLoggerPlugin concrete;
     LoggerPluginInterface* base = &concrete;
 
     CHECK(base->init("polymorphic"));
     CHECK(base->log(0, "polymorphic"));
     CHECK(concrete.init_called);
-    CHECK(concrete.last_message == "polymorphic");
+    CHECK_EQ(concrete.last_message, "polymorphic");
   }
 }
 

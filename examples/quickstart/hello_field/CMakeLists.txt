@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)
@@ -15,14 +15,7 @@ if(NOT TARGET vlink::vlink)
   message(FATAL_ERROR "Can not find_package for vlink.")
 endif()
 
-# Setter program -- writes configuration values
-add_executable(example_config_setter config_setter.cc)
-target_include_directories(example_config_setter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(example_config_setter PRIVATE vlink::all)
+add_executable(${PROJECT_NAME} hello_field.cc)
+target_link_libraries(${PROJECT_NAME} PRIVATE vlink::all)
 
-# Getter program -- reads configuration values
-add_executable(example_config_getter config_getter.cc)
-target_include_directories(example_config_getter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(example_config_getter PRIVATE vlink::all)
-
-install(TARGETS example_config_setter example_config_getter RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

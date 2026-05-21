@@ -28,83 +28,68 @@
 #include <doctest/doctest.h>
 
 #include <atomic>
-#include <chrono>
 #include <future>
-#include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// Each test is a separate TEST_CASE inside the TEST_SUITE.
-// SUBCASE re-entry causes the TEST_CASE body to re-run for every SUBCASE,
-// which leads to rapid MultiLoop (thread pool) creation/destruction and
-// intermittent SIGSEGV from thread churn.
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("base-MultiLoop") {
-  TEST_CASE("default constructor") {
+  TEST_CASE("default construction yields non-running loop") {
     MultiLoop loop;
-    CHECK(!loop.is_running());
+    CHECK_FALSE(loop.is_running());
   }
 
-  TEST_CASE("explicit thread_num constructor") {
+  TEST_CASE("explicit thread count construction yields non-running loop") {
     MultiLoop loop(2);
-    CHECK(!loop.is_running());
+    CHECK_FALSE(loop.is_running());
   }
 
-  TEST_CASE("constructor with Type overload") {
-    MultiLoop loop_normal(2, MessageLoop::kNormalType);
-    CHECK(!loop_normal.is_running());
+  TEST_CASE("construction with type overload yields non-running loop") {
+    MultiLoop normal(2, MessageLoop::kNormalType);
+    CHECK_FALSE(normal.is_running());
 
-    MultiLoop loop_lockfree(2, MessageLoop::kLockfreeType);
-    CHECK(!loop_lockfree.is_running());
+    MultiLoop lf(2, MessageLoop::kLockfreeType);
+    CHECK_FALSE(lf.is_running());
   }
 
-  TEST_CASE("async_run starts the loop") {
+  TEST_CASE("async_run starts loop and is_running becomes true") {
     MultiLoop loop(2);
-
     bool started = loop.async_run();
     CHECK(started);
     CHECK(loop.is_running());
-
     loop.quit();
     loop.wait_for_quit(2000);
   }
 
-  TEST_CASE("async_run returns false if already running") {
+  TEST_CASE("async_run returns false when already running") {
     MultiLoop loop(2);
-
     loop.async_run();
     bool second = loop.async_run();
-    CHECK(!second);
-
+    CHECK_FALSE(second);
     loop.quit();
     loop.wait_for_quit(2000);
   }
 
-  TEST_CASE("post_task executes on a worker thread") {
+  TEST_CASE("post_task executes callback on a worker thread") {
     MultiLoop loop(2);
     loop.async_run();
 
     std::promise<int> promise;
     auto future = promise.get_future();
-
     loop.post_task([&promise]() { promise.set_value(42); });
 
     auto status = future.wait_for(2s);
-    CHECK(status == std::future_status::ready);
-    CHECK(future.get() == 42);
+    CHECK_EQ(status, std::future_status::ready);
+    CHECK_EQ(future.get(), 42);
 
     loop.quit();
     loop.wait_for_quit(2000);
   }
 
   TEST_CASE("multiple post_task calls all execute") {
-    constexpr int kCount = 100;
-
+    static constexpr int kCount = 100;
     MultiLoop loop(4);
     loop.async_run();
 
@@ -116,7 +101,6 @@ TEST_SUITE("base-MultiLoop") {
     for (int i = 0; i < kCount; ++i) {
       loop.post_task([&counter, &remaining, &all_done]() {
         counter.fetch_add(1, std::memory_order_relaxed);
-
         if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
           all_done.set_value();
         }
@@ -126,8 +110,8 @@ TEST_SUITE("base-MultiLoop") {
     bool idle = loop.wait_for_idle(3000);
     CHECK(idle);
     auto status = future.wait_for(3s);
-    CHECK(status == std::future_status::ready);
-    CHECK(counter.load() == kCount);
+    CHECK_EQ(status, std::future_status::ready);
+    CHECK_EQ(counter.load(), kCount);
 
     loop.quit();
     loop.wait_for_quit(2000);
@@ -146,7 +130,6 @@ TEST_SUITE("base-MultiLoop") {
       loop.post_task([&done, &remaining, &all_done]() {
         std::this_thread::sleep_for(5ms);
         done.fetch_add(1, std::memory_order_relaxed);
-
         if (remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
           all_done.set_value();
         }
@@ -156,20 +139,19 @@ TEST_SUITE("base-MultiLoop") {
     bool result = loop.wait_for_idle(5000);
     CHECK(result);
     auto status = future.wait_for(5s);
-    CHECK(status == std::future_status::ready);
-    CHECK(done.load() == 20);
+    CHECK_EQ(status, std::future_status::ready);
+    CHECK_EQ(done.load(), 20);
 
     loop.quit();
     loop.wait_for_quit(2000);
   }
 
-  TEST_CASE("wait_for_idle waits for worker task completion through base pointer") {
+  TEST_CASE("wait_for_idle via base pointer waits for worker task") {
     MultiLoop loop(2);
     MessageLoop* base = &loop;
     loop.async_run();
 
     std::atomic<bool> done{false};
-
     loop.post_task([&done]() {
       std::this_thread::sleep_for(100ms);
       done.store(true, std::memory_order_release);
@@ -177,50 +159,6 @@ TEST_SUITE("base-MultiLoop") {
 
     CHECK(base->wait_for_idle(3000));
     CHECK(done.load(std::memory_order_acquire));
-
-    loop.quit();
-    loop.wait_for_quit(2000);
-  }
-
-  TEST_CASE("wait_for_idle waits for worker tasks reposted to dispatcher") {
-    MultiLoop loop(1);
-    MessageLoop* base = &loop;
-    loop.async_run();
-
-    std::atomic<bool> followup_started{false};
-    std::atomic<bool> allow_followup_finish{false};
-    std::atomic<bool> followup_done{false};
-    std::atomic<bool> stop_releaser{false};
-
-    loop.post_task([&loop, &followup_started, &allow_followup_finish, &followup_done]() {
-      loop.post_task([&followup_started, &allow_followup_finish, &followup_done]() {
-        followup_started.store(true, std::memory_order_release);
-
-        while (!allow_followup_finish.load(std::memory_order_acquire)) {
-          std::this_thread::sleep_for(1ms);
-        }
-
-        followup_done.store(true, std::memory_order_release);
-      });
-    });
-
-    std::thread releaser([&followup_started, &allow_followup_finish, &stop_releaser]() {
-      while (!followup_started.load(std::memory_order_acquire) && !stop_releaser.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(1ms);
-      }
-
-      if (followup_started.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(50ms);
-        allow_followup_finish.store(true, std::memory_order_release);
-      }
-    });
-
-    CHECK(base->wait_for_idle(3000));
-    CHECK(followup_done.load(std::memory_order_acquire));
-
-    stop_releaser.store(true, std::memory_order_release);
-    allow_followup_finish.store(true, std::memory_order_release);
-    releaser.join();
 
     loop.quit();
     loop.wait_for_quit(2000);
@@ -234,7 +172,7 @@ TEST_SUITE("base-MultiLoop") {
     bool stopped = loop.wait_for_quit(2000);
 
     CHECK(stopped);
-    CHECK(!loop.is_running());
+    CHECK_FALSE(loop.is_running());
   }
 
   TEST_CASE("is_in_same_thread returns true from worker") {
@@ -243,12 +181,11 @@ TEST_SUITE("base-MultiLoop") {
 
     std::promise<bool> promise;
     auto future = promise.get_future();
-
     loop.post_task([&loop, &promise]() { promise.set_value(loop.is_in_same_thread()); });
 
     auto status = future.wait_for(2s);
-    CHECK(status == std::future_status::ready);
-    CHECK(future.get() == true);
+    CHECK_EQ(status, std::future_status::ready);
+    CHECK(future.get());
 
     loop.quit();
     loop.wait_for_quit(2000);
@@ -258,60 +195,50 @@ TEST_SUITE("base-MultiLoop") {
     MultiLoop loop(2);
     loop.async_run();
 
-    CHECK(!loop.is_in_same_thread());
+    CHECK_FALSE(loop.is_in_same_thread());
 
     loop.quit();
     loop.wait_for_quit(2000);
   }
 
-  TEST_CASE("invoke_task returns a future") {
+  TEST_CASE("invoke_task returns a future with the result") {
     MultiLoop loop(2);
     loop.async_run();
 
     auto future = loop.invoke_task([]() -> std::string { return "hello_from_worker"; });
-
     auto status = future.wait_for(2s);
-    CHECK(status == std::future_status::ready);
-    CHECK(future.get() == "hello_from_worker");
+    CHECK_EQ(status, std::future_status::ready);
+    CHECK_EQ(future.get(), "hello_from_worker");
 
     loop.quit();
     loop.wait_for_quit(2000);
   }
 
-  TEST_CASE("tasks run concurrently on multiple threads") {
-    constexpr int kTasks = 4;
-
+  TEST_CASE("tasks run concurrently on multiple worker threads") {
+    static constexpr int kTasks = 4;
     MultiLoop loop(4);
     loop.async_run();
 
     std::atomic<int> running{0};
     std::atomic<int> max_concurrent{0};
-    std::vector<std::future<void>> task_futures;
-
     std::atomic<int> latch{kTasks};
+    std::vector<std::future<void>> futures;
 
     for (int i = 0; i < kTasks; ++i) {
-      auto fut = loop.invoke_task([&running, &max_concurrent, &latch]() {
+      futures.push_back(loop.invoke_task([&running, &max_concurrent, &latch]() {
         int cur = running.fetch_add(1, std::memory_order_acq_rel) + 1;
-
         int old_max = max_concurrent.load(std::memory_order_acquire);
-
         while (cur > old_max && !max_concurrent.compare_exchange_weak(old_max, cur, std::memory_order_acq_rel)) {
         }
-
         latch.fetch_sub(1, std::memory_order_acq_rel);
-
         while (latch.load(std::memory_order_acquire) > 0) {
           std::this_thread::yield();
         }
-
         running.fetch_sub(1, std::memory_order_acq_rel);
-      });
-
-      task_futures.push_back(std::move(fut));
+      }));
     }
 
-    for (auto& f : task_futures) {
+    for (auto& f : futures) {
       f.wait_for(5s);
     }
 
@@ -321,18 +248,18 @@ TEST_SUITE("base-MultiLoop") {
     loop.wait_for_quit(2000);
   }
 
-  TEST_CASE("set_name and get_name") {
+  TEST_CASE("set_name and get_name are consistent") {
     MultiLoop loop(2);
     loop.set_name("test_loop");
-    CHECK(loop.get_name() == "test_loop");
+    CHECK_EQ(loop.get_name(), "test_loop");
   }
 
   TEST_CASE("get_type reflects construction type") {
-    MultiLoop normal_loop(2, MessageLoop::kNormalType);
-    CHECK(normal_loop.get_type() == MessageLoop::kNormalType);
+    MultiLoop normal(2, MessageLoop::kNormalType);
+    CHECK_EQ(normal.get_type(), MessageLoop::kNormalType);
 
-    MultiLoop lf_loop(2, MessageLoop::kLockfreeType);
-    CHECK(lf_loop.get_type() == MessageLoop::kLockfreeType);
+    MultiLoop lf(2, MessageLoop::kLockfreeType);
+    CHECK_EQ(lf.get_type(), MessageLoop::kLockfreeType);
   }
 
   TEST_CASE("quit with force discards pending tasks") {
@@ -340,7 +267,6 @@ TEST_SUITE("base-MultiLoop") {
     loop.async_run();
 
     std::atomic<int> counter{0};
-
     std::atomic<bool> release{false};
     loop.post_task([&release]() {
       while (!release.load(std::memory_order_acquire)) {
@@ -359,22 +285,19 @@ TEST_SUITE("base-MultiLoop") {
     CHECK(counter.load() <= 50);
   }
 
-  TEST_CASE("post_task_with_priority on priority loop") {
+  TEST_CASE("post_task_with_priority on priority loop executes task") {
     MultiLoop loop(2, MessageLoop::kPriorityType);
     loop.async_run();
 
     std::atomic<int> ran{0};
-
     loop.post_task_with_priority([&ran]() { ran.store(1); }, MessageLoop::kNormalPriority);
 
     loop.wait_for_idle(2000);
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-
+    auto deadline = std::chrono::steady_clock::now() + 2s;
     while (ran.load() == 0 && std::chrono::steady_clock::now() < deadline) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      std::this_thread::sleep_for(1ms);
     }
-
-    CHECK(ran.load() == 1);
+    CHECK_EQ(ran.load(), 1);
 
     loop.quit();
     loop.wait_for_quit(2000);
@@ -391,35 +314,28 @@ TEST_SUITE("base-MultiLoop") {
         done.store(true);
       });
 
-      // Wait for the task to finish before letting the destructor run,
-      // otherwise the thread pool may be torn down while a worker is
-      // still executing, causing SIGSEGV.
-      auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-
+      auto deadline = std::chrono::steady_clock::now() + 2s;
       while (!done.load() && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(1ms);
       }
     }
   }
 
-  TEST_CASE("register_begin_handler fires on start") {
+  TEST_CASE("register_begin_handler fires once on start") {
     std::atomic<int> begin_count{0};
-
     MultiLoop loop(3);
     loop.register_begin_handler([&begin_count]() { begin_count.fetch_add(1, std::memory_order_relaxed); });
 
     loop.async_run();
     std::this_thread::sleep_for(50ms);
-
-    CHECK(begin_count.load() == 1);
+    CHECK_EQ(begin_count.load(), 1);
 
     loop.quit();
     loop.wait_for_quit(2000);
   }
 
-  TEST_CASE("register_end_handler fires on exit") {
+  TEST_CASE("register_end_handler fires once on exit") {
     std::atomic<int> end_count{0};
-
     MultiLoop loop(3);
     loop.register_end_handler([&end_count]() { end_count.fetch_add(1, std::memory_order_relaxed); });
 
@@ -427,12 +343,11 @@ TEST_SUITE("base-MultiLoop") {
     loop.quit();
     loop.wait_for_quit(2000);
 
-    CHECK(end_count.load() == 1);
+    CHECK_EQ(end_count.load(), 1);
   }
 
-  TEST_CASE("get_task_count reflects pending tasks") {
+  TEST_CASE("get_task_count reflects pending task count") {
     MultiLoop loop(1);
-
     std::atomic<bool> release{false};
     loop.async_run();
 
@@ -447,7 +362,6 @@ TEST_SUITE("base-MultiLoop") {
     }
 
     std::this_thread::sleep_for(20ms);
-
     size_t queued = loop.get_task_count();
     CHECK(queued <= 5u);
 

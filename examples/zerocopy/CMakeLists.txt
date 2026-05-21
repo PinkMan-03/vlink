@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)
@@ -16,7 +16,10 @@ if(NOT TARGET vlink)
   endif()
 endif()
 
-add_subdirectory(zerocopy_loan)
+add_subdirectory(zerocopy_audio_frame)
+add_subdirectory(zerocopy_basic)
 add_subdirectory(zerocopy_camera_frame)
+add_subdirectory(zerocopy_object_array)
+add_subdirectory(zerocopy_occupancy_grid)
 add_subdirectory(zerocopy_point_cloud)
-add_subdirectory(zerocopy_raw_data)
+add_subdirectory(zerocopy_tensor)

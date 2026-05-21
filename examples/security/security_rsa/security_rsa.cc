@@ -21,24 +21,6 @@
  * limitations under the License.
  */
 
-// Security RSA Hybrid Example
-// Demonstrates the asymmetric path of vlink::Security::Config:
-//   - RSA-OAEP-SHA256 wraps a fresh 16-byte AES-128 session key per message
-//   - AES-128-GCM encrypts the payload with that session key
-//   - RSA-PSS-SHA256 (optional) signs AAD + ciphertext/tag for sender authentication
-//
-// Configuration on the sender:
-//   cfg.public_key_pem  = peer_recv_pub_pem;     // wrap session key for receiver
-//   cfg.advanced.signing_key_pem = own_sign_priv_pem;     // (optional) sign AAD + ciphertext/tag
-//
-// Configuration on the receiver:
-//   cfg.private_key_pem = own_recv_priv_pem;     // unwrap session key
-//   cfg.advanced.verify_key_pem  = peer_sign_pub_pem;     // (optional) verify signature
-//
-// Keys must be RSA >= 2048 bits.  This example generates ephemeral RSA-2048 key
-// pairs on startup via OpenSSL for self-contained demonstration.  In production,
-// keys are typically loaded from PEM files provisioned out of band.
-
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -48,21 +30,49 @@
 #include <vlink/vlink.h>
 
 #include <atomic>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-namespace {
+// ---------------------------------------------------------------------------
+// security_rsa.cc
+//
+// RSA hybrid encryption (Security::Config 3rd mode). The sender generates
+// a fresh AES-128 session key per message, encrypts the payload with
+// AES-128-GCM, wraps the session key with the receiver's RSA-OAEP-SHA256
+// public key, and concatenates [wrapped-key][AEAD-envelope]. Optional
+// RSA-PSS-SHA256 signature over the envelope provides sender
+// authentication (defeats key-substitution attacks).
+//
+// Wire layout:
+//   [u16 wrapped_key_len][wrapped_key bytes][AES-GCM envelope][optional PSS sig]
+//
+// Key roles in Security::Config:
+//   * Sender   sets  public_key_pem            (peer's pub, for wrap)
+//                    advanced.signing_key_pem  (own priv, optional sign)
+//   * Receiver sets  private_key_pem           (own priv, for unwrap)
+//                    advanced.verify_key_pem   (peer's pub, optional verify)
+//
+// Failure modes:
+//   * Wrong receiver private key  -> RSA unwrap fails, sample dropped.
+//   * Tampered ciphertext         -> GCM tag fails, sample dropped.
+//   * Wrong signing key           -> PSS verify fails, sample dropped.
+//
+// This file generates ephemeral key pairs at startup via OpenSSL; in
+// production you'd load PEMs from disk or a secure store.
+// ---------------------------------------------------------------------------
 
 struct RsaKeyPair {
   std::string public_pem;
   std::string private_pem;
 };
 
-RsaKeyPair generate_rsa_keypair(int bits) {
+// Generate an in-memory RSA key pair using OpenSSL EVP_PKEY APIs. Returns
+// the keys in PEM format, which is what Security::Config consumes. Returns
+// an empty struct on any failure (subsequent .empty() check in main()).
+static RsaKeyPair generate_rsa_keypair(int bits) {
   RsaKeyPair kp;
 
   EVP_PKEY_CTX* gctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
@@ -92,14 +102,12 @@ RsaKeyPair generate_rsa_keypair(int bits) {
     BIO* bio = BIO_new(BIO_s_mem());
 
     if (bio == nullptr) {
-      VLOG_W("BIO_new(public) failed");
       return RsaKeyPair{};
     }
 
     std::unique_ptr<BIO, decltype(&BIO_free)> bio_guard(bio, &BIO_free);
 
     if (PEM_write_bio_PUBKEY(bio, pkey) != 1) {
-      VLOG_W("PEM_write_bio_PUBKEY failed");
       return RsaKeyPair{};
     }
 
@@ -107,7 +115,6 @@ RsaKeyPair generate_rsa_keypair(int bits) {
     const auto len = BIO_get_mem_data(bio, &buf);  // NOLINT(runtime/int, google-runtime-int)
 
     if (buf == nullptr || len <= 0) {
-      VLOG_W("BIO_get_mem_data(public) returned empty");
       return RsaKeyPair{};
     }
 
@@ -117,14 +124,12 @@ RsaKeyPair generate_rsa_keypair(int bits) {
     BIO* bio = BIO_new(BIO_s_mem());
 
     if (bio == nullptr) {
-      VLOG_W("BIO_new(private) failed");
       return RsaKeyPair{};
     }
 
     std::unique_ptr<BIO, decltype(&BIO_free)> bio_guard(bio, &BIO_free);
 
     if (PEM_write_bio_PrivateKey(bio, pkey, nullptr, nullptr, 0, nullptr, nullptr) != 1) {
-      VLOG_W("PEM_write_bio_PrivateKey failed");
       return RsaKeyPair{};
     }
 
@@ -132,7 +137,6 @@ RsaKeyPair generate_rsa_keypair(int bits) {
     const auto len = BIO_get_mem_data(bio, &buf);  // NOLINT(runtime/int, google-runtime-int)
 
     if (buf == nullptr || len <= 0) {
-      VLOG_W("BIO_get_mem_data(private) returned empty");
       return RsaKeyPair{};
     }
 
@@ -141,9 +145,6 @@ RsaKeyPair generate_rsa_keypair(int bits) {
 
   return kp;
 }
-
-}  // namespace
-
 int main() {
   VLOG_I("Generating ephemeral RSA-2048 key pairs (receiver + signing)");
   const RsaKeyPair recv_kp = generate_rsa_keypair(2048);
@@ -154,11 +155,12 @@ int main() {
     return 1;
   }
 
-  // ======== Section 1: RSA-OAEP Hybrid (Encryption Only) ========
-  // Sender wraps a fresh AES-128 session key with the receiver's RSA public key,
-  // then AES-128-GCM encrypts the payload with that session key.
+  // ---- Section 1: RSA-OAEP hybrid (encryption only, no signing) ----
+  // Receiver holds the private half; publisher only knows the public half.
+  // No verify_key_pem on the subscriber -> no sender authentication, any
+  // party with the receiver's public key could publish valid samples.
   {
-    std::cout << "\n[1] RSA-OAEP Hybrid (AES-128-GCM payload)" << std::endl;
+    VLOG_I("[1] RSA-OAEP Hybrid (AES-128-GCM payload)");
 
     std::atomic<int> received{0};
 
@@ -166,16 +168,17 @@ int main() {
     sub_cfg.private_key_pem = recv_kp.private_pem;
 
     vlink::SecuritySubscriber<std::string> sub("dds://security_rsa/hybrid", sub_cfg);
+    // Listener runs on the DDS dispatch thread iff RSA unwrap + GCM tag
+    // both succeed.
     sub.listen([&received](const std::string& msg) {
       received++;
-      VLOG_I("[RSA-Hybrid] Received:", msg);
+      VLOG_I("[RSA-Hybrid] Received: ", msg);
     });
 
     vlink::Security::Config pub_cfg;
     pub_cfg.public_key_pem = recv_kp.public_pem;
 
     vlink::SecurityPublisher<std::string> pub("dds://security_rsa/hybrid", pub_cfg);
-
     pub.wait_for_subscribers();
 
     pub.publish("RSA-OAEP wraps an AES-128 session key");
@@ -183,15 +186,15 @@ int main() {
     pub.publish("AES-128-GCM provides the authenticated payload");
 
     std::this_thread::sleep_for(100ms);
-    VLOG_I("RSA hybrid: received", received.load(), "messages");
+    VLOG_I("RSA hybrid: received ", received.load(), " messages");
   }
 
-  // ======== Section 2: RSA-OAEP Hybrid + RSA-PSS Sender Authentication ========
-  // Adds RSA-PSS-SHA256 signing/verification on top of the hybrid encryption.
-  // The sender signs AAD + ciphertext/tag with its own private key, and the
-  // receiver verifies with the matching public key before decrypting.
+  // ---- Section 2: RSA hybrid + RSA-PSS signing (full authentication) ----
+  // Publisher signs envelope with sign_kp.private; subscriber verifies with
+  // sign_kp.public. Now an attacker who only knows the receiver's public
+  // key still cannot forge samples -- the signature check would fail.
   {
-    std::cout << "\n[2] RSA Hybrid + RSA-PSS Signed (sender authenticated)" << std::endl;
+    VLOG_I("[2] RSA Hybrid + RSA-PSS Signed (sender authenticated)");
 
     std::atomic<int> received{0};
 
@@ -202,7 +205,7 @@ int main() {
     vlink::SecuritySubscriber<std::string> sub("dds://security_rsa/signed", sub_cfg);
     sub.listen([&received](const std::string& msg) {
       received++;
-      VLOG_I("[RSA-Signed] Received:", msg);
+      VLOG_I("[RSA-Signed] Received: ", msg);
     });
 
     vlink::Security::Config pub_cfg;
@@ -210,57 +213,54 @@ int main() {
     pub_cfg.advanced.signing_key_pem = sign_kp.private_pem;
 
     vlink::SecurityPublisher<std::string> pub("dds://security_rsa/signed", pub_cfg);
-
     pub.wait_for_subscribers();
 
     pub.publish("Signed with RSA-PSS-SHA256");
     pub.publish("Receiver verifies before decrypting");
 
     std::this_thread::sleep_for(100ms);
-    VLOG_I("RSA signed: received", received.load(), "messages");
+    VLOG_I("RSA signed: received ", received.load(), " messages");
   }
 
-  // ======== Section 3: Wrong Signing Key Rejection ========
-  // The receiver expects messages signed by sign_kp.  A sender that signs with
-  // a different key fails verification and the messages are dropped before the
-  // user callback.
+  // ---- Section 3: wrong signing key rejection ----
+  // Publisher signs with an impostor key; subscriber's verify_key_pem
+  // expects sign_kp.public, so RSA-PSS verification fails on every sample
+  // and the listener never fires. Expected count is 0.
   {
-    std::cout << "\n[3] Wrong Signing Key -- Verification Failure" << std::endl;
+    VLOG_I("[3] Wrong Signing Key -- Verification Failure");
 
     const RsaKeyPair impostor_kp = generate_rsa_keypair(2048);
-
     std::atomic<int> received{0};
 
     vlink::Security::Config sub_cfg;
     sub_cfg.private_key_pem = recv_kp.private_pem;
-    sub_cfg.advanced.verify_key_pem = sign_kp.public_pem;  // Trust only sign_kp
+    sub_cfg.advanced.verify_key_pem = sign_kp.public_pem;
 
     vlink::SecuritySubscriber<std::string> sub("dds://security_rsa/impostor", sub_cfg);
     sub.listen([&received](const std::string& msg) {
       received++;
-      VLOG_I("[Impostor] Received (unexpected):", msg);
+      VLOG_I("[Impostor] Received (unexpected): ", msg);
     });
 
     vlink::Security::Config pub_cfg;
     pub_cfg.public_key_pem = recv_kp.public_pem;
-    pub_cfg.advanced.signing_key_pem = impostor_kp.private_pem;  // Signs with the wrong key
+    pub_cfg.advanced.signing_key_pem = impostor_kp.private_pem;
 
     vlink::SecurityPublisher<std::string> pub("dds://security_rsa/impostor", pub_cfg);
-
     pub.wait_for_subscribers();
 
     pub.publish("This message should be rejected on verification");
     pub.publish("Impostor signing key does not match advanced.verify_key_pem");
 
     std::this_thread::sleep_for(200ms);
-    VLOG_I("Impostor: received", received.load(), "messages (expected 0 due to RSA-PSS failure)");
+    VLOG_I("Impostor: received ", received.load(), " messages (expected 0 due to RSA-PSS failure)");
   }
 
-  // ======== Section 4: Standalone Security Class with RSA ========
-  // The Security class can be used directly for RSA hybrid encryption,
-  // independent of the pub/sub framework.
+  // ---- Section 4: standalone Security class roundtrip ----
+  // Exercises the same RSA-hybrid + PSS-sign path outside pub/sub. Used by
+  // offline tooling that needs to encrypt/decrypt bag samples.
   {
-    std::cout << "\n[4] Standalone vlink::Security with RSA Hybrid" << std::endl;
+    VLOG_I("[4] Standalone vlink::Security with RSA Hybrid");
 
     vlink::Security::Config sender_cfg;
     sender_cfg.public_key_pem = recv_kp.public_pem;
@@ -275,11 +275,11 @@ int main() {
     vlink::Bytes plaintext = vlink::Bytes::from_string("Standalone RSA hybrid payload");
     vlink::Bytes ciphertext;
     const bool enc_ok = sender.encrypt(plaintext, ciphertext);
-    VLOG_I("Encrypt success:", enc_ok, "plaintext_size:", plaintext.size(), "cipher_size:", ciphertext.size());
+    VLOG_I("Encrypt success: ", enc_ok, " plaintext_size: ", plaintext.size(), " cipher_size: ", ciphertext.size());
 
     vlink::Bytes recovered;
     const bool dec_ok = receiver.decrypt(ciphertext, recovered);
-    VLOG_I("Decrypt success:", dec_ok, "recovered:", recovered.to_string());
+    VLOG_I("Decrypt success: ", dec_ok, " recovered: ", recovered.to_string());
 
     if (plaintext == recovered) {
       VLOG_I("Roundtrip verification: PASS");
@@ -288,26 +288,14 @@ int main() {
     }
   }
 
-  // ======== Section 5: Configuration Reference ========
+  // ---- Section 5: configuration reference ----
   {
-    std::cout << "\n[5] RSA Configuration Reference" << std::endl;
-    std::cout << "   Sender Security::Config:" << std::endl;
-    std::cout << "     public_key_pem  -- peer's RSA public key (PEM); wraps session key" << std::endl;
-    std::cout << "     advanced.signing_key_pem -- local RSA private key (PEM); optional RSA-PSS sign" << std::endl;
-    std::cout << std::endl;
-    std::cout << "   Receiver Security::Config:" << std::endl;
-    std::cout << "     private_key_pem -- local RSA private key (PEM); unwraps session key" << std::endl;
-    std::cout << "     advanced.verify_key_pem  -- peer's RSA public key (PEM); optional RSA-PSS verify" << std::endl;
-    std::cout << std::endl;
-    std::cout << "   Constraints:" << std::endl;
-    std::cout << "     - RSA keys must be >= 2048 bits" << std::endl;
-    std::cout << "     - PEM strings must contain a valid RSA key; EC keys are rejected" << std::endl;
-    std::cout << "     - Configuration is one-shot at construction; rebuild Security to change" << std::endl;
-    std::cout << std::endl;
-    std::cout << "   Algorithms:" << std::endl;
-    std::cout << "     Wrap:      RSA-OAEP-SHA256 (per-message 16-byte AES session key)" << std::endl;
-    std::cout << "     Payload:   AES-128-GCM (envelope AAD, sequence nonce, 16-byte tag)" << std::endl;
-    std::cout << "     Signature: RSA-PSS-SHA256 (salt length = digest length)" << std::endl;
+    VLOG_I("[5] RSA Configuration Reference");
+    VLOG_I("  Sender:   public_key_pem (peer pub), advanced.signing_key_pem (own priv, optional)");
+    VLOG_I("  Receiver: private_key_pem (own priv), advanced.verify_key_pem (peer pub, optional)");
+    VLOG_I("  Wrap:      RSA-OAEP-SHA256 (per-message 16-byte AES session key)");
+    VLOG_I("  Payload:   AES-128-GCM (envelope AAD, sequence nonce, 16-byte tag)");
+    VLOG_I("  Signature: RSA-PSS-SHA256");
   }
 
   VLOG_I("Security RSA hybrid example complete.");

@@ -98,4 +98,7 @@ CheckOptions:
   - { key: readability-function-size.StatementThreshold,                   value: 500         }
   - { key: readability-function-size.BranchThreshold,                      value: 50          }
   - { key: readability-function-size.ParameterThreshold,                   value: 10          }
+
+ExtraArgsBefore:
+  - '-Wno-c2y-extensions'
 ...

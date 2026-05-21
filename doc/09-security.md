@@ -125,6 +125,9 @@ class Security final {
   };
 
   Security();
+  static Config from_private_key_path(const std::string& private_key_path);
+  static Config from_public_key_path(const std::string& public_key_path);
+  static Config from_key_paths(const std::string& public_key_path, const std::string& private_key_path);
   explicit Security(const Config& cfg);
   explicit Security(Config&& cfg);
   ~Security();
@@ -229,6 +232,22 @@ receiver_cfg.private_key_pem = own_priv_pem;  // 本地私钥用于解密
 receiver_cfg.advanced.verify_key_pem = peer_pub_pem;   // 对端公钥用于验签
 
 vlink::SecuritySubscriber<MyMsg> sub("dds://secure/topic", receiver_cfg);
+```
+
+也可以直接从 PEM 文件路径创建 `Config`，减少业务代码里手写读文件逻辑：
+
+```cpp
+auto sender_cfg = vlink::Security::from_public_key_path("receiver_pub.pem");
+auto receiver_cfg = vlink::Security::from_private_key_path("receiver_priv.pem");
+auto full_cfg = vlink::Security::from_key_paths("peer_pub.pem", "own_priv.pem");
+```
+
+Python API 暴露同名静态方法，返回 `_vlink.SecurityConfig`：
+
+```python
+sender_cfg = _vlink.Security.from_public_key_path("receiver_pub.pem")
+receiver_cfg = _vlink.Security.from_private_key_path("receiver_priv.pem")
+full_cfg = _vlink.Security.from_key_paths("peer_pub.pem", "own_priv.pem")
 ```
 
 省略 `advanced.signing_key_pem` / `advanced.verify_key_pem` 时仍可正常加解密，只是不再校验发送方身份。

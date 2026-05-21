@@ -23,142 +23,137 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_DDST
+
+#include "./modules/ddst_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_DDST
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-DdstConf - construction") {
-  TEST_CASE("construct with topic only uses defaults") {
+TEST_SUITE("modules-DdstConf") {
+  TEST_CASE("default domain depth and qos when only topic supplied") {
     DdstConf conf("vehicle/speed");
-    CHECK(conf.topic == "vehicle/speed");
-    CHECK(conf.domain == 0);
-    CHECK(conf.depth == 0);
+
+    CHECK_EQ(conf.topic, "vehicle/speed");
+    CHECK_EQ(conf.domain, 0);
+    CHECK_EQ(conf.depth, 0);
+    CHECK(conf.qos.empty());
+    CHECK(conf.qos_ext.empty());
+  }
+
+  TEST_CASE("explicit domain and depth are stored") {
+    DdstConf conf("my_topic", 4, 8);
+
+    CHECK_EQ(conf.topic, "my_topic");
+    CHECK_EQ(conf.domain, 4);
+    CHECK_EQ(conf.depth, 8);
     CHECK(conf.qos.empty());
   }
 
-  TEST_CASE("construct with topic, domain, depth") {
-    DdstConf conf("my_topic", 4, 8);
-    CHECK(conf.topic == "my_topic");
-    CHECK(conf.domain == 4);
-    CHECK(conf.depth == 8);
-  }
-
-  TEST_CASE("construct with named QoS") {
+  TEST_CASE("named qos profile is stored") {
     DdstConf conf("my_topic", 0, 0, "travo_qos");
-    CHECK(conf.qos == "travo_qos");
-  }
-}
 
-TEST_SUITE("modules-DdstConf - equality operators") {
-  TEST_CASE("equal configs compare equal") {
-    DdstConf a("topic", 2, 10, "qos");
-    DdstConf b("topic", 2, 10, "qos");
-    CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_EQ(conf.qos, "travo_qos");
+    CHECK(conf.qos_ext.empty());
   }
 
-  TEST_CASE("different topic compares not equal") {
-    DdstConf a("topic_a");
-    DdstConf b("topic_b");
-    CHECK(a != b);
-  }
-
-  TEST_CASE("different domain compares not equal") {
-    DdstConf a("topic", 0);
-    DdstConf b("topic", 1);
-    CHECK(a != b);
-  }
-}
-
-TEST_SUITE("modules-DdstConf - transport type") {
-  TEST_CASE("get_transport_type returns kDdst") {
-    DdstConf conf("topic");
-    CHECK(conf.get_transport_type() == TransportType::kDdst);
-  }
-}
-
-TEST_SUITE("modules-DdstConf - qos_ext constructor") {
-  TEST_CASE("construct with qos_ext map") {
+  TEST_CASE("qos_ext constructor stores property map") {
     DdstConf::PropertiesMap ext;
     ext["pub"] = "pub_profile";
     ext["sub"] = "sub_profile";
 
     DdstConf conf("my_topic", 1, ext);
-    CHECK(conf.topic == "my_topic");
-    CHECK(conf.domain == 1);
-    CHECK(conf.depth == 0);
-    CHECK(conf.qos.empty());
-    CHECK(!conf.qos_ext.empty());
-    CHECK(conf.qos_ext.at("pub") == "pub_profile");
-    CHECK(conf.qos_ext.at("sub") == "sub_profile");
-  }
-}
 
-TEST_SUITE("modules-DdstConf - equality with qos_ext") {
-  TEST_CASE("different depth compares not equal") {
+    CHECK_EQ(conf.topic, "my_topic");
+    CHECK_EQ(conf.domain, 1);
+    CHECK_EQ(conf.depth, 0);
+    CHECK(conf.qos.empty());
+    CHECK_FALSE(conf.qos_ext.empty());
+    CHECK_EQ(conf.qos_ext.at("pub"), "pub_profile");
+    CHECK_EQ(conf.qos_ext.at("sub"), "sub_profile");
+  }
+
+  TEST_CASE("operator== holds when all fields match") {
+    DdstConf a("topic", 2, 10, "qos");
+    DdstConf b("topic", 2, 10, "qos");
+
+    CHECK(a == b);
+    CHECK_FALSE(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing topic") {
+    DdstConf a("topic_a");
+    DdstConf b("topic_b");
+
+    CHECK(a != b);
+    CHECK_FALSE(a == b);
+  }
+
+  TEST_CASE("operator!= detects differing domain") {
+    DdstConf a("topic", 0, 0);
+    DdstConf b("topic", 1, 0);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing depth") {
     DdstConf a("topic", 0, 5);
     DdstConf b("topic", 0, 10);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different qos string compares not equal") {
+  TEST_CASE("operator!= detects differing qos name") {
     DdstConf a("topic", 0, 0, "qos_a");
     DdstConf b("topic", 0, 0, "qos_b");
+
     CHECK(a != b);
   }
 
-  TEST_CASE("equal with qos_ext compares equal") {
+  TEST_CASE("operator!= detects differing qos_ext") {
+    DdstConf::PropertiesMap ext_a;
+    ext_a["pub"] = "profile1";
+    DdstConf::PropertiesMap ext_b;
+    ext_b["pub"] = "profile2";
+
+    DdstConf a("topic", 0, ext_a);
+    DdstConf b("topic", 0, ext_b);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("equal qos_ext compare equal") {
     DdstConf::PropertiesMap ext;
     ext["pub"] = "profile";
 
     DdstConf a("topic", 0, ext);
     DdstConf b("topic", 0, ext);
+
     CHECK(a == b);
-  }
-
-  TEST_CASE("different qos_ext compares not equal") {
-    DdstConf::PropertiesMap ext1;
-    ext1["pub"] = "profile1";
-    DdstConf::PropertiesMap ext2;
-    ext2["pub"] = "profile2";
-
-    DdstConf a("topic", 0, ext1);
-    DdstConf b("topic", 0, ext2);
-    CHECK(a != b);
   }
 
   TEST_CASE("self equality") {
     DdstConf a("topic", 1, 5, "qos");
+
     CHECK(a == a);
-    CHECK(!(a != a));
+    CHECK_FALSE(a != a);
   }
-}
 
-TEST_SUITE("modules-DdstConf - default values") {
-  TEST_CASE("default domain is 0") {
+  TEST_CASE("get_transport_type returns kDdst") {
     DdstConf conf("topic");
-    CHECK(conf.domain == 0);
+
+    CHECK(conf.get_transport_type() == TransportType::kDdst);
   }
 
-  TEST_CASE("default depth is 0") {
-    DdstConf conf("topic");
-    CHECK(conf.depth == 0);
+  TEST_CASE("register_qos accepts a valid profile name") {
+    Qos qos;
+    qos.reliability.kind = Qos::Reliability::kReliable;
+
+    CHECK_NOTHROW(DdstConf::register_qos("ddst_test_profile", qos));
   }
-
-  TEST_CASE("empty topic") {
-    DdstConf conf("");
-    CHECK(conf.topic.empty());
-  }
-}
-
-#else
-
-TEST_SUITE("modules-DdstConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_DDST not defined - skip") { CHECK(true); }
 }
 
 #endif  // VLINK_SUPPORT_DDST

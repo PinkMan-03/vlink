@@ -21,109 +21,113 @@
  * limitations under the License.
  */
 
-// PointCloud zero-copy container example
-// Demonstrates create, push_value_v3f, get_value_v3f, schema inspection,
-// serialize/deserialize, and pub/sub on dds://.
-
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 #include <vlink/zerocopy/point_cloud.h>
 
 #include <cstring>
-#include <iostream>
 #include <thread>
-
-#include "cloud_builder.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
+// ---------------------------------------------------------------------------
+// zerocopy_point_cloud.cc
+//
+// PointCloud is the zerocopy container for variable-schema point sets
+// (lidar, radar, depth). Unlike CameraFrame it carries a *self-describing*
+// schema: each point is a tightly packed struct whose field names + types
+// are stored alongside the buffer. The schema describes:
+//   * names    -- e.g. {"x","y","z","intensity","ring"}
+//   * sizes    -- bytes per field (1/2/4/8)
+//   * types    -- enum tag (kFloat / kDouble / kUint8 / kInt32 / ...)
+// pack_size() is the sum of field sizes; a 1000-point XYZ cloud is
+// 1000 * 12 = 12000 bytes plus a small header.
+//
+// Field-access path:
+//   get_key_map() -- name -> byte offset within a point.
+//   get_value<T>(index, key_map, "name") -- typed read.
+//   Specialised XYZ helpers (push_value_v3f / get_value_v3f) skip the map
+//   lookup for the common case where the first three fields are float XYZ.
+//
+// On the wire, the schema travels with the payload: a receiver that has
+// never seen this exact field set can still iterate it correctly. This
+// is what makes PointCloud play nicely with rerun.io / Foxglove / ROS2.
+// ---------------------------------------------------------------------------
+
 int main() {
-  // ======== Section 1: Create a Point Cloud with float XYZ ========
+  // ---- Section 1: create point cloud with float XYZ ----
+  // Three float fields named x/y/z. capacity=1000 reserves storage for up
+  // to 1000 points; actual size grows with push_value.
   {
-    std::cout << "\n[1] Create Point Cloud with float XYZ" << std::endl;
+    VLOG_I("[1] Create Point Cloud with float XYZ");
 
     vlink::zerocopy::PointCloud pc;
+    const bool ok = pc.create<float, float, float>(1000, {"x", "y", "z"});
+    VLOG_I("  create<float,float,float>(1000) = ", ok);
+    VLOG_I("  pack_size=", pc.pack_size(), " bytes/point; is_owner=", pc.is_owner());
 
-    // create<float,float,float>(max_points, {"x","y","z"})
-    bool ok = pc.create<float, float, float>(1000, {"x", "y", "z"});
-    std::cout << "  create<float,float,float>(1000) = " << std::boolalpha << ok << std::endl;
-    std::cout << "  pack_size:  " << pc.pack_size() << " bytes/point" << std::endl;
-    std::cout << "  size:       " << pc.size() << " points" << std::endl;
-    std::cout << "  is_owner:   " << std::boolalpha << pc.is_owner() << std::endl;
-
-    // Push points
     pc.push_value(1.0F, 2.0F, 3.0F);
     pc.push_value(4.0F, 5.0F, 6.0F);
     pc.push_value(7.0F, 8.0F, 9.0F);
-    std::cout << "  After push: " << pc.size() << " points" << std::endl;
+    VLOG_I("  after push: size=", pc.size());
 
-    // Read back using get_value_v3f
     float x;
     float y;
     float z;
     pc.get_value_v3f(x, y, z, 0);
-    std::cout << "  Point[0]:   (" << x << ", " << y << ", " << z << ")" << std::endl;
+    VLOG_I("  point[0] = (", x, ", ", y, ", ", z, ")");
 
-    // Read back using Vector3f
     auto v = pc.get_value_v3f(1);
-    std::cout << "  Point[1]:   (" << v.x << ", " << v.y << ", " << v.z << ")" << std::endl;
+    VLOG_I("  point[1] = (", v.x, ", ", v.y, ", ", v.z, ")");
   }
 
-  // ======== Section 2: Float XYZ with Extra Fields ========
+  // ---- Section 2: XYZ + intensity (create_v3f) ----
+  // create_v3f<float>(N, extras) is shorthand for "three XYZ floats plus
+  // these extra typed fields". pack_size = 12 (XYZ) + 4 (intensity) = 16.
   {
-    std::cout << "\n[2] Float XYZ + Intensity (create_v3f)" << std::endl;
+    VLOG_I("[2] Float XYZ + Intensity (create_v3f)");
 
     vlink::zerocopy::PointCloud pc;
-
-    // create_v3f<float>(n, extra_keys) automatically prepends x,y,z
     pc.create_v3f<float>(500, {"intensity"});
-    std::cout << "  pack_size: " << pc.pack_size() << " bytes/point (3*4 + 1*4 = 16)" << std::endl;
+    VLOG_I("  pack_size=", pc.pack_size(), " bytes/point (3*4 + 1*4 = 16)");
 
-    // Push points with v3f helper
     pc.push_value_v3f(1.0F, 2.0F, 3.0F, 0.8F);
     pc.push_value_v3f(4.0F, 5.0F, 6.0F, 0.5F);
     pc.push_value_v3f(10.0F, 20.0F, 30.0F, 1.0F);
-    std::cout << "  size:      " << pc.size() << " points" << std::endl;
 
-    // Read XYZ via get_value_v3f
-    float x;
-    float y;
-    float z;
-    pc.get_value_v3f(x, y, z, 2);
-    std::cout << "  Point[2]:  (" << x << ", " << y << ", " << z << ")" << std::endl;
-
-    // Read extra field using KeyMap
     auto key_map = pc.get_key_map();
     auto intensity = pc.get_value<float>(2, key_map, "intensity");
-    std::cout << "  Intensity: " << intensity << std::endl;
+    VLOG_I("  point[2].intensity = ", intensity);
   }
 
-  // ======== Section 3: Schema Inspection ========
+  // ---- Section 3: schema inspection ----
+  // Tools / visualisers reflect on the stored schema instead of hard-coding
+  // a layout. KeyList preserves declaration order; key_map gives O(1)
+  // offset lookup by name.
   {
-    std::cout << "\n[3] Schema Inspection" << std::endl;
+    VLOG_I("[3] Schema Inspection");
 
     vlink::zerocopy::PointCloud pc;
     pc.create<float, float, float, uint8_t>(100, {"x", "y", "z", "ring"});
+    VLOG_I("  names=", pc.get_protocol_name_str());
+    VLOG_I("  sizes=", pc.get_protocol_size_str());
+    VLOG_I("  types=", pc.get_protocol_type_str());
 
-    std::cout << "  Protocol names:    " << pc.get_protocol_name_str() << std::endl;
-    std::cout << "  Protocol sizes:    " << pc.get_protocol_size_str() << std::endl;
-    std::cout << "  Protocol types:    " << pc.get_protocol_type_str() << std::endl;
-    std::cout << "  Protocol size_num: 0x" << std::hex << pc.get_protocol_size_num() << std::dec << std::endl;
-    std::cout << "  Protocol type_num: 0x" << std::hex << pc.get_protocol_type_num() << std::dec << std::endl;
-
-    // Get detailed key list
     vlink::zerocopy::PointCloud::KeyList key_list;
     auto key_map = pc.get_key_map(&key_list);
-    std::cout << "  Fields:" << std::endl;
+
     for (const auto& key : key_list) {
-      std::cout << "    name=\"" << key.name << "\" type=" << static_cast<int>(key.type)
-                << " size=" << static_cast<int>(key.size) << " offset=" << key_map[key.name] << std::endl;
+      VLOG_I("    name=", key.name, " type=", static_cast<int>(key.type), " size=", static_cast<int>(key.size),
+             " offset=", key_map[key.name]);
     }
   }
 
-  // ======== Section 4: Serialize / Deserialize ========
+  // ---- Section 4: serialize / deserialize ----
+  // Wire format = [header][schema descriptor][point payload]. check_valid
+  // verifies the magic / length consistency before downstream code touches
+  // the buffer.
   {
-    std::cout << "\n[4] Serialize / Deserialize" << std::endl;
+    VLOG_I("[4] Serialize / Deserialize");
 
     vlink::zerocopy::PointCloud original;
     original.create_v3f(1000);
@@ -136,52 +140,44 @@ int main() {
       original.push_value_v3f(fi, fi * 2, fi * 3);
     }
 
-    // Serialize
     vlink::Bytes wire;
     original >> wire;
-    std::cout << "  Points:          " << original.size() << std::endl;
-    std::cout << "  Serialized size: " << wire.size() << " bytes" << std::endl;
-    std::cout << "  get_serialized_size: " << original.get_serialized_size() << std::endl;
+    VLOG_I("  points=", original.size(), " serialized=", wire.size(), " bytes");
+    VLOG_I("  check_valid=", vlink::zerocopy::PointCloud::check_valid(wire));
 
-    // Validate
-    bool valid = vlink::zerocopy::PointCloud::check_valid(wire);
-    std::cout << "  check_valid:     " << std::boolalpha << valid << std::endl;
-
-    // Deserialize (zero-copy: data borrows wire memory)
     vlink::zerocopy::PointCloud restored;
     restored << wire;
-    std::cout << "  Restored size:   " << restored.size() << " points" << std::endl;
-    std::cout << "  Restored seq:    " << restored.header.seq << std::endl;
-    std::cout << "  is_owner:        " << std::boolalpha << restored.is_owner() << std::endl;
+    VLOG_I("  restored size=", restored.size(), " seq=", restored.header.seq, " is_owner=", restored.is_owner());
 
     auto v = restored.get_value_v3f(50);
-    std::cout << "  Point[50]:       (" << v.x << ", " << v.y << ", " << v.z << ")" << std::endl;
+    VLOG_I("  point[50] = (", v.x, ", ", v.y, ", ", v.z, ")");
   }
 
-  // ======== Section 5: set_value and resize ========
+  // ---- Section 5: resize + set_value ----
+  // resize() adjusts the logical point count without reallocating (subject
+  // to capacity). set_value_v3f writes at an arbitrary index -- useful for
+  // patching sparse clouds without rebuilding.
   {
-    std::cout << "\n[5] set_value and resize" << std::endl;
+    VLOG_I("[5] resize() + set_value()");
 
     vlink::zerocopy::PointCloud pc;
     pc.create<float, float, float>(10, {"x", "y", "z"});
-
-    // resize sets the logical size so set_value can overwrite records
     pc.resize(5);
-    std::cout << "  After resize(5): size=" << pc.size() << std::endl;
 
-    // Overwrite specific points
     pc.set_value_v3f(0, 100.0F, 200.0F, 300.0F);
     pc.set_value_v3f(4, 400.0F, 500.0F, 600.0F);
 
     auto v0 = pc.get_value_v3f(0);
     auto v4 = pc.get_value_v3f(4);
-    std::cout << "  Point[0]: (" << v0.x << ", " << v0.y << ", " << v0.z << ")" << std::endl;
-    std::cout << "  Point[4]: (" << v4.x << ", " << v4.y << ", " << v4.z << ")" << std::endl;
+    VLOG_I("  point[0] = (", v0.x, ", ", v0.y, ", ", v0.z, ")");
+    VLOG_I("  point[4] = (", v4.x, ", ", v4.y, ", ", v4.z, ")");
   }
 
-  // ======== Section 6: Pub/Sub with PointCloud ========
+  // ---- Section 6: pub/sub with PointCloud ----
+  // End-to-end demo. Listener fires on `loop`'s thread; pc is a non-
+  // owning view in shm:// (this example uses dds:// for portability).
   {
-    std::cout << "\n[6] Pub/Sub with PointCloud" << std::endl;
+    VLOG_I("[6] Pub/Sub with PointCloud");
 
     vlink::MessageLoop loop;
     loop.set_name("pc_loop");
@@ -192,8 +188,7 @@ int main() {
     sub.attach(&loop);
     sub.listen([&received](const vlink::zerocopy::PointCloud& pc) {
       received++;
-      std::cout << "  [Sub] seq=" << pc.header.seq << " points=" << pc.size() << " pack=" << pc.pack_size()
-                << std::endl;
+      VLOG_I("  [Sub] seq=", pc.header.seq, " points=", pc.size(), " pack=", pc.pack_size());
     });
 
     vlink::Publisher<vlink::zerocopy::PointCloud> pub("dds://zerocopy/pointcloud");
@@ -203,34 +198,36 @@ int main() {
       vlink::zerocopy::PointCloud pc;
       pc.create_v3f(100);
       pc.header.seq = i;
+
       for (int j = 0; j < 10; ++j) {
         auto fj = static_cast<float>(j);
         pc.push_value_v3f(fj, fj, fj);
       }
+
       pub.publish(pc);
     }
 
     loop.wait_for_idle(1000);
-    std::cout << "  Total received: " << received << std::endl;
+    VLOG_I("  total received: ", received);
 
     loop.quit();
     loop.wait_for_quit();
   }
 
-  // ======== Section 7: Double-Precision Variant ========
+  // ---- Section 7: double-precision variant ----
+  // create_v3d uses double instead of float for XYZ -- pack_size doubles
+  // (3 * 8 = 24 bytes/point). Use for survey-grade lidar where float
+  // precision (~7 digits) is insufficient.
   {
-    std::cout << "\n[7] Double-Precision (create_v3d / get_value_v3d)" << std::endl;
+    VLOG_I("[7] Double-Precision (create_v3d)");
 
     vlink::zerocopy::PointCloud pc;
     pc.create_v3d(100);
-
     pc.push_value_v3d(1.111111, 2.222222, 3.333333);
     pc.push_value_v3d(4.444444, 5.555555, 6.666666);
 
-    std::cout << "  pack_size: " << pc.pack_size() << " bytes/point (3*8=24)" << std::endl;
-
     auto v = pc.get_value_v3d(0);
-    std::cout << "  Point[0]:  (" << v.x << ", " << v.y << ", " << v.z << ")" << std::endl;
+    VLOG_I("  pack_size=", pc.pack_size(), " point[0]=(", v.x, ", ", v.y, ", ", v.z, ")");
   }
 
   VLOG_I("PointCloud example complete.");

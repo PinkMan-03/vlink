@@ -1,193 +1,187 @@
-# Method Sync -- VLink 方法模型同步调用示例
+# method_sync — Method 模型同步调用：`invoke()` 的三种返回形态
 
-## 1. 通信模型概览
+本示例演示 Method（请求/响应）模型最常用的形态 —— **同步阻塞调用**。客户端通过 `Client::invoke()` 发出请求并阻塞等待响应；服务端通过 `Server::listen(ReqRespCallback)` 注册同步回调，在回调里直接填充响应对象。
 
-![通信模型概览](../event_basic/images/communication-models-overview.png)
+读完本示例你能掌握：
 
-## 2. 概述
+- 服务端 `listen(cb)` 的 `(req, resp&)` 双参数回调写法。
+- 客户端 `invoke()` 的三种调用方式 —— 输出引用、`std::optional<Resp>` 返回、自定义超时。
+- `wait_for_connected()` / `is_connected()` 的连接状态查询接口。
 
-本示例演示 VLink **方法模型 (Method Model)** 的同步调用模式：Server 注册同步处理函数，Client 使用阻塞式 `invoke()` 发送请求并等待响应。
+## 背景与适用场景
 
-![Method Sync RPC Sequence](images/method-sync-rpc-sequence.png)
+适用场景：
 
-```
-Client ──invoke(req)──> [dds://] ──> Server: callback(req, resp) ──> [dds://] ──> Client: resp
-```
+- 远程计算/查询：客户端拿到结果才能继续工作（典型 RPC）。
+- 命令下发并等待执行结果（如调用某个服务做一次校准）。
+- 跨进程的"函数调用"风格 API。
 
-## 3. 方法模型核心概念
+不适合：
 
-VLink 方法模型是一种请求/响应（RPC）通信模式：
-- **Server<Req, Resp>**: 注册处理函数，接收请求，填写响应
-- **Client<Req, Resp>**: 发送请求，等待并接收响应
+- 不需要回执的单向通知（用 `method_fire_forget`）。
+- 客户端不能阻塞（如 UI 线程 / 事件循环回调里），需要异步回调或 future（用 `method_async`）。
+- 客户端需要发起大量并发请求（同步串行会成为瓶颈，仍然用 async）。
 
-### 3.1 五种调用模式
+VLink Method 模型在传输层是"基于 Event 的双工通信"：客户端把请求发到 `<url>` 上，服务端处理后把响应送回客户端。Server 与 Client 之间通过隐含的 request_id 关联响应，应用层不需要关心序号匹配。
 
-| 模式 | 方法 | 阻塞 | 返回值 |
-|------|------|------|--------|
-| 同步引用 | `invoke(req, resp&, timeout)` | 是 | `bool` |
-| 同步可选 | `invoke(req, timeout)` | 是 | `optional<Resp>` |
-| 回调异步 | `invoke(req, callback)` | 否 | `bool` |
-| Future 异步 | `async_invoke(req)` | 否 | `future<Resp>` |
-| 即发即忘 | `send(req)` | 否 | `bool` |
+## 核心 API
 
-本示例聚焦前两种同步模式。异步模式参见 `method_async`，即发即忘参见 `method_fire_forget`。
+| API | 签名 | 说明 |
+|-----|------|------|
+| `vlink::Server<Req, Resp>` | `explicit Server(const std::string& url, InitType type = kWithInit)` | 服务端 |
+| `Server::listen` | `bool listen(ReqRespCallback&& cb)` | `cb(const Req&, Resp&)` 原地填充响应；同步返回视为完成一次 RPC |
+| `vlink::Client<Req, Resp>` | `explicit Client(const std::string& url, InitType type = kWithInit)` | 客户端 |
+| `Client::wait_for_connected` | `bool wait_for_connected(std::chrono::milliseconds timeout)` | 阻塞等待到服务端就绪 |
+| `Client::is_connected` | `bool is_connected() const` | 非阻塞查询是否就绪 |
+| `Client::invoke` (引用) | `bool invoke(const Req&, Resp&, std::chrono::milliseconds timeout = kDefaultInterval)` | 返回 false 表示超时/失败 |
+| `Client::invoke` (optional) | `std::optional<Resp> invoke(const Req&, std::chrono::milliseconds timeout = kDefaultInterval)` | 返回 `nullopt` 表示超时/失败 |
 
-## 4. 关键代码分析
+## 代码导读
 
-### 4.1 Server 同步处理函数
+### 1. 启动 server loop 并注册服务
 
 ```cpp
-Server<MathRequest, MathResponse> server("dds://math/calculator");
+MessageLoop server_loop;
+server_loop.set_name("server_loop");
+server_loop.async_run();
+
+Server<MathRequest, MathResponse> server(kUrl);
 server.attach(&server_loop);
 server.listen([](const MathRequest& req, MathResponse& resp) {
-    resp.result = req.x + req.y;
-    resp.success = true;
+  resp.success = true;
+  switch (req.operation) {
+    case 0: resp.result = req.x + req.y; break;
+    case 1: resp.result = req.x - req.y; break;
+    case 2: resp.result = req.x * req.y; break;
+    case 3:
+      if (req.y != 0.0) {
+        resp.result = req.x / req.y;
+      } else {
+        resp.result = 0.0;
+        resp.success = false;
+      }
+      break;
+    case 4: resp.result = std::pow(req.x, req.y); break;
+    default: resp.result = 0.0; resp.success = false; break;
+  }
+  VLOG_I("[server] op=", req.operation, " x=", req.x, " y=", req.y, " => ", resp.result);
 });
 ```
 
-`listen(ReqRespCallback)` 接收签名为 `void(const Req&, Resp&)` 的回调。回调中必须在返回前填充 `resp`，框架会在回调返回后自动序列化并发送响应。
+`listen(ReqRespCallback)` 是 Method 模型最常见的回调：vlink 框架收到请求后构造一个空的 `Resp`，把 `req`、`resp&` 一起传进回调。回调里**原地修改 `resp`**，回调返回后框架自动把响应送回客户端。
 
-**关键点**:
-- 回调在 `attach()` 指定的 MessageLoop 线程上执行
-- 回调是同步的：处理完成后框架立即回复
-- `listen()` 只能调用一次，重复调用会触发 Fatal 错误
-- 如果不需要响应，使用 `Server<Req>` 配合 `listen(ReqCallback)`
+服务端必须先 attach 到 loop，所有请求处理都跑在 loop 线程上。如果业务逻辑慢，可以把 server attach 到 `MultiLoop` 或转发任务到 `ThreadPool`。
 
-### 4.2 Client 连接检测
+### 2. 客户端连接
 
 ```cpp
-Client<MathRequest, MathResponse> client("dds://math/calculator");
-bool connected = client.wait_for_connected(2000ms);
-bool is_conn = client.is_connected();
+Client<MathRequest, MathResponse> client(kUrl);
+VLOG_I("[client] wait_for_connected: ", client.wait_for_connected(2000ms));
+VLOG_I("[client] is_connected: ", client.is_connected());
 ```
 
-- `wait_for_connected(timeout)`: 阻塞等待 Server 就绪。默认超时 5000ms
-- `is_connected()`: 非阻塞查询当前连接状态
-- 还有 `detect_connected(callback)` 用于异步通知
+`wait_for_connected(timeout)` 阻塞等到服务端 discovery 完成。生产代码通常用 `detect_connected` 异步回调（见 `method_async`）。`is_connected()` 是非阻塞查询。
 
-### 4.3 invoke(req, resp) -- 引用输出模式
+### 3. 模式 1：`invoke(req, resp)` 输出引用
 
 ```cpp
 MathRequest req{10.0, 3.0, 0};
 MathResponse resp{};
 bool ok = client.invoke(req, resp);
-// resp.result == 13.0
+VLOG_I("[client] 10 + 3 = ", resp.result, " ok=", ok);
 ```
 
-阻塞式调用：
-1. 序列化 `req`，通过传输层发送到 Server
-2. Server 回调处理请求，填写 `resp`
-3. Server 框架序列化 `resp`，通过传输层返回
-4. Client 反序列化响应，写入 `resp` 引用
-5. 返回 `true` 表示成功
+经典的"调用前自己 zero-init 输出对象"风格。`invoke()` 返回 `bool`：true 表示成功收到 resp，false 表示超时或失败。
 
-返回 `false` 的情况：
-- Server 未连接
-- 超时（默认 5000ms）
-- 传输层错误
-
-### 4.4 invoke(req) -> optional -- 可选返回模式
+### 4. 模式 2：`invoke(req)` 返回 `std::optional<Resp>`
 
 ```cpp
+MathRequest req{6.0, 7.0, 2};
 auto result = client.invoke(req);
+
 if (result.has_value()) {
-    double answer = result->result;
+  VLOG_I("[client] 6 * 7 = ", result->result);
 }
 ```
 
-与引用输出模式功能相同，但返回 `std::optional<Resp>`：
-- 成功：返回包含 `Resp` 的 `optional`
-- 失败/超时：返回 `std::nullopt`
+更现代的 C++ 风格，避免显式声明 `Resp` 局部变量。`std::nullopt` 表示超时/失败。
 
-这种模式更符合现代 C++ 风格，避免了未初始化引用的问题。
-
-### 4.5 自定义超时
+### 5. 模式 3：自定义超时
 
 ```cpp
-bool ok = client.invoke(req, resp, 1000ms);      // 1 秒超时
-auto result = client.invoke(req, 1000ms);          // 1 秒超时
+MathRequest req{100.0, 0.0, 3};
+auto result = client.invoke(req, 1000ms);
+
+if (result.has_value()) {
+  VLOG_I("[client] 100 / 0 success=", result->success);
+}
 ```
 
-两种 invoke 模式都支持自定义超时参数。默认超时为 `Timeout::kDefaultInterval`（5000ms）。设置为 0 会被视为无限等待（会产生告警日志）。
+默认 timeout 是 `Timeout::kDefaultInterval`（通常 500ms）；可以显式传 `std::chrono::milliseconds`。注意"失败的业务结果"（如除零）仍然是一次**成功的 RPC**：`resp.success=false` 但 `invoke()` 返回有值。RPC 层的失败（超时、断连）才返回 `nullopt`。
 
-## 5. RPC 内部流程
+### 6. 顺序批量调用
 
-```
-1. client.invoke(req)
-   ├── 序列化 MathRequest -> Bytes
-   ├── 发送到 dds:// 传输层
-   └── 阻塞等待响应
+```cpp
+for (int i = 1; i <= 5; ++i) {
+  MathRequest req{static_cast<double>(i), static_cast<double>(i), 2};
+  auto result = client.invoke(req);
 
-2. Server 接收到请求
-   ├── 反序列化 Bytes -> MathRequest
-   ├── 在 server_loop 线程上执行回调
-   ├── 回调填写 MathResponse
-   ├── 序列化 MathResponse -> Bytes
-   └── 通过传输层返回
-
-3. client.invoke() 收到响应
-   ├── 反序列化 Bytes -> MathResponse
-   ├── 写入 resp 引用 / 返回 optional
-   └── 解除阻塞，返回 true
+  if (result.has_value()) {
+    VLOG_I("[client] ", i, " * ", i, " = ", result->result);
+  }
+}
 ```
 
-## 6. 编译与运行
+每个 invoke 都阻塞等待响应。这种串行调用的吞吐被 round-trip 时延限制；要并发就用 `async_invoke`。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_method_sync example_method_sync_server example_method_sync_client
 ./build/output/bin/example_method_sync
 ```
 
-## 7. 预期输出
+预期输出（节选）：
 
 ```
-[I] === VLink Method Sync Example ===
-[I] [Server] Listening on dds://math/calculator
-[I] [Client] Created on dds://math/calculator
-[I] [Client] wait_for_connected: 1
-[I] --- Mode 1: invoke(req, resp) ---
-[I] [Server] op=0 x=10 y=3 => 13
-[I] [Client] 10 + 3 = 13 success=1 ok=1
-[I] [Server] op=1 x=100 y=7 => 93
-[I] [Client] 100 - 7 = 93 success=1 ok=1
-[I] --- Mode 2: invoke(req) -> optional ---
-[I] [Server] op=2 x=6 y=7 => 42
-[I] [Client] 6 * 7 = 42 success=1
-[I] --- Mode 3: invoke with custom timeout ---
-[I] [Server] op=3 x=100 y=0 => 0
-[I] [Client] 100 / 0 = 0 success=0 ok=1
+[server] op=0 x=10 y=3 => 13
+[client] 10 + 3 = 13 ok=1
+[server] op=2 x=6 y=7 => 42
+[client] 6 * 7 = 42
+[server] op=3 x=100 y=0 => 0
+[client] 100 / 0 success=0
+[server] op=2 x=1 y=1 => 1
+[client] 1 * 1 = 1
 ...
-[I] === Example complete ===
+[server] op=2 x=5 y=5 => 25
+[client] 5 * 5 = 25
 ```
 
-## 8. 文件结构
+URL `dds://math/calculator` 需要启用 FastDDS 组件；改 URL 前缀即可切换其它后端。
 
-| 文件 | 说明 |
-|------|------|
-| `math_types.h` | POD 消息类型 `MathRequest` / `MathResponse` 的定义 |
-| `method_sync.cc` | 单进程合并示例（Server + Client） |
-| `server.cc` | 多进程拆分：Server 端（独立可执行文件） |
-| `client.cc` | 多进程拆分：Client 端（独立可执行文件） |
-| `CMakeLists.txt` | 构建配置（生成 3 个可执行文件） |
+## 常见陷阱
 
-### 8.1 多进程运行方式
+1. **回调里阻塞**：`listen` 回调跑在 server_loop 线程，阻塞会让后续请求排队；高耗时逻辑要转发到 `ThreadPool`。
+2. **不 `wait_for_connected` 直接 invoke**：discovery 没完成时 invoke 会超时返回 `nullopt`，看起来像 server 不工作。
+3. **`invoke()` 不能在 server_loop 线程上调用**：那是 server 的回调线程；client.invoke 阻塞那条线程会死锁。本示例 client 在 main 线程里调用，安全。
+4. **业务错误 vs RPC 错误**：业务里"运算失败"应当在 `Resp` 里用字段表达（如 `resp.success`）；不要靠 RPC 失败语义传递业务结果。
+5. **超时太短**：默认 500ms 在高负载或慢服务下会假超时；按场景显式传 timeout。
 
-```bash
-# 终端 1: 启动 Server
-./build/output/bin/example_method_sync_server
+## 设计要点
 
-# 终端 2: 启动 Client
-./build/output/bin/example_method_sync_client
-```
+- Server 的 `listen(ReqRespCallback)` 是同步形态：回调一返回就被视为响应已构造完毕。需要异步处理（如 server 转发到工作线程再回填）就用 `listen_for_reply` + `reply(req_id, resp)`（见 `method_async`）。
+- Client 端的 `invoke()` 内部会等待 server 的 reply（基于 request_id 匹配）；timeout 后即便 server 后续 reply 也会被丢弃。
+- Method 模型 Server-Client 是一对一关系（DDS / shm 后端语义）；多客户端需要分别开多个 Client 实例。
 
-## 9. 扩展思考
+## 配图
 
-- 同步 `invoke()` 会阻塞调用线程。如果在 MessageLoop 线程上调用 `invoke()` 会导致死锁（loop 线程等待响应，但响应需要 loop 线程派发）。请在独立线程中调用 `invoke()`。
-- 对于需要并发处理的场景，使用 `async_invoke()` 或 `invoke(req, callback)` 参见 `method_async` 示例。
-- 将 URL 从 `dds://` 切换为 `someip://` 或 `zenoh://` 可切换传输协议，API 完全一致。
-- 如果不需要响应（单向命令），使用 `Server<Req>` + `Client<Req>` 的即发即忘模式，参见 `method_fire_forget` 示例。
+![RPC sequence](./images/method-sync-rpc-sequence.png)
 
-## 10. 相关文档
+图中演示一次同步 RPC 的完整时序：Client 发请求、阻塞等响应、Server 回调处理并填充响应、响应返回 Client、unblock 继续执行。
 
-详细原理参见 [doc/04-method-model.md](../../../doc/04-method-model.md)。
+## 参考
+
+- `../method_async/` — 异步调用（回调式 + `std::future` 式）
+- `../method_fire_forget/` — 单向调用（不等待响应）
+- `../../quickstart/hello_rpc/` — 最短的 RPC 示例
+- `vlink/include/vlink/client.h`、`server.h` — Client/Server 完整接口
+- 顶层 `doc/04-method-model.md` — Method 模型规范

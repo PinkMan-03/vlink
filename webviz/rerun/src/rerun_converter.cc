@@ -800,6 +800,82 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
     return;
   }
 
+  if (schema_type == SchemaType::kZeroCopy && Helpers::has_startwith(ser, "vlink::zerocopy::OccupancyGrid")) {
+    zerocopy::OccupancyGrid grid;
+
+    if VUNLIKELY (!(grid << raw)) {
+      MLOG_W("Failed to deserialize OccupancyGrid");
+      return;
+    }
+
+    auto occupancy_grid_timestamp_ns = clamp_header_timestamp_ns(grid.header.time_meas);
+
+    apply_primary_timestamp(occupancy_grid_timestamp_ns);
+
+    if VUNLIKELY (!log_occupancy_grid(rec, entity_path, grid)) {
+      MLOG_W("log_occupancy_grid failed: path={} raw={}", entity_path, raw.size());
+    }
+
+    return;
+  }
+
+  if (schema_type == SchemaType::kZeroCopy && Helpers::has_startwith(ser, "vlink::zerocopy::Tensor")) {
+    zerocopy::Tensor tensor;
+
+    if VUNLIKELY (!(tensor << raw)) {
+      MLOG_W("Failed to deserialize Tensor");
+      return;
+    }
+
+    auto tensor_timestamp_ns = clamp_header_timestamp_ns(tensor.header.time_meas);
+
+    apply_primary_timestamp(tensor_timestamp_ns);
+
+    if VUNLIKELY (!log_tensor(rec, entity_path, tensor)) {
+      MLOG_W("log_tensor failed: path={} raw={}", entity_path, raw.size());
+    }
+
+    return;
+  }
+
+  if (schema_type == SchemaType::kZeroCopy && Helpers::has_startwith(ser, "vlink::zerocopy::ObjectArray")) {
+    zerocopy::ObjectArray arr;
+
+    if VUNLIKELY (!(arr << raw)) {
+      MLOG_W("Failed to deserialize ObjectArray");
+      return;
+    }
+
+    auto object_array_timestamp_ns = clamp_header_timestamp_ns(arr.header.time_meas);
+
+    apply_primary_timestamp(object_array_timestamp_ns);
+
+    if VUNLIKELY (!log_object_array(rec, entity_path, arr)) {
+      MLOG_W("log_object_array failed: path={} raw={}", entity_path, raw.size());
+    }
+
+    return;
+  }
+
+  if (schema_type == SchemaType::kZeroCopy && Helpers::has_startwith(ser, "vlink::zerocopy::AudioFrame")) {
+    zerocopy::AudioFrame frame;
+
+    if VUNLIKELY (!(frame << raw)) {
+      MLOG_W("Failed to deserialize AudioFrame");
+      return;
+    }
+
+    auto audio_frame_timestamp_ns = clamp_header_timestamp_ns(frame.header.time_meas);
+
+    apply_primary_timestamp(audio_frame_timestamp_ns);
+
+    if VUNLIKELY (!log_audio_frame(rec, entity_path, frame)) {
+      MLOG_W("log_audio_frame failed: path={} raw={}", entity_path, raw.size());
+    }
+
+    return;
+  }
+
   const auto& all_mappings = find_all_mappings(url, ser);
 
   if VLIKELY (!all_mappings.empty()) {
@@ -822,6 +898,30 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
         if (mapping->converter == "raw_data") {
           apply_primary_timestamp(-1);
           log_raw_data(rec, entity_path, raw);
+          return;
+        }
+
+        if (mapping->converter == "occupancy_grid") {
+          apply_primary_timestamp(-1);
+          log_occupancy_grid(rec, entity_path, raw);
+          return;
+        }
+
+        if (mapping->converter == "tensor") {
+          apply_primary_timestamp(-1);
+          log_tensor(rec, entity_path, raw);
+          return;
+        }
+
+        if (mapping->converter == "object_array") {
+          apply_primary_timestamp(-1);
+          log_object_array(rec, entity_path, raw);
+          return;
+        }
+
+        if (mapping->converter == "audio_frame") {
+          apply_primary_timestamp(-1);
+          log_audio_frame(rec, entity_path, raw);
           return;
         }
 
@@ -1425,6 +1525,414 @@ bool RerunConverter::log_raw_data(::rerun::RecordingStream& rec, const std::stri
   }
 
   return log_raw_data(rec, entity_path, rd);
+}
+
+bool RerunConverter::log_occupancy_grid(::rerun::RecordingStream& rec, const std::string& entity_path,
+                                        const zerocopy::OccupancyGrid& grid) {
+  const auto* data_ptr = grid.data();
+  auto data_size = grid.size();
+  auto w = grid.width();
+  auto h = grid.height();
+
+  if VUNLIKELY (!data_ptr || data_size == 0 || w == 0 || h == 0) {
+    MLOG_W("OccupancyGrid invalid: size={} width={} height={}", data_size, w, h);
+    return false;
+  }
+
+  auto cell_count = static_cast<size_t>(w) * static_cast<size_t>(h);
+  auto cell_type = grid.cell_type();
+  auto cell_size = grid.cell_size();
+
+  if VUNLIKELY (cell_size == 0 || cell_count * cell_size > data_size) {
+    MLOG_W("OccupancyGrid size mismatch: cells={} cell_size={} bytes={}", cell_count, cell_size, data_size);
+    return false;
+  }
+
+  std::vector<uint8_t> gray(cell_count, 0);
+
+  switch (cell_type) {
+    case zerocopy::OccupancyGrid::kCellInt8: {
+      const auto* cells = reinterpret_cast<const int8_t*>(data_ptr);
+
+      for (size_t i = 0; i < cell_count; ++i) {
+        auto v = cells[i];
+
+        if (v < 0) {
+          gray[i] = 127;
+        } else {
+          auto clamped = std::min<int>(v, 100);
+          gray[i] = static_cast<uint8_t>(255 - clamped * 255 / 100);
+        }
+      }
+
+      break;
+    }
+    case zerocopy::OccupancyGrid::kCellUint8: {
+      std::memcpy(gray.data(), data_ptr, cell_count);
+      break;
+    }
+    case zerocopy::OccupancyGrid::kCellUint16: {
+      const auto* cells = reinterpret_cast<const uint16_t*>(data_ptr);
+
+      for (size_t i = 0; i < cell_count; ++i) {
+        gray[i] = static_cast<uint8_t>(cells[i] >> 8U);
+      }
+
+      break;
+    }
+    case zerocopy::OccupancyGrid::kCellFloat32: {
+      const auto* cells = reinterpret_cast<const float*>(data_ptr);
+      auto v_min = grid.value_min();
+      auto v_max = grid.value_max();
+
+      if (!(v_max > v_min)) {
+        v_min = 0.0F;
+        v_max = 1.0F;
+      }
+
+      auto inv_range = 1.0F / (v_max - v_min);
+
+      for (size_t i = 0; i < cell_count; ++i) {
+        auto t = std::min(std::max((cells[i] - v_min) * inv_range, 0.0F), 1.0F);
+        gray[i] = static_cast<uint8_t>(t * 255.0F);
+      }
+
+      break;
+    }
+    default: {
+      MLOG_W("OccupancyGrid unsupported cell_type={}", static_cast<int>(cell_type));
+      return false;
+    }
+  }
+
+  auto pixel_data = ::rerun::Collection<uint8_t>::take_ownership(std::move(gray));
+  auto image = ::rerun::archetypes::Image(pixel_data, {w, h}, ::rerun::datatypes::ColorModel::L);
+  rec.log(entity_path, image);
+
+  return true;
+}
+
+bool RerunConverter::log_occupancy_grid(::rerun::RecordingStream& rec, const std::string& entity_path,
+                                        const Bytes& raw) {
+  zerocopy::OccupancyGrid grid;
+
+  if VUNLIKELY (!(grid << raw)) {
+    MLOG_W("Failed to deserialize OccupancyGrid");
+    return false;
+  }
+
+  return log_occupancy_grid(rec, entity_path, grid);
+}
+
+bool RerunConverter::log_tensor(::rerun::RecordingStream& rec, const std::string& entity_path,
+                                const zerocopy::Tensor& tensor) {
+  const auto* data_ptr = tensor.data();
+  auto data_size = tensor.size();
+  auto rank = tensor.rank();
+
+  if VUNLIKELY (!data_ptr || data_size == 0 || rank == 0) {
+    MLOG_W("Tensor invalid: size={} rank={}", data_size, static_cast<int>(rank));
+    return false;
+  }
+
+  std::vector<uint64_t> shape;
+  shape.reserve(rank);
+
+  for (uint8_t i = 0; i < rank; ++i) {
+    shape.emplace_back(tensor.shape_at(i));
+  }
+
+  ::rerun::datatypes::TensorBuffer buffer;
+  auto dtype = tensor.dtype();
+
+  switch (dtype) {
+    case zerocopy::Tensor::kBool:
+    case zerocopy::Tensor::kUint8: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint8_t>::borrow(data_ptr, data_size));
+      break;
+    }
+    case zerocopy::Tensor::kInt8: {
+      buffer = ::rerun::datatypes::TensorBuffer(
+          ::rerun::Collection<int8_t>::borrow(reinterpret_cast<const int8_t*>(data_ptr), data_size));
+      break;
+    }
+    case zerocopy::Tensor::kInt16: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<int16_t>::borrow(
+          reinterpret_cast<const int16_t*>(data_ptr), data_size / sizeof(int16_t)));
+      break;
+    }
+    case zerocopy::Tensor::kUint16: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint16_t>::borrow(
+          reinterpret_cast<const uint16_t*>(data_ptr), data_size / sizeof(uint16_t)));
+      break;
+    }
+    case zerocopy::Tensor::kInt32: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<int32_t>::borrow(
+          reinterpret_cast<const int32_t*>(data_ptr), data_size / sizeof(int32_t)));
+      break;
+    }
+    case zerocopy::Tensor::kUint32: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint32_t>::borrow(
+          reinterpret_cast<const uint32_t*>(data_ptr), data_size / sizeof(uint32_t)));
+      break;
+    }
+    case zerocopy::Tensor::kFloat32: {
+      buffer = ::rerun::datatypes::TensorBuffer(
+          ::rerun::Collection<float>::borrow(reinterpret_cast<const float*>(data_ptr), data_size / sizeof(float)));
+      break;
+    }
+    case zerocopy::Tensor::kInt64: {
+      std::vector<int64_t> aligned(data_size / sizeof(int64_t));
+      std::memcpy(aligned.data(), data_ptr, aligned.size() * sizeof(int64_t));
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<int64_t>::take_ownership(std::move(aligned)));
+      break;
+    }
+    case zerocopy::Tensor::kUint64: {
+      std::vector<uint64_t> aligned(data_size / sizeof(uint64_t));
+      std::memcpy(aligned.data(), data_ptr, aligned.size() * sizeof(uint64_t));
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint64_t>::take_ownership(std::move(aligned)));
+      break;
+    }
+    case zerocopy::Tensor::kFloat64: {
+      std::vector<double> aligned(data_size / sizeof(double));
+      std::memcpy(aligned.data(), data_ptr, aligned.size() * sizeof(double));
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<double>::take_ownership(std::move(aligned)));
+      break;
+    }
+    case zerocopy::Tensor::kFloat16:
+    case zerocopy::Tensor::kBfloat16:
+    default: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint8_t>::borrow(data_ptr, data_size));
+      break;
+    }
+  }
+
+  auto archetype = ::rerun::archetypes::Tensor(std::move(shape), std::move(buffer));
+
+  auto layout = tensor.layout();
+
+  if (!layout.empty()) {
+    std::vector<std::string> dim_names;
+    dim_names.reserve(rank);
+
+    for (uint8_t i = 0; i < rank; ++i) {
+      if (i < layout.size()) {
+        dim_names.emplace_back(1, layout[i]);
+      } else {
+        dim_names.emplace_back("dim" + std::to_string(static_cast<int>(i)));
+      }
+    }
+
+    archetype = std::move(archetype).with_dim_names(std::move(dim_names));
+  }
+
+  rec.log(entity_path, archetype);
+
+  return true;
+}
+
+bool RerunConverter::log_tensor(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw) {
+  zerocopy::Tensor tensor;
+
+  if VUNLIKELY (!(tensor << raw)) {
+    MLOG_W("Failed to deserialize Tensor");
+    return false;
+  }
+
+  return log_tensor(rec, entity_path, tensor);
+}
+
+bool RerunConverter::log_object_array(::rerun::RecordingStream& rec, const std::string& entity_path,
+                                      const zerocopy::ObjectArray& arr) {
+  auto count = arr.count();
+
+  if VUNLIKELY (count == 0) {
+    return false;
+  }
+
+  std::vector<::rerun::Position3D> centers;
+  std::vector<::rerun::HalfSize3D> half_sizes;
+  std::vector<::rerun::components::RotationQuat> rotations;
+  std::vector<::rerun::Color> colors;
+  std::vector<::rerun::components::ClassId> class_ids;
+  std::vector<::rerun::components::Text> labels;
+
+  centers.reserve(count);
+  half_sizes.reserve(count);
+  rotations.reserve(count);
+  colors.reserve(count);
+  class_ids.reserve(count);
+  labels.reserve(count);
+
+  static const ::rerun::Color kMotionColors[] = {
+      ::rerun::Color(160, 160, 160), ::rerun::Color(80, 200, 120), ::rerun::Color(255, 96, 96),
+      ::rerun::Color(255, 196, 64),  ::rerun::Color(96, 160, 220),
+  };
+
+  static constexpr size_t kMotionColorCount = sizeof(kMotionColors) / sizeof(kMotionColors[0]);
+
+  for (uint32_t i = 0; i < count; ++i) {
+    const auto* obj = arr.objects(i);
+
+    if VUNLIKELY (!obj) {
+      continue;
+    }
+
+    centers.emplace_back(obj->position[0], obj->position[1], obj->position[2]);
+    half_sizes.emplace_back(obj->size[0] * 0.5F, obj->size[1] * 0.5F, obj->size[2] * 0.5F);
+
+    auto half_yaw = obj->yaw * 0.5F;
+    auto sin_half = std::sin(half_yaw);
+    auto cos_half = std::cos(half_yaw);
+    rotations.emplace_back(::rerun::datatypes::Quaternion::from_xyzw(0.0F, 0.0F, sin_half, cos_half));
+
+    auto motion_idx = static_cast<size_t>(obj->motion_state);
+
+    if (motion_idx < kMotionColorCount) {
+      colors.emplace_back(kMotionColors[motion_idx]);
+    } else {
+      colors.emplace_back(kMotionColors[0]);
+    }
+
+    class_ids.emplace_back(static_cast<uint16_t>(obj->class_id > 0xFFFFU ? 0xFFFFU : obj->class_id));
+
+    size_t label_len = 0;
+
+    while (label_len < sizeof(obj->label) && obj->label[label_len] != '\0') {
+      ++label_len;
+    }
+
+    std::string label_text(obj->label, label_len);
+
+    if (obj->track_id != 0) {
+      label_text.append("#").append(std::to_string(obj->track_id));
+    }
+
+    labels.emplace_back(label_text);
+  }
+
+  if VUNLIKELY (centers.empty()) {
+    return false;
+  }
+
+  auto boxes = ::rerun::archetypes::Boxes3D::from_centers_and_half_sizes(centers, half_sizes);
+
+  if (!rotations.empty()) {
+    boxes = std::move(boxes).with_quaternions(std::move(rotations));
+  }
+
+  if (!colors.empty()) {
+    boxes = std::move(boxes).with_colors(std::move(colors));
+  }
+
+  if (!class_ids.empty()) {
+    boxes = std::move(boxes).with_class_ids(std::move(class_ids));
+  }
+
+  if (!labels.empty()) {
+    boxes = std::move(boxes).with_labels(std::move(labels));
+    boxes = std::move(boxes).with_show_labels(::rerun::components::ShowLabels(false));
+  }
+
+  rec.log(entity_path, boxes);
+
+  return true;
+}
+
+bool RerunConverter::log_object_array(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw) {
+  zerocopy::ObjectArray arr;
+
+  if VUNLIKELY (!(arr << raw)) {
+    MLOG_W("Failed to deserialize ObjectArray");
+    return false;
+  }
+
+  return log_object_array(rec, entity_path, arr);
+}
+
+bool RerunConverter::log_audio_frame(::rerun::RecordingStream& rec, const std::string& entity_path,
+                                     const zerocopy::AudioFrame& frame) {
+  const auto* data_ptr = frame.data();
+  auto data_size = frame.size();
+  auto num_channels = frame.num_channels();
+  auto num_samples = frame.num_samples();
+
+  if VUNLIKELY (!data_ptr || data_size == 0 || num_channels == 0 || num_samples == 0) {
+    return false;
+  }
+
+  ::rerun::datatypes::TensorBuffer buffer;
+  auto format = frame.format();
+
+  switch (format) {
+    case zerocopy::AudioFrame::kFormatPcmU8: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint8_t>::borrow(data_ptr, data_size));
+      break;
+    }
+    case zerocopy::AudioFrame::kFormatPcmS16: {
+      auto element_count = data_size / sizeof(int16_t);
+      buffer = ::rerun::datatypes::TensorBuffer(
+          ::rerun::Collection<int16_t>::borrow(reinterpret_cast<const int16_t*>(data_ptr), element_count));
+      break;
+    }
+    case zerocopy::AudioFrame::kFormatPcmS32: {
+      auto element_count = data_size / sizeof(int32_t);
+      buffer = ::rerun::datatypes::TensorBuffer(
+          ::rerun::Collection<int32_t>::borrow(reinterpret_cast<const int32_t*>(data_ptr), element_count));
+      break;
+    }
+    case zerocopy::AudioFrame::kFormatPcmF32: {
+      auto element_count = data_size / sizeof(float);
+      buffer = ::rerun::datatypes::TensorBuffer(
+          ::rerun::Collection<float>::borrow(reinterpret_cast<const float*>(data_ptr), element_count));
+      break;
+    }
+    default: {
+      buffer = ::rerun::datatypes::TensorBuffer(::rerun::Collection<uint8_t>::borrow(data_ptr, data_size));
+      break;
+    }
+  }
+
+  std::vector<uint64_t> shape;
+  shape.reserve(2);
+
+  if (frame.layout() == zerocopy::AudioFrame::kLayoutPlanar) {
+    shape.emplace_back(static_cast<uint64_t>(num_channels));
+    shape.emplace_back(static_cast<uint64_t>(num_samples));
+  } else {
+    shape.emplace_back(static_cast<uint64_t>(num_samples));
+    shape.emplace_back(static_cast<uint64_t>(num_channels));
+  }
+
+  auto archetype = ::rerun::archetypes::Tensor(std::move(shape), std::move(buffer));
+
+  std::vector<std::string> dim_names;
+  dim_names.reserve(2);
+
+  if (frame.layout() == zerocopy::AudioFrame::kLayoutPlanar) {
+    dim_names.emplace_back("channel");
+    dim_names.emplace_back("sample");
+  } else {
+    dim_names.emplace_back("sample");
+    dim_names.emplace_back("channel");
+  }
+
+  archetype = std::move(archetype).with_dim_names(std::move(dim_names));
+
+  rec.log(entity_path, archetype);
+
+  return true;
+}
+
+bool RerunConverter::log_audio_frame(::rerun::RecordingStream& rec, const std::string& entity_path, const Bytes& raw) {
+  zerocopy::AudioFrame frame;
+
+  if VUNLIKELY (!(frame << raw)) {
+    MLOG_W("Failed to deserialize AudioFrame");
+    return false;
+  }
+
+  return log_audio_frame(rec, entity_path, frame);
 }
 
 bool RerunConverter::log_proto_with_mapping(::rerun::RecordingStream& rec, const std::string& entity_path,

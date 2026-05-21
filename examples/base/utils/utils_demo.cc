@@ -21,188 +21,139 @@
  * limitations under the License.
  */
 
-// Example: Utils - comprehensive demonstration of platform-agnostic system utilities
-
 #include <vlink/base/logger.h>
 #include <vlink/base/utils.h>
 
-#include <chrono>
 #include <string>
-#include <thread>
 #include <vector>
 
-// Demonstrate process and path information queries.
-void demo_process_info() {
-  VLOG_I("=== Process & Path Information ===");
-
-  int32_t pid = vlink::Utils::get_pid();
-  std::string pid_str = vlink::Utils::get_pid_str();
-  VLOG_I("  PID (int32): ", pid, "  PID (string): ", pid_str);
-
-  std::string app_path = vlink::Utils::get_app_path();
-  std::string app_dir = vlink::Utils::get_app_dir();
-  std::string app_name = vlink::Utils::get_app_name();
-  VLOG_I("  App path: ", app_path);
-  VLOG_I("  App dir:  ", app_dir);
-  VLOG_I("  App name: ", app_name);
-
-  std::string host_name = vlink::Utils::get_host_name();
-  std::string tmp_dir = vlink::Utils::get_tmp_dir();
-  std::string machine_id = vlink::Utils::get_machine_id();
-  VLOG_I("  Hostname:   ", host_name);
-  VLOG_I("  Tmp dir:    ", tmp_dir);
-  VLOG_I("  Machine ID: ", machine_id);
-}
-
-// Demonstrate environment variable operations.
-void demo_environment() {
-  VLOG_I("=== Environment Variables ===");
-
-  // Read an existing variable with a default fallback.
-  std::string home = vlink::Utils::get_env("HOME", "/unknown");
-  VLOG_I("  HOME = ", home);
-
-  // Set a custom variable, read it back, then unset it.
-  vlink::Utils::set_env("VLINK_DEMO_VAR", "hello_vlink", true);
-  std::string val = vlink::Utils::get_env("VLINK_DEMO_VAR", "not_found");
-  VLOG_I("  VLINK_DEMO_VAR (after set) = ", val);
-
-  vlink::Utils::unset_env("VLINK_DEMO_VAR");
-  val = vlink::Utils::get_env("VLINK_DEMO_VAR", "not_found");
-  VLOG_I("  VLINK_DEMO_VAR (after unset) = ", val);
-
-  // Read a non-existent variable with default.
-  std::string missing = vlink::Utils::get_env("NO_SUCH_VAR_12345", "default_value");
-  VLOG_I("  NO_SUCH_VAR_12345 = ", missing);
-}
-
-// Demonstrate network address queries.
-void demo_network() {
-  VLOG_I("=== Network Information ===");
-
-  std::vector<std::string> ipv4_all = vlink::Utils::get_all_ipv4_address(false);
-  VLOG_I("  All IPv4 addresses (", ipv4_all.size(), " found):");
-  for (const auto& addr : ipv4_all) {
-    VLOG_I("    ", addr);
-  }
-
-  std::vector<std::string> ipv4_up = vlink::Utils::get_all_ipv4_address(true);
-  VLOG_I("  Available IPv4 addresses (", ipv4_up.size(), " found):");
-  for (const auto& addr : ipv4_up) {
-    std::string iface = vlink::Utils::get_interface_name_by_ipv4(addr);
-    VLOG_I("    ", addr, " -> interface: ", iface);
-  }
-
-  std::vector<std::string> dds_addrs = vlink::Utils::get_dds_default_address(true, 3);
-  VLOG_I("  DDS default addresses (", dds_addrs.size(), " found):");
-  for (const auto& addr : dds_addrs) {
-    VLOG_I("    ", addr);
-  }
-}
-
-// Demonstrate singleton check.
-void demo_singleton() {
-  VLOG_I("=== Singleton Check ===");
-
-  bool is_single = vlink::Utils::check_singleton("vlink_utils_demo");
-  VLOG_I("  check_singleton(\"vlink_utils_demo\"): ", is_single ? "true" : "false");
-
-  // A second call with the same name should still return true (same process).
-  bool is_single2 = vlink::Utils::check_singleton("vlink_utils_demo");
-  VLOG_I("  check_singleton again: ", is_single2 ? "true" : "false");
-}
-
-// Demonstrate thread management utilities.
-void demo_thread() {
-  VLOG_I("=== Thread Management ===");
-
-  // Set the current thread name.
-  bool ok = vlink::Utils::set_thread_name("demo_main");
-  VLOG_I("  set_thread_name(\"demo_main\"): ", ok ? "success" : "failed");
-
-  // Get native thread ID.
-  uint64_t tid = vlink::Utils::get_native_thread_id();
-  VLOG_I("  Native thread ID: ", tid);
-
-  // Set thread priority (SCHED_OTHER, priority 0 is typical for non-RT).
-  bool prio_ok = vlink::Utils::set_thread_priority(0, -1, nullptr);
-  VLOG_I("  set_thread_priority(0): ", prio_ok ? "success" : "failed");
-
-  // Demonstrate yield_cpu in a tight spin loop.
-  VLOG_I("  Executing 1000 yield_cpu() calls for busy-wait optimization...");
-  for (int i = 0; i < 1000; ++i) {
-    vlink::Utils::yield_cpu();
-  }
-  VLOG_I("  yield_cpu loop completed");
-}
-
-// Demonstrate system resource monitoring.
-void demo_resource_monitoring() {
-  VLOG_I("=== Resource Monitoring ===");
-
-  double cpu = vlink::Utils::get_cpu_usage();
-  double mem = vlink::Utils::get_memory_usage();
-  VLOG_I("  CPU usage: ", cpu, "%");
-  VLOG_I("  Memory usage (RSS): ", mem, "%");
-
-  // Check if our own process is running.
-  std::string self_name = vlink::Utils::get_app_name();
-  bool running = vlink::Utils::is_process_running(self_name);
-  VLOG_I("  is_process_running(\"", self_name, "\"): ", running ? "true" : "false");
-}
-
-// Demonstrate timestamp queries using ElapsedTimer static methods.
-void demo_timestamps() {
-  VLOG_I("=== Timestamps ===");
-
-  // Timezone offset.
-  int32_t tz_diff = vlink::Utils::get_timezone_diff();
-  int tz_hours = tz_diff / 3600;
-  VLOG_I("  Timezone offset: ", tz_diff, "s (UTC", (tz_hours >= 0 ? "+" : ""), tz_hours, ")");
-
-  // Terminal size query.
-  auto [cols, rows] = vlink::Utils::get_terminal_size();
-  VLOG_I("  Terminal size: ", cols, " cols x ", rows, " rows");
-}
-
-// Demonstrate signal registration (non-blocking).
-void demo_signal_registration() {
-  VLOG_I("=== Signal Registration ===");
-
-  // Register a terminate signal handler (SIGTERM, SIGINT).
-  vlink::Utils::register_terminate_signal([](int sig) { VLOG_W("Received termination signal: ", sig); }, false, false);
-  VLOG_I("  Terminate signal handler registered (SIGTERM/SIGINT)");
-
-  // Register a crash signal handler (SIGSEGV, SIGABRT, etc.).
-  vlink::Utils::register_crash_signal([](int sig) { VLOG_E("Crash signal received: ", sig); });
-  VLOG_I("  Crash signal handler registered (SIGSEGV/SIGABRT/SIGFPE/SIGBUS)");
-}
-
+// -----------------------------------------------------------------------------
+// Utils demo
+//
+// Module:   vlink/base/utils.h
+// Scenario: vlink::Utils is a junk-drawer of cross-platform helpers used by
+//           the rest of VLink: process / path info, env-var manipulation,
+//           network interface enumeration (incl. the DDS-default-address
+//           heuristic), singleton lock files, thread naming / priority /
+//           tid lookup, CPU/memory usage probes, timezone offset, terminal
+//           dimensions, and signal handler registration. This example fires
+//           each entry-point once so the surface area is visible at a glance.
+// -----------------------------------------------------------------------------
 int main() {
-  VLOG_I("===================================================");
-  VLOG_I("  VLink Utils Comprehensive Demo");
-  VLOG_I("===================================================");
+  VLOG_I("=== VLink Utils Demo ===");
 
-  demo_process_info();
-  demo_environment();
-  demo_network();
-  demo_singleton();
-  demo_thread();
-  demo_resource_monitoring();
-  demo_timestamps();
-  demo_signal_registration();
+  // Process & path info: equivalent to argv[0]-based introspection but
+  // robust to symlinks and chdir. machine_id is a stable per-host identifier
+  // (used by some transports for cross-process discovery).
+  {
+    VLOG_I("--- Process & path info ---");
+    VLOG_I("  pid=", vlink::Utils::get_pid(), " pid_str=", vlink::Utils::get_pid_str());
+    VLOG_I("  app_path=", vlink::Utils::get_app_path());
+    VLOG_I("  app_dir=", vlink::Utils::get_app_dir());
+    VLOG_I("  app_name=", vlink::Utils::get_app_name());
+    VLOG_I("  hostname=", vlink::Utils::get_host_name(), " tmp_dir=", vlink::Utils::get_tmp_dir(),
+           " machine_id=", vlink::Utils::get_machine_id());
+  }
 
-  // Console UTF-8 setup (no-op on Linux, useful on Windows).
+  // Env-var management: get_env returns the default if unset; set_env
+  // overwrites (third arg = overwrite_if_present). unset_env removes the
+  // binding so a subsequent get_env returns the supplied default again.
+  {
+    VLOG_I("--- Env vars ---");
+    VLOG_I("  HOME=", vlink::Utils::get_env("HOME", "/unknown"));
+
+    vlink::Utils::set_env("VLINK_DEMO_VAR", "hello_vlink", true);
+    VLOG_I("  VLINK_DEMO_VAR (set)=", vlink::Utils::get_env("VLINK_DEMO_VAR", "not_found"));
+
+    vlink::Utils::unset_env("VLINK_DEMO_VAR");
+    VLOG_I("  VLINK_DEMO_VAR (unset)=", vlink::Utils::get_env("VLINK_DEMO_VAR", "not_found"));
+    VLOG_I("  NO_SUCH_VAR_12345=", vlink::Utils::get_env("NO_SUCH_VAR_12345", "default_value"));
+  }
+
+  // Network introspection: get_all_ipv4_address(true) filters to interfaces
+  // currently up; get_dds_default_address ranks them by the heuristic the
+  // DDS transport uses to pick its default outbound interface.
+  {
+    VLOG_I("--- Network ---");
+    auto all = vlink::Utils::get_all_ipv4_address(false);
+    VLOG_I("  all ipv4: ", all.size());
+
+    auto up = vlink::Utils::get_all_ipv4_address(true);
+    for (const auto& addr : up) {
+      VLOG_I("    ", addr, " iface=", vlink::Utils::get_interface_name_by_ipv4(addr));
+    }
+
+    auto dds = vlink::Utils::get_dds_default_address(true, 3);
+    for (const auto& addr : dds) {
+      VLOG_I("  dds default: ", addr);
+    }
+  }
+
+  // Singleton lock-file: first call grabs the lock and returns true; the
+  // second call with the same name returns false (already held by us).
+  // The lock is process-scoped; useful to gate "only one instance" tools.
+  {
+    VLOG_I("--- Singleton check ---");
+    VLOG_I("  check_singleton #1=", vlink::Utils::check_singleton("vlink_utils_demo"));
+    VLOG_I("  check_singleton #2=", vlink::Utils::check_singleton("vlink_utils_demo"));
+  }
+
+  // Thread helpers: name the current thread (shows up in `top -H`, gdb,
+  // perf), read the native tid, twiddle scheduling priority. yield_cpu is
+  // a hot-spin-friendly equivalent of std::this_thread::yield.
+  {
+    VLOG_I("--- Thread ---");
+    VLOG_I("  set_thread_name=", vlink::Utils::set_thread_name("demo_main") ? "ok" : "fail");
+    VLOG_I("  tid=", vlink::Utils::get_native_thread_id());
+    VLOG_I("  set_thread_priority(0)=", vlink::Utils::set_thread_priority(0, -1, nullptr) ? "ok" : "fail");
+
+    for (int i = 0; i < 1000; ++i) {
+      vlink::Utils::yield_cpu();
+    }
+
+    VLOG_I("  1000 yield_cpu calls done");
+  }
+
+  // Resource probes: instantaneous CPU% (per process) and memory% (per
+  // process or system, platform-dependent). is_process_running scans the
+  // process table for the named binary.
+  {
+    VLOG_I("--- Resource monitoring ---");
+    VLOG_I("  cpu_usage=", vlink::Utils::get_cpu_usage(), "%");
+    VLOG_I("  memory_usage=", vlink::Utils::get_memory_usage(), "%");
+
+    auto name = vlink::Utils::get_app_name();
+    VLOG_I("  is_process_running(self)=", vlink::Utils::is_process_running(name));
+  }
+
+  // Timezone offset in seconds (east-of-UTC). get_terminal_size returns
+  // (cols, rows); useful for laying out CLI output.
+  {
+    VLOG_I("--- Timestamps ---");
+    int32_t tz = vlink::Utils::get_timezone_diff();
+    VLOG_I("  timezone offset=", tz, "s (~", tz / 3600, "h)");
+
+    auto [cols, rows] = vlink::Utils::get_terminal_size();
+    VLOG_I("  terminal=", cols, "x", rows);
+  }
+
+  // Signal handlers. register_terminate_signal handles SIGTERM/SIGINT;
+  // register_crash_signal handles SIGSEGV/SIGABRT/etc. The callbacks run
+  // in a SIGNAL context -- ONLY async-signal-safe operations are allowed
+  // (the logger is signal-safe for short messages but avoid allocation).
+  {
+    VLOG_I("--- Signals ---");
+    vlink::Utils::register_terminate_signal([](int sig) { VLOG_W("Received termination: ", sig); }, false, false);
+    vlink::Utils::register_crash_signal([](int sig) { VLOG_E("Crash signal: ", sig); });
+    VLOG_I("  registered terminate / crash signal handlers");
+  }
+
+  // Console UTF-8: matters on Windows where the console code page defaults
+  // to OEM. try_release_sys_memory hints malloc to return freed pages back
+  // to the OS -- best-effort, not guaranteed by any allocator.
   vlink::Utils::set_console_utf8_output();
-
-  // Hint the OS to release any unused heap pages.
   vlink::Utils::try_release_sys_memory();
-  VLOG_I("  try_release_sys_memory() called");
-
-  VLOG_I("===================================================");
-  VLOG_I("  Utils demo completed successfully");
-  VLOG_I("===================================================");
-
+  VLOG_I("Utils demo completed.");
   vlink::Logger::flush();
   return 0;
 }

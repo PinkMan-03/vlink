@@ -21,39 +21,36 @@
  * limitations under the License.
  */
 
-/**
- * @file producer.cc
- * @brief CameraFrame Zero-Copy Producer -- Publishes camera frames via SHM/DDS.
- *
- * Demonstrates:
- *   - Creating CameraFrame with metadata (resolution, format, stream type)
- *   - Filling pixel data and setting header timestamps
- *   - Publishing frames via zerocopy-capable transport
- *
- * Usage:
- *   Terminal 1: ./example_camera_consumer
- *   Terminal 2: ./example_camera_producer
- */
-
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 #include <vlink/zerocopy/camera_frame.h>
 
-#include <iostream>
 #include <thread>
 
 #include "frame_producer.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
+// ---------------------------------------------------------------------------
+// producer.cc (camera_frame example)
+//
+// Standalone CameraFrame publisher. Pairs with consumer.cc -- run them in
+// two terminals, producer second so the subscriber side is already up.
+// Uses dds:// here (network path); switch the URL to shm:// for full
+// zero-copy semantics. The pixel data is filled with a deterministic
+// pattern (see frame_producer.h) so the consumer's checksum is predictable.
+// ---------------------------------------------------------------------------
+
 int main() {
-  // ======== Create a 320x240 NV12 frame publisher ========
-  // Using small resolution for the example to keep memory usage low.
   VLOG_I("=== CameraFrame Producer ===");
 
   vlink::Publisher<vlink::zerocopy::CameraFrame> pub("dds://zerocopy/camera");
+  // wait_for_subscribers blocks up to 5s for at least one match. Without
+  // it, the first publishes below would be discarded (no reader yet).
   pub.wait_for_subscribers(5s);
 
+  // 320x240 NV12 @ 30Hz, image-stream type "I" (intra) on channel 0.
+  // NV12 is the most common Y+UV format for ISP/camera output.
   frame_producer::FrameConfig cfg;
   cfg.width = 320;
   cfg.height = 240;
@@ -62,23 +59,15 @@ int main() {
   cfg.freq = 30;
   cfg.channel = 0;
 
-  // Publish 10 frames at ~30fps simulation
+  // 10 frames at ~30 fps (33ms). create_test_frame allocates a fresh
+  // buffer per frame; on shm:// this path would use loan() instead for
+  // true zero-copy. publish() takes ownership / increments refcount.
   for (uint32_t seq = 1; seq <= 10; ++seq) {
     auto frame = frame_producer::create_test_frame(cfg, seq);
-
     VLOG_I("Publishing frame seq=", seq, " size=", frame.size(), " bytes");
     pub.publish(frame);
-
-    std::this_thread::sleep_for(33ms);  // ~30fps
+    std::this_thread::sleep_for(33ms);
   }
-
-  // ======== Format reference ========
-  VLOG_I("Format Reference:");
-  VLOG_I("  Uncompressed: YUV420(1) YUV422(2) YUV444(3) NV12(4) NV21(5)");
-  VLOG_I("  Packed YUV:   YUYV(6) YVYU(7) UYVY(8) VYUY(9)");
-  VLOG_I("  RGB:          BGR888(10) RGB888Packed(11) RGB888Planar(12)");
-  VLOG_I("  Compressed:   JPEG(101) H264(102) H265(103)");
-  VLOG_I("  Stream Types: I-frame(1) P-frame(2) B-frame(3)");
 
   std::this_thread::sleep_for(500ms);
   VLOG_I("=== Producer Complete ===");

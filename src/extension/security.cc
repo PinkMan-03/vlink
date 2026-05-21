@@ -26,6 +26,8 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -1120,6 +1122,88 @@ struct Security::Impl final {  // NOLINT(clang-analyzer-optin.performance.Paddin
 
 // Security
 Security::Security() : Security(Config{}) {}
+
+Security::Config Security::from_private_key_path(const std::string& private_key_path) {
+  Config config;
+  std::ifstream file(private_key_path, std::ios::binary);
+
+  if VUNLIKELY (!file) {
+    VLOG_W("Security: failed to open private key file: ", private_key_path);
+    return config;
+  }
+
+  config.private_key_pem.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+
+  if VUNLIKELY (file.bad()) {
+    VLOG_W("Security: failed to read private key file: ", private_key_path);
+#ifdef VLINK_ENABLE_SECURITY
+    cleanse_string(config.private_key_pem);
+#else
+    config.private_key_pem.clear();
+#endif
+  }
+
+  return config;
+}
+
+Security::Config Security::from_public_key_path(const std::string& public_key_path) {
+  Config config;
+  std::ifstream file(public_key_path, std::ios::binary);
+
+  if VUNLIKELY (!file) {
+    VLOG_W("Security: failed to open public key file: ", public_key_path);
+    return config;
+  }
+
+  config.public_key_pem.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+
+  if VUNLIKELY (file.bad()) {
+    VLOG_W("Security: failed to read public key file: ", public_key_path);
+    config.public_key_pem.clear();
+  }
+
+  return config;
+}
+
+Security::Config Security::from_key_paths(const std::string& public_key_path, const std::string& private_key_path) {
+  Config config;
+
+  {
+    std::ifstream file(public_key_path, std::ios::binary);
+
+    if VUNLIKELY (!file) {
+      VLOG_W("Security: failed to open public key file: ", public_key_path);
+    } else {
+      config.public_key_pem.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+
+      if VUNLIKELY (file.bad()) {
+        VLOG_W("Security: failed to read public key file: ", public_key_path);
+        config.public_key_pem.clear();
+      }
+    }
+  }
+
+  {
+    std::ifstream file(private_key_path, std::ios::binary);
+
+    if VUNLIKELY (!file) {
+      VLOG_W("Security: failed to open private key file: ", private_key_path);
+    } else {
+      config.private_key_pem.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+
+      if VUNLIKELY (file.bad()) {
+        VLOG_W("Security: failed to read private key file: ", private_key_path);
+#ifdef VLINK_ENABLE_SECURITY
+        cleanse_string(config.private_key_pem);
+#else
+        config.private_key_pem.clear();
+#endif
+      }
+    }
+  }
+
+  return config;
+}
 
 Security::Security(const Config& cfg) : Security(Config{cfg}) {}
 

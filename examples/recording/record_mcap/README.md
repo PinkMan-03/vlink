@@ -1,197 +1,171 @@
-# VLink MCAP 格式录制示例
+# record_mcap — MCAP 格式录制：`.vcap` / `.vcapx`
 
-![MCAP Format Recording and Replay](images/mcap-format-flow.png)
+vlink 支持 MCAP（`.vcap` / `.vcapx`）作为 bag 文件格式，与 Foxglove Studio、ROS 2 MCAP 工具链完全兼容。MCAP 是一种自描述、可索引、模块化的二进制日志格式，适合做跨工具链分析、机器学习数据集、长期归档。
 
-## 1. 概述
+本示例演示：
 
-本示例演示了使用 MCAP 格式进行消息录制和回放。MCAP（Message Capture Archive Protocol）是一种模块化、索引化的二进制文件格式，专为高效随机访问回放而设计。
+- 通过 `BagWriter::create("xxx.vcap")` 工厂自动识别 MCAP 格式。
+- 显式构造 `vlink::VCAPWriter` 配置 Zstd 压缩、tag。
+- `.vcapx` 分片模式 + split 回调。
+- `BagReader::create("xxx.vcap")` 与显式 `VCAPReader` 两种读取方式。
+- `detect_schema()` 列出嵌入的 schema。
 
-VLink 同时支持 SQLite（`.vdb`）和 MCAP（`.vcap`/`.vcapx`）两种录制格式。MCAP 格式的主要优势包括：
+读完本示例你能掌握：
 
-- **跨平台兼容**：可被 Foxglove Studio 等第三方可视化工具直接打开
-- **索引化存储**：支持按通道和时间戳快速定位
-- **Schema 嵌入**：可在文件中嵌入 protobuf 或 flatbuffers schema，支持离线反序列化
-- **校验和支持**：提供数据完整性验证
-- **多压缩编解码器**：支持 Zstd、LZ4、LZAV 等压缩算法
+- 何时选 MCAP 而非 vdb。
+- VCAPWriter / VCAPReader 与 BagWriter / BagReader 的关系。
+- MCAP 分片（`.vcapx`）的工程意义。
 
-## 2. 格式选择
+## 背景与适用场景
 
-VLink 通过文件扩展名自动选择录制格式：
+何时选 MCAP：
 
-| 扩展名 | 格式 | Writer 实现 | Reader 实现 |
-|--------|------|------------|------------|
-| `.vcap` | MCAP | `VCAPWriter` | `VCAPReader` |
-| `.vcapx` | MCAP | `VCAPWriter` | `VCAPReader` |
-| `.vdb` / `.vdbx` | SQLite | `VDBWriter` | `VDBReader` |
+- 数据要用 Foxglove Studio 可视化。
+- 数据要与 ROS 2 工具链（rosbag2）互操作。
+- 需要嵌入式 schema 自描述（Protobuf、FlatBuffers、ROS msg）。
+- 长期归档、跨团队协作。
 
-## 3. 创建 MCAP 文件
+何时选 vdb（SQLite）：
 
-### 3.1 方式一：通过工厂方法（推荐）
+- vlink 内部读写性能更高（SQLite 索引）。
+- 需要复杂查询（按 URL、时间范围、tag 过滤）。
+- 不需要与外部工具链互通。
+
+MCAP 文件内部由 chunk + index + footer 组成；自带 schema 与 channel 元数据，可以独立解析。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `BagWriter::create` | `static std::shared_ptr<BagWriter> create(const std::string& path, const Config& = {})` | 工厂；扩展名为 `.vcap` / `.vcapx` 时返回 VCAPWriter |
+| `vlink::VCAPWriter` | `VCAPWriter(const std::string& path, const Config&)` | 显式构造 |
+| `vlink::VCAPReader` | `VCAPReader(const std::string& path)` | 显式 reader |
+| `VCAPReader::get_ser_type` | `Serializer::Type get_ser_type(const std::string& url) const` | 按 URL 查序列化类型 |
+| `Config::compress` | enum | `kCompressNone` / `kCompressZstd` / `kCompressLz4` |
+| `Config::split_by_size` / `split_name_by_time` | size_t / bool | `.vcapx` 分片模式 |
+| `BagReader::detect_schema` | `std::vector<SchemaInfo> detect_schema() const` | 列出嵌入 schema |
+| `BagWriter::register_split_callback` | `void` | 分片切换回调 |
+
+## 代码导读
+
+### 1. 自动识别 MCAP
 
 ```cpp
-// 文件扩展名为 .vcap，自动使用 VCAPWriter
-auto writer = BagWriter::create("/tmp/recording.vcap");
-writer->async_run();
-writer->push("dds://my/topic", "raw", SchemaType::kRaw, ActionType::kPublish, data);
+auto writer = vlink::BagWriter::create("/tmp/auto.vcap");
+// 内部按扩展名识别为 VCAPWriter
+writer->push("intra://topic", vlink::Serializer::kStringType, vlink::SchemaType::kRaw,
+             vlink::ActionType::kPublish, vlink::Bytes::from_string("hello"));
 ```
 
-### 3.2 方式二：显式构造
+### 2. 显式 VCAPWriter + Zstd
 
 ```cpp
-auto writer = std::make_shared<VCAPWriter>("/tmp/recording.vcap", config);
-writer->async_run();
-```
+vlink::BagWriter::Config cfg;
+cfg.compress = vlink::CompressType::kCompressZstd;
+cfg.tag_name = "experiment_2025";
 
-两种方式的 API 完全一致，区别仅在于工厂方法自动根据扩展名选择实现。
-
-## 4. VCAPWriter 特性
-
-`VCAPWriter` 继承 `BagWriter` 的全部配置和能力，包括：
-
-### 4.1 压缩支持
-
-```cpp
-BagWriter::Config config;
-config.compress = BagWriter::CompressType::kCompressZstd;
-config.compress_level = 5;
-```
-
-MCAP 格式下，BagWriter 路径实际只启用 Zstandard 压缩：
-
-| 枚举 | MCAP 路径实际效果 |
-|------|-------------------|
-| `kCompressNone` | 不压缩 |
-| `kCompressAuto` | 走 Zstandard |
-| `kCompressZstd` | 走 Zstandard |
-| `kCompressLz4`  | 枚举在此路径被视为不压缩 |
-| `kCompressLzav` | 枚举在此路径被视为不压缩 |
-
-> 若需 MCAP 文件启用 LZ4，请使用独立 CLI 工具 `vlink-bag2mcap`（支持 `--compression none|lz4|zstd`），它直接写 MCAP，不走 BagWriter。
-
-### 4.2 文件分割
-
-```cpp
-BagWriter::Config config;
-config.split_by_size = 1024 * 1024 * 100;  // 每 100MB 分割
-config.split_name_by_time = true;           // 文件名包含时间戳
-```
-
-分割后的文件命名格式：`recording_20260328_143025.vcap`、`recording_20260328_143125.vcap` 等。
-
-### 4.3 Schema 嵌入
-
-MCAP 支持在文件中嵌入 schema，使得回放时无需原始 `.proto` / `.fbs` 文件即可反序列化消息：
-
-```cpp
-writer->register_schema_callback(
-    [](const std::string& ser_type, SchemaType schema_type) -> SchemaData {
-        SchemaData schema;
-        schema.name = ser_type;
-        schema.schema_type = schema_type;
-        schema.encoding = std::string(SchemaData::convert_type(schema_type));
-        // schema.data = ...;
-        return schema;
-    });
-```
-
-## 5. 读取 MCAP 文件
-
-### 5.1 通过工厂方法
-
-```cpp
-auto reader = BagReader::create("/tmp/recording.vcap");
-```
-
-### 5.2 显式构造
-
-```cpp
-auto reader = std::make_shared<VCAPReader>("/tmp/recording.vcap");
-```
-
-### 5.3 查看文件元数据
-
-```cpp
-const auto& info = reader->get_info();
-// info.storage_type: "mcap"
-// info.compression_type: 使用的压缩算法
-// info.message_count: 消息总数
-// info.url_metas: 每个 URL 的统计信息
-```
-
-### 5.4 查询 URL 的序列化类型
-
-```cpp
-std::string ser = reader->get_ser_type("dds://my/topic");
-// 返回 "demo.proto.PointCloud"、"raw" 等
-```
-
-### 5.5 提取嵌入的 Proto Schema
-
-```cpp
-auto schemas = reader->detect_schema();
-for (const auto& schema : schemas) {
-    // schema.encoding: "protobuf"
-    // schema.schema_type: SchemaType::kProtobuf
-    // schema.name: 消息类型全名
-    // schema.data: 二进制 FileDescriptorSet
+auto writer = std::make_shared<vlink::VCAPWriter>("/tmp/mcap_explicit.vcap", cfg);
+for (int i = 0; i < 100; ++i) {
+  writer->push(/* ... */);
 }
 ```
 
-## 6. VCAPReader 回放控制
+Zstd 在 MCAP 内是标准压缩；压缩率约 3-5x，CPU 开销小。
 
-`VCAPReader` 继承了 `BagReader` 的全部回放控制能力：
+### 3. .vcapx 分片
 
 ```cpp
-reader->async_run();
+vlink::BagWriter::Config cfg;
+cfg.split_by_size = 10 * 1024 * 1024;     // 每 10MB 切分
+cfg.split_name_by_time = true;             // 文件名带时间戳
+auto writer = std::make_shared<vlink::VCAPWriter>("/tmp/big_data.vcapx", cfg);
 
-BagReader::Config config;
-config.rate = 2.0;           // 2 倍速
-config.times = BagReader::kInfinite;  // 无限循环
-config.filter_urls.insert("dds://my/topic");  // 只回放指定 URL
-reader->play(config);
+writer->register_split_callback([](const std::string& new_path, bool before_open) {
+  if (before_open) {
+    VLOG_I("about to open new file: ", new_path);
+  } else {
+    VLOG_I("opened: ", new_path);
+  }
+}, /*before_open=*/true);
 
-// 控制
-reader->pause();
-reader->resume();
-reader->jump(5000, 1.0, 1);  // 跳转到 5 秒处
-reader->stop();
+// 写大量数据自动触发分片
 ```
 
-## 7. .vcap 与 .vcapx 的区别
+`.vcapx` 扩展名是 vlink 的 MCAP 分片格式：底层多个 `.vcap` 文件 + manifest，整体当一个 bag 用。
 
-两种扩展名在当前实现中均使用 `VCAPWriter`/`VCAPReader`。`.vcap` 是单文件 MCAP；`.vcapx` 是 split 模式的 manifest 文件，内部引用实际写出的 `.vcap` 分片。需要按大小或时间切分时，输出路径必须使用 `.vcapx`。
+### 4. 读 MCAP
 
-## 8. MCAP 与 SQLite 格式对比
+```cpp
+auto reader = vlink::BagReader::create("/tmp/auto.vcap");
+auto info = reader->get_info();
+MLOG_I("total messages: {}", info.total_messages);
 
-| 特性 | MCAP (.vcap) | SQLite (.vdb) |
-|------|-------------|---------------|
-| 第三方工具支持 | Foxglove Studio 等 | 通用 SQLite 浏览器 |
-| 随机访问性能 | 优秀（内置索引） | 优秀（SQL 查询） |
-| Schema 嵌入 | 原生支持 | 支持 |
-| 文件修复 | 支持 | 支持（WAL 模式更强） |
-| 压缩支持 | 全部支持 | 全部支持 |
-| 文件分割 | 支持 | 支持 |
-| 写入性能 | 高 | 高（WAL 模式更优） |
+reader->register_output_callback([](int64_t ts, const std::string& url, ..., const vlink::Bytes& d) {
+  VLOG_I("got msg url=", url, " size=", d.size());
+});
+reader->play({});
+```
 
-## 9. 编译和运行
+VCAPReader 派生自 BagReader；BagReader 的所有 API（`play` / `seek` / `Config`）都可用。
+
+### 5. 显式 VCAPReader + 查 schema
+
+```cpp
+auto reader = std::make_shared<vlink::VCAPReader>("/tmp/mcap_explicit.vcap");
+auto schemas = reader->detect_schema();
+for (const auto& s : schemas) {
+  VLOG_I("schema: ", s.type_name, " ser=", static_cast<int>(s.ser_type));
+}
+
+auto ser = reader->get_ser_type("intra://topic");
+VLOG_I("topic ser type: ", static_cast<int>(ser));
+```
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_record_mcap
 ./build/output/bin/example_record_mcap
 ```
 
-## 10. 输出文件
+预期产物：
 
-| 文件 | 说明 |
-|------|------|
-| `/tmp/mcap_auto.vcap` | 通过工厂方法创建的 MCAP 文件 |
-| `/tmp/mcap_explicit.vcap` | 显式构造 + Zstd 压缩 |
-| `/tmp/mcap_split.vcapx` | split manifest，引用实际写出的 `.vcap` 分片 |
+```
+/tmp/auto.vcap
+/tmp/mcap_explicit.vcap
+/tmp/big_data.vcapx/        (目录)
+  big_data.vcapx-00000.vcap
+  big_data.vcapx-00001.vcap
+  ...
+```
 
-## 11. 最佳实践
+可以用 Foxglove Studio 直接打开 `.vcap` 文件查看消息流。
 
-1. **需要 Foxglove 兼容时使用 MCAP**：如果需要用 Foxglove Studio 可视化数据，选择 `.vcap` 扩展名
-2. **需要 SQL 查询时使用 SQLite**：如果需要对录制数据进行复杂查询，选择 `.vdb` 扩展名
-3. **嵌入 Schema**：注册 `SchemaCallback` 以在 MCAP 文件中嵌入 schema 数据，方便离线分析
-4. **合理配置压缩**：MCAP 格式下推荐使用 `kCompressZstd` 以获得最佳压缩比与兼容性
+## 常见陷阱
+
+1. **`.vcap` vs `.vcapx`**：单文件 vs 分片。分片更适合大数据集，但管理稍复杂。
+2. **Zstd 压缩不支持 random seek**：seek 时要从最近的 chunk 开始解压；高频 seek 性能可能下降。
+3. **schema 没注册**：vlink 把消息按字节存进 MCAP，但要让 Foxglove 解析必须注册 schema（Protobuf / FlatBuffers）。
+4. **split_callback 跑在写线程**：长任务会阻塞写入；保持轻。
+5. **跨进程同时写 `.vcap`**：MCAP 不是 SQLite，单写多读语义；并发写会破坏文件。
+
+## 设计要点
+
+- VCAPWriter 内部用 MCAP C++ 库（vlink 自带）写入；遵循 MCAP 1.0 规范。
+- Zstd 是 MCAP 标准压缩；vlink 同时支持 LZ4 / LZAV，但 MCAP 工具兼容性按 Zstd 最稳。
+- `.vcapx` 分片利用 manifest 文件维护子文件列表；读时按时序自动跳转。
+
+## 配图
+
+![MCAP format flow](./images/mcap-format-flow.png)
+
+图中展示 MCAP 文件内部结构：header → chunks → index → footer。
+
+## 参考
+
+- `../record_basic/` — 节点级简单录制
+- `../record_bag/` — 通用 vdb API
+- `../record_compression/` — 压缩对比
+- MCAP 官方规范 https://mcap.dev/
+- Foxglove Studio https://foxglove.dev/
+- `vlink/include/vlink/extension/vcap_writer.h` / `vcap_reader.h` — VCAP 接口
+- 顶层 `doc/12-bag-recording.md` — 录制系统章节

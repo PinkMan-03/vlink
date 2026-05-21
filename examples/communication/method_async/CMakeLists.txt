@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)
@@ -17,18 +17,7 @@ if(NOT TARGET vlink::vlink)
   message(FATAL_ERROR "Can not find_package for vlink.")
 endif()
 
-# Single-process combined example (original)
 add_executable(${PROJECT_NAME} method_async.cc)
 target_link_libraries(${PROJECT_NAME} vlink::all)
 
-# Multi-process split: server
-add_executable(${PROJECT_NAME}_server server.cc)
-target_link_libraries(${PROJECT_NAME}_server vlink::all)
-
-# Multi-process split: client
-add_executable(${PROJECT_NAME}_client client.cc)
-target_link_libraries(${PROJECT_NAME}_client vlink::all)
-
-install(TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_server ${PROJECT_NAME}_client
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

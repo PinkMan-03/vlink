@@ -27,150 +27,117 @@
 
 #include <doctest/doctest.h>
 
-#include <chrono>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
 TEST_SUITE("base-CachedTimestamp") {
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() returns non-empty string_view") {
+  TEST_CASE("get returns non-empty string_view") {
     CachedTimestamp ts;
     std::string_view sv = ts.get();
 
-    CHECK(!sv.empty());
+    CHECK_FALSE(sv.empty());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() returns string of expected length for default format") {
+  TEST_CASE("default format produces 18-character timestamp") {
     CachedTimestamp ts;
     std::string_view sv = ts.get();
 
-    // Default format "%02d-%02d %02d:%02d:%02d.%03d" produces "MM-DD HH:MM:SS.mmm"
-    // which is 18 characters
-    CHECK(sv.size() == 18u);
+    CHECK_EQ(sv.size(), 18u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() result contains expected separators") {
+  TEST_CASE("default format has expected separators at fixed positions") {
     CachedTimestamp ts;
     std::string_view sv = ts.get();
 
-    // Format: "MM-DD HH:MM:SS.mmm"
-    // Position 2 should be '-', position 5 should be ' '
-    // Position 8 should be ':', position 11 should be ':', position 14 should be '.'
-    REQUIRE(sv.size() == 18u);
-    CHECK(sv[2] == '-');
-    CHECK(sv[5] == ' ');
-    CHECK(sv[8] == ':');
-    CHECK(sv[11] == ':');
-    CHECK(sv[14] == '.');
+    REQUIRE_EQ(sv.size(), 18u);
+    CHECK_EQ(sv[2], '-');
+    CHECK_EQ(sv[5], ' ');
+    CHECK_EQ(sv[8], ':');
+    CHECK_EQ(sv[11], ':');
+    CHECK_EQ(sv[14], '.');
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() digits are valid ASCII numerals") {
+  TEST_CASE("all digit positions contain ASCII numerals") {
     CachedTimestamp ts;
     std::string_view sv = ts.get();
+    REQUIRE_EQ(sv.size(), 18u);
 
-    REQUIRE(sv.size() == 18u);
-
-    // All digit positions: 0,1,3,4,6,7,9,10,12,13,15,16,17
-    static const size_t kDigitPositions[] = {0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 15, 16, 17};
-
-    for (size_t pos : kDigitPositions) {
-      bool is_digit = (sv[pos] >= '0') && (sv[pos] <= '9');
-      CHECK(is_digit);
+    static const size_t kDigitPos[] = {0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 15, 16, 17};
+    for (size_t pos : kDigitPos) {
+      CHECK(sv[pos] >= '0');
+      CHECK(sv[pos] <= '9');
     }
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() called multiple times returns consistent format") {
-    CachedTimestamp ts;
-
-    for (int i = 0; i < 10; ++i) {
-      std::string_view sv = ts.get();
-      CHECK(sv.size() == 18u);
-      CHECK(sv[2] == '-');
-      CHECK(sv[5] == ' ');
-      CHECK(sv[14] == '.');
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() with use_utc=true returns same length") {
-    CachedTimestamp ts;
-    std::string_view sv = ts.get("%02d-%02d %02d:%02d:%02d.%03d", true);
-
-    CHECK(sv.size() == 18u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() rapid successive calls do not crash") {
-    CachedTimestamp ts;
-
-    for (int i = 0; i < 1000; ++i) {
-      std::string_view sv = ts.get();
-      CHECK(!sv.empty());
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() millisecond field is within valid range [000..999]") {
+  TEST_CASE("millisecond field is within [000, 999]") {
     CachedTimestamp ts;
     std::string_view sv = ts.get();
+    REQUIRE_EQ(sv.size(), 18u);
 
-    REQUIRE(sv.size() == 18u);
-
-    // Millisecond portion: positions 15,16,17
     int ms = (sv[15] - '0') * 100 + (sv[16] - '0') * 10 + (sv[17] - '0');
-
     CHECK(ms >= 0);
     CHECK(ms <= 999);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() result value copied to string remains valid") {
+  TEST_CASE("repeated calls return consistent format") {
     CachedTimestamp ts;
+    for (int i = 0; i < 10; ++i) {
+      std::string_view sv = ts.get();
+      CHECK_EQ(sv.size(), 18u);
+      CHECK_EQ(sv[2], '-');
+      CHECK_EQ(sv[14], '.');
+    }
+  }
 
+  TEST_CASE("get with use_utc=true returns same-length string") {
+    CachedTimestamp ts;
+    std::string_view sv = ts.get("%02d-%02d %02d:%02d:%02d.%03d", true);
+
+    CHECK_EQ(sv.size(), 18u);
+  }
+
+  TEST_CASE("rapid successive calls do not crash") {
+    CachedTimestamp ts;
+    for (int i = 0; i < 1000; ++i) {
+      std::string_view sv = ts.get();
+      CHECK_FALSE(sv.empty());
+    }
+  }
+
+  TEST_CASE("value copied to string remains valid across calls") {
+    CachedTimestamp ts;
     std::string copy1 = std::string(ts.get());
     std::string copy2 = std::string(ts.get());
 
-    // Both should be valid timestamps (non-empty, right length)
-    CHECK(copy1.size() == 18u);
-    CHECK(copy2.size() == 18u);
+    CHECK_EQ(copy1.size(), 18u);
+    CHECK_EQ(copy2.size(), 18u);
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("multiple instances are independent") {
     CachedTimestamp ts1;
     CachedTimestamp ts2;
 
-    std::string_view sv1 = ts1.get();
-    std::string_view sv2 = ts2.get();
-
-    CHECK(sv1.size() == 18u);
-    CHECK(sv2.size() == 18u);
+    CHECK_EQ(ts1.get().size(), 18u);
+    CHECK_EQ(ts2.get().size(), 18u);
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("concurrent access from multiple threads does not crash") {
     CachedTimestamp ts;
     static constexpr int kThreads = 4;
-    static constexpr int kIterCnt = 200;
+    static constexpr int kIter = 200;
 
     std::vector<std::thread> threads;
     threads.reserve(kThreads);
 
     for (int t = 0; t < kThreads; ++t) {
       threads.emplace_back([&ts]() {
-        for (int i = 0; i < kIterCnt; ++i) {
+        for (int i = 0; i < kIter; ++i) {
           std::string copy = std::string(ts.get());
-          CHECK(copy.size() == 18u);
+          CHECK_EQ(copy.size(), 18u);
         }
       });
     }
@@ -180,26 +147,19 @@ TEST_SUITE("base-CachedTimestamp") {
     }
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("second boundary: get() returns fresh timestamp across second") {
+  TEST_CASE("get produces well-formed timestamp after crossing a second boundary") {
     CachedTimestamp ts;
-
-    // Warm up the cache
     std::string first = std::string(ts.get());
 
-    // Sleep just over 1 second to cross the second boundary
-    std::this_thread::sleep_for(std::chrono::milliseconds(1050));
+    std::this_thread::sleep_for(1050ms);
 
     std::string second = std::string(ts.get());
 
-    CHECK(first.size() == 18u);
-    CHECK(second.size() == 18u);
-    // The timestamps may differ (especially the seconds digit)
-    // We cannot guarantee they differ in a fast-running environment,
-    // but we verify both are well-formed.
-    CHECK(second[2] == '-');
-    CHECK(second[5] == ' ');
-    CHECK(second[14] == '.');
+    CHECK_EQ(first.size(), 18u);
+    CHECK_EQ(second.size(), 18u);
+    CHECK_EQ(second[2], '-');
+    CHECK_EQ(second[5], ' ');
+    CHECK_EQ(second[14], '.');
   }
 }
 

@@ -28,18 +28,16 @@
 #include <doctest/doctest.h>
 
 #include <cstring>
+#include <string>
 #include <vector>
 
-#include "./base/bytes.h"
-
-//
 #include "../common_test.h"
 
 namespace {
 
 void fill_pattern(uint8_t* buf, size_t n, uint8_t seed = 0xA5) {
   for (size_t i = 0; i < n; ++i) {
-    buf[i] = static_cast<uint8_t>(seed + static_cast<uint8_t>(i & 0xFF));
+    buf[i] = static_cast<uint8_t>(seed + static_cast<uint8_t>(i & 0xFFu));
   }
 }
 
@@ -47,247 +45,248 @@ bool region_matches(const uint8_t* a, const uint8_t* b, size_t n) { return std::
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: RawData - default construction
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-RawData - default construction") {
-  TEST_CASE("default-constructed RawData is invalid") {
+TEST_SUITE("zerocopy-RawData") {
+  TEST_CASE("default construction yields invalid empty object") {
     zerocopy::RawData rd;
-    CHECK(!rd.is_valid());
-    CHECK(rd.size() == 0);
-    CHECK(!rd.is_owner());
-    CHECK(rd.data() == nullptr);
+
+    CHECK_FALSE(rd.is_valid());
+    CHECK_EQ(rd.size(), 0u);
+    CHECK_FALSE(rd.is_owner());
+    CHECK_EQ(rd.data(), nullptr);
+    CHECK_EQ(rd.reserved_buf(), 0u);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: RawData - create
-// ---------------------------------------------------------------------------
+  TEST_CASE("sizeof is exactly 64 bytes") { CHECK_EQ(sizeof(zerocopy::RawData), 64u); }
 
-TEST_SUITE("zerocopy-RawData - create") {
-  TEST_CASE("create(N) succeeds for N > 0") {
+  TEST_CASE("create succeeds and sets ownership for representative sizes") {
+    size_t sz = 0;
+
+    SUBCASE("single byte") { sz = 1; }
+    SUBCASE("small") { sz = 64; }
+    SUBCASE("medium") { sz = 1024; }
+    SUBCASE("large") { sz = 65536; }
+
     zerocopy::RawData rd;
-    CHECK(rd.create(1024));
+    CHECK(rd.create(sz));
     CHECK(rd.is_valid());
-    CHECK(rd.size() == 1024);
     CHECK(rd.is_owner());
-    CHECK(rd.data() != nullptr);
+    CHECK_EQ(rd.size(), sz);
+    CHECK_NE(rd.data(), nullptr);
   }
 
-  TEST_CASE("create(0) returns false") {
+  TEST_CASE("create with zero size returns false") {
     zerocopy::RawData rd;
-    CHECK(!rd.create(0));
-    CHECK(!rd.is_valid());
+
+    CHECK_FALSE(rd.create(0));
+    CHECK_FALSE(rd.is_valid());
   }
 
-  TEST_CASE("header fields survive create()") {
+  TEST_CASE("create replaces previous owned buffer") {
     zerocopy::RawData rd;
-    rd.header.seq = 5;
+
+    REQUIRE(rd.create(100));
+    CHECK_EQ(rd.size(), 100u);
+
+    REQUIRE(rd.create(200));
+    CHECK_EQ(rd.size(), 200u);
+    CHECK(rd.is_owner());
+  }
+
+  TEST_CASE("header fields are preserved across create") {
+    zerocopy::RawData rd;
+
+    rd.header.seq = 5u;
     std::strncpy(rd.header.frame_id, "raw_0", sizeof(rd.header.frame_id) - 1);
     rd.header.frame_id[sizeof(rd.header.frame_id) - 1] = '\0';
-    rd.header.time_meas = 12345ULL;
-    rd.header.time_pub = 67890ULL;
+    rd.header.time_meas = 12345u;
+    rd.header.time_pub = 67890u;
 
     rd.create(256);
 
-    CHECK(rd.header.seq == 5);
-    CHECK(std::string(rd.header.frame_id) == "raw_0");
-    CHECK(rd.header.time_meas == 12345ULL);
-    CHECK(rd.header.time_pub == 67890ULL);
+    CHECK_EQ(rd.header.seq, 5u);
+    CHECK_EQ(std::string(rd.header.frame_id), "raw_0");
+    CHECK_EQ(rd.header.time_meas, 12345u);
+    CHECK_EQ(rd.header.time_pub, 67890u);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: RawData - serialization
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-RawData - serialization") {
-  TEST_CASE("serialize and deserialize round-trip") {
-    constexpr size_t kSize = 512;
-
+  TEST_CASE("clear resets all fields including header and reserved_buf") {
     zerocopy::RawData rd;
-    rd.header.seq = 1;
-    rd.header.time_pub = 999999ULL;
-    rd.create(kSize);
 
-    fill_pattern(const_cast<uint8_t*>(rd.data()), kSize, 0x55);
+    rd.create(200);
+    rd.header.seq = 99u;
+    rd.reserved_buf() = 0x1234u;
+    REQUIRE(rd.is_valid());
 
-    Bytes wire;
-    bool ser_ok = (rd >> wire);
-    CHECK(ser_ok);
-    CHECK(zerocopy::RawData::check_valid(wire));
-    CHECK(wire.size() == rd.get_serialized_size());
+    rd.clear();
 
-    zerocopy::RawData rd2;
-    bool deser_ok = (rd2 << wire);
-    CHECK(deser_ok);
-
-    CHECK(rd2.is_valid());
-    CHECK(rd2.size() == kSize);
-    CHECK(!rd2.is_owner());
-    CHECK(rd2.header.seq == 1);
-    CHECK(rd2.header.time_pub == 999999ULL);
-    CHECK(region_matches(rd.data(), rd2.data(), kSize));
+    CHECK_FALSE(rd.is_valid());
+    CHECK_FALSE(rd.is_owner());
+    CHECK_EQ(rd.size(), 0u);
+    CHECK_EQ(rd.data(), nullptr);
+    CHECK_EQ(rd.header.seq, 0u);
+    CHECK_EQ(rd.reserved_buf(), 0u);
   }
 
-  TEST_CASE("check_valid with empty bytes returns false") {
-    Bytes empty;
-    CHECK(!zerocopy::RawData::check_valid(empty));
-  }
-
-  TEST_CASE("check_valid with corrupted bytes returns false") {
+  TEST_CASE("clear then create again succeeds") {
     zerocopy::RawData rd;
-    rd.create(64);
 
-    Bytes wire;
-    rd >> wire;
-
-    wire[0] ^= 0xFF;
-    CHECK(!zerocopy::RawData::check_valid(wire));
-  }
-
-  TEST_CASE("operator>> on uninitialized RawData returns true with empty payload") {
-    // An uninitialized RawData (size=0, data=null) serializes successfully:
-    // it produces a magic-framed payload with zero-length data.
-    zerocopy::RawData rd;
-    Bytes wire;
-    bool ok = (rd >> wire);
-    CHECK(ok);
-    // The serialized buffer should be valid (magic numbers intact).
-    CHECK(zerocopy::RawData::check_valid(wire));
-  }
-
-  TEST_CASE("get_serialized_size is magic(4) + struct + data + magic(4)") {
-    zerocopy::RawData rd;
     rd.create(100);
+    rd.clear();
+    CHECK_FALSE(rd.is_valid());
 
-    size_t expected = sizeof(uint32_t) + sizeof(zerocopy::RawData) + 100 + sizeof(uint32_t);
-    CHECK(rd.get_serialized_size() == expected);
+    CHECK(rd.create(50));
+    CHECK(rd.is_valid());
+    CHECK_EQ(rd.size(), 50u);
   }
 
-  TEST_CASE("deserialize from too-small buffer returns false") {
-    std::vector<uint8_t> raw(4, 0x00);
-    Bytes too_small(raw);
+  TEST_CASE("reserved_buf round-trip including boundary values") {
     zerocopy::RawData rd;
-    bool ok = (rd << too_small);
-    CHECK_FALSE(ok);
+
+    rd.reserved_buf() = 0x1234u;
+    CHECK_EQ(rd.reserved_buf(), 0x1234u);
+
+    rd.reserved_buf() = 0xFFFFu;
+    CHECK_EQ(rd.reserved_buf(), 0xFFFFu);
+
+    rd.reserved_buf() = 0u;
+    CHECK_EQ(rd.reserved_buf(), 0u);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: RawData - copy operations
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-RawData - deep copy") {
-  TEST_CASE("deep_copy from RawData") {
+  TEST_CASE("shallow_copy from RawData aliases the buffer") {
     zerocopy::RawData src;
+
+    src.create(256);
+    fill_pattern(const_cast<uint8_t*>(src.data()), 256, 0x11u);
+
+    zerocopy::RawData dst;
+    CHECK(dst.shallow_copy(src));
+
+    CHECK(dst.is_valid());
+    CHECK_FALSE(dst.is_owner());
+    CHECK_EQ(dst.size(), 256u);
+    CHECK_EQ(dst.data(), src.data());
+  }
+
+  TEST_CASE("shallow_copy self returns false") {
+    zerocopy::RawData rd;
+
+    rd.create(32);
+    CHECK_FALSE(rd.shallow_copy(rd));
+  }
+
+  TEST_CASE("shallow_copy from raw pointer aliases the buffer") {
+    std::vector<uint8_t> buf(64, 0xABu);
+
+    zerocopy::RawData rd;
+    CHECK(rd.shallow_copy(buf.data(), buf.size()));
+
+    CHECK(rd.is_valid());
+    CHECK_FALSE(rd.is_owner());
+    CHECK_EQ(rd.size(), 64u);
+    CHECK_EQ(rd.data(), buf.data());
+  }
+
+  TEST_CASE("shallow_copy from raw pointer rejects null or zero size") {
+    zerocopy::RawData rd;
+
+    CHECK_FALSE(rd.shallow_copy(nullptr, 64));
+
+    std::vector<uint8_t> buf(8, 0xFFu);
+    CHECK_FALSE(rd.shallow_copy(buf.data(), 0));
+  }
+
+  TEST_CASE("shallow_copy same pointer returns false") {
+    std::vector<uint8_t> buf(64, 0x55u);
+
+    zerocopy::RawData rd;
+    CHECK(rd.shallow_copy(buf.data(), buf.size()));
+    CHECK_FALSE(rd.shallow_copy(buf.data(), buf.size()));
+  }
+
+  TEST_CASE("deep_copy from RawData allocates owned copy") {
+    zerocopy::RawData src;
+
     src.create(128);
-    fill_pattern(const_cast<uint8_t*>(src.data()), 128, 0xCC);
+    fill_pattern(const_cast<uint8_t*>(src.data()), 128, 0xCCu);
 
     zerocopy::RawData dst;
     CHECK(dst.deep_copy(src));
 
     CHECK(dst.is_valid());
     CHECK(dst.is_owner());
-    CHECK(dst.size() == 128);
+    CHECK_EQ(dst.size(), 128u);
     CHECK(region_matches(src.data(), dst.data(), 128));
+  }
+
+  TEST_CASE("deep_copy into same-size owned buffer reuses memory") {
+    zerocopy::RawData src;
+    src.create(64);
+    fill_pattern(const_cast<uint8_t*>(src.data()), 64, 0xAAu);
+
+    zerocopy::RawData dst;
+    dst.create(64);
+
+    CHECK(dst.deep_copy(src));
+    CHECK(dst.is_owner());
+    CHECK_EQ(dst.size(), 64u);
+    CHECK(region_matches(src.data(), dst.data(), 64));
   }
 
   TEST_CASE("deep_copy self returns false") {
     zerocopy::RawData rd;
+
     rd.create(64);
-    CHECK(!rd.deep_copy(rd));
+    CHECK_FALSE(rd.deep_copy(rd));
   }
 
   TEST_CASE("deep_copy from raw pointer") {
-    constexpr size_t kN = 128;
+    static constexpr size_t kN = 128;
     std::vector<uint8_t> src(kN);
-    fill_pattern(src.data(), kN, 0x33);
+    fill_pattern(src.data(), kN, 0x33u);
 
     zerocopy::RawData rd;
     CHECK(rd.deep_copy(src.data(), kN));
 
     CHECK(rd.is_valid());
     CHECK(rd.is_owner());
-    CHECK(rd.size() == kN);
+    CHECK_EQ(rd.size(), kN);
     CHECK(region_matches(src.data(), rd.data(), kN));
   }
 
-  TEST_CASE("deep_copy null pointer returns false") {
+  TEST_CASE("deep_copy from raw pointer rejects null or zero size") {
     zerocopy::RawData rd;
-    CHECK(!rd.deep_copy(nullptr, 64));
-  }
 
-  TEST_CASE("deep_copy zero size returns false") {
+    CHECK_FALSE(rd.deep_copy(nullptr, 64));
+
     std::vector<uint8_t> buf(8);
-    zerocopy::RawData rd;
-    CHECK(!rd.deep_copy(buf.data(), 0));
+    CHECK_FALSE(rd.deep_copy(buf.data(), 0));
   }
 
-  TEST_CASE("fill_data is alias for deep_copy") {
-    constexpr size_t kN = 32;
-    std::vector<uint8_t> src(kN, 0xFE);
+  TEST_CASE("fill_data is an alias for deep_copy") {
+    static constexpr size_t kN = 32;
+    std::vector<uint8_t> src(kN, 0xFEu);
 
     zerocopy::RawData rd;
     CHECK(rd.fill_data(src.data(), kN));
+
     CHECK(rd.is_owner());
     CHECK(region_matches(src.data(), rd.data(), kN));
   }
-}
 
-TEST_SUITE("zerocopy-RawData - shallow copy") {
-  TEST_CASE("shallow_copy from RawData") {
+  TEST_CASE("fill_data rejects null pointer and zero size") {
+    zerocopy::RawData rd;
+
+    CHECK_FALSE(rd.fill_data(nullptr, 64));
+
+    std::vector<uint8_t> buf(8);
+    CHECK_FALSE(rd.fill_data(buf.data(), 0));
+  }
+
+  TEST_CASE("move_copy transfers ownership and invalidates source") {
     zerocopy::RawData src;
-    src.create(256);
-    fill_pattern(const_cast<uint8_t*>(src.data()), 256, 0x11);
 
-    zerocopy::RawData dst;
-    CHECK(dst.shallow_copy(src));
-
-    CHECK(dst.is_valid());
-    CHECK(!dst.is_owner());
-    CHECK(dst.size() == 256);
-    CHECK(dst.data() == src.data());
-  }
-
-  TEST_CASE("shallow_copy self returns false") {
-    zerocopy::RawData rd;
-    rd.create(32);
-    CHECK(!rd.shallow_copy(rd));
-  }
-
-  TEST_CASE("shallow_copy from raw pointer") {
-    constexpr size_t kN = 64;
-    std::vector<uint8_t> buf(kN, 0xAB);
-
-    zerocopy::RawData rd;
-    CHECK(rd.shallow_copy(buf.data(), kN));
-
-    CHECK(rd.is_valid());
-    CHECK(!rd.is_owner());
-    CHECK(rd.size() == kN);
-    CHECK(rd.data() == buf.data());
-  }
-
-  TEST_CASE("shallow_copy null pointer returns false") {
-    zerocopy::RawData rd;
-    CHECK(!rd.shallow_copy(nullptr, 64));
-  }
-
-  TEST_CASE("shallow_copy zero size returns false") {
-    std::vector<uint8_t> buf(8, 0xFF);
-    zerocopy::RawData rd;
-    CHECK(!rd.shallow_copy(buf.data(), 0));
-  }
-}
-
-TEST_SUITE("zerocopy-RawData - move copy") {
-  TEST_CASE("move_copy transfers ownership") {
-    zerocopy::RawData src;
     src.create(100);
-    fill_pattern(const_cast<uint8_t*>(src.data()), 100, 0x77);
-
+    fill_pattern(const_cast<uint8_t*>(src.data()), 100, 0x77u);
     const uint8_t* original_ptr = src.data();
 
     zerocopy::RawData dst;
@@ -295,179 +294,118 @@ TEST_SUITE("zerocopy-RawData - move copy") {
 
     CHECK(dst.is_valid());
     CHECK(dst.is_owner());
-    CHECK(dst.data() == original_ptr);
-    CHECK(dst.size() == 100);
+    CHECK_EQ(dst.data(), original_ptr);
+    CHECK_EQ(dst.size(), 100u);
 
-    CHECK(!src.is_valid());
-    CHECK(!src.is_owner());
-    CHECK(src.size() == 0);
+    CHECK_FALSE(src.is_valid());
+    CHECK_FALSE(src.is_owner());
+    CHECK_EQ(src.data(), nullptr);
+    CHECK_EQ(src.size(), 0u);
   }
 
   TEST_CASE("move_copy self returns false") {
     zerocopy::RawData rd;
+
     rd.create(32);
-    CHECK(!rd.move_copy(rd));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: RawData - reserved_buf
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-RawData - reserved_buf") {
-  TEST_CASE("reserved_buf can be set and read") {
-    zerocopy::RawData rd;
-    rd.create(16);
-
-    rd.reserved_buf() = 0x1234;
-    CHECK(rd.reserved_buf() == 0x1234);
+    CHECK_FALSE(rd.move_copy(rd));
   }
 
-  TEST_CASE("reserved_buf survives serialization round-trip") {
-    zerocopy::RawData rd;
-    rd.create(32);
-    rd.reserved_buf() = 0xBEEF;
-
-    Bytes wire;
-    rd >> wire;
-
-    zerocopy::RawData rd2;
-    rd2 << wire;
-
-    CHECK(rd2.reserved_buf() == 0xBEEF);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: RawData - C++ special members
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-RawData - special members") {
-  TEST_CASE("copy constructor makes deep copy") {
+  TEST_CASE("copy constructor performs deep copy") {
     zerocopy::RawData src;
+
     src.create(64);
-    fill_pattern(const_cast<uint8_t*>(src.data()), 64, 0x9A);
+    fill_pattern(const_cast<uint8_t*>(src.data()), 64, 0x9Au);
+    src.reserved_buf() = 0x5678u;
 
     zerocopy::RawData copy(src);
 
     CHECK(copy.is_owner());
-    CHECK(copy.size() == 64);
-    CHECK(copy.data() != src.data());
+    CHECK_EQ(copy.size(), 64u);
+    CHECK_NE(copy.data(), src.data());
     CHECK(region_matches(src.data(), copy.data(), 64));
+    CHECK_EQ(copy.reserved_buf(), 0x5678u);
   }
 
   TEST_CASE("move constructor transfers ownership") {
     zerocopy::RawData src;
-    src.create(48);
-    fill_pattern(const_cast<uint8_t*>(src.data()), 48, 0x5C);
 
+    src.create(48);
+    fill_pattern(const_cast<uint8_t*>(src.data()), 48, 0x5Cu);
+    src.reserved_buf() = 0x9ABCu;
     const uint8_t* ptr = src.data();
 
     zerocopy::RawData moved(std::move(src));
 
     CHECK(moved.is_owner());
-    CHECK(moved.size() == 48);
-    CHECK(moved.data() == ptr);
-    CHECK(!src.is_valid());
+    CHECK_EQ(moved.size(), 48u);
+    CHECK_EQ(moved.data(), ptr);
+    CHECK_EQ(moved.reserved_buf(), 0x9ABCu);
+    CHECK_FALSE(src.is_valid());
   }
 
-  TEST_CASE("copy assignment makes deep copy") {
+  TEST_CASE("copy assignment performs deep copy") {
     zerocopy::RawData src;
+
     src.create(80);
-    fill_pattern(const_cast<uint8_t*>(src.data()), 80, 0x4D);
+    fill_pattern(const_cast<uint8_t*>(src.data()), 80, 0x4Du);
 
     zerocopy::RawData dst;
     dst = src;
 
     CHECK(dst.is_owner());
-    CHECK(dst.size() == 80);
+    CHECK_EQ(dst.size(), 80u);
     CHECK(region_matches(src.data(), dst.data(), 80));
   }
 
   TEST_CASE("move assignment transfers ownership") {
     zerocopy::RawData src;
-    src.create(96);
 
+    src.create(96);
     const uint8_t* ptr = src.data();
 
     zerocopy::RawData dst;
     dst = std::move(src);
 
     CHECK(dst.is_owner());
-    CHECK(dst.data() == ptr);
-    CHECK(!src.is_valid());
+    CHECK_EQ(dst.data(), ptr);
+    CHECK_FALSE(src.is_valid());
   }
 
-  TEST_CASE("clear() resets RawData to invalid state") {
+  TEST_CASE("serialize and deserialize round-trip preserves all data") {
+    static constexpr size_t kSize = 512;
+
     zerocopy::RawData rd;
-    rd.create(200);
-    CHECK(rd.is_valid());
-
-    rd.clear();
-
-    CHECK(!rd.is_valid());
-    CHECK(!rd.is_owner());
-    CHECK(rd.size() == 0);
-    CHECK(rd.data() == nullptr);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: RawData - additional edge cases
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-RawData - edge cases") {
-  TEST_CASE("sizeof(RawData) is 64 bytes") { CHECK(sizeof(zerocopy::RawData) == 64U); }
-
-  TEST_CASE("create replaces previous owned buffer") {
-    zerocopy::RawData rd;
-    REQUIRE(rd.create(100));
-    CHECK(rd.size() == 100);
-
-    REQUIRE(rd.create(200));
-    CHECK(rd.size() == 200);
-    CHECK(rd.is_owner());
-  }
-
-  TEST_CASE("deep_copy into already-owned same-size buffer reuses memory") {
-    zerocopy::RawData src;
-    src.create(64);
-    fill_pattern(const_cast<uint8_t*>(src.data()), 64, 0xAA);
-
-    zerocopy::RawData dst;
-    dst.create(64);
-
-    dst.deep_copy(src);
-    CHECK(dst.is_owner());
-    CHECK(dst.size() == 64);
-    CHECK(region_matches(src.data(), dst.data(), 64));
-  }
-
-  TEST_CASE("shallow_copy from raw pointer same pointer returns false") {
-    std::vector<uint8_t> buf(64, 0x55);
-    zerocopy::RawData rd;
-    CHECK(rd.shallow_copy(buf.data(), buf.size()));
-    CHECK(!rd.shallow_copy(buf.data(), buf.size()));
-  }
-
-  TEST_CASE("check_valid with end magic corrupted returns false") {
-    zerocopy::RawData rd;
-    rd.create(128);
+    rd.header.seq = 1u;
+    rd.header.time_pub = 999999u;
+    rd.reserved_buf() = 0xBEEFu;
+    rd.create(kSize);
+    fill_pattern(const_cast<uint8_t*>(rd.data()), kSize, 0x55u);
 
     Bytes wire;
-    rd >> wire;
+    CHECK((rd >> wire));
+    CHECK(zerocopy::RawData::check_valid(wire));
+    CHECK_EQ(wire.size(), rd.get_serialized_size());
 
-    wire[wire.size() - 1] ^= 0xFF;
-    CHECK(!zerocopy::RawData::check_valid(wire));
+    zerocopy::RawData rd2;
+    CHECK((rd2 << wire));
+
+    CHECK(rd2.is_valid());
+    CHECK_EQ(rd2.size(), kSize);
+    CHECK_FALSE(rd2.is_owner());
+    CHECK_EQ(rd2.header.seq, 1u);
+    CHECK_EQ(rd2.header.time_pub, 999999u);
+    CHECK_EQ(rd2.reserved_buf(), 0xBEEFu);
+    CHECK(region_matches(rd.data(), rd2.data(), kSize));
   }
 
   TEST_CASE("header fields survive serialization round-trip") {
     zerocopy::RawData rd;
-    rd.header.seq = 42;
+
+    rd.header.seq = 42u;
     std::strncpy(rd.header.frame_id, "sensor_1", sizeof(rd.header.frame_id) - 1);
     rd.header.frame_id[sizeof(rd.header.frame_id) - 1] = '\0';
-    rd.header.time_meas = 100000ULL;
-    rd.header.time_pub = 200000ULL;
+    rd.header.time_meas = 100000u;
+    rd.header.time_pub = 200000u;
     rd.create(16);
 
     Bytes wire;
@@ -476,116 +414,75 @@ TEST_SUITE("zerocopy-RawData - edge cases") {
     zerocopy::RawData rd2;
     rd2 << wire;
 
-    CHECK(rd2.header.seq == 42);
-    CHECK(std::string(rd2.header.frame_id) == "sensor_1");
-    CHECK(rd2.header.time_meas == 100000ULL);
-    CHECK(rd2.header.time_pub == 200000ULL);
+    CHECK_EQ(rd2.header.seq, 42u);
+    CHECK_EQ(std::string(rd2.header.frame_id), "sensor_1");
+    CHECK_EQ(rd2.header.time_meas, 100000u);
+    CHECK_EQ(rd2.header.time_pub, 200000u);
   }
 
-  TEST_CASE("reserved_buf default value is 0") {
+  TEST_CASE("check_valid rejects empty, corrupted begin magic, and corrupted end magic") {
     zerocopy::RawData rd;
-    CHECK(rd.reserved_buf() == 0);
+    rd.create(128);
+
+    Bytes wire;
+    rd >> wire;
+
+    SUBCASE("empty bytes") {
+      Bytes empty;
+      CHECK_FALSE(zerocopy::RawData::check_valid(empty));
+    }
+
+    SUBCASE("corrupted begin magic") {
+      wire[0] ^= 0xFFu;
+      CHECK_FALSE(zerocopy::RawData::check_valid(wire));
+    }
+
+    SUBCASE("corrupted end magic") {
+      wire[wire.size() - 1] ^= 0xFFu;
+      CHECK_FALSE(zerocopy::RawData::check_valid(wire));
+    }
   }
 
-  TEST_CASE("reserved_buf max value") {
+  TEST_CASE("deserialize from too-small buffer returns false") {
+    std::vector<uint8_t> raw(4, 0x00u);
+    Bytes too_small(raw);
+
     zerocopy::RawData rd;
-    rd.reserved_buf() = 0xFFFF;
-    CHECK(rd.reserved_buf() == 0xFFFF);
+    CHECK_FALSE((rd << too_small));
   }
 
-  TEST_CASE("clear resets reserved_buf and header") {
+  TEST_CASE("serialize empty RawData produces valid wire buffer") {
     zerocopy::RawData rd;
-    rd.create(16);
-    rd.reserved_buf() = 0x1234;
-    rd.header.seq = 99;
 
-    rd.clear();
-
-    CHECK(rd.reserved_buf() == 0);
-    CHECK(rd.header.seq == 0);
+    Bytes wire;
+    CHECK((rd >> wire));
+    CHECK(zerocopy::RawData::check_valid(wire));
   }
 
-  // TEST_CASE("copy assignment to self is no-op") {
-  //   zerocopy::RawData rd;
-  //   rd.create(64);
-  //   fill_pattern(const_cast<uint8_t*>(rd.data()), 64, 0xCC);
-  //   const uint8_t* ptr = rd.data();
-
-  //   rd = rd;  // NOLINT
-
-  //   CHECK(rd.is_owner());
-  //   CHECK(rd.data() == ptr);
-  // }
-
-  // TEST_CASE("move assignment to self is no-op") {
-  //   zerocopy::RawData rd;
-  //   rd.create(64);
-  //   const uint8_t* ptr = rd.data();
-
-  //   rd = std::move(rd);  // NOLINT
-
-  //   CHECK(rd.data() == ptr);
-  //   CHECK(rd.is_owner());
-  // }
-
-  TEST_CASE("move_copy leaves source fully invalid") {
-    zerocopy::RawData src;
-    src.create(100);
-    src.reserved_buf() = 0xABCD;
-
-    zerocopy::RawData dst;
-    CHECK(dst.move_copy(src));
-
-    CHECK(!src.is_valid());
-    CHECK(!src.is_owner());
-    CHECK(src.data() == nullptr);
-    CHECK(src.size() == 0);
-  }
-
-  TEST_CASE("clear then create again succeeds") {
+  TEST_CASE("get_serialized_size equals magic + struct + payload + magic") {
     zerocopy::RawData rd;
-    rd.create(100);
-    rd.clear();
 
-    CHECK(!rd.is_valid());
-    CHECK(rd.create(50));
+    SUBCASE("empty") {
+      size_t expected = sizeof(uint32_t) + sizeof(zerocopy::RawData) + 0u + sizeof(uint32_t);
+      CHECK_EQ(rd.get_serialized_size(), expected);
+    }
+
+    SUBCASE("with payload") {
+      rd.create(100);
+      size_t expected = sizeof(uint32_t) + sizeof(zerocopy::RawData) + 100u + sizeof(uint32_t);
+      CHECK_EQ(rd.get_serialized_size(), expected);
+    }
+  }
+
+  TEST_CASE("is_valid returns false when data is null or size is zero") {
+    zerocopy::RawData rd;
+    CHECK_FALSE(rd.is_valid());
+
+    rd.create(1);
     CHECK(rd.is_valid());
-    CHECK(rd.size() == 50);
-  }
 
-  TEST_CASE("get_serialized_size on empty RawData") {
-    zerocopy::RawData rd;
-    size_t sz = rd.get_serialized_size();
-    CHECK(sz == sizeof(uint32_t) + sizeof(zerocopy::RawData) + 0 + sizeof(uint32_t));
-  }
-
-  TEST_CASE("fill_data null pointer returns false") {
-    zerocopy::RawData rd;
-    CHECK(!rd.fill_data(nullptr, 64));
-  }
-
-  TEST_CASE("fill_data zero size returns false") {
-    std::vector<uint8_t> buf(8);
-    zerocopy::RawData rd;
-    CHECK(!rd.fill_data(buf.data(), 0));
-  }
-
-  TEST_CASE("reserved_buf survives copy constructor") {
-    zerocopy::RawData src;
-    src.create(16);
-    src.reserved_buf() = 0x5678;
-
-    zerocopy::RawData copy(src);
-    CHECK(copy.reserved_buf() == 0x5678);
-  }
-
-  TEST_CASE("reserved_buf survives move constructor") {
-    zerocopy::RawData src;
-    src.create(16);
-    src.reserved_buf() = 0x9ABC;
-
-    zerocopy::RawData moved(std::move(src));
-    CHECK(moved.reserved_buf() == 0x9ABC);
+    rd.clear();
+    CHECK_FALSE(rd.is_valid());
   }
 }
 

@@ -21,19 +21,34 @@
  * limitations under the License.
  */
 
-/// @file greeter_plugin.cc
-/// @brief Concrete GreeterInterface implementation compiled into a shared library.
-///
-/// Build output: libgreeter_plugin.so
-/// The host application loads this .so at runtime via Plugin::load<GreeterInterface>().
+// =============================================================================
+// File: greeter_plugin.cc
+//
+// Implementation translation unit that becomes libgreeter_plugin.so. It is
+// dlopen()'d by the host (plugin_basic.cc) at runtime; no static linking.
+//
+// Three things must line up between this file and greeter_interface.h:
+//   1. The class derives publicly from GreeterInterface so the host can use
+//      a base-class pointer.
+//   2. VLINK_PLUGIN_REGISTER is invoked with the SAME argument as on the
+//      interface (the interface name, not the implementation name). That
+//      installs the plugin_id matching the host's expectation.
+//   3. VLINK_PLUGIN_DECLARE exports the C ABI entry points the loader needs:
+//        - vlink_plugin_create  -> new GreeterImpl
+//        - vlink_plugin_destroy -> delete the base pointer
+//        - vlink_plugin_get_version_info -> returns major/minor/commit
+//      Version numbers (1, 0) are compared against the (major, minor) passed
+//      to Plugin::load<T>(name, major, minor). A mismatch causes load() to
+//      return nullptr rather than dispatch into ABI-incompatible code.
+// =============================================================================
 
 #include "greeter_interface.h"
 
-/// Concrete implementation of the GreeterInterface.
-///
-/// Note: VLINK_PLUGIN_REGISTER uses the *interface* type (GreeterInterface), not the
-/// implementation type.  This ensures the plugin ID matches between host and plugin.
 class GreeterImpl : public GreeterInterface {
+  // Must repeat the SAME interface name here so the loader can match this
+  // .so to the interface declared in the host. Passing "GreeterImpl" here
+  // by mistake would make Plugin::load<GreeterInterface>() fail with
+  // "plugin_id mismatch".
   VLINK_PLUGIN_REGISTER(GreeterInterface)
 
  public:
@@ -42,6 +57,10 @@ class GreeterImpl : public GreeterInterface {
   std::string plugin_name() const override { return "GreeterImpl"; }
 };
 
-/// Export C entry points: vlink_plugin_create / vlink_plugin_destroy.
-/// The first argument is the concrete class; the next two are major.minor version.
+// Emits extern "C" factory + destroyer + version metadata. Arguments:
+//   GreeterImpl -> concrete type to instantiate on create
+//   1           -> major version (semantic-version-style break gate)
+//   0           -> minor version (compatible additions)
+// The host requests (1, 0) and gets a valid handle; (2, 0) is rejected by the
+// loader to protect against ABI drift.
 VLINK_PLUGIN_DECLARE(GreeterImpl, 1, 0)

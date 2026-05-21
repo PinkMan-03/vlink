@@ -25,10 +25,14 @@
 
 #include <cstdint>
 
-/// POD sensor data for the event_basic example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
+// Sample payload for event_basic. Trivially-copyable POD -- vlink dispatches
+// it via the built-in "Standard" serializer (raw memcpy), no schema needed.
+// Fields:
+//   id         monotonically increasing sequence number assigned by producer.
+//   value      synthetic temperature reading (degC).
+//   timestamp  steady-clock milliseconds at publish time, for latency calc.
 struct SensorData {
-  int id;             // Sequence number of the sensor reading
-  float value;        // Measured sensor value (e.g., temperature in Celsius)
-  int64_t timestamp;  // Timestamp in milliseconds since epoch
+  int id;
+  float value;
+  int64_t timestamp;
 };

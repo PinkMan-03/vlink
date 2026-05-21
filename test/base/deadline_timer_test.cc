@@ -29,106 +29,66 @@
 
 #include <thread>
 
+#include "../common_test.h"
 #include "./base/elapsed_timer.h"
 
-//
-#include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Default construction
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-DeadlineTimer - default construction") {
-  TEST_CASE("default constructed timer is invalid") {
+TEST_SUITE("base-DeadlineTimer") {
+  TEST_CASE("default constructor yields invalid timer with deadline zero") {
     DeadlineTimer t;
-    CHECK(!t.is_valid());
+    CHECK_FALSE(t.is_valid());
+    CHECK_EQ(t.deadline(), 0U);
+    CHECK_FALSE(t.has_expired());
   }
 
-  TEST_CASE("default constructed timer deadline() == 0") {
-    DeadlineTimer t;
-    CHECK(t.deadline() == 0U);
-  }
-
-  TEST_CASE("default constructed timer has_expired() == false") {
-    // deadline==0 is treated as already-expired by the implementation
-    DeadlineTimer t;
-    CHECK(!t.has_expired());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Construction with interval
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-DeadlineTimer - interval construction") {
-  TEST_CASE("timer constructed with positive interval is valid") {
-    DeadlineTimer t(1000);  // 1000 ms from now
-    CHECK(t.is_valid());
-  }
-
-  TEST_CASE("timer constructed with positive interval has non-zero deadline") {
-    DeadlineTimer t(500);
-    CHECK(t.deadline() > 0U);
-  }
-
-  TEST_CASE("timer with 1000 ms has not expired immediately") {
+  TEST_CASE("interval constructor with positive value yields valid unexpired timer") {
     DeadlineTimer t(1000);
-    CHECK(!t.has_expired());
-  }
-
-  TEST_CASE("timer with large interval has positive remaining_time") {
-    DeadlineTimer t(5000);  // 5 seconds
+    CHECK(t.is_valid());
+    CHECK(t.deadline() > 0U);
+    CHECK_FALSE(t.has_expired());
     CHECK(t.remaining_time() > 0);
   }
 
-  TEST_CASE("timer constructed with microsecond accuracy") {
-    DeadlineTimer t(100000, ElapsedTimer::kMicro);  // 100 ms in microseconds
+  TEST_CASE("interval constructor with kMicro accuracy") {
+    DeadlineTimer t(100000, ElapsedTimer::kMicro);
     CHECK(t.is_valid());
-    CHECK(!t.has_expired());
-    CHECK(t.get_accuracy() == ElapsedTimer::kMicro);
+    CHECK_FALSE(t.has_expired());
+    CHECK_EQ(t.get_accuracy(), ElapsedTimer::kMicro);
   }
 
-  TEST_CASE("timer constructed with nanosecond accuracy") {
-    DeadlineTimer t(100000000LL, ElapsedTimer::kNano);  // 100 ms in nanoseconds
+  TEST_CASE("interval constructor with kNano accuracy") {
+    DeadlineTimer t(100000000LL, ElapsedTimer::kNano);
     CHECK(t.is_valid());
-    CHECK(!t.has_expired());
-    CHECK(t.get_accuracy() == ElapsedTimer::kNano);
+    CHECK_FALSE(t.has_expired());
+    CHECK_EQ(t.get_accuracy(), ElapsedTimer::kNano);
   }
 
-  TEST_CASE("get_accuracy() returns kMilli by default") {
+  TEST_CASE("default accuracy is kMilli") {
     DeadlineTimer t(100);
-    CHECK(t.get_accuracy() == ElapsedTimer::kMilli);
+    CHECK_EQ(t.get_accuracy(), ElapsedTimer::kMilli);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: set_deadline
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-DeadlineTimer - set_deadline") {
   TEST_CASE("set_deadline makes timer valid") {
     DeadlineTimer t;
-    CHECK(!t.is_valid());
+    CHECK_FALSE(t.is_valid());
 
     t.set_deadline(500);
     CHECK(t.is_valid());
   }
 
-  TEST_CASE("set_deadline(0) resets timer to invalid and expired state") {
-    // interval <= 0 stores deadline=0: is_valid==false, has_expired==false
+  TEST_CASE("set_deadline with zero resets timer to invalid state") {
     DeadlineTimer t;
     t.set_deadline(0);
-    CHECK(!t.is_valid());
-    CHECK(!t.has_expired());
+    CHECK_FALSE(t.is_valid());
+    CHECK_FALSE(t.has_expired());
   }
 
-  TEST_CASE("set_deadline with large value - remaining time is positive") {
+  TEST_CASE("set_deadline produces positive remaining time for large interval") {
     DeadlineTimer t;
-    t.set_deadline(10000);  // 10 s
+    t.set_deadline(10000);
     CHECK(t.remaining_time() > 0);
   }
 
-  TEST_CASE("set_deadline can be called multiple times") {
+  TEST_CASE("set_deadline called twice advances the deadline") {
     DeadlineTimer t;
     t.set_deadline(100);
     uint64_t first = t.deadline();
@@ -137,74 +97,61 @@ TEST_SUITE("base-DeadlineTimer - set_deadline") {
     t.set_deadline(100);
     uint64_t second = t.deadline();
 
-    // The second deadline should be later than the first
     CHECK(second > first);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: set_deadline_abs
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-DeadlineTimer - set_deadline_abs") {
-  TEST_CASE("set_deadline_abs makes timer valid") {
-    DeadlineTimer t;
-    uint64_t abs = ElapsedTimer::get_cpu_timestamp() + 5000;
-    t.set_deadline_abs(abs);
-    CHECK(t.is_valid());
-  }
-
-  TEST_CASE("set_deadline_abs stores the exact value") {
+  TEST_CASE("set_deadline_abs makes timer valid and stores the exact value") {
     DeadlineTimer t;
     uint64_t abs = 123456789U;
     t.set_deadline_abs(abs);
-    CHECK(t.deadline() == abs);
+
+    CHECK(t.is_valid());
+    CHECK_EQ(t.deadline(), abs);
   }
 
-  TEST_CASE("set_deadline_abs with past timestamp: has_expired is true") {
+  TEST_CASE("set_deadline_abs with a future timestamp yields unexpired timer") {
     DeadlineTimer t;
-    // Set the deadline to 1 ms in the past
+    uint64_t abs = ElapsedTimer::get_cpu_timestamp() + 5000;
+    t.set_deadline_abs(abs);
+
+    CHECK(t.is_valid());
+    CHECK_FALSE(t.has_expired());
+  }
+
+  TEST_CASE("set_deadline_abs with a past timestamp yields expired timer") {
+    DeadlineTimer t;
     uint64_t past = ElapsedTimer::get_cpu_timestamp() - 1U;
     t.set_deadline_abs(past);
+
     CHECK(t.has_expired());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: reset
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-DeadlineTimer - reset") {
-  TEST_CASE("reset() invalidates a previously set timer") {
+  TEST_CASE("reset invalidates a previously set timer") {
     DeadlineTimer t(500);
     CHECK(t.is_valid());
 
     t.reset();
-    CHECK(!t.is_valid());
-    CHECK(t.deadline() == 0U);
+    CHECK_FALSE(t.is_valid());
+    CHECK_EQ(t.deadline(), 0U);
   }
 
-  TEST_CASE("reset() then set_deadline() works") {
+  TEST_CASE("reset then set_deadline restores valid timer") {
     DeadlineTimer t(100);
     t.reset();
     t.set_deadline(200);
+
     CHECK(t.is_valid());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Expiry detection
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-DeadlineTimer - expiry detection") {
-  TEST_CASE("timer expires after sleep longer than deadline") {
-    DeadlineTimer t(50);  // 50 ms
+  TEST_CASE("timer expires after sleeping longer than the deadline") {
+    DeadlineTimer t(50);
     std::this_thread::sleep_for(100ms);
+
     CHECK(t.has_expired());
   }
 
   TEST_CASE("remaining_time decreases over time") {
-    DeadlineTimer t(2000);  // 2 s
+    DeadlineTimer t(2000);
     int64_t r1 = t.remaining_time();
 
     std::this_thread::sleep_for(20ms);
@@ -213,24 +160,19 @@ TEST_SUITE("base-DeadlineTimer - expiry detection") {
     CHECK(r2 < r1);
   }
 
-  TEST_CASE("remaining_time is negative or zero after expiry") {
+  TEST_CASE("remaining_time is zero or negative after expiry") {
     DeadlineTimer t(30);
     std::this_thread::sleep_for(60ms);
+
     CHECK(t.remaining_time() <= 0);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Copy and move semantics
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-DeadlineTimer - copy and move") {
-  TEST_CASE("copy constructor preserves deadline") {
+  TEST_CASE("copy constructor preserves deadline and validity") {
     DeadlineTimer orig(1000);
     DeadlineTimer copy(orig);  // NOLINT(performance-unnecessary-copy-initialization)
 
     CHECK(copy.is_valid());
-    CHECK(copy.deadline() == orig.deadline());
+    CHECK_EQ(copy.deadline(), orig.deadline());
   }
 
   TEST_CASE("move constructor transfers deadline") {
@@ -239,7 +181,7 @@ TEST_SUITE("base-DeadlineTimer - copy and move") {
 
     DeadlineTimer moved(std::move(orig));
     CHECK(moved.is_valid());
-    CHECK(moved.deadline() == dl);
+    CHECK_EQ(moved.deadline(), dl);
   }
 
   TEST_CASE("copy assignment preserves deadline") {
@@ -248,7 +190,7 @@ TEST_SUITE("base-DeadlineTimer - copy and move") {
     b = a;
 
     CHECK(b.is_valid());
-    CHECK(b.deadline() == a.deadline());
+    CHECK_EQ(b.deadline(), a.deadline());
   }
 
   TEST_CASE("move assignment transfers deadline") {
@@ -259,7 +201,7 @@ TEST_SUITE("base-DeadlineTimer - copy and move") {
     b = std::move(a);
 
     CHECK(b.is_valid());
-    CHECK(b.deadline() == dl);
+    CHECK_EQ(b.deadline(), dl);
   }
 }
 

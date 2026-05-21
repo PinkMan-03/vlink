@@ -21,127 +21,196 @@
  * limitations under the License.
  */
 
-// Example: MessageLoop advanced - 3 types, exec_task, Schedule::Config, chaining, invoke_task
-
 #include <vlink/base/logger.h>
 #include <vlink/base/message_loop.h>
 
-#include "schedule_examples.h"
+#include <string>
+#include <thread>
 
+using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
+
+// -----------------------------------------------------------------------------
+// MessageLoop advanced example
+//
+// Module:   vlink/base/message_loop.h (+ Schedule)
+// Scenario: Tour the optional behaviour knobs:
+//             - Queue type:     Normal / Lockfree / Priority.
+//             - Dispatch strat: Block (cond_var wait) vs Pop (busy spin).
+//             - exec_task:      Schedule::Config-based dispatch returning a
+//                               chainable Status (on_then/on_else/on_catch).
+//             - invoke_task:    fire-and-await -- returns std::future<T>.
+// CAUTION:  invoke_task BLOCKS the caller on future.get(). Calling
+//           invoke_task on a single-thread loop FROM that same loop's
+//           thread DEADLOCKS -- the worker would need to free itself to
+//           run the requested task. Always invoke from a different thread.
+// -----------------------------------------------------------------------------
 int main() {
-  // ---------------------------------------------------------------
-  // 1. Compare three queue types: Normal, Lockfree, Priority.
-  // ---------------------------------------------------------------
+  // Three queue flavours: Normal is the default mutex+cond_var queue;
+  // Lockfree uses MPMC ring buffers (lower contention, fixed capacity);
+  // Priority lets post_task_with_priority slot a task ahead of lower
+  // priorities. Priority is the only type that honours per-task priority.
   {
-    VLOG_I("=== Section 1: Queue type comparison ===");
+    VLOG_I("=== Queue types ===");
 
-    // Normal type - mutex-protected std::queue (default).
     vlink::MessageLoop normal_loop(vlink::MessageLoop::kNormalType);
     normal_loop.set_name("normal");
     normal_loop.async_run();
-    normal_loop.post_task([]() { VLOG_I("  [NormalType] Task executed"); });
+    normal_loop.post_task([]() { VLOG_I("  [Normal] task"); });
     normal_loop.wait_for_idle();
-    MLOG_I("  NormalType - strategy: {}", static_cast<int>(normal_loop.get_strategy()));
+    MLOG_I("  Normal strategy={}", static_cast<int>(normal_loop.get_strategy()));
     normal_loop.quit();
     normal_loop.wait_for_quit();
 
-    // Lockfree type - MPMC lock-free queue (fastest single-producer path).
     vlink::MessageLoop lockfree_loop(vlink::MessageLoop::kLockfreeType);
     lockfree_loop.set_name("lockfree");
     lockfree_loop.async_run();
-    lockfree_loop.post_task([]() { VLOG_I("  [LockfreeType] Task executed"); });
+    lockfree_loop.post_task([]() { VLOG_I("  [Lockfree] task"); });
     lockfree_loop.wait_for_idle();
     lockfree_loop.quit();
     lockfree_loop.wait_for_quit();
 
-    // Priority type - priority queue, higher values dispatched first.
     vlink::MessageLoop priority_loop(vlink::MessageLoop::kPriorityType);
     priority_loop.set_name("priority");
     priority_loop.async_run();
-    priority_loop.post_task_with_priority([]() { VLOG_I("  [PriorityType] Low priority task"); },
-                                          vlink::MessageLoop::kLowestPriority);
-    priority_loop.post_task_with_priority([]() { VLOG_I("  [PriorityType] High priority task"); },
-                                          vlink::MessageLoop::kHighestPriority);
-    priority_loop.post_task_with_priority([]() { VLOG_I("  [PriorityType] Normal priority task"); },
-                                          vlink::MessageLoop::kNormalPriority);
+    priority_loop.post_task_with_priority([]() { VLOG_I("  [Priority] low"); }, vlink::MessageLoop::kLowestPriority);
+    priority_loop.post_task_with_priority([]() { VLOG_I("  [Priority] high"); }, vlink::MessageLoop::kHighestPriority);
+    priority_loop.post_task_with_priority([]() { VLOG_I("  [Priority] normal"); }, vlink::MessageLoop::kNormalPriority);
     priority_loop.wait_for_idle();
     priority_loop.quit();
     priority_loop.wait_for_quit();
   }
 
-  // ---------------------------------------------------------------
-  // 2. Dispatch strategies comparison.
-  // ---------------------------------------------------------------
+  // Dispatch strategy: kBlockStrategy sleeps on a condition variable when
+  // the queue is empty (low CPU when idle). kPopStrategy busy-spins for
+  // ultra-low-latency wake-up at the cost of 100% CPU on the loop thread.
+  // Switch dynamically based on workload phase.
   {
-    VLOG_I("=== Section 2: Dispatch strategies ===");
+    VLOG_I("=== Dispatch strategies ===");
     vlink::MessageLoop loop;
     loop.async_run();
 
-    MLOG_I("  Current strategy: {}", static_cast<int>(loop.get_strategy()));
-
     loop.set_strategy(vlink::MessageLoop::kBlockStrategy);
-    loop.post_task([]() { VLOG_I("  Running with kBlockStrategy"); });
+    loop.post_task([]() { VLOG_I("  kBlockStrategy"); });
     loop.wait_for_idle();
 
     loop.set_strategy(vlink::MessageLoop::kPopStrategy);
-    loop.post_task([]() { VLOG_I("  Running with kPopStrategy"); });
+    loop.post_task([]() { VLOG_I("  kPopStrategy"); });
     loop.wait_for_idle();
 
     loop.quit();
     loop.wait_for_quit();
   }
 
-  // ---------------------------------------------------------------
-  // 3. exec_task with Schedule::Config - void callback.
-  // ---------------------------------------------------------------
+  // exec_task with Schedule::Config: returns a Status object that chains
+  // observers for the various failure modes (schedule timeout = waited too
+  // long in queue, execution timeout = body ran too long, on_catch =
+  // body threw). Delay 0 means "as soon as possible".
   {
-    VLOG_I("=== Section 3: Schedule::Config demos ===");
+    VLOG_I("=== exec_task with Schedule::Config ===");
     vlink::MessageLoop loop(vlink::MessageLoop::kPriorityType);
     loop.async_run();
 
-    schedule_examples::demo_exec_task_void(loop);
+    loop.exec_task(vlink::Schedule::Config{0, 100}, []() { VLOG_I("  immediate, priority=100"); });
+
+    loop.exec_task(vlink::Schedule::Config{200}, []() { VLOG_I("  delayed 200ms"); })
+        .on_schedule_timeout([]() { VLOG_W("  schedule timeout"); })
+        .on_execution_timeout([]() { VLOG_W("  execution timeout"); })
+        .on_catch([](std::exception& e) { MLOG_E("  caught: {}", e.what()); });
+
+    std::this_thread::sleep_for(300ms);
+    loop.wait_for_idle();
 
     loop.quit();
     loop.wait_for_quit();
   }
 
-  // ---------------------------------------------------------------
-  // 4. exec_task with on_then/on_else chaining - bool callback.
-  // ---------------------------------------------------------------
+  // Bool-returning body + on_then / on_else: a tiny state machine. on_then
+  // chains run sequentially while each returns true; first false stops the
+  // chain and triggers on_else. Use for conditional pipelines without
+  // hand-writing if/else dispatch on the loop thread.
   {
-    VLOG_I("=== Section 4: Chaining demos ===");
+    VLOG_I("=== on_then / on_else chaining ===");
     vlink::MessageLoop loop;
     loop.async_run();
 
-    schedule_examples::demo_exec_task_chaining(loop);
+    loop.exec_task(vlink::Schedule::Config{},
+                   []() -> bool {
+                     VLOG_I("  bool task -> true");
+                     return true;
+                   })
+        .on_then([]() -> bool {
+          VLOG_I("  on_then(1)");
+          return true;
+        })
+        .on_then([]() -> bool {
+          VLOG_I("  on_then(2)");
+          return true;
+        })
+        .on_else([]() { VLOG_I("  on_else (NOT called)"); });
 
+    loop.wait_for_idle();
+
+    loop.exec_task(vlink::Schedule::Config{},
+                   []() -> bool {
+                     VLOG_I("  bool task -> false");
+                     return false;
+                   })
+        .on_then([]() -> bool {
+          VLOG_I("  on_then (NOT called)");
+          return true;
+        })
+        .on_else([]() { VLOG_I("  on_else: failure path"); });
+
+    loop.wait_for_idle();
     loop.quit();
     loop.wait_for_quit();
   }
 
-  // ---------------------------------------------------------------
-  // 5. invoke_task with std::future.
-  // ---------------------------------------------------------------
+  // invoke_task: synchronous request/response across the loop boundary.
+  // future.get() BLOCKS the caller until the loop thread runs the body.
+  // Calling this from inside the same loop's thread deadlocks -- always
+  // dispatch from a different thread.
   {
-    VLOG_I("=== Section 5: invoke_task demos ===");
+    VLOG_I("=== invoke_task ===");
     vlink::MessageLoop loop;
     loop.async_run();
 
-    schedule_examples::demo_invoke_task(loop);
+    auto fut_int = loop.invoke_task([]() -> int {
+      VLOG_I("  computing on loop thread...");
+      return 42;
+    });
+    MLOG_I("  invoke result: {}", fut_int.get());
+
+    auto fut_str = loop.invoke_task([]() -> std::string { return "hello from loop"; });
+    MLOG_I("  invoke string: {}", fut_str.get());
 
     loop.quit();
     loop.wait_for_quit();
   }
 
-  // ---------------------------------------------------------------
-  // 6. Priority queue with invoke_task_with_priority.
-  // ---------------------------------------------------------------
+  // Priority-aware invoke: when the queue is priority-typed, high-priority
+  // invokes jump ahead of lower-priority pending tasks. Get-order is
+  // arbitrary because both futures resolve independently.
   {
-    VLOG_I("=== Section 6: Priority invoke demos ===");
+    VLOG_I("=== invoke_task_with_priority ===");
     vlink::MessageLoop loop(vlink::MessageLoop::kPriorityType);
     loop.async_run();
 
-    schedule_examples::demo_priority_invoke(loop);
+    auto high = loop.invoke_task_with_priority(
+        []() -> int {
+          VLOG_I("  high priority invoke");
+          return 1;
+        },
+        vlink::MessageLoop::kHighestPriority);
+
+    auto low = loop.invoke_task_with_priority(
+        []() -> int {
+          VLOG_I("  low priority invoke");
+          return 2;
+        },
+        vlink::MessageLoop::kLowestPriority);
+
+    MLOG_I("  high={} low={}", high.get(), low.get());
 
     loop.quit();
     loop.wait_for_quit();

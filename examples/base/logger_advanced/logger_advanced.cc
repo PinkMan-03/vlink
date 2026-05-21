@@ -21,109 +21,156 @@
  * limitations under the License.
  */
 
-// Example: Logger advanced - custom handler, backtrace, fatal, compile-time filtering
-
 #include <vlink/base/logger.h>
 
+#include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
-#include "custom_handler.h"
+// Demonstrates the custom-handler hook: every console line is mirrored into
+// our own sink (here, an in-memory vector plus a styled std::cout dump).
+// Handlers run on whichever thread emitted the log -- so the captured_logs_
+// vector is guarded by a mutex.
+class CustomLogHandler {
+ public:
+  void install() {
+    vlink::Logger::register_console_handler(
+        [this](vlink::Logger::Level level, std::string_view message) { handle(level, message); });
+  }
 
+  size_t captured_count() const {
+    std::lock_guard lock(mutex_);
+    return captured_logs_.size();
+  }
+
+ private:
+  void handle(vlink::Logger::Level level, std::string_view message) {
+    {
+      std::lock_guard lock(mutex_);
+      captured_logs_.emplace_back(message);
+    }
+
+    const char* prefix = "?";
+    switch (level) {
+      case vlink::Logger::kTrace:
+        prefix = "TRACE";
+        break;
+      case vlink::Logger::kDebug:
+        prefix = "DEBUG";
+        break;
+      case vlink::Logger::kInfo:
+        prefix = "INFO ";
+        break;
+      case vlink::Logger::kWarn:
+        prefix = "WARN ";
+        break;
+      case vlink::Logger::kError:
+        prefix = "ERROR";
+        break;
+      case vlink::Logger::kFatal:
+        prefix = "FATAL";
+        break;
+      default:
+        break;
+    }
+
+    std::cout << "[CustomHandler][" << prefix << "] " << message << std::endl;
+  }
+
+  mutable std::mutex mutex_;
+  std::vector<std::string> captured_logs_;
+};
+// -----------------------------------------------------------------------------
+// Logger advanced example
+//
+// Module:   vlink/base/logger.h
+// Scenario: Exercise the post-init customisation points: registering a
+//           custom console handler, the backtrace ring buffer (cheap
+//           trace-level logging that is only flushed on demand), the FATAL
+//           level that throws std::runtime_error after logging, the
+//           is_writable level guard for skipping expensive payload
+//           formatting, console ANSI toggle and stream-precision tuning.
+// CAUTION:  VLOG_F / MLOG_F LOG the message and then THROW
+//           std::runtime_error -- never call them in a destructor or noexcept
+//           function. The example wraps both in try/catch to demonstrate
+//           recovery and to keep the demo running.
+// -----------------------------------------------------------------------------
 int main() {
   vlink::Logger::init("logger_advanced_demo");
   vlink::Logger::set_console_level(vlink::Logger::kTrace);
 
-  // ---------------------------------------------------------------
-  // 1. Register a custom console handler via CustomLogHandler class.
-  // ---------------------------------------------------------------
-  custom_handler::CustomLogHandler handler;
+  // Install a custom console handler: every console-bound line will also
+  // call into handle() above. Useful for forwarding logs into a GUI panel
+  // or a remote sink without touching the default file/console pipeline.
+  CustomLogHandler handler;
   handler.install();
+  VLOG_I("custom handler installed");
+  MLOG_D("captured so far: {}", handler.captured_count());
 
-  VLOG_I("Custom handler installed - this message is routed through it");
-  MLOG_D("Captured log count so far: {}", handler.captured_count());
-
-  // ---------------------------------------------------------------
-  // 2. Enable backtrace ring buffer.
-  //    Retains the last N messages regardless of current log level.
-  //    Useful for post-mortem debugging.
-  // ---------------------------------------------------------------
+  // Backtrace ring buffer: trace-level lines are buffered in memory (cheap,
+  // no formatting) but NOT emitted. dump_backtrace flushes the most recent
+  // N lines on demand -- ideal for printing context only when an error hits.
   vlink::Logger::enable_backtrace(10);
+  VLOG_T("bt 1: system initializing");
+  VLOG_D("bt 2: loading configuration");
+  VLOG_I("bt 3: configuration loaded");
+  VLOG_D("bt 4: connecting to database");
+  VLOG_I("bt 5: database connected");
 
-  VLOG_T("Backtrace message 1: system initializing");
-  VLOG_D("Backtrace message 2: loading configuration");
-  VLOG_I("Backtrace message 3: configuration loaded successfully");
-  VLOG_D("Backtrace message 4: connecting to database");
-  VLOG_I("Backtrace message 5: database connection established");
-
-  // Dump the backtrace buffer to sinks.
-  VLOG_W("About to dump backtrace...");
+  VLOG_W("about to dump backtrace...");
   vlink::Logger::dump_backtrace();
-  VLOG_I("Backtrace dumped successfully");
-
   vlink::Logger::disable_backtrace();
 
-  // ---------------------------------------------------------------
-  // 3. Demonstrate that kFatal level throws RuntimeError.
-  //    In production, this is used for unrecoverable errors.
-  // ---------------------------------------------------------------
-  VLOG_I("--- Demonstrating Fatal log (will throw RuntimeError) ---");
-
+  // VLOG_F: log the fatal message AND throw std::runtime_error. Catch is
+  // mandatory unless the caller is willing to terminate; the design lets
+  // top-level supervisors decide whether to restart, exit, or recover.
   try {
-    VLOG_F("Fatal error: critical subsystem failure, code=", 0xDEAD);
+    VLOG_F("fatal: critical subsystem failure, code=", 0xDEAD);
   } catch (const std::runtime_error& e) {
-    VLOG_I("Caught RuntimeError from VLOG_F: ", e.what());
+    VLOG_I("caught from VLOG_F: ", e.what());
   }
 
   try {
-    MLOG_F("Fatal format: operation {} failed with status {}", "connect", -1);
+    MLOG_F("fatal: op {} status {}", "connect", -1);
   } catch (const std::runtime_error& e) {
-    VLOG_I("Caught RuntimeError from MLOG_F: ", e.what());
+    VLOG_I("caught from MLOG_F: ", e.what());
   }
 
-  // ---------------------------------------------------------------
-  // 4. Compile-time filtering explanation.
-  // ---------------------------------------------------------------
-  MLOG_I("Compile-time minimum log level: {}", static_cast<int>(vlink::Logger::kMinimumLevel));
-  MLOG_I("Detail annotation threshold: {}", static_cast<int>(vlink::Logger::kDetailLevel));
+  // Compile-time constants expose the build's level configuration. WARN/
+  // ERROR records automatically inject {file:line}; INFO and below do not.
+  MLOG_I("kMinimumLevel={} kDetailLevel={}", static_cast<int>(vlink::Logger::kMinimumLevel),
+         static_cast<int>(vlink::Logger::kDetailLevel));
+  VLOG_W("warn includes {file:line} automatically");
+  VLOG_E("error includes {file:line} automatically");
 
-  VLOG_W("This warning includes {file:line} detail automatically");
-  VLOG_E("This error also includes {file:line} detail");
-
-  // ---------------------------------------------------------------
-  // 5. Check writability before expensive argument construction.
-  // ---------------------------------------------------------------
-
+  // is_writable guard: skips the expensive payload preparation when the
+  // sink would drop the message anyway. The guard is a single atomic load,
+  // far cheaper than constructing the payload string speculatively.
   if (vlink::Logger::is_writable(vlink::Logger::kDebug)) {
-    std::string expensive_data = "computed-only-when-debug-is-active";
-    VLOG_D("Expensive debug data: ", expensive_data);
+    std::string expensive = "computed-only-when-debug-is-active";
+    VLOG_D("expensive: ", expensive);
   }
 
-  // ---------------------------------------------------------------
-  // 6. Console formatting control.
-  // ---------------------------------------------------------------
+  // ANSI colour toggle: handy when redirecting to a non-tty or when the
+  // host terminal does not handle escape sequences.
   vlink::Logger::set_console_fmt_enable(false);
-  VLOG_I("ANSI color codes disabled for this message");
-
+  VLOG_I("ANSI color disabled");
   vlink::Logger::set_console_fmt_enable(true);
-  VLOG_I("ANSI color codes re-enabled");
+  VLOG_I("ANSI color re-enabled");
 
-  // ---------------------------------------------------------------
-  // 7. Stream formatting flags.
-  // ---------------------------------------------------------------
+  // Stream precision controls the float/double formatting of VLOG_* lines.
+  // MLOG_* / CLOG_* are unaffected -- they use their own format spec.
   vlink::Logger::set_stream_precision(4);
-  VLOG_I("Stream precision set to 4: pi=", 3.14159265);
-
+  VLOG_I("precision 4: pi=", 3.14159265);
   vlink::Logger::set_stream_precision(2);
-  VLOG_I("Stream precision set to 2: pi=", 3.14159265);
+  VLOG_I("precision 2: pi=", 3.14159265);
 
-  // ---------------------------------------------------------------
-  // Summary of captured logs from custom handler.
-  // ---------------------------------------------------------------
-  MLOG_I("Total messages captured by custom handler: {}", handler.captured_count());
+  MLOG_I("total captured by custom handler: {}", handler.captured_count());
 
   vlink::Logger::flush();
   VLOG_I("Logger advanced example finished.");
-
   return 0;
 }

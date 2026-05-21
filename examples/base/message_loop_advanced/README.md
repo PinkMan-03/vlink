@@ -1,143 +1,207 @@
-# VLink MessageLoop 高级示例
+# message_loop_advanced — MessageLoop 进阶：队列类型、调度策略、Schedule::Config、`exec_task`
 
-## 1. 概述
+本示例覆盖 MessageLoop 在生产环境常用的几组进阶能力：
 
-本示例演示了 VLink `MessageLoop` 的高级功能，包括三种队列类型的对比、三种调度策略的切换、`exec_task` 与 `Schedule::Config` 的配合使用、`on_then`/`on_else` 结果链式调用，以及 `invoke_task` 的 Future 模式。
+- **三种队列类型**：`kNormalType` / `kLockfreeType` / `kPriorityType`，按场景选最合适的内部数据结构。
+- **两种 dispatch 策略**：`kBlockStrategy`（条件变量阻塞）vs `kPopStrategy`（自旋轮询）。
+- **`Schedule::Config` 驱动的高阶任务**：延迟执行、优先级、超时回调、异常捕获。
+- **链式 `on_then` / `on_else`**：根据 bool 返回值串联回调。
+- **`invoke_task` / `invoke_task_with_priority`**：返回 `std::future<R>`，在 loop 线程上执行后把结果同步给调用方。
 
-## 2. 文件说明
+读完本示例你能掌握：
 
-| 文件 | 说明 |
-|------|------|
-| `message_loop_advanced.cc` | MessageLoop 高级功能演示源码 |
-| `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
+- 三种队列类型对吞吐 / 公平性 / 延迟的影响。
+- `Schedule::Config` 比 `post_task` 多了哪些可调维度。
+- 何时该用 `invoke_task` 而非 `post_task`。
 
-## 3. 构建与运行
+## 背景与适用场景
 
-```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_message_loop_advanced
-./build/output/bin/example_message_loop_advanced
-```
+`message_loop_basic` 演示了 MessageLoop 的"经典"形态。但 vlink 在底层提供了更细的可调维度，覆盖几类工程需求：
 
-## 4. 核心功能详解
+- **高吞吐 + 低争抢**：用 `kLockfreeType` 队列（基于 MPMC lockfree 实现），消除 mutex 争抢。
+- **任务有优先级**：紧急任务（命令、错误处理）需要插队，用 `kPriorityType`。
+- **任务有截止时间**：需要"如果 X 毫秒内未开始执行就放弃" / "执行超过 Y 毫秒打日志"，用 `exec_task` + `Schedule::Config`。
+- **任务有结果**：业务想拿到任务返回值（int / std::string / 自定义类型），用 `invoke_task` 拿 future。
 
-### 4.1 三种队列类型
+## 核心 API
 
-| 类型 | 枚举值 | 内部实现 | 特点 |
-|------|--------|----------|------|
-| `kNormalType` | 0 | 互斥锁保护的 std::queue | 默认类型，不支持优先级 |
-| `kLockfreeType` | 1 | 无锁 MPMC 队列 | 单生产者路径最快 |
-| `kPriorityType` | 2 | 优先级队列 | 支持任务优先级分发 |
+| API | 签名 | 说明 |
+|-----|------|------|
+| `MessageLoop(MessageLoopType)` | `enum { kNormalType, kLockfreeType, kPriorityType }` | 选队列类型 |
+| `post_task_with_priority` | `bool post_task_with_priority(Function<void()>&&, Priority)` | 优先级队列上投递 |
+| `set_strategy` / `get_strategy` | `void set_strategy(Strategy)` | `kBlockStrategy` 或 `kPopStrategy` |
+| `exec_task` | `template <typename Callable> Schedule::RetStatus exec_task(const Schedule::Config&, Callable&&)` | 带 Config 的任务投递 |
+| `Schedule::Config` | `{ delay_ms, priority, schedule_timeout_ms, execution_timeout_ms }` | 任务执行约束 |
+| `RetStatus::on_schedule_timeout` | 链式 | 入队后超过 schedule_timeout 仍未开始执行 |
+| `RetStatus::on_execution_timeout` | 链式 | 执行超时 |
+| `RetStatus::on_catch` | 链式 | 捕获异常 |
+| `RetStatus::on_then` | `on_then(Function<bool()>)` | 上一步返回 true 时调用 |
+| `RetStatus::on_else` | `on_else(Function<void()>)` | 上一步返回 false 时调用 |
+| `invoke_task` | `template <typename Callable> std::future<R> invoke_task(Callable&&)` | 同步等任务返回值 |
+| `invoke_task_with_priority` | 同上 + Priority | 优先级队列上等返回值 |
+
+## 代码导读
+
+### 1. 三种队列类型
 
 ```cpp
 MessageLoop normal_loop(MessageLoop::kNormalType);
+normal_loop.async_run();
+normal_loop.post_task([]() { VLOG_I("  [Normal] task"); });
+
 MessageLoop lockfree_loop(MessageLoop::kLockfreeType);
+lockfree_loop.async_run();
+lockfree_loop.post_task([]() { VLOG_I("  [Lockfree] task"); });
+
 MessageLoop priority_loop(MessageLoop::kPriorityType);
+priority_loop.async_run();
+priority_loop.post_task_with_priority([]() { VLOG_I("  [Priority] low"); }, MessageLoop::kLowestPriority);
+priority_loop.post_task_with_priority([]() { VLOG_I("  [Priority] high"); }, MessageLoop::kHighestPriority);
+priority_loop.post_task_with_priority([]() { VLOG_I("  [Priority] normal"); }, MessageLoop::kNormalPriority);
 ```
 
-`kPriorityType` 支持 `post_task_with_priority(callback, priority)` 方法，数值越大的任务越先被执行。预定义的优先级包括 `kLowestPriority(1)`、`kTimerPriority(50)`、`kNormalPriority(100)` 和 `kHighestPriority(65535)`。
+- `kNormalType`：mutex + condition_variable，公平 FIFO；默认。
+- `kLockfreeType`：MPMC lockfree 队列；高并发投递场景延迟稳定。
+- `kPriorityType`：堆排序队列，允许优先级插队。
 
-### 4.2 三种调度策略（控制队列已满时的入队行为）
+priority loop 上的任务**按优先级出队**：上面三次 post 后顺序是 high → normal → low。
 
-| 策略 | 枚举值 | 行为（仅在 `post_task` 时队列已满才生效） | 适用场景 |
-|------|--------|------|----------|
-| `kOptimizationStrategy` | 0 | 重试最多 10 次（每次 sleep 1 ms），仍满则丢弃最旧任务后入队（默认） | 平衡延迟与背压 |
-| `kPopStrategy` | 1 | 立即丢弃最旧任务后入队 | 实时场景，新数据优先 |
-| `kBlockStrategy` | 2 | 无限重试（每次 sleep 1 ms）直到有空位 | 不允许丢任务 |
+### 2. dispatch 策略
 
 ```cpp
-loop.set_strategy(MessageLoop::kBlockStrategy);
+loop.set_strategy(MessageLoop::kBlockStrategy);   // mutex+cv 阻塞等
+loop.set_strategy(MessageLoop::kPopStrategy);     // 自旋轮询，亚微秒唤醒
 ```
 
-策略可以在运行时动态切换。**注意**：空闲调度（队列为空时）始终为条件变量等待，不受策略影响。
+- `kBlockStrategy`：队列空时线程 condition_variable 阻塞等待；唤醒延迟约 1-10us。
+- `kPopStrategy`：队列空时主动 yield 自旋检查；亚微秒唤醒但 CPU 占用高。
 
-### 4.3 exec_task 与 Schedule::Config
+### 3. exec_task + Schedule::Config
 
 ```cpp
-loop.exec_task(Schedule::Config{delay_ms, priority, schedule_timeout_ms, execution_timeout_ms},
-               []() { /* void callback */ })
-    .on_schedule_timeout([]() { /* 任务未在规定时间内开始 */ })
-    .on_execution_timeout([]() { /* 任务执行超时 */ })
-    .on_catch([](std::exception& e) { /* 任务抛出异常 */ });
+loop.exec_task(Schedule::Config{0, 100}, []() { VLOG_I("  immediate, priority=100"); });
+
+loop.exec_task(Schedule::Config{200}, []() { VLOG_I("  delayed 200ms"); })
+    .on_schedule_timeout([]() { VLOG_W("  schedule timeout"); })
+    .on_execution_timeout([]() { VLOG_W("  execution timeout"); })
+    .on_catch([](std::exception& e) { MLOG_E("  caught: {}", e.what()); });
 ```
 
-`Schedule::Config` 的四个字段：
+`Schedule::Config{delay_ms, priority, schedule_timeout_ms, execution_timeout_ms}` 控制：
 
-| 字段 | 含义 | 默认值 |
-|------|------|--------|
-| `delay_ms` | 投递前延迟（通过单次定时器实现） | 0 |
-| `priority` | 任务分发优先级 | 0 |
-| `schedule_timeout_ms` | 任务开始前的最长等待时间 | 0（禁用） |
-| `execution_timeout_ms` | 任务执行的最长时间 | 0（禁用） |
+- `delay_ms`：投递后延迟多久才能开始执行。
+- `priority`：在 priority loop 上的优先级。
+- `schedule_timeout_ms`：入队后最长等待多久；超时 `on_schedule_timeout` 被调。
+- `execution_timeout_ms`：执行最长时长；超时 `on_execution_timeout` 被调（**不会强行中断任务**）。
 
-返回的 `Schedule::Status` 对象支持链式注册回调，所有回调都在循环线程上调用。
+链式 `.on_*` 同步注册，按各自时机被调。
 
-### 4.4 on_then / on_else 结果链
-
-当回调返回 `bool` 时，`exec_task` 返回 `Schedule::RetStatus`：
+### 4. on_then / on_else 链
 
 ```cpp
-loop.exec_task(config, []() -> bool { return try_connect(); })
-    .on_then([]() -> bool {
-        // callback 返回 true 时触发
-        return start_session();
-    })
-    .on_then([]() -> bool {
-        // 上一个 on_then 返回 true 时继续
-        return verify_session();
-    })
-    .on_else([]() {
-        // callback 返回 false 时触发
-        retry_later();
-    });
+loop.exec_task(Schedule::Config{},
+               []() -> bool {
+                 VLOG_I("  bool task -> true");
+                 return true;
+               })
+    .on_then([]() -> bool { VLOG_I("  on_then(1)"); return true; })
+    .on_then([]() -> bool { VLOG_I("  on_then(2)"); return true; })
+    .on_else([]() { VLOG_I("  on_else (NOT called)"); });
+
+loop.exec_task(Schedule::Config{},
+               []() -> bool {
+                 return false;
+               })
+    .on_then([]() -> bool { return true; })
+    .on_else([]() { VLOG_I("  on_else: failure path"); });
 ```
 
-多个 `on_then` 可以串联，形成一个条件执行链。每个 `on_then` 回调返回 `bool`，只有返回 `true` 才会继续执行下一个。如果任何环节返回 `false`，则触发 `on_else`。
+callable 返回 bool 时，`on_then` 在 true 时被调（可链式继续返回 bool 串接），`on_else` 在 false 时被调（短路）。类似简化版 promise/future 链。
 
-### 4.5 invoke_task 与 Future
+### 5. invoke_task 拿返回值
 
 ```cpp
-auto future = loop.invoke_task([]() -> int { return compute(); });
-int result = future.get();  // 阻塞等待结果
+auto fut_int = loop.invoke_task([]() -> int {
+  VLOG_I("  computing on loop thread...");
+  return 42;
+});
+MLOG_I("  invoke result: {}", fut_int.get());
+
+auto fut_str = loop.invoke_task([]() -> std::string { return "hello from loop"; });
+MLOG_I("  invoke string: {}", fut_str.get());
 ```
 
-`invoke_task` 将可调用对象投递到循环线程执行，返回 `std::future<T>` 以获取执行结果。支持任意返回类型。
+`invoke_task` 内部用 `std::promise/std::future` 把任务结果回传调用线程。`.get()` 阻塞等待任务在 loop 上完成。
 
-**重要警告**：不要在循环线程上调用 `future.get()`，否则会死锁。`invoke_task_with_priority` 变体支持指定优先级。
-
-### 4.6 Priority invoke_task
+### 6. invoke_task_with_priority
 
 ```cpp
-auto future = loop.invoke_task_with_priority(
-    []() -> int { return result; },
-    MessageLoop::kHighestPriority);
+auto high = loop.invoke_task_with_priority([]() -> int { return 1; }, MessageLoop::kHighestPriority);
+auto low  = loop.invoke_task_with_priority([]() -> int { return 2; }, MessageLoop::kLowestPriority);
+
+MLOG_I("  high={} low={}", high.get(), low.get());
 ```
 
-在优先级队列循环中，高优先级的 invoke_task 会被优先执行。
+优先级队列 + future 返回值的组合。
 
-## 5. 代码执行流程
+## 运行
 
-1. **队列类型对比**：分别创建 Normal、Lockfree、Priority 类型的循环并执行任务
-2. **策略切换**：在运行的循环上动态切换三种调度策略
-3. **void exec_task**：使用 Schedule::Config 配置延迟和优先级，注册超时和异常回调
-4. **bool exec_task 链**：演示 true 路径（on_then 链）和 false 路径（on_else）
-5. **invoke_task**：通过 future 获取循环线程上的计算结果
-6. **优先级 invoke**：在 Priority 队列上执行不同优先级的 invoke_task
+```bash
+./build/output/bin/example_message_loop_advanced
+```
 
-## 6. Schedule::Status 生命周期
+预期输出（节选）：
 
-`Schedule::Status` 是一个移动语义的 RAII 对象，内部通过 `shared_ptr<Status::Impl>` 管理状态。即使 Status 对象被销毁，已注册的回调仍然有效（因为任务包装器持有 shared_ptr）。
+```
+=== Queue types ===
+  [Normal] task
+  [Lockfree] task
+  [Priority] high
+  [Priority] normal
+  [Priority] low
+=== Dispatch strategies ===
+  kBlockStrategy
+  kPopStrategy
+=== exec_task with Schedule::Config ===
+  immediate, priority=100
+  delayed 200ms
+=== on_then / on_else chaining ===
+  bool task -> true
+  on_then(1)
+  on_then(2)
+  bool task -> false
+  on_else: failure path
+=== invoke_task ===
+  computing on loop thread...
+  invoke result: 42
+  invoke string: hello from loop
+=== invoke_task_with_priority ===
+  high=1 low=2
+MessageLoop advanced example finished.
+```
 
-## 7. 性能考量
+## 常见陷阱
 
-- `kLockfreeType` 在高频投递场景下开销最低
-- `kPriorityType` 有排序开销，但保证关键任务优先处理
-- `kPopStrategy` 适合"宁可丢旧不丢新"的实时场景（队列满时直接丢弃最旧任务）
-- `kBlockStrategy` 适合不允许丢任务的场景（队列满时阻塞重试至成功）
+1. **`post_task_with_priority` 在非 priority loop 上调**：行为退化为忽略优先级；要么换 priority loop，要么用普通 `post_task`。
+2. **`kLockfreeType` + `invoke_task`**：fut.get() 在 loop 线程内调会死锁。
+3. **on_then 链很长**：每一环都是同步调用，串行执行；任务多就拆分。
+4. **`execution_timeout` 不真的中断任务**：vlink 不会 kill 任务，只触发回调。长任务还是会跑完。
+5. **`Schedule::Config{200}` 是 delay_ms=200**：单参形态；其它字段保持默认。
 
-## 8. 注意事项
+## 设计要点
 
-- `invoke_task().get()` 不能在循环线程上调用，否则死锁
-- `kPriorityType` 之外的队列类型忽略优先级参数
-- `exec_task` 的 `delay_ms > 0` 时通过内部一次性定时器实现延迟
-- 所有回调（on_then/on_else/on_catch/on_timeout）都在循环线程上执行
+- 三种队列类型在内存布局、缓存友好度、并发争抢上各有取舍；切换前先用 microbench 比较。
+- `Schedule::Config` 的 timeout 是软超时；vlink 不强制中断已开始的任务。
+- `invoke_task` 内部要分配 promise/future（堆分配）；微秒级热路径用 atomic + `post_task` 更便宜。
+
+## 配图
+
+无专属配图。MessageLoop 内部结构见 `../message_loop_basic/images/message-loop-architecture.png`。
+
+## 参考
+
+- `../message_loop_basic/` — MessageLoop 入门
+- `../schedule/` — `Schedule::Config` 在 Timer 等 API 上的更多用法
+- `../multi_loop/` — 多 loop 并行
+- `../thread_pool/` — ThreadPool 与 MessageLoop 的取舍
+- `vlink/include/vlink/base/message_loop.h` — MessageLoop 完整接口

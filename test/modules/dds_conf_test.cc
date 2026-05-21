@@ -23,85 +23,118 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_DDS
+
+#include "./modules/dds_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_DDS
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-DdsConf - construction") {
-  TEST_CASE("construct with topic only uses defaults") {
+TEST_SUITE("modules-DdsConf") {
+  TEST_CASE("default domain depth and qos when only topic supplied") {
     DdsConf conf("vehicle/speed");
-    CHECK(conf.topic == "vehicle/speed");
-    CHECK(conf.domain == 0);
-    CHECK(conf.depth == 0);
+
+    CHECK_EQ(conf.topic, "vehicle/speed");
+    CHECK_EQ(conf.domain, 0);
+    CHECK_EQ(conf.depth, 0);
     CHECK(conf.qos.empty());
     CHECK(conf.qos_ext.empty());
   }
 
-  TEST_CASE("construct with topic, domain, depth") {
+  TEST_CASE("explicit domain and depth are stored") {
     DdsConf conf("my_topic", 5, 10);
-    CHECK(conf.topic == "my_topic");
-    CHECK(conf.domain == 5);
-    CHECK(conf.depth == 10);
+
+    CHECK_EQ(conf.topic, "my_topic");
+    CHECK_EQ(conf.domain, 5);
+    CHECK_EQ(conf.depth, 10);
     CHECK(conf.qos.empty());
   }
 
-  TEST_CASE("construct with named QoS") {
-    DdsConf conf("my_topic", 0, 0, "my_qos_profile");
-    CHECK(conf.qos == "my_qos_profile");
+  TEST_CASE("named qos profile is stored") {
+    DdsConf conf("my_topic", 2, 0, "fast_profile");
+
+    CHECK_EQ(conf.qos, "fast_profile");
+    CHECK(conf.qos_ext.empty());
   }
 
-  TEST_CASE("construct with qos_ext map") {
+  TEST_CASE("qos_ext constructor stores property map") {
     DdsConf::PropertiesMap ext;
-    ext["pub"] = "some_pub_profile";
+    ext["pub"] = "pub_profile";
+    ext["sub"] = "sub_profile";
 
-    DdsConf conf("my_topic", 0, ext);
-    CHECK(!conf.qos_ext.empty());
-    CHECK(conf.qos_ext.at("pub") == "some_pub_profile");
+    DdsConf conf("my_topic", 1, ext);
+
+    CHECK_EQ(conf.domain, 1);
+    CHECK(conf.qos.empty());
+    CHECK_FALSE(conf.qos_ext.empty());
+    CHECK_EQ(conf.qos_ext.at("pub"), "pub_profile");
+    CHECK_EQ(conf.qos_ext.at("sub"), "sub_profile");
   }
-}
 
-TEST_SUITE("modules-DdsConf - equality operators") {
-  TEST_CASE("equal configs compare equal") {
-    DdsConf a("topic", 1, 5, "event");
-    DdsConf b("topic", 1, 5, "event");
+  TEST_CASE("operator== holds when all fields match") {
+    DdsConf a("topic", 1, 5, "q");
+    DdsConf b("topic", 1, 5, "q");
+
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
   }
 
-  TEST_CASE("different topic compares not equal") {
-    DdsConf a("topic_a");
-    DdsConf b("topic_b");
+  TEST_CASE("operator!= detects differing topic") {
+    DdsConf a("topic_a", 0, 0);
+    DdsConf b("topic_b", 0, 0);
+
+    CHECK(a != b);
+    CHECK_FALSE(a == b);
+  }
+
+  TEST_CASE("operator!= detects differing domain") {
+    DdsConf a("topic", 0, 0);
+    DdsConf b("topic", 1, 0);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different domain compares not equal") {
-    DdsConf a("topic", 0);
-    DdsConf b("topic", 1);
+  TEST_CASE("operator!= detects differing depth") {
+    DdsConf a("topic", 0, 1);
+    DdsConf b("topic", 0, 2);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different qos compares not equal") {
+  TEST_CASE("operator!= detects differing qos name") {
     DdsConf a("topic", 0, 0, "qos_a");
     DdsConf b("topic", 0, 0, "qos_b");
+
     CHECK(a != b);
   }
-}
 
-TEST_SUITE("modules-DdsConf - transport type") {
+  TEST_CASE("operator!= detects differing qos_ext") {
+    DdsConf::PropertiesMap ext_a;
+    ext_a["pub"] = "x";
+    DdsConf::PropertiesMap ext_b;
+    ext_b["pub"] = "y";
+
+    DdsConf a("topic", 0, ext_a);
+    DdsConf b("topic", 0, ext_b);
+
+    CHECK(a != b);
+  }
+
   TEST_CASE("get_transport_type returns kDds") {
     DdsConf conf("topic");
+
     CHECK(conf.get_transport_type() == TransportType::kDds);
   }
-}
 
-#else
+  TEST_CASE("register_qos accepts a valid profile name") {
+    Qos qos;
+    qos.reliability.kind = Qos::Reliability::kReliable;
 
-TEST_SUITE("modules-DdsConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_DDS not defined - skip") { CHECK(true); }
+    CHECK_NOTHROW(DdsConf::register_qos("dds_test_profile", qos));
+  }
 }
 
 #endif  // VLINK_SUPPORT_DDS

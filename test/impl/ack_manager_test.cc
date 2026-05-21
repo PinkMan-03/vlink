@@ -31,38 +31,31 @@
 #include <thread>
 #include <vector>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: AckManager - basic request lifecycle
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-AckManager - basic lifecycle") {
-  TEST_CASE("create_request returns non-null") {
+TEST_SUITE("impl-AckManager") {
+  TEST_CASE("create_request returns non-null token") {
     AckManager mgr;
     auto req = mgr.create_request();
     CHECK(req != nullptr);
   }
 
-  TEST_CASE("multiple create_request calls return distinct tokens") {
+  TEST_CASE("successive tokens are distinct") {
     AckManager mgr;
     auto r1 = mgr.create_request();
     auto r2 = mgr.create_request();
     auto r3 = mgr.create_request();
-
     CHECK(r1 != r2);
     CHECK(r2 != r3);
     CHECK(r1 != r3);
   }
 
-  TEST_CASE("process notified by separate thread succeeds") {
+  TEST_CASE("process returns true when notified by another thread") {
     AckManager mgr;
     auto req = mgr.create_request();
 
     std::thread notifier([&mgr, &req]() {
-      // Give the process thread time to start waiting
-      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      std::this_thread::sleep_for(20ms);
       mgr.notify(req);
     });
 
@@ -72,32 +65,49 @@ TEST_SUITE("impl-AckManager - basic lifecycle") {
     CHECK(result == true);
   }
 
-  TEST_CASE("process times out when no notify is called") {
+  TEST_CASE("process returns false on timeout when no notify arrives") {
     AckManager mgr;
     auto req = mgr.create_request();
-
     bool result = mgr.process(req, 50, []() { return true; });
-
     CHECK(result == false);
   }
 
   TEST_CASE("process returns false when send callback returns false") {
     AckManager mgr;
     auto req = mgr.create_request();
-
     bool result = mgr.process(req, 2000, []() { return false; });
-
     CHECK(result == false);
   }
 
-  TEST_CASE("notify with callback invokes the callback") {
+  TEST_CASE("process with zero timeout returns false without blocking") {
+    AckManager mgr;
+    auto req = mgr.create_request();
+    bool result = mgr.process(req, 0, []() { return true; });
+    CHECK(result == false);
+  }
+
+  TEST_CASE("process with negative timeout waits until notify") {
     AckManager mgr;
     auto req = mgr.create_request();
 
+    std::thread notifier([&mgr, &req]() {
+      std::this_thread::sleep_for(30ms);
+      mgr.notify(req);
+    });
+
+    bool result = mgr.process(req, -1, []() { return true; });
+    notifier.join();
+
+    CHECK(result == true);
+  }
+
+  TEST_CASE("notify invokes optional callback before waking process") {
+    AckManager mgr;
+    auto req = mgr.create_request();
     bool callback_called = false;
 
-    std::thread notifier([&mgr, &req, &callback_called]() {
-      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::thread notifier([&]() {
+      std::this_thread::sleep_for(20ms);
       mgr.notify(req, [&callback_called]() { callback_called = true; });
     });
 
@@ -108,214 +118,12 @@ TEST_SUITE("impl-AckManager - basic lifecycle") {
     CHECK(callback_called == true);
   }
 
-  TEST_CASE("notify returns false for unknown request") {
-    AckManager mgr;
-    auto req = mgr.create_request();
-    // Do not call process — request is not in the set
-
-    // notify on a request not yet in the set should return false
-    bool notified = mgr.notify(req);
-    CHECK(notified == false);
-  }
-
-  TEST_CASE("remove returns false for request not in set") {
+  TEST_CASE("notify with nullptr callback still wakes process") {
     AckManager mgr;
     auto req = mgr.create_request();
 
-    bool removed = mgr.remove(req);
-    CHECK(removed == false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: AckManager - clear / interruption
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-AckManager - clear") {
-  TEST_CASE("clear wakes all blocked process calls") {
-    AckManager mgr;
-
-    constexpr int kRequests = 3;
-    std::vector<AckManager::RequestPtr> reqs;
-    reqs.reserve(kRequests);
-
-    for (int i = 0; i < kRequests; ++i) {
-      reqs.push_back(mgr.create_request());
-    }
-
-    std::atomic<int> failed_count{0};
-    std::vector<std::thread> threads;
-    threads.reserve(kRequests);
-
-    for (int i = 0; i < kRequests; ++i) {
-      threads.emplace_back([&mgr, &reqs, i, &failed_count]() {
-        bool ok = mgr.process(reqs[i], 5000, []() { return true; });
-
-        if (!ok) {
-          ++failed_count;
-        }
-      });
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    mgr.clear();
-
-    for (auto& t : threads) {
-      t.join();
-    }
-
-    CHECK(failed_count.load() == kRequests);
-  }
-
-  TEST_CASE("process returns false immediately after clear") {
-    AckManager mgr;
-    mgr.clear();
-
-    auto req = mgr.create_request();
-    bool result = mgr.process(req, 2000, []() { return true; });
-
-    CHECK(result == false);
-  }
-
-  TEST_CASE("reset_interrupted allows new generation without reviving cleared requests") {
-    AckManager mgr;
-    auto old_req = mgr.create_request();
-    std::atomic<bool> old_result{true};
-
-    std::thread waiter([&mgr, &old_req, &old_result]() {
-      old_result.store(mgr.process(old_req, 5000, []() { return true; }), std::memory_order_release);
-    });
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    mgr.clear();
-    mgr.reset_interrupted();
-
-    auto new_req = mgr.create_request();
-
-    std::thread notifier([&mgr, &new_req]() {
-      std::this_thread::sleep_for(std::chrono::milliseconds(20));
-      mgr.notify(new_req);
-    });
-
-    bool new_result = mgr.process(new_req, 2000, []() { return true; });
-
-    waiter.join();
-    notifier.join();
-
-    CHECK(new_result == true);
-    CHECK(old_result.load(std::memory_order_acquire) == false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: AckManager - concurrent requests
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-AckManager - concurrent") {
-  TEST_CASE("multiple concurrent process/notify pairs all succeed") {
-    AckManager mgr;
-    constexpr int kPairs = 5;
-
-    std::vector<AckManager::RequestPtr> reqs;
-    reqs.reserve(kPairs);
-
-    for (int i = 0; i < kPairs; ++i) {
-      reqs.push_back(mgr.create_request());
-    }
-
-    std::atomic<int> success_count{0};
-    std::vector<std::thread> waiters;
-    waiters.reserve(kPairs);
-
-    for (int i = 0; i < kPairs; ++i) {
-      waiters.emplace_back([&mgr, &reqs, i, &success_count]() {
-        bool ok = mgr.process(reqs[i], 3000, []() { return true; });
-
-        if (ok) {
-          ++success_count;
-        }
-      });
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
-
-    // Notify all in reverse order to show ordering independence
-    for (int i = kPairs - 1; i >= 0; --i) {
-      mgr.notify(reqs[i]);
-    }
-
-    for (auto& t : waiters) {
-      t.join();
-    }
-
-    CHECK(success_count.load() == kPairs);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: AckManager - infinite wait
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-AckManager - infinite wait") {
-  TEST_CASE("process with negative timeout waits until notify") {
-    AckManager mgr;
-    auto req = mgr.create_request();
-
-    std::thread notifier([&mgr, &req]() {
-      std::this_thread::sleep_for(std::chrono::milliseconds(30));
-      mgr.notify(req);
-    });
-
-    bool result = mgr.process(req, -1, []() { return true; });
-    notifier.join();
-
-    CHECK(result == true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: AckManager - remove
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-AckManager - remove") {
-  TEST_CASE("remove cancels a pending request") {
-    AckManager mgr;
-    auto req = mgr.create_request();
-
-    std::atomic<bool> process_result{true};
-
-    std::thread waiter(
-        [&mgr, &req, &process_result]() { process_result = mgr.process(req, 5000, []() { return true; }); });
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    // Remove should find the request in the set
-    // Note: remove does not wake the waiter, so the waiter will time out
-    // or we clear to unblock
-    mgr.clear();
-
-    waiter.join();
-    CHECK(process_result.load() == false);
-  }
-
-  TEST_CASE("remove on non-existent request returns false") {
-    AckManager mgr;
-    auto req = mgr.create_request();
-    // Not added via process, so remove should return false
-    CHECK(mgr.remove(req) == false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: AckManager - notify edge cases
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-AckManager - notify edge cases") {
-  TEST_CASE("notify with nullptr callback succeeds") {
-    AckManager mgr;
-    auto req = mgr.create_request();
-
-    std::thread notifier([&mgr, &req]() {
-      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::thread notifier([&]() {
+      std::this_thread::sleep_for(20ms);
       mgr.notify(req, nullptr);
     });
 
@@ -325,64 +133,142 @@ TEST_SUITE("impl-AckManager - notify edge cases") {
     CHECK(result == true);
   }
 
-  TEST_CASE("double notify on same request - second returns false") {
+  TEST_CASE("notify returns false for request not in the pending set") {
     AckManager mgr;
     auto req = mgr.create_request();
+    bool notified = mgr.notify(req);
+    CHECK(notified == false);
+  }
 
-    std::thread notifier([&mgr, &req]() {
-      std::this_thread::sleep_for(std::chrono::milliseconds(20));
-      bool first = mgr.notify(req);
-      // The request is removed after first notify, so second should fail
-      bool second = mgr.notify(req);
-      CHECK(first == true);
-      CHECK(second == false);
+  TEST_CASE("second notify on same request returns false") {
+    AckManager mgr;
+    auto req = mgr.create_request();
+    bool first_ok = false;
+    bool second_ok = false;
+
+    std::thread notifier([&]() {
+      std::this_thread::sleep_for(20ms);
+      first_ok = mgr.notify(req);
+      second_ok = mgr.notify(req);
     });
 
-    bool result = mgr.process(req, 2000, []() { return true; });
+    (void)mgr.process(req, 2000, []() { return true; });
     notifier.join();
 
-    CHECK(result == true);
+    CHECK(first_ok == true);
+    CHECK(second_ok == false);
   }
 
-  TEST_CASE("process with zero timeout returns false if not immediately notified") {
+  TEST_CASE("remove returns false for request not in the pending set") {
     AckManager mgr;
     auto req = mgr.create_request();
-
-    bool result = mgr.process(req, 0, []() { return true; });
-    // With timeout 0, should return false almost immediately unless notified
-    CHECK(result == false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: AckManager - sequence numbers
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-AckManager - request sequence") {
-  TEST_CASE("requests have monotonically increasing sequence numbers") {
-    AckManager mgr;
-    auto r1 = mgr.create_request();
-    auto r2 = mgr.create_request();
-    auto r3 = mgr.create_request();
-
-    // Requests should be distinct and ordered
-    CHECK(r1 != nullptr);
-    CHECK(r2 != nullptr);
-    CHECK(r3 != nullptr);
-    CHECK(r1 != r2);
-    CHECK(r2 != r3);
+    CHECK(mgr.remove(req) == false);
   }
 
-  TEST_CASE("clear followed by new requests works") {
+  TEST_CASE("clear wakes all blocked process calls with false") {
     AckManager mgr;
-    auto r1 = mgr.create_request();
+    static constexpr int kRequests = 3;
+
+    std::vector<AckManager::RequestPtr> reqs;
+    reqs.reserve(kRequests);
+    for (int i = 0; i < kRequests; ++i) {
+      reqs.push_back(mgr.create_request());
+    }
+
+    std::atomic<int> failed{0};
+    std::vector<std::thread> threads;
+    threads.reserve(kRequests);
+
+    for (int i = 0; i < kRequests; ++i) {
+      threads.emplace_back([&mgr, &reqs, i, &failed]() {
+        bool ok = mgr.process(reqs[i], 5000, []() { return true; });
+
+        if (!ok) {
+          ++failed;
+        }
+      });
+    }
+
+    std::this_thread::sleep_for(50ms);
     mgr.clear();
 
-    // After clear, process should return false immediately
-    auto r2 = mgr.create_request();
-    CHECK(r2 != nullptr);
-    bool result = mgr.process(r2, 50, []() { return true; });
+    for (auto& t : threads) {
+      t.join();
+    }
+
+    CHECK(failed.load() == kRequests);
+  }
+
+  TEST_CASE("process returns false immediately after clear") {
+    AckManager mgr;
+    mgr.clear();
+    auto req = mgr.create_request();
+    bool result = mgr.process(req, 2000, []() { return true; });
     CHECK(result == false);
+  }
+
+  TEST_CASE("reset_interrupted allows new requests to succeed while old generation still fails") {
+    AckManager mgr;
+    auto old_req = mgr.create_request();
+    std::atomic<bool> old_result{true};
+
+    std::thread waiter(
+        [&]() { old_result.store(mgr.process(old_req, 5000, []() { return true; }), std::memory_order_release); });
+
+    std::this_thread::sleep_for(50ms);
+    mgr.clear();
+    mgr.reset_interrupted();
+
+    auto new_req = mgr.create_request();
+
+    std::thread notifier([&]() {
+      std::this_thread::sleep_for(20ms);
+      mgr.notify(new_req);
+    });
+
+    bool new_result = mgr.process(new_req, 2000, []() { return true; });
+    waiter.join();
+    notifier.join();
+
+    CHECK(new_result == true);
+    CHECK(old_result.load(std::memory_order_acquire) == false);
+  }
+
+  TEST_CASE("multiple concurrent process and notify pairs all succeed") {
+    AckManager mgr;
+    static constexpr int kPairs = 5;
+
+    std::vector<AckManager::RequestPtr> reqs;
+    reqs.reserve(kPairs);
+    for (int i = 0; i < kPairs; ++i) {
+      reqs.push_back(mgr.create_request());
+    }
+
+    std::atomic<int> success{0};
+    std::vector<std::thread> waiters;
+    waiters.reserve(kPairs);
+
+    for (int i = 0; i < kPairs; ++i) {
+      waiters.emplace_back([&mgr, &reqs, i, &success]() {
+        bool ok = mgr.process(reqs[i], 3000, []() { return true; });
+
+        if (ok) {
+          ++success;
+        }
+      });
+    }
+
+    std::this_thread::sleep_for(30ms);
+
+    for (int i = kPairs - 1; i >= 0; --i) {
+      mgr.notify(reqs[i]);
+    }
+
+    for (auto& t : waiters) {
+      t.join();
+    }
+
+    CHECK(success.load() == kPairs);
   }
 }
 

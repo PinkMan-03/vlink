@@ -27,347 +27,253 @@
 
 #include <doctest/doctest.h>
 
+#include <cstdint>
 #include <string>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Url - static helper methods
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Url - static helpers") {
-  TEST_CASE("get_sort_index - intra:// has lower index than dds://") {
-    int intra_idx = Url::get_sort_index("intra://topic");
-    int dds_idx = Url::get_sort_index("dds://topic");
-
-    CHECK(intra_idx < dds_idx);
-  }
-
-  TEST_CASE("get_sort_index - shm:// has low index") {
-    int shm_idx = Url::get_sort_index("shm://topic");
-    int zenoh_idx = Url::get_sort_index("zenoh://topic");
-
-    CHECK(shm_idx < zenoh_idx);
-  }
-
-  TEST_CASE("get_sort_index - returns non-negative value") {
-    CHECK(Url::get_sort_index("intra://test") >= 0);
-    CHECK(Url::get_sort_index("dds://test") >= 0);
-    CHECK(Url::get_sort_index("zenoh://test") >= 0);
-    CHECK(Url::get_sort_index("unknown://test") >= 0);
-  }
-
-  TEST_CASE("is_local_type - intra:// is local") { CHECK(Url::is_local_type("intra://topic") == true); }
-
-  TEST_CASE("is_local_type - shm:// is local") { CHECK(Url::is_local_type("shm://topic") == true); }
-
-  TEST_CASE("is_local_type - shm2:// is local") { CHECK(Url::is_local_type("shm2://topic") == true); }
-
-  TEST_CASE("is_local_type - dds:// is not local") { CHECK(Url::is_local_type("dds://topic") == false); }
-
-  TEST_CASE("is_local_type - zenoh:// is not local") { CHECK(Url::is_local_type("zenoh://topic") == false); }
-
-  TEST_CASE("is_local_type - ddsc:// is not local") { CHECK(Url::is_local_type("ddsc://topic") == false); }
-
-  TEST_CASE("is_intra_type - intra:// returns true") { CHECK(Url::is_intra_type("intra://topic") == true); }
-
-  TEST_CASE("is_intra_type - shm:// returns false") { CHECK(Url::is_intra_type("shm://topic") == false); }
-
-  TEST_CASE("is_intra_type - dds:// returns false") { CHECK(Url::is_intra_type("dds://topic") == false); }
-
-  TEST_CASE("is_shm_type - shm:// returns true") { CHECK(Url::is_shm_type("shm://topic") == true); }
-
-  TEST_CASE("is_shm_type - shm2:// returns true") { CHECK(Url::is_shm_type("shm2://topic") == true); }
-
-  TEST_CASE("is_shm_type - intra:// returns false") { CHECK(Url::is_shm_type("intra://topic") == false); }
-
-  TEST_CASE("is_shm_type - dds:// returns false") { CHECK(Url::is_shm_type("dds://topic") == false); }
-
-  TEST_CASE("get_transport_enable_flags returns non-zero when intra is enabled") {
-#ifdef VLINK_SUPPORT_INTRA
-    uint16_t flags = Url::get_transport_enable_flags();
-    CHECK((flags & Url::kEnableIntra) != 0);
-#else
-    CHECK(true);  // skip when intra not compiled in
-#endif
-  }
-
-  TEST_CASE("TransportEnableFlag bitmask values are distinct") {
-    CHECK(Url::kEnableIntra != Url::kEnableShm);
-    CHECK(Url::kEnableShm != Url::kEnableShm2);
-    CHECK(Url::kEnableZenoh != Url::kEnableDds);
-    CHECK(Url::kEnableDds != Url::kEnableDdsc);
-  }
-
-  TEST_CASE("kEnableAll has all lower bits set") {
-    // kEnableAll = 0xFFFF
-    CHECK(Url::kEnableAll == 0xFFFF);
-  }
-
-  TEST_CASE("kEnableEmpty is zero") { CHECK(Url::kEnableEmpty == 0); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Url - construction and get_str
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Url - construction") {
-  TEST_CASE("intra:// URL constructs successfully") {
+TEST_SUITE("impl-Url") {
+  TEST_CASE("construct from string stores the url in get_str") {
     Url url("intra://test_topic");
-    CHECK(url.get_str() == "intra://test_topic");
+
+    CHECK_EQ(url.get_str(), "intra://test_topic");
   }
 
-  TEST_CASE("get_target returns non-null for valid URL") {
+  TEST_CASE("get_target returns non-null for a supported url") {
     Url url("intra://topic");
-    CHECK(url.get_target() != nullptr);
+
+    CHECK_NE(url.get_target(), nullptr);
   }
 
-  TEST_CASE("get_transport_type returns kIntra for intra:// URL") {
+  TEST_CASE("get_transport_type returns kIntra for intra url") {
     Url url("intra://topic");
-    CHECK(url.get_transport_type() == TransportType::kIntra);
+
+    CHECK_EQ(url.get_transport_type(), TransportType::kIntra);
   }
 
-  TEST_CASE("copy constructor produces independent copy") {
+  TEST_CASE("copy constructor produces independent object with same string") {
     Url original("intra://copy_test");
     Url copy(original);
 
-    CHECK(copy.get_str() == original.get_str());
-    CHECK(copy.get_target() != original.get_target());
+    CHECK_EQ(copy.get_str(), original.get_str());
+    CHECK_NE(copy.get_target(), original.get_target());
   }
 
-  TEST_CASE("move constructor transfers ownership") {
+  TEST_CASE("move constructor transfers string and target") {
     Url original("intra://move_test");
-    const std::string expected_str = original.get_str();
+    const std::string expected = original.get_str();
 
     Url moved(std::move(original));
 
-    CHECK(moved.get_str() == expected_str);
-    CHECK(moved.get_target() != nullptr);
+    CHECK_EQ(moved.get_str(), expected);
+    CHECK_NE(moved.get_target(), nullptr);
+    CHECK_EQ(original.get_target(), nullptr);
   }
 
-  TEST_CASE("copy assignment works") {
+  TEST_CASE("copy assignment replaces destination with copy of source") {
     Url a("intra://topic_a");
     Url b("intra://topic_b");
 
     b = a;
 
-    CHECK(b.get_str() == a.get_str());
-    CHECK(b.get_target() != a.get_target());
+    CHECK_EQ(b.get_str(), a.get_str());
+    CHECK_NE(b.get_target(), a.get_target());
   }
 
-  TEST_CASE("move assignment works") {
+  TEST_CASE("move assignment transfers source to destination") {
     Url a("intra://topic_a");
     Url b("intra://topic_b");
     const std::string expected = a.get_str();
 
     b = std::move(a);
 
-    CHECK(b.get_str() == expected);
+    CHECK_EQ(b.get_str(), expected);
+    CHECK_EQ(a.get_target(), nullptr);
   }
 
-  // TEST_CASE("self copy assignment is safe") {
-  //   Url url("intra://self_assign");
-  //   url = url;  // NOLINT
-  //   CHECK(url.get_str() == "intra://self_assign");
-  // }
-
-  // TEST_CASE("self move assignment is safe") {
-  //   Url url("intra://self_move");
-  //   url = std::move(url);
-  //   // After self-move the object should still be in a valid (possibly empty) state
-  //   CHECK(true);
-  // }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Url - parse and validity
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Url - parse") {
-  TEST_CASE("parse kPublisher succeeds for intra://") {
+  TEST_CASE("parse kPublisher succeeds for intra url") {
     Url url("intra://parse_test");
-    bool ok = url.parse(kPublisher);
-    CHECK(ok == true);
+
+    CHECK(url.parse(kPublisher));
   }
 
-  TEST_CASE("parse kSubscriber succeeds for intra://") {
+  TEST_CASE("parse kSubscriber succeeds for intra url") {
     Url url("intra://parse_test");
-    bool ok = url.parse(kSubscriber);
-    CHECK(ok == true);
+
+    CHECK(url.parse(kSubscriber));
   }
 
-  TEST_CASE("is_valid returns true for intra://") {
+  TEST_CASE("parse kServer succeeds for intra url") {
+    Url url("intra://server_test");
+
+    CHECK(url.parse(kServer));
+  }
+
+  TEST_CASE("parse kClient succeeds for intra url") {
+    Url url("intra://client_test");
+
+    CHECK(url.parse(kClient));
+  }
+
+  TEST_CASE("parse kSetter succeeds for intra url") {
+    Url url("intra://setter_test");
+
+    CHECK(url.parse(kSetter));
+  }
+
+  TEST_CASE("parse kGetter succeeds for intra url") {
+    Url url("intra://getter_test");
+
+    CHECK(url.parse(kGetter));
+  }
+
+  TEST_CASE("is_valid returns true for intra url after parse") {
     Url url("intra://valid_test");
     url.parse(kPublisher);
-    CHECK(url.is_valid() == true);
+
+    CHECK(url.is_valid());
   }
 
-  TEST_CASE("get_impl_type returns correct type after parse") {
+  TEST_CASE("get_impl_type contains kPublisher bit after parsing as publisher") {
     Url url("intra://impl_test");
     url.parse(kPublisher);
-    ImplType t = url.get_impl_type();
-    CHECK((t & kPublisher) != 0);
+
+    CHECK_NE((url.get_impl_type() & kPublisher), 0);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Url - Protocol struct fields
-// ---------------------------------------------------------------------------
+  TEST_CASE("get_str preserves url that contains query parameters") {
+    Url url("intra://topic?key=value");
 
-TEST_SUITE("impl-Url - protocol fields via target") {
-  TEST_CASE("get_transport_type kIntra after intra:// construction") {
-    Url url("intra://namespace/topic");
-    CHECK(url.get_transport_type() == TransportType::kIntra);
+    CHECK_NE(url.get_str().find("intra://"), std::string::npos);
+  }
+
+  TEST_CASE("get_str preserves url with underscores in topic name") {
+    Url url("intra://topic_with_underscores");
+
+    CHECK_EQ(url.get_str(), "intra://topic_with_underscores");
+    CHECK_NE(url.get_target(), nullptr);
+  }
+
+  TEST_CASE("get_transport_type returns kIntra for intra url with multi-segment path") {
+    Url url("intra://ns/topic/sub");
+
+    CHECK_EQ(url.get_transport_type(), TransportType::kIntra);
   }
 
 #ifdef VLINK_SUPPORT_DDS
-  TEST_CASE("get_transport_type kDds after dds:// construction") {
+  TEST_CASE("get_transport_type returns kDds for dds url") {
     Url url("dds://namespace/topic");
-    CHECK(url.get_transport_type() == TransportType::kDds);
+
+    CHECK_EQ(url.get_transport_type(), TransportType::kDds);
   }
 #endif
 
 #ifdef VLINK_SUPPORT_ZENOH
-  TEST_CASE("get_transport_type kZenoh after zenoh:// construction") {
+  TEST_CASE("get_transport_type returns kZenoh for zenoh url") {
     Url url("zenoh://namespace/topic");
-    CHECK(url.get_transport_type() == TransportType::kZenoh);
+
+    CHECK_EQ(url.get_transport_type(), TransportType::kZenoh);
   }
 #endif
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Url - additional static helpers edge cases
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Url - static helpers edge cases") {
-  TEST_CASE("is_local_type - someip:// is not local") { CHECK(Url::is_local_type("someip://topic") == false); }
-
-  TEST_CASE("is_local_type - fdbus:// is not local") { CHECK(Url::is_local_type("fdbus://topic") == false); }
-
-  TEST_CASE("is_local_type - empty string") { CHECK(Url::is_local_type("") == false); }
-
-  TEST_CASE("is_intra_type - empty string returns false") { CHECK(Url::is_intra_type("") == false); }
-
-  TEST_CASE("is_shm_type - empty string returns false") { CHECK(Url::is_shm_type("") == false); }
-
-  TEST_CASE("is_intra_type - shm2:// returns false") { CHECK(Url::is_intra_type("shm2://topic") == false); }
-
-  TEST_CASE("is_shm_type - someip:// returns false") { CHECK(Url::is_shm_type("someip://topic") == false); }
-
-  TEST_CASE("get_sort_index - shm2:// has low index") {
-    int shm2_idx = Url::get_sort_index("shm2://topic");
-    int dds_idx = Url::get_sort_index("dds://topic");
-    CHECK(shm2_idx < dds_idx);
+  TEST_CASE("is_local_type identifies intra shm and shm2 as local") {
+    CHECK(Url::is_local_type("intra://topic"));
+    CHECK(Url::is_local_type("shm://topic"));
+    CHECK(Url::is_local_type("shm2://topic"));
   }
 
-  TEST_CASE("get_sort_index - someip:// returns non-negative") { CHECK(Url::get_sort_index("someip://test") >= 0); }
+  TEST_CASE("is_local_type identifies network transports as not local") {
+    CHECK_FALSE(Url::is_local_type("dds://topic"));
+    CHECK_FALSE(Url::is_local_type("zenoh://topic"));
+    CHECK_FALSE(Url::is_local_type("ddsc://topic"));
+    CHECK_FALSE(Url::is_local_type("someip://topic"));
+    CHECK_FALSE(Url::is_local_type("fdbus://topic"));
+    CHECK_FALSE(Url::is_local_type("mqtt://topic"));
+  }
 
-  TEST_CASE("get_sort_index - ddsc:// returns non-negative") { CHECK(Url::get_sort_index("ddsc://test") >= 0); }
+  TEST_CASE("is_local_type returns false for empty string") { CHECK_FALSE(Url::is_local_type("")); }
 
-  TEST_CASE("get_sort_index - fdbus:// returns non-negative") { CHECK(Url::get_sort_index("fdbus://test") >= 0); }
+  TEST_CASE("is_intra_type returns true only for intra url") {
+    CHECK(Url::is_intra_type("intra://topic"));
+    CHECK_FALSE(Url::is_intra_type("shm://topic"));
+    CHECK_FALSE(Url::is_intra_type("shm2://topic"));
+    CHECK_FALSE(Url::is_intra_type("dds://topic"));
+    CHECK_FALSE(Url::is_intra_type(""));
+  }
 
-  TEST_CASE("get_sort_index - empty string returns -1") { CHECK(Url::get_sort_index("") == -1); }
+  TEST_CASE("is_shm_type returns true for shm and shm2 only") {
+    CHECK(Url::is_shm_type("shm://topic"));
+    CHECK(Url::is_shm_type("shm2://topic"));
+    CHECK_FALSE(Url::is_shm_type("intra://topic"));
+    CHECK_FALSE(Url::is_shm_type("dds://topic"));
+    CHECK_FALSE(Url::is_shm_type("someip://topic"));
+    CHECK_FALSE(Url::is_shm_type(""));
+  }
 
-  TEST_CASE("TransportEnableFlag combinations work") {
+  TEST_CASE("get_sort_index returns -1 for empty string") { CHECK_EQ(Url::get_sort_index(""), -1); }
+
+  TEST_CASE("get_sort_index returns non-negative for all known transports") {
+    CHECK_GE(Url::get_sort_index("intra://test"), 0);
+    CHECK_GE(Url::get_sort_index("dds://test"), 0);
+    CHECK_GE(Url::get_sort_index("zenoh://test"), 0);
+    CHECK_GE(Url::get_sort_index("someip://test"), 0);
+    CHECK_GE(Url::get_sort_index("ddsc://test"), 0);
+    CHECK_GE(Url::get_sort_index("fdbus://test"), 0);
+  }
+
+  TEST_CASE("get_sort_index assigns lower index to local transports than network transports") {
+    CHECK_LT(Url::get_sort_index("intra://topic"), Url::get_sort_index("dds://topic"));
+    CHECK_LT(Url::get_sort_index("shm://topic"), Url::get_sort_index("zenoh://topic"));
+    CHECK_LT(Url::get_sort_index("shm2://topic"), Url::get_sort_index("dds://topic"));
+  }
+
+  TEST_CASE("get_transport_enable_flags returns non-zero when at least one transport is compiled in") {
+    uint16_t flags = Url::get_transport_enable_flags();
+    CHECK_NE(flags, 0);
+  }
+
+#ifdef VLINK_SUPPORT_INTRA
+  TEST_CASE("get_transport_enable_flags has kEnableIntra bit set when intra is compiled in") {
+    uint16_t flags = Url::get_transport_enable_flags();
+
+    CHECK_NE((flags & Url::kEnableIntra), 0);
+  }
+#endif
+
+  TEST_CASE("kEnableEmpty is zero") { CHECK_EQ(Url::kEnableEmpty, 0); }
+
+  TEST_CASE("kEnableAll equals 0xFFFF") { CHECK_EQ(Url::kEnableAll, static_cast<uint16_t>(0xFFFF)); }
+
+  TEST_CASE("kEnableAll includes every individual transport flag") {
+    CHECK_NE((Url::kEnableAll & Url::kEnableIntra), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableShm), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableShm2), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableZenoh), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableDds), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableDdsc), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableDdsr), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableDdst), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableSomeip), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableMqtt), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableFdbus), 0);
+    CHECK_NE((Url::kEnableAll & Url::kEnableQnx), 0);
+  }
+
+  TEST_CASE("individual TransportEnableFlag values are pairwise distinct") {
+    CHECK_NE(Url::kEnableIntra, Url::kEnableShm);
+    CHECK_NE(Url::kEnableShm, Url::kEnableShm2);
+    CHECK_NE(Url::kEnableZenoh, Url::kEnableDds);
+    CHECK_NE(Url::kEnableDds, Url::kEnableDdsc);
+    CHECK_NE(Url::kEnableMqtt, Url::kEnableFdbus);
+  }
+
+  TEST_CASE("bitwise OR of individual flags selects only those transports") {
     uint16_t combined = Url::kEnableIntra | Url::kEnableDds;
-    CHECK((combined & Url::kEnableIntra) != 0);
-    CHECK((combined & Url::kEnableDds) != 0);
-    CHECK((combined & Url::kEnableShm) == 0);
-    CHECK((combined & Url::kEnableZenoh) == 0);
-  }
 
-  TEST_CASE("kEnableAll includes all individual flags") {
-    CHECK((Url::kEnableAll & Url::kEnableIntra) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableShm) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableShm2) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableZenoh) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableDds) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableDdsc) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableDdsr) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableDdst) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableSomeip) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableMqtt) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableFdbus) != 0);
-    CHECK((Url::kEnableAll & Url::kEnableQnx) != 0);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Url - parse edge cases
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Url - parse edge cases") {
-  TEST_CASE("parse kServer succeeds for intra://") {
-    Url url("intra://server_test");
-    bool ok = url.parse(kServer);
-    CHECK(ok == true);
-  }
-
-  TEST_CASE("parse kClient succeeds for intra://") {
-    Url url("intra://client_test");
-    bool ok = url.parse(kClient);
-    CHECK(ok == true);
-  }
-
-  TEST_CASE("parse kSetter succeeds for intra://") {
-    Url url("intra://setter_test");
-    bool ok = url.parse(kSetter);
-    CHECK(ok == true);
-  }
-
-  TEST_CASE("parse kGetter succeeds for intra://") {
-    Url url("intra://getter_test");
-    bool ok = url.parse(kGetter);
-    CHECK(ok == true);
-  }
-
-  TEST_CASE("get_transport_type returns kIntra for intra:// with path") {
-    Url url("intra://ns/topic/sub");
-    CHECK(url.get_transport_type() == TransportType::kIntra);
-  }
-
-  TEST_CASE("is_valid before parse for intra://") {
-    Url url("intra://check_valid");
-    // Before parse, target exists so is_valid may return true depending on conf
-    CHECK(url.get_target() != nullptr);
-  }
-
-  TEST_CASE("get_str preserves URL with query") {
-    Url url("intra://topic?key=value");
-    CHECK(url.get_str().find("intra://") != std::string::npos);
-  }
-
-  TEST_CASE("Url with URL containing special chars in topic") {
-    Url url("intra://topic_with_underscores");
-    CHECK(url.get_str() == "intra://topic_with_underscores");
-    CHECK(url.get_target() != nullptr);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Url - move semantics
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Url - move semantics") {
-  TEST_CASE("moved-from object has null target") {
-    Url a("intra://move_source");
-    const void* old_target = a.get_target();
-    CHECK(old_target != nullptr);
-
-    Url b(std::move(a));
-    CHECK(b.get_target() != nullptr);
-    // moved-from a should have null target
-    CHECK(a.get_target() == nullptr);
-  }
-
-  TEST_CASE("move assignment transfers target") {
-    Url a("intra://move_src");
-    Url b("intra://move_dst");
-
-    b = std::move(a);
-    CHECK(b.get_str() == "intra://move_src");
-    CHECK(a.get_target() == nullptr);
+    CHECK_NE((combined & Url::kEnableIntra), 0);
+    CHECK_NE((combined & Url::kEnableDds), 0);
+    CHECK_EQ((combined & Url::kEnableShm), 0);
+    CHECK_EQ((combined & Url::kEnableZenoh), 0);
   }
 }
 

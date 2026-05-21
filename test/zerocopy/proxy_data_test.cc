@@ -30,362 +30,348 @@
 #include <cstring>
 #include <string>
 
-#include "./base/bytes.h"
-
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ProxyData - default construction
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-ProxyData - default construction") {
-  TEST_CASE("default-constructed ProxyData is empty/invalid") {
+TEST_SUITE("zerocopy-ProxyData") {
+  TEST_CASE("default construction yields invalid empty object") {
     zerocopy::ProxyData pd;
-    CHECK(!pd.is_valid());
-    CHECK(pd.size() == 0);
-    CHECK(!pd.is_owner());
-    CHECK(pd.control_id() == 0);
-    CHECK(pd.mode() == 0);
-    CHECK(pd.timestamp() == 0);
-    CHECK(pd.seq() == 0);
+
+    CHECK_FALSE(pd.is_valid());
+    CHECK_EQ(pd.size(), 0u);
+    CHECK_FALSE(pd.is_owner());
+    CHECK_EQ(pd.control_id(), 0u);
+    CHECK_EQ(pd.mode(), 0u);
+    CHECK_EQ(pd.timestamp(), 0LL);
+    CHECK_EQ(pd.seq(), 0LL);
+    CHECK_EQ(pd.schema(), 0u);
     CHECK(pd.raw().empty());
     CHECK(pd.url().empty());
     CHECK(pd.ser().empty());
     CHECK(pd.hostname().empty());
   }
 
-  TEST_CASE("sizeof(ProxyData) is 80 bytes") { CHECK(sizeof(zerocopy::ProxyData) == 80u); }
-}
+  TEST_CASE("sizeof is exactly 80 bytes") { CHECK_EQ(sizeof(zerocopy::ProxyData), 80u); }
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ProxyData - setters/getters
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-ProxyData - setters and getters") {
-  TEST_CASE("set_control_id / control_id round-trip") {
+  TEST_CASE("all scalar setter/getter pairs round-trip") {
     zerocopy::ProxyData pd;
-    pd.set_control_id(42);
-    CHECK(pd.control_id() == 42);
-  }
 
-  TEST_CASE("set_mode / mode round-trip") {
-    zerocopy::ProxyData pd;
-    pd.set_mode(7);
-    CHECK(pd.mode() == 7);
-  }
+    pd.set_control_id(42u);
+    CHECK_EQ(pd.control_id(), 42u);
 
-  TEST_CASE("set_timestamp / timestamp round-trip") {
-    zerocopy::ProxyData pd;
+    pd.set_mode(7u);
+    CHECK_EQ(pd.mode(), 7u);
+
     pd.set_timestamp(1234567890LL);
-    CHECK(pd.timestamp() == 1234567890LL);
-  }
+    CHECK_EQ(pd.timestamp(), 1234567890LL);
 
-  TEST_CASE("set_seq / seq round-trip") {
-    zerocopy::ProxyData pd;
     pd.set_seq(999LL);
-    CHECK(pd.seq() == 999LL);
+    CHECK_EQ(pd.seq(), 999LL);
+
+    pd.set_schema(5u);
+    CHECK_EQ(pd.schema(), 5u);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ProxyData - create
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-ProxyData - create") {
-  TEST_CASE("create with all fields populates data correctly") {
-    zerocopy::ProxyData pd;
-    pd.set_control_id(1);
-    pd.set_timestamp(5000LL);
-
+  TEST_CASE("create with all fields populates url ser hostname and raw") {
     Bytes raw = Bytes::create(32);
-    uint8_t* p = raw.data();
 
     for (size_t i = 0; i < 32; ++i) {
-      p[i] = static_cast<uint8_t>(i);
+      raw.data()[i] = static_cast<uint8_t>(i);
     }
 
+    zerocopy::ProxyData pd;
+    pd.set_control_id(1u);
+    pd.set_timestamp(5000LL);
     pd.create(raw, "dds://my/topic", "protobuf", static_cast<uint32_t>(SchemaType::kProtobuf), "host01");
 
     CHECK(pd.is_valid());
     CHECK(pd.is_owner());
-    CHECK(!pd.url().empty());
-    CHECK(!pd.ser().empty());
-    CHECK(!pd.hostname().empty());
-    CHECK(pd.url() == "dds://my/topic");
-    CHECK(pd.ser() == "protobuf");
-    CHECK(pd.schema() == static_cast<uint32_t>(SchemaType::kProtobuf));
-    CHECK(pd.hostname() == "host01");
+    CHECK_EQ(pd.url(), "dds://my/topic");
+    CHECK_EQ(pd.ser(), "protobuf");
+    CHECK_EQ(pd.schema(), static_cast<uint32_t>(SchemaType::kProtobuf));
+    CHECK_EQ(pd.hostname(), "host01");
 
     Bytes raw_view = pd.raw();
-    CHECK(raw_view.size() == 32);
-    CHECK(std::memcmp(raw_view.data(), raw.data(), 32) == 0);
+    CHECK_EQ(raw_view.size(), 32u);
+    CHECK_EQ(std::memcmp(raw_view.data(), raw.data(), 32), 0);
   }
 
   TEST_CASE("create without hostname leaves hostname empty") {
-    zerocopy::ProxyData pd;
     Bytes raw = Bytes::create(8);
+
+    zerocopy::ProxyData pd;
     pd.create(raw, "intra://topic", "raw");
 
     CHECK(pd.is_valid());
-    CHECK(pd.url() == "intra://topic");
-    CHECK(pd.ser() == "raw");
-    CHECK(pd.schema() == 0u);
+    CHECK_EQ(pd.url(), "intra://topic");
+    CHECK_EQ(pd.ser(), "raw");
+    CHECK_EQ(pd.schema(), 0u);
     CHECK(pd.hostname().empty());
   }
 
-  TEST_CASE("create with empty Bytes still sets url/ser/hostname") {
-    zerocopy::ProxyData pd;
+  TEST_CASE("create with empty Bytes still sets url ser hostname") {
     Bytes empty;
-    pd.create(empty, "shm://topic", "bytes", 0, "myhost");
 
-    CHECK(pd.url() == "shm://topic");
-    CHECK(pd.ser() == "bytes");
-    CHECK(pd.schema() == 0u);
-    CHECK(pd.hostname() == "myhost");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: ProxyData - serialization
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-ProxyData - serialization") {
-  TEST_CASE("serialize and deserialize round-trip") {
-    zerocopy::ProxyData src;
-    src.set_control_id(10);
-    src.set_mode(2);
-    src.set_timestamp(9999LL);
-    src.set_seq(42LL);
-
-    const std::string payload_str = "hello proxy data test payload";
-    Bytes raw = Bytes::create(payload_str.size());
-    std::memcpy(raw.data(), payload_str.data(), payload_str.size());
-
-    src.create(raw, "dds://sensor/lidar", "protobuf", static_cast<uint32_t>(SchemaType::kProtobuf), "vehicle01");
-
-    Bytes wire;
-    bool ser_ok = (src >> wire);
-    CHECK(ser_ok);
-    CHECK(!wire.empty());
-    CHECK(zerocopy::ProxyData::check_valid(wire));
-    CHECK(wire.size() == src.get_serialized_size());
-
-    zerocopy::ProxyData dst;
-    bool deser_ok = (dst << wire);
-    CHECK(deser_ok);
-
-    CHECK(dst.is_valid());
-    CHECK(!dst.is_owner());
-    CHECK(dst.control_id() == 10);
-    CHECK(dst.mode() == 2);
-    CHECK(dst.timestamp() == 9999LL);
-    CHECK(dst.seq() == 42LL);
-    CHECK(dst.url() == "dds://sensor/lidar");
-    CHECK(dst.ser() == "protobuf");
-    CHECK(dst.schema() == static_cast<uint32_t>(SchemaType::kProtobuf));
-    CHECK(dst.hostname() == "vehicle01");
-
-    Bytes raw_view = dst.raw();
-    REQUIRE(raw_view.size() == payload_str.size());
-    CHECK(std::memcmp(raw_view.data(), payload_str.data(), payload_str.size()) == 0);
-  }
-
-  TEST_CASE("check_valid on empty Bytes returns false") {
-    Bytes empty;
-    CHECK(!zerocopy::ProxyData::check_valid(empty));
-  }
-
-  TEST_CASE("check_valid on corrupted Bytes returns false") {
     zerocopy::ProxyData pd;
-    Bytes raw = Bytes::create(16);
-    pd.create(raw, "dds://topic", "raw");
+    pd.create(empty, "shm://topic", "bytes", 0u, "myhost");
 
-    Bytes wire;
-    pd >> wire;
-
-    wire[0] ^= 0xFF;
-    CHECK(!zerocopy::ProxyData::check_valid(wire));
+    CHECK_EQ(pd.url(), "shm://topic");
+    CHECK_EQ(pd.ser(), "bytes");
+    CHECK_EQ(pd.hostname(), "myhost");
   }
 
-  TEST_CASE("get_serialized_size is magic(4) + struct(80) + size + magic(4)") {
+  TEST_CASE("clear resets all fields to zero") {
+    Bytes raw = Bytes::create(64);
+
     zerocopy::ProxyData pd;
-    Bytes raw = Bytes::create(20);
-    pd.create(raw, "url", "ser");
+    pd.create(raw, "dds://clear_test", "protobuf");
+    pd.set_control_id(99u);
 
-    size_t expected = sizeof(uint32_t) + sizeof(zerocopy::ProxyData) + pd.size() + sizeof(uint32_t);
-    CHECK(pd.get_serialized_size() == expected);
+    pd.clear();
+
+    CHECK_FALSE(pd.is_valid());
+    CHECK_EQ(pd.size(), 0u);
+    CHECK_FALSE(pd.is_owner());
+    CHECK_EQ(pd.control_id(), 0u);
+    CHECK(pd.url().empty());
+    CHECK(pd.ser().empty());
+    CHECK(pd.hostname().empty());
   }
 
-  TEST_CASE("schema field survives create + serialize + deserialize for every SchemaType family") {
-    const uint32_t schema_values[] = {
-        static_cast<uint32_t>(SchemaType::kUnknown), static_cast<uint32_t>(SchemaType::kRaw),
-        static_cast<uint32_t>(SchemaType::kZeroCopy), static_cast<uint32_t>(SchemaType::kProtobuf),
-        static_cast<uint32_t>(SchemaType::kFlatbuffers)};
-
-    for (uint32_t schema : schema_values) {
-      zerocopy::ProxyData src;
-      Bytes raw = Bytes::create(4);
-      raw[0] = 0x01;
-
-      src.create(raw, "dds://roundtrip/schema", "ser_name", schema, "hostX");
-      CHECK(src.schema() == schema);
-
-      Bytes wire;
-      bool ser_ok = (src >> wire);
-      REQUIRE(ser_ok);
-
-      zerocopy::ProxyData dst;
-      bool deser_ok = (dst << wire);
-      REQUIRE(deser_ok);
-      CHECK(dst.schema() == schema);
-      CHECK(dst.url() == "dds://roundtrip/schema");
-      CHECK(dst.ser() == "ser_name");
-      CHECK(dst.hostname() == "hostX");
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: ProxyData - copy operations
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-ProxyData - shallow copy") {
-  TEST_CASE("shallow_copy makes a borrow") {
-    zerocopy::ProxyData src;
+  TEST_CASE("shallow_copy aliases the tail buffer") {
     Bytes raw = Bytes::create(8);
+
+    zerocopy::ProxyData src;
     src.create(raw, "dds://a", "raw");
 
     zerocopy::ProxyData dst;
     CHECK(dst.shallow_copy(src));
 
-    CHECK(!dst.is_owner());
-    CHECK(dst.url() == "dds://a");
+    CHECK_FALSE(dst.is_owner());
+    CHECK_EQ(dst.url(), "dds://a");
+    CHECK_EQ(dst.ser(), "raw");
   }
 
   TEST_CASE("shallow_copy self returns false") {
-    zerocopy::ProxyData pd;
     Bytes raw = Bytes::create(8);
-    pd.create(raw, "dds://a", "raw");
-    CHECK(!pd.shallow_copy(pd));
-  }
-}
 
-TEST_SUITE("zerocopy-ProxyData - deep copy") {
-  TEST_CASE("deep_copy creates owned copy") {
-    zerocopy::ProxyData src;
+    zerocopy::ProxyData pd;
+    pd.create(raw, "dds://a", "raw");
+
+    CHECK_FALSE(pd.shallow_copy(pd));
+  }
+
+  TEST_CASE("deep_copy creates owned independent copy") {
     Bytes raw = Bytes::create(16);
-    raw[0] = 0xAB;
+    raw.data()[0] = 0xABu;
+
+    zerocopy::ProxyData src;
     src.create(raw, "dds://b", "protobuf", static_cast<uint32_t>(SchemaType::kProtobuf), "host");
 
     zerocopy::ProxyData dst;
     CHECK(dst.deep_copy(src));
 
     CHECK(dst.is_owner());
-    CHECK(dst.url() == "dds://b");
-    CHECK(dst.ser() == "protobuf");
-    CHECK(dst.schema() == static_cast<uint32_t>(SchemaType::kProtobuf));
-    CHECK(dst.hostname() == "host");
+    CHECK_EQ(dst.url(), "dds://b");
+    CHECK_EQ(dst.ser(), "protobuf");
+    CHECK_EQ(dst.schema(), static_cast<uint32_t>(SchemaType::kProtobuf));
+    CHECK_EQ(dst.hostname(), "host");
   }
 
   TEST_CASE("deep_copy self returns false") {
-    zerocopy::ProxyData pd;
     Bytes raw = Bytes::create(8);
-    pd.create(raw, "dds://c", "raw");
-    CHECK(!pd.deep_copy(pd));
-  }
-}
 
-TEST_SUITE("zerocopy-ProxyData - move copy") {
-  TEST_CASE("move_copy transfers ownership") {
-    zerocopy::ProxyData src;
+    zerocopy::ProxyData pd;
+    pd.create(raw, "dds://c", "raw");
+
+    CHECK_FALSE(pd.deep_copy(pd));
+  }
+
+  TEST_CASE("move_copy transfers ownership and invalidates source") {
     Bytes raw = Bytes::create(16);
+
+    zerocopy::ProxyData src;
     src.create(raw, "dds://d", "bytes");
 
     zerocopy::ProxyData dst;
     CHECK(dst.move_copy(src));
 
     CHECK(dst.is_owner());
-    CHECK(dst.url() == "dds://d");
-    CHECK(!src.is_valid());
+    CHECK_EQ(dst.url(), "dds://d");
+    CHECK_FALSE(src.is_valid());
   }
 
   TEST_CASE("move_copy self returns false") {
-    zerocopy::ProxyData pd;
     Bytes raw = Bytes::create(8);
+
+    zerocopy::ProxyData pd;
     pd.create(raw, "dds://e", "raw");
-    CHECK(!pd.move_copy(pd));
+
+    CHECK_FALSE(pd.move_copy(pd));
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ProxyData - special members
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-ProxyData - special members") {
-  TEST_CASE("copy constructor makes deep copy") {
-    zerocopy::ProxyData src;
+  TEST_CASE("copy constructor performs deep copy") {
     Bytes raw = Bytes::create(32);
-    raw[0] = 0x42;
+    raw.data()[0] = 0x42u;
+
+    zerocopy::ProxyData src;
     src.create(raw, "dds://copy_test", "protobuf", static_cast<uint32_t>(SchemaType::kProtobuf), "host_copy");
 
     zerocopy::ProxyData copy(src);
 
     CHECK(copy.is_owner());
-    CHECK(copy.url() == "dds://copy_test");
-    CHECK(copy.hostname() == "host_copy");
+    CHECK_EQ(copy.url(), "dds://copy_test");
+    CHECK_EQ(copy.hostname(), "host_copy");
+    CHECK_EQ(copy.schema(), static_cast<uint32_t>(SchemaType::kProtobuf));
   }
 
   TEST_CASE("move constructor transfers ownership") {
-    zerocopy::ProxyData src;
     Bytes raw = Bytes::create(16);
+
+    zerocopy::ProxyData src;
     src.create(raw, "dds://move_test", "raw");
 
     zerocopy::ProxyData moved(std::move(src));
 
     CHECK(moved.is_owner());
-    CHECK(moved.url() == "dds://move_test");
-    CHECK(!src.is_valid());
+    CHECK_EQ(moved.url(), "dds://move_test");
+    CHECK_FALSE(src.is_valid());
   }
 
-  TEST_CASE("copy assignment makes deep copy") {
-    zerocopy::ProxyData src;
+  TEST_CASE("copy assignment performs deep copy") {
     Bytes raw = Bytes::create(16);
+
+    zerocopy::ProxyData src;
     src.create(raw, "dds://assign_test", "bytes");
 
     zerocopy::ProxyData dst;
     dst = src;
 
     CHECK(dst.is_owner());
-    CHECK(dst.url() == "dds://assign_test");
+    CHECK_EQ(dst.url(), "dds://assign_test");
   }
 
   TEST_CASE("move assignment transfers ownership") {
-    zerocopy::ProxyData src;
     Bytes raw = Bytes::create(16);
+
+    zerocopy::ProxyData src;
     src.create(raw, "dds://move_assign_test", "raw");
 
     zerocopy::ProxyData dst;
     dst = std::move(src);
 
     CHECK(dst.is_owner());
-    CHECK(dst.url() == "dds://move_assign_test");
-    CHECK(!src.is_valid());
+    CHECK_EQ(dst.url(), "dds://move_assign_test");
+    CHECK_FALSE(src.is_valid());
   }
 
-  TEST_CASE("clear() resets to invalid/empty state") {
+  TEST_CASE("serialize and deserialize round-trip preserves all fields") {
+    const std::string payload_str = "hello proxy data test payload";
+    Bytes raw = Bytes::create(payload_str.size());
+    std::memcpy(raw.data(), payload_str.data(), payload_str.size());
+
+    zerocopy::ProxyData src;
+    src.set_control_id(10u);
+    src.set_mode(2u);
+    src.set_timestamp(9999LL);
+    src.set_seq(42LL);
+    src.create(raw, "dds://sensor/lidar", "protobuf", static_cast<uint32_t>(SchemaType::kProtobuf), "vehicle01");
+
+    Bytes wire;
+    CHECK((src >> wire));
+    CHECK_FALSE(wire.empty());
+    CHECK(zerocopy::ProxyData::check_valid(wire));
+    CHECK_EQ(wire.size(), src.get_serialized_size());
+
+    zerocopy::ProxyData dst;
+    CHECK((dst << wire));
+
+    CHECK(dst.is_valid());
+    CHECK_FALSE(dst.is_owner());
+    CHECK_EQ(dst.control_id(), 10u);
+    CHECK_EQ(dst.mode(), 2u);
+    CHECK_EQ(dst.timestamp(), 9999LL);
+    CHECK_EQ(dst.seq(), 42LL);
+    CHECK_EQ(dst.url(), "dds://sensor/lidar");
+    CHECK_EQ(dst.ser(), "protobuf");
+    CHECK_EQ(dst.schema(), static_cast<uint32_t>(SchemaType::kProtobuf));
+    CHECK_EQ(dst.hostname(), "vehicle01");
+
+    Bytes raw_view = dst.raw();
+    REQUIRE_EQ(raw_view.size(), payload_str.size());
+    CHECK_EQ(std::memcmp(raw_view.data(), payload_str.data(), payload_str.size()), 0);
+  }
+
+  TEST_CASE("schema field survives round-trip for every SchemaType family") {
+    const uint32_t schema_values[] = {
+        static_cast<uint32_t>(SchemaType::kUnknown),     static_cast<uint32_t>(SchemaType::kRaw),
+        static_cast<uint32_t>(SchemaType::kZeroCopy),    static_cast<uint32_t>(SchemaType::kProtobuf),
+        static_cast<uint32_t>(SchemaType::kFlatbuffers),
+    };
+
+    for (uint32_t schema : schema_values) {
+      Bytes raw = Bytes::create(4);
+      raw.data()[0] = 0x01u;
+
+      zerocopy::ProxyData src;
+      src.create(raw, "dds://roundtrip/schema", "ser_name", schema, "hostX");
+      CHECK_EQ(src.schema(), schema);
+
+      Bytes wire;
+      REQUIRE((src >> wire));
+
+      zerocopy::ProxyData dst;
+      REQUIRE((dst << wire));
+      CHECK_EQ(dst.schema(), schema);
+      CHECK_EQ(dst.url(), "dds://roundtrip/schema");
+      CHECK_EQ(dst.hostname(), "hostX");
+    }
+  }
+
+  TEST_CASE("check_valid rejects empty, corrupted begin magic, and corrupted end magic") {
+    Bytes raw = Bytes::create(16);
+
     zerocopy::ProxyData pd;
-    Bytes raw = Bytes::create(64);
-    pd.create(raw, "dds://clear_test", "protobuf");
-    pd.set_control_id(99);
+    pd.create(raw, "dds://topic", "raw");
+
+    Bytes wire;
+    pd >> wire;
+
+    SUBCASE("empty bytes") {
+      Bytes empty;
+      CHECK_FALSE(zerocopy::ProxyData::check_valid(empty));
+    }
+
+    SUBCASE("corrupted begin magic") {
+      wire[0] ^= 0xFFu;
+      CHECK_FALSE(zerocopy::ProxyData::check_valid(wire));
+    }
+
+    SUBCASE("corrupted end magic") {
+      wire[wire.size() - 1] ^= 0xFFu;
+      CHECK_FALSE(zerocopy::ProxyData::check_valid(wire));
+    }
+  }
+
+  TEST_CASE("get_serialized_size equals magic + struct + payload + magic") {
+    Bytes raw = Bytes::create(20);
+
+    zerocopy::ProxyData pd;
+    pd.create(raw, "url", "ser");
+
+    size_t expected = sizeof(uint32_t) + sizeof(zerocopy::ProxyData) + pd.size() + sizeof(uint32_t);
+    CHECK_EQ(pd.get_serialized_size(), expected);
+  }
+
+  TEST_CASE("is_valid checks internal region consistency") {
+    zerocopy::ProxyData pd;
+    CHECK_FALSE(pd.is_valid());
+
+    Bytes raw = Bytes::create(8);
+    pd.create(raw, "url", "ser");
+    CHECK(pd.is_valid());
 
     pd.clear();
-
-    CHECK(!pd.is_valid());
-    CHECK(pd.size() == 0);
-    CHECK(!pd.is_owner());
-    CHECK(pd.control_id() == 0);
-    CHECK(pd.url().empty());
+    CHECK_FALSE(pd.is_valid());
   }
 }
 

@@ -28,20 +28,40 @@
 #include <vlink/base/task_handle.h>
 
 #include <atomic>
-#include <chrono>
 #include <stdexcept>
 #include <thread>
 #include <vector>
 
+using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
+
+// -----------------------------------------------------------------------------
+// Cancellation example
+//
+// Module:   vlink/base/cancellation.h (+ task_handle.h integration)
+// Scenario: Full tour of the cooperative cancellation primitive. The model:
+//             - CancellationSource owns the cancellation state.
+//             - CancellationToken is a cheap, copyable observer handed to
+//               workers; it lets them poll, throw, or register callbacks.
+//             - CancellationRegistration is the RAII handle returned by
+//               register_callback; resetting it before fire unregisters.
+// Key invariants exercised below:
+//             - request_cancel is idempotent (returns false on second call).
+//             - Callbacks registered AFTER request_cancel fire synchronously
+//               on the caller's thread; those registered BEFORE fire on the
+//               canceller's thread.
+//             - Callback exceptions are swallowed/isolated; siblings still
+//               fire. Reentrant cancellation across sources is safe.
+//             - The token can be threaded into PostTaskOptions so a task
+//               inherits parent cancellation without manual plumbing.
+// -----------------------------------------------------------------------------
 int main() {
   vlink::Logger::init("example_cancellation");
 
-  // ---------------------------------------------------------------
-  // 1. Polling style cancellation.
-  // ---------------------------------------------------------------
+  // Polling style: simplest and most portable. The worker periodically asks
+  // is_cancellation_requested and exits cooperatively. Second request_cancel
+  // returns false because the state already flipped.
   {
-    VLOG_I("=== Section 1: polling cancellation ===");
-
+    VLOG_I("=== Polling cancellation ===");
     vlink::CancellationSource source;
     auto token = source.token();
 
@@ -49,90 +69,81 @@ int main() {
       uint32_t iter = 0;
       while (!token.is_cancellation_requested()) {
         ++iter;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(10ms);
       }
-      VLOG_I("polling worker exited after ", iter, " iterations");
+
+      VLOG_I("  worker exited after ", iter, " iterations");
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
-    const bool first = source.request_cancel();
-    const bool second = source.request_cancel();
-    VLOG_I("request_cancel: first=", first, " second=", second);
+    std::this_thread::sleep_for(80ms);
+    VLOG_I("  request_cancel first=", source.request_cancel(), " second=", source.request_cancel());
     worker.join();
   }
 
-  // ---------------------------------------------------------------
-  // 2. Structured cancellation via throw + RAII unwind.
-  // ---------------------------------------------------------------
+  // Structured / exception style: throw_if_cancellation_requested throws
+  // OperationCancelled, which unwinds the stack normally and triggers RAII
+  // dtors -- preferred when work is deeply nested.
   {
-    VLOG_I("=== Section 2: structured cancellation (OperationCancelled) ===");
-
+    VLOG_I("=== Structured (OperationCancelled) ===");
     vlink::CancellationSource source;
     auto token = source.token();
 
     std::thread worker([token]() {
-      struct RaiiUnwind {
-        ~RaiiUnwind() { VLOG_I("RAII destructor ran during stack unwind"); }
+      struct Raii {
+        ~Raii() { VLOG_I("  RAII dtor ran during unwind"); }
       };
 
       try {
-        RaiiUnwind guard;
+        Raii guard;
         for (int i = 0; i < 1000; ++i) {
           token.throw_if_cancellation_requested();
-          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+          std::this_thread::sleep_for(5ms);
         }
       } catch (const vlink::Exception::OperationCancelled& ex) {
-        VLOG_I("worker caught: ", ex.what());
+        VLOG_I("  caught: ", ex.what());
       }
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(50ms);
     source.request_cancel();
     worker.join();
   }
 
-  // ---------------------------------------------------------------
-  // 3. register_callback: async one-shot notification.
-  // ---------------------------------------------------------------
+  // register_callback: the callback fires on whichever thread invokes
+  // request_cancel (here, the main thread). reg.valid() goes false after
+  // fire because the registration is consumed.
   {
-    VLOG_I("=== Section 3: register_callback async fire ===");
-
+    VLOG_I("=== register_callback async fire ===");
     vlink::CancellationSource source;
     auto token = source.token();
 
+    // Counter incremented from inside the callback to prove it fired.
     std::atomic_int fired{0};
     auto reg = token.register_callback([&fired]() { fired.fetch_add(1); });
-
-    VLOG_I("registration valid before cancel: ", reg.valid());
+    VLOG_I("  reg.valid pre-cancel=", reg.valid());
     source.request_cancel();
-    VLOG_I("fired counter after cancel: ", fired.load());
-    VLOG_I("registration valid after cancel: ", reg.valid());
+    VLOG_I("  fired=", fired.load(), " reg.valid post-cancel=", reg.valid());
   }
 
-  // ---------------------------------------------------------------
-  // 4. register_callback after cancel -> synchronous fire on caller thread.
-  // ---------------------------------------------------------------
+  // Register-after-cancel: source is already cancelled, so register_callback
+  // fires the callback synchronously on the caller's thread before
+  // returning -- this guarantees no callback is silently dropped.
   {
-    VLOG_I("=== Section 4: register_callback after cancel (sync fire) ===");
-
+    VLOG_I("=== register after cancel (sync fire) ===");
     vlink::CancellationSource source;
     auto token = source.token();
     source.request_cancel();
 
-    const auto reg_tid = std::this_thread::get_id();
+    const auto caller = std::this_thread::get_id();
     std::atomic<std::thread::id> fire_tid{};
     auto reg = token.register_callback([&fire_tid]() { fire_tid.store(std::this_thread::get_id()); });
-
-    VLOG_I("registration valid: ", reg.valid(), " (expect false)");
-    VLOG_I("fired synchronously on caller thread: ", (reg_tid == fire_tid.load()));
+    VLOG_I("  reg.valid=", reg.valid(), " sync_on_caller=", (caller == fire_tid.load()));
   }
 
-  // ---------------------------------------------------------------
-  // 5. CancellationRegistration::reset() unregisters before fire.
-  // ---------------------------------------------------------------
+  // reset() before fire: unregisters the callback. Useful to cancel a
+  // subscription before its source ever fires.
   {
-    VLOG_I("=== Section 5: reset before fire ===");
-
+    VLOG_I("=== reset before fire ===");
     vlink::CancellationSource source;
     auto token = source.token();
 
@@ -140,17 +151,15 @@ int main() {
     auto reg = token.register_callback([&fired]() { fired.fetch_add(1); });
     reg.reset();
     source.request_cancel();
-    VLOG_I("fired after reset: ", fired.load(), " (expect 0)");
+    VLOG_I("  fired (expect 0)=", fired.load());
   }
 
-  // ---------------------------------------------------------------
-  // 6. Multiple tokens observe the same source (fan-out).
-  // ---------------------------------------------------------------
+  // Fan-out: one source feeds many tokens (one per observer thread). All
+  // observers see cancellation simultaneously -- token copies are cheap.
   {
-    VLOG_I("=== Section 6: fan-out observers ===");
-
+    VLOG_I("=== Fan-out ===");
     vlink::CancellationSource source;
-    static const int kObservers = 6;
+    static constexpr int kObservers = 6;
     std::atomic_int joined{0};
     std::vector<std::thread> workers;
     workers.reserve(kObservers);
@@ -158,137 +167,130 @@ int main() {
     for (int i = 0; i < kObservers; ++i) {
       workers.emplace_back([token = source.token(), i, &joined]() {
         while (!token.is_cancellation_requested()) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(5));
+          std::this_thread::sleep_for(5ms);
         }
+
         joined.fetch_add(1);
-        VLOG_I("observer ", i, " saw cancellation");
+        VLOG_I("  observer ", i, " saw cancel");
       });
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    std::this_thread::sleep_for(40ms);
     source.request_cancel();
-    for (auto& t : workers) t.join();
-    VLOG_I("all ", kObservers, " observers joined=", joined.load());
+    for (auto& t : workers) {
+      t.join();
+    }
+
+    VLOG_I("  all joined=", joined.load());
   }
 
-  // ---------------------------------------------------------------
-  // 7. Hierarchical cancellation: parent -> child cascade.
-  // ---------------------------------------------------------------
+  // Hierarchical cascade: a parent's cancellation propagates to children by
+  // chaining register_callback. Useful for cancelling a tree of subtasks
+  // without each layer holding the parent source directly.
   {
-    VLOG_I("=== Section 7: parent/child cascade ===");
-
+    VLOG_I("=== Parent / child cascade ===");
     vlink::CancellationSource root;
     vlink::CancellationSource middle;
     vlink::CancellationSource leaf;
 
+    // Callbacks fire on the request_cancel caller's thread; the chain runs
+    // synchronously here so by the time root.request_cancel() returns,
+    // leaf has also been cancelled.
     auto reg_mid = root.token().register_callback([&middle]() {
-      VLOG_I("root fired -> cancelling middle");
+      VLOG_I("  root fired -> cancel middle");
       middle.request_cancel();
     });
     auto reg_leaf = middle.token().register_callback([&leaf]() {
-      VLOG_I("middle fired -> cancelling leaf");
+      VLOG_I("  middle fired -> cancel leaf");
       leaf.request_cancel();
     });
 
     auto leaf_token = leaf.token();
     root.request_cancel();
-    VLOG_I("leaf.is_cancellation_requested=", leaf_token.is_cancellation_requested());
+    VLOG_I("  leaf.is_cancellation_requested=", leaf_token.is_cancellation_requested());
   }
 
-  // ---------------------------------------------------------------
-  // 8. Sibling sources cancellation inside a callback is deadlock-free.
-  // ---------------------------------------------------------------
+  // Sibling cancellation from within a callback: cancelling source B from
+  // inside source A's callback must NOT deadlock; cancellation locking is
+  // per-source.
   {
-    VLOG_I("=== Section 8: sibling cancel inside callback (no self-deadlock) ===");
-
+    VLOG_I("=== Sibling cancel inside callback ===");
     vlink::CancellationSource a;
     vlink::CancellationSource b;
 
     auto reg = a.token().register_callback([token_a = a.token(), &b]() {
-      // The internal mutex of a is already released before this callback runs,
-      // so we can freely query a's token and trigger b without deadlock.
-      VLOG_I("inside a's callback, a.is_cancellation_requested=", token_a.is_cancellation_requested());
+      VLOG_I("  inside a.cb a.is_cancellation_requested=", token_a.is_cancellation_requested());
       b.request_cancel();
     });
 
     a.request_cancel();
-    VLOG_I("b.is_cancellation_requested=", b.token().is_cancellation_requested());
+    VLOG_I("  b.is_cancellation_requested=", b.token().is_cancellation_requested());
   }
 
-  // ---------------------------------------------------------------
-  // 9. Callback exceptions are swallowed and other callbacks still fire.
-  // ---------------------------------------------------------------
+  // Exception isolation: a throwing callback must not prevent subsequent
+  // callbacks from firing. The framework swallows the exception silently.
   {
-    VLOG_I("=== Section 9: callback exception isolation ===");
-
+    VLOG_I("=== Callback exception isolation ===");
     vlink::CancellationSource source;
     auto token = source.token();
-
     auto reg1 = token.register_callback([]() { throw std::runtime_error("boom"); });
     std::atomic_bool reached{false};
     auto reg2 = token.register_callback([&reached]() { reached.store(true); });
 
     source.request_cancel();
-    VLOG_I("second callback still fired=", reached.load());
+    VLOG_I("  second callback still fired=", reached.load());
   }
 
-  // ---------------------------------------------------------------
-  // 10. Default-constructed token never reports cancellation.
-  // ---------------------------------------------------------------
+  // Empty / default-constructed token: no source attached, so the token can
+  // never report cancellation and registrations are no-ops.
   {
-    VLOG_I("=== Section 10: empty token semantics ===");
-
-    vlink::CancellationToken empty_token;
-    VLOG_I("empty.valid=", empty_token.valid(), " requested=", empty_token.is_cancellation_requested());
-
-    // Registering on an empty token returns an empty registration without
-    // observing or invoking the callback.
-    std::atomic_int never_fired{0};
-    auto reg = empty_token.register_callback([&never_fired]() { never_fired.fetch_add(1); });
-    VLOG_I("registration on empty token valid=", reg.valid(), " fired=", never_fired.load());
+    VLOG_I("=== Empty token semantics ===");
+    vlink::CancellationToken empty;
+    std::atomic_int never{0};
+    auto reg = empty.register_callback([&never]() { never.fetch_add(1); });
+    VLOG_I("  empty.valid=", empty.valid(), " req=", empty.is_cancellation_requested(), " reg.valid=", reg.valid(),
+           " fired=", never.load());
   }
 
-  // ---------------------------------------------------------------
-  // 11. Race: cancel between register_callback() and stash of returned reg.
-  // ---------------------------------------------------------------
+  // Race: many registrars contend with one canceller. Some registrations
+  // win the race and fire; others reset before fire. The invariant is
+  // fired <= registered, which the test sanity-checks.
   {
-    VLOG_I("=== Section 11: concurrent producers racing one source ===");
-
+    VLOG_I("=== Concurrent producers racing one source ===");
     vlink::CancellationSource source;
     auto token = source.token();
 
     std::atomic_int registered{0};
     std::atomic_int fired{0};
 
-    // Many threads register concurrently while another thread cancels.
     std::vector<std::thread> registrars;
     registrars.reserve(8);
     for (int i = 0; i < 8; ++i) {
       registrars.emplace_back([&]() {
         auto reg = token.register_callback([&fired]() { fired.fetch_add(1); });
         registered.fetch_add(1);
-        // Some threads release immediately, some keep the registration alive.
 
+        // Reset half the registrations to also stress the unregister path.
         if ((registered.load() & 1U) != 0U) {
           reg.reset();
         }
       });
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    std::this_thread::sleep_for(2ms);
     source.request_cancel();
+    for (auto& t : registrars) {
+      t.join();
+    }
 
-    for (auto& t : registrars) t.join();
-    VLOG_I("registered=", registered.load(), " fired=", fired.load(),
-           " (fired <= registered; exact value depends on race)");
+    VLOG_I("  registered=", registered.load(), " fired=", fired.load(), " (fired <= registered; race-dependent)");
   }
 
-  // ---------------------------------------------------------------
-  // 12. Integration with TaskHandle: parent token cascades into queued tasks.
-  // ---------------------------------------------------------------
+  // TaskHandle integration: passing a token through PostTaskOptions lets a
+  // task observe cancellation from outside, while still completing normally
+  // (returns from the callback) -- yielding a kCompleted state, not kCancelled.
   {
-    VLOG_I("=== Section 12: integration with TaskHandle ===");
-
+    VLOG_I("=== Integration with TaskHandle ===");
     vlink::MessageLoop loop;
     loop.async_run();
 
@@ -299,13 +301,14 @@ int main() {
     auto h = loop.post_task_handle(
         [token = opts.cancellation_token]() {
           while (!token.is_cancellation_requested()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(5ms);
           }
-          VLOG_I("task observed cancellation via inherited token");
+
+          VLOG_I("  task observed inherited token");
         },
         opts);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    std::this_thread::sleep_for(30ms);
     batch.request_cancel();
     h.wait();
 

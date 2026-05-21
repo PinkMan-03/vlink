@@ -23,103 +23,104 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_INTRA
+
+#include "./modules/intra_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <string>
 
-#ifdef VLINK_SUPPORT_INTRA
-
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: IntraConf - construction
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("modules-IntraConf - construction") {
-  TEST_CASE("construct with address only") {
+TEST_SUITE("modules-IntraConf") {
+  TEST_CASE("default event pipeline and type when only address supplied") {
     IntraConf conf("my_topic");
-    CHECK(conf.address == "my_topic");
+
+    CHECK_EQ(conf.address, "my_topic");
     CHECK(conf.event.empty());
-    CHECK(conf.pipeline == 0);
-    CHECK(conf.type == "queue");
+    CHECK_EQ(conf.pipeline, 0);
+    CHECK_EQ(conf.type, "queue");
   }
 
-  TEST_CASE("construct with address and event") {
+  TEST_CASE("event parameter is stored") {
     IntraConf conf("my_service", "my_event");
-    CHECK(conf.address == "my_service");
-    CHECK(conf.event == "my_event");
-    CHECK(conf.pipeline == 0);
-    CHECK(conf.type == "queue");
+
+    CHECK_EQ(conf.address, "my_service");
+    CHECK_EQ(conf.event, "my_event");
+    CHECK_EQ(conf.pipeline, 0);
+    CHECK_EQ(conf.type, "queue");
   }
 
-  TEST_CASE("construct with all params") {
+  TEST_CASE("all parameters are stored") {
     IntraConf conf("topic", "evt", 4, "direct");
-    CHECK(conf.address == "topic");
-    CHECK(conf.event == "evt");
-    CHECK(conf.pipeline == 4);
-    CHECK(conf.type == "direct");
+
+    CHECK_EQ(conf.address, "topic");
+    CHECK_EQ(conf.event, "evt");
+    CHECK_EQ(conf.pipeline, 4);
+    CHECK_EQ(conf.type, "direct");
   }
 
-  TEST_CASE("queue type is default") {
+  TEST_CASE("pipeline zero is the default") {
+    IntraConf conf("addr", "");
+
+    CHECK_EQ(conf.pipeline, 0);
+  }
+
+  TEST_CASE("queue is the default type") {
     IntraConf conf("addr");
-    CHECK(conf.type == "queue");
+
+    CHECK_EQ(conf.type, "queue");
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: IntraConf - equality
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("modules-IntraConf - equality operators") {
-  TEST_CASE("equal configurations compare equal") {
+  TEST_CASE("operator== holds when all fields match") {
     IntraConf a("topic", "event", 2, "queue");
     IntraConf b("topic", "event", 2, "queue");
+
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
   }
 
-  TEST_CASE("different address compares not equal") {
+  TEST_CASE("operator!= detects differing address") {
     IntraConf a("topic_a");
     IntraConf b("topic_b");
+
     CHECK(a != b);
-    CHECK(!(a == b));
+    CHECK_FALSE(a == b);
   }
 
-  TEST_CASE("different event compares not equal") {
+  TEST_CASE("operator!= detects differing event") {
     IntraConf a("topic", "event1");
     IntraConf b("topic", "event2");
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different pipeline compares not equal") {
+  TEST_CASE("operator!= detects differing pipeline") {
     IntraConf a("topic", "", 0);
     IntraConf b("topic", "", 4);
+
     CHECK(a != b);
   }
 
-  TEST_CASE("different type compares not equal") {
+  TEST_CASE("operator!= detects differing type") {
     IntraConf a("topic", "", 0, "queue");
     IntraConf b("topic", "", 0, "direct");
+
     CHECK(a != b);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: IntraConf - transport type
-// ---------------------------------------------------------------------------
+  TEST_CASE("self equality") {
+    IntraConf a("topic", "event", 2, "direct");
 
-TEST_SUITE("modules-IntraConf - transport type") {
+    CHECK(a == a);
+    CHECK_FALSE(a != a);
+  }
+
   TEST_CASE("get_transport_type returns kIntra") {
     IntraConf conf("topic");
+
     CHECK(conf.get_transport_type() == TransportType::kIntra);
-  }
-}
-
-#else
-
-TEST_SUITE("modules-IntraConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_INTRA not defined - skip") {
-    CHECK(true);  // placeholder when module is not compiled
   }
 }
 

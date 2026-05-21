@@ -21,95 +21,82 @@
  * limitations under the License.
  */
 
-// VLink condition variable (cross-platform wrapper)
+// Helloworld client sample.
+//
+// Companion to helloworld_server.cc. Two subcommands:
+//   set <l> <r>  -- one-shot RPC: send (left, right) to the Server, print sum.
+//   sub          -- subscribe to the periodic event stream until Ctrl+C.
+// The transport URL is resolved at runtime via helloworld_common.h and matches
+// whatever scheme the server was started with. Demonstrates Client<Req,Resp>
+// invoke() with a timeout and Subscriber<T> with signal-driven graceful exit
+// (ConditionVariable + register_terminate_signal). Typical engineering scenario:
+// a CLI tool that probes a running middleware service from the shell.
+
 #include <vlink/base/condition_variable.h>
-// VLink utility library (signal handling, environment variables, etc.)
-#include <vlink/base/utils.h>
-// VLink core communication API (Client, Subscriber, etc.)
+#include <vlink/base/elapsed_timer.h>
 #include <vlink/base/logger.h>
+#include <vlink/base/utils.h>
 #include <vlink/vlink.h>
 
-// Protobuf generated message types
 #if defined(__ANDROID__) && __has_include("helloworld/proto/helloworld.pb.h")
 #include "helloworld/proto/helloworld.pb.h"
 #else
 #include "helloworld.pb.h"
 #endif
 
-// Performance timer
-#include <vlink/base/elapsed_timer.h>
-
-// Common configuration header
 #include "./helloworld_common.h"
 
-using namespace vlink;                 // NOLINT(build/namespaces, google-build-using-namespace)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// RPC call mode: send an addition request to the server and get the result
-/// Demonstrates VLink's method model (Client/Server) with synchronous invocation
+// Issue one RPC call: pack (left, right) into a Protobuf Request, invoke()
+// synchronously with a 3s timeout, and print the returned sum.
 int set(int left, int right) {
-  // Create a Client: request type is Request, response type is Response
-  Client<Helloworld::Request, Helloworld::Response> client(Common::get_method_url());
+  vlink::Client<Helloworld::Request, Helloworld::Response> client(Common::get_method_url());
 
-  // Block and wait for the server to come online (timeout: 1 second)
-
+  // wait_for_connected blocks until discovery sees a matching Server (or 1s
+  // elapses). Skipping this would make the first invoke() race with discovery.
   if (!client.wait_for_connected(1s)) {
     VLOG_W("[Client] Server not ready.");
     return -1;
   }
 
-  // Construct the request message
   Helloworld::Request req;
   req.set_left(left);
   req.set_right(right);
 
-  // Synchronous call: send the request and wait for the response (timeout: 3 seconds)
   Helloworld::Response resp;
-  bool ret = client.invoke(req, resp, 3s);
 
-  if (!ret) {
+  if (!client.invoke(req, resp, 3s)) {
     VLOG_W("[Client] Invoke failed.");
     return -1;
   }
 
-  // Print the result returned by the server
   VLOG_D("[Client] Receive sum: ", resp.sum());
-
   return 0;
 }
 
-/// Event subscription mode: continuously receive event messages published by the server
-/// Demonstrates VLink's event model (Publisher/Subscriber) subscription
+// Subscribe to event messages until Ctrl+C is received.
 int sub() {
-  // Create a Subscriber to receive event messages
-  Subscriber<Helloworld::Message> sub(Common::get_event_url());
-
-  // Register receive callback: print the content of each received message
+  vlink::Subscriber<Helloworld::Message> sub(Common::get_event_url());
+  // listen() callback fires on the transport's worker thread for every event.
   sub.listen([](const Helloworld::Message& msg) { CLOG_D("[Client] Receive event: %s.", msg.detail().c_str()); });
 
-  // Use a condition variable to block the main thread until a termination signal is received
+  // Park the main thread on a condition variable. The signal handler runs in
+  // async-signal context and merely calls notify_one(), letting wait() return
+  // normally so destructors of the subscriber unwind cleanly on the main thread.
   std::mutex mtx;
   std::unique_lock lock(mtx);
   vlink::ConditionVariable cv;
-
-  // Register Ctrl+C signal handler to wake up the condition variable and exit
-  Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });
+  vlink::Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });
   cv.wait(lock);
 
   return 0;
 }
 
-/// Main function: select the run mode based on command-line arguments
-///   sub       - Event subscription mode, continuously receive messages
-///   set L R   - RPC call mode, compute L + R
 int main(int argc, char* argv[]) {
-  // Mode 1: Event subscription
-
   if (argc == 2 && ::strcmp(argv[1], "sub") == 0) {
     return sub();
   }
-
-  // Mode 2: RPC call
 
   if (argc == 4 && ::strcmp(argv[1], "set") == 0) {
     int left = std::stoi(argv[2]);
@@ -117,10 +104,8 @@ int main(int argc, char* argv[]) {
     return set(left, right);
   }
 
-  // Print usage instructions
   VLOG_I("Usage:");
   VLOG_I(" sample_helloworld_client [sub]");
   VLOG_I(" sample_helloworld_client [set] [left_num] [right_num]");
-
   return 1;
 }

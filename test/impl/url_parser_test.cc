@@ -28,297 +28,312 @@
 #include <doctest/doctest.h>
 
 #include <map>
-#include <stdexcept>
 #include <string>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+namespace {
 
-static const UrlParser::Category kH = UrlParser::Category::kHierarchical;
-static const UrlParser::Category kN = UrlParser::Category::kNonHierarchical;
-static const UrlParser::Separator kAmp = UrlParser::Separator::kAmpersand;
-static const UrlParser::Separator kSemi = UrlParser::Separator::kSemicolon;
+constexpr UrlParser::Category kH = UrlParser::Category::kHierarchical;
+constexpr UrlParser::Category kN = UrlParser::Category::kNonHierarchical;
+constexpr UrlParser::Separator kAmp = UrlParser::Separator::kAmpersand;
+constexpr UrlParser::Separator kSemi = UrlParser::Separator::kSemicolon;
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Basic hierarchical parsing
-// ---------------------------------------------------------------------------
+}  // namespace
 
-TEST_SUITE("impl-UrlParser - basic hierarchical") {
-  TEST_CASE("shm://vehicle/speed") {
+TEST_SUITE("impl-UrlParser") {
+  TEST_CASE("simple hierarchical url is decomposed into transport host path") {
     UrlParser p("shm://vehicle/speed");
 
-    CHECK(p.get_transport() == "shm");
-    CHECK(p.get_host() == "vehicle");
-    CHECK(p.get_path() == "speed");
-    CHECK(p.get_port() == 0);  // 0 = absent
+    CHECK_EQ(p.get_transport(), "shm");
+    CHECK_EQ(p.get_host(), "vehicle");
+    CHECK_EQ(p.get_path(), "speed");
+    CHECK_EQ(p.get_port(), 0);
     CHECK(p.get_query().empty());
     CHECK(p.get_fragment().empty());
     CHECK(p.get_username().empty());
     CHECK(p.get_password().empty());
-    CHECK(p.get_category() == kH);
+    CHECK_EQ(p.get_category(), kH);
   }
 
-  TEST_CASE("dds://topic/sub/path?key=value&key2=val2") {
+  TEST_CASE("query parameters are parsed into dictionary") {
     UrlParser p("dds://topic/sub/path?key=value&key2=val2");
 
-    CHECK(p.get_transport() == "dds");
-    CHECK(p.get_host() == "topic");
-    CHECK(p.get_path() == "sub/path");
+    CHECK_EQ(p.get_transport(), "dds");
+    CHECK_EQ(p.get_host(), "topic");
+    CHECK_EQ(p.get_path(), "sub/path");
 
     const auto& dict = p.get_query_dictionary();
-    REQUIRE(dict.count("key") == 1);
-    REQUIRE(dict.count("key2") == 1);
-    CHECK(dict.at("key") == "value");
-    CHECK(dict.at("key2") == "val2");
+    REQUIRE_EQ(dict.count("key"), 1u);
+    REQUIRE_EQ(dict.count("key2"), 1u);
+    CHECK_EQ(dict.at("key"), "value");
+    CHECK_EQ(dict.at("key2"), "val2");
   }
 
-  TEST_CASE("someip://127.0.0.1:30490/0x1/method - port parsed correctly") {
-    // Port appears after the colon following the host: transport://host:port/path
+  TEST_CASE("host-colon-port is parsed correctly") {
     UrlParser p("someip://127.0.0.1:30490/0x1/method");
 
-    CHECK(p.get_transport() == "someip");
-    CHECK(p.get_host() == "127.0.0.1");
-    CHECK(p.get_port() == 30490);
-    CHECK(!p.get_path().empty());
+    CHECK_EQ(p.get_transport(), "someip");
+    CHECK_EQ(p.get_host(), "127.0.0.1");
+    CHECK_EQ(p.get_port(), 30490);
+    CHECK_FALSE(p.get_path().empty());
   }
 
-  TEST_CASE("intra://test1?event=hello - query dict with single param") {
-    UrlParser p("intra://test1?event=hello");
-
-    CHECK(p.get_transport() == "intra");
-    CHECK(p.get_host() == "test1");
-
-    const auto& dict = p.get_query_dictionary();
-    REQUIRE(dict.count("event") == 1);
-    CHECK(dict.at("event") == "hello");
-  }
-
-  TEST_CASE("zenoh://domain/some/topic with no query or fragment") {
-    UrlParser p("zenoh://domain/some/topic");
-
-    CHECK(p.get_transport() == "zenoh");
-    CHECK(p.get_host() == "domain");
-    CHECK(p.get_path() == "some/topic");
-    CHECK(p.get_query().empty());
-    CHECK(p.get_fragment().empty());
-    CHECK(p.get_query_dictionary().empty());
-  }
-
-  TEST_CASE("fdbus://my_service - host only, no path") {
+  TEST_CASE("host-only url with no path produces empty path") {
     UrlParser p("fdbus://my_service");
 
-    CHECK(p.get_transport() == "fdbus");
-    CHECK(p.get_host() == "my_service");
+    CHECK_EQ(p.get_transport(), "fdbus");
+    CHECK_EQ(p.get_host(), "my_service");
+    CHECK(p.get_path().empty());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Fragment and credential components
-// ---------------------------------------------------------------------------
+  TEST_CASE("transport-only authority with no host produces empty host") {
+    UrlParser p("intra://");
 
-TEST_SUITE("impl-UrlParser - fragment and credentials") {
-  TEST_CASE("url://host/path#fragment - fragment extracted correctly") {
+    CHECK_EQ(p.get_transport(), "intra");
+    CHECK(p.get_host().empty());
+  }
+
+  TEST_CASE("single query parameter is placed in dictionary") {
+    UrlParser p("intra://test1?event=hello");
+
+    CHECK_EQ(p.get_transport(), "intra");
+    CHECK_EQ(p.get_host(), "test1");
+
+    const auto& dict = p.get_query_dictionary();
+    REQUIRE_EQ(dict.count("event"), 1u);
+    CHECK_EQ(dict.at("event"), "hello");
+  }
+
+  TEST_CASE("fragment component is extracted correctly") {
     UrlParser p("url://host/path#fragment");
 
-    CHECK(p.get_transport() == "url");
-    CHECK(p.get_host() == "host");
-    CHECK(p.get_path() == "path");
-    CHECK(p.get_fragment() == "fragment");
+    CHECK_EQ(p.get_transport(), "url");
+    CHECK_EQ(p.get_fragment(), "fragment");
+    CHECK(p.get_query().empty());
   }
 
-  TEST_CASE("transport://user:pass@host/path - username and password") {
+  TEST_CASE("username and password are parsed from authority") {
     UrlParser p("transport://user:pass@host/path");
 
-    CHECK(p.get_transport() == "transport");
-    CHECK(p.get_username() == "user");
-    CHECK(p.get_password() == "pass");
-    CHECK(p.get_host() == "host");
-    CHECK(p.get_path() == "path");
+    CHECK_EQ(p.get_username(), "user");
+    CHECK_EQ(p.get_password(), "pass");
+    CHECK_EQ(p.get_host(), "host");
+    CHECK_EQ(p.get_path(), "path");
   }
 
-  TEST_CASE("transport://user@host - username without password throws") {
-    // The parser requires a colon-delimited password after the username;
-    // a bare user@host (no colon before '@') is rejected with RuntimeError.
+  TEST_CASE("bare user-at-host without colon throws runtime error") {
     CHECK_THROWS_AS(UrlParser("transport://user@host"), std::runtime_error);
   }
 
-  TEST_CASE("full URL with all components") {
+  TEST_CASE("url with all components is fully decomposed") {
     UrlParser p("dds://admin:secret@192.168.1.1:7400/vehicle/speed?qos=reliable#section1");
 
-    CHECK(p.get_transport() == "dds");
-    CHECK(p.get_username() == "admin");
-    CHECK(p.get_password() == "secret");
-    CHECK(p.get_host() == "192.168.1.1");
-    CHECK(p.get_port() == 7400);
-    CHECK(p.get_path() == "vehicle/speed");
-    CHECK(!p.get_query().empty());
-    CHECK(p.get_fragment() == "section1");
-
-    const auto& dict = p.get_query_dictionary();
-    REQUIRE(dict.count("qos") == 1);
-    CHECK(dict.at("qos") == "reliable");
+    CHECK_EQ(p.get_transport(), "dds");
+    CHECK_EQ(p.get_username(), "admin");
+    CHECK_EQ(p.get_password(), "secret");
+    CHECK_EQ(p.get_host(), "192.168.1.1");
+    CHECK_EQ(p.get_port(), 7400);
+    CHECK_EQ(p.get_path(), "vehicle/speed");
+    CHECK_EQ(p.get_fragment(), "section1");
+    CHECK_EQ(p.get_query_dictionary().at("qos"), "reliable");
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Port behaviour
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-UrlParser - port handling") {
-  TEST_CASE("get_port() returns 0 when no port specified") {
+  TEST_CASE("get_port returns 0 when no port is present") {
     UrlParser p("shm://topicname/path");
-    CHECK(p.get_port() == 0);
+
+    CHECK_EQ(p.get_port(), 0);
   }
 
-  TEST_CASE("port 0 is parsed as 0") {
-    UrlParser p("someip://host:0/path");
-    CHECK(p.get_port() == 0);
+  TEST_CASE("port boundary values are parsed correctly") {
+    SUBCASE("port 0") {
+      UrlParser p("someip://host:0/path");
+      CHECK_EQ(p.get_port(), 0);
+    }
+
+    SUBCASE("port 65535") {
+      UrlParser p("someip://host:65535/path");
+      CHECK_EQ(p.get_port(), 65535);
+    }
+
+    SUBCASE("port 8080") {
+      UrlParser p("someip://localhost:8080");
+      CHECK_EQ(p.get_port(), 8080);
+      CHECK_EQ(p.get_host(), "localhost");
+    }
   }
 
-  TEST_CASE("port 65535 boundary") {
-    UrlParser p("someip://host:65535/path");
-    CHECK(p.get_port() == 65535);
-  }
-
-  TEST_CASE("port 30490 as used in SOME/IP") {
-    UrlParser p("someip://127.0.0.1:30490/my_service");
-    CHECK(p.get_port() == 30490);
-    CHECK(p.get_host() == "127.0.0.1");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Query separator variants
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-UrlParser - query separators") {
-  TEST_CASE("kAmpersand separator (default): a=1&b=2") {
+  TEST_CASE("ampersand separator splits query into individual key-value pairs") {
     UrlParser p("url://host/path?a=1&b=2", kH, kAmp);
 
     const auto& dict = p.get_query_dictionary();
-    REQUIRE(dict.count("a") == 1);
-    REQUIRE(dict.count("b") == 1);
-    CHECK(dict.at("a") == "1");
-    CHECK(dict.at("b") == "2");
+    REQUIRE_EQ(dict.count("a"), 1u);
+    REQUIRE_EQ(dict.count("b"), 1u);
+    CHECK_EQ(dict.at("a"), "1");
+    CHECK_EQ(dict.at("b"), "2");
   }
 
-  TEST_CASE("kSemicolon separator: a=1;b=2") {
+  TEST_CASE("semicolon separator splits query into individual key-value pairs") {
     UrlParser p("url://host/path?a=1;b=2", kH, kSemi);
 
     const auto& dict = p.get_query_dictionary();
-    REQUIRE(dict.count("a") == 1);
-    REQUIRE(dict.count("b") == 1);
-    CHECK(dict.at("a") == "1");
-    CHECK(dict.at("b") == "2");
+    REQUIRE_EQ(dict.count("a"), 1u);
+    REQUIRE_EQ(dict.count("b"), 1u);
+    CHECK_EQ(dict.at("a"), "1");
+    CHECK_EQ(dict.at("b"), "2");
   }
 
-  TEST_CASE("kSemicolon separator with three params") {
+  TEST_CASE("semicolon separator handles three parameters") {
     UrlParser p("url://host/path?x=10;y=20;z=30", kH, kSemi);
 
     const auto& dict = p.get_query_dictionary();
-    CHECK(dict.size() == 3);
-    CHECK(dict.at("x") == "10");
-    CHECK(dict.at("y") == "20");
-    CHECK(dict.at("z") == "30");
+    CHECK_EQ(dict.size(), 3u);
+    CHECK_EQ(dict.at("x"), "10");
+    CHECK_EQ(dict.at("y"), "20");
+    CHECK_EQ(dict.at("z"), "30");
   }
 
-  TEST_CASE("ampersand separator does not split on semicolon") {
+  TEST_CASE("ampersand separator does not split on semicolon character") {
     UrlParser p("url://host/path?a=1;b=2", kH, kAmp);
 
-    const auto& dict = p.get_query_dictionary();
-    // With ampersand separator, "a=1;b=2" is one token; key "a" maps to "1;b=2"
-    CHECK(dict.size() == 1);
+    CHECK_EQ(p.get_query_dictionary().size(), 1u);
   }
 
-  TEST_CASE("query key without value stored with empty string") {
+  TEST_CASE("query key without equals sign is stored with empty string value") {
     UrlParser p("url://host/path?flag", kH, kAmp);
 
     const auto& dict = p.get_query_dictionary();
-    REQUIRE(dict.count("flag") == 1);
+    REQUIRE_EQ(dict.count("flag"), 1u);
     CHECK(dict.at("flag").empty());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Non-hierarchical (opaque) URIs
-// ---------------------------------------------------------------------------
+  TEST_CASE("query with four key-value pairs all parsed correctly") {
+    UrlParser p("dds://host/path?a=1&b=2&c=3&d=4", kH, kAmp);
 
-TEST_SUITE("impl-UrlParser - non-hierarchical") {
-  TEST_CASE("mailto:user@example.com") {
-    UrlParser p("mailto:user@example.com", kN);
-
-    CHECK(p.get_transport() == "mailto");
-    CHECK(p.get_category() == kN);
-    CHECK(!p.get_content().empty());
+    const auto& dict = p.get_query_dictionary();
+    CHECK_EQ(dict.size(), 4u);
+    CHECK_EQ(dict.at("a"), "1");
+    CHECK_EQ(dict.at("d"), "4");
   }
 
-  TEST_CASE("urn:isbn:978-3-16-148410-0") {
-    UrlParser p("urn:isbn:978-3-16-148410-0", kN);
+  TEST_CASE("fragment is empty when not present in query url") {
+    UrlParser p("shm://host/path?q=1");
 
-    CHECK(p.get_transport() == "urn");
-    CHECK(p.get_category() == kN);
+    CHECK(p.get_fragment().empty());
   }
 
-  TEST_CASE("category is stored correctly for hierarchical") {
-    UrlParser p("shm://topic", kH);
-    CHECK(p.get_category() == kH);
+  TEST_CASE("query and fragment coexist in the same url") {
+    UrlParser p("dds://host/path?key=val#frag");
+
+    CHECK_EQ(p.get_query_dictionary().at("key"), "val");
+    CHECK_EQ(p.get_fragment(), "frag");
   }
 
-  TEST_CASE("category is stored correctly for non-hierarchical") {
-    UrlParser p("data:text/plain,hello", kN);
-    CHECK(p.get_category() == kN);
+  TEST_CASE("ip address is accepted as host component") {
+    UrlParser p("dds://192.168.0.1/topic");
+
+    CHECK_EQ(p.get_host(), "192.168.0.1");
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: to_string round-trip
-// ---------------------------------------------------------------------------
+  TEST_CASE("multi-segment path is stored as slash-joined string") {
+    UrlParser p("dds://ns/a/b/c/d");
 
-TEST_SUITE("impl-UrlParser - to_string round-trip") {
-  TEST_CASE("simple URL reconstructed") {
+    CHECK_EQ(p.get_host(), "ns");
+    CHECK_EQ(p.get_path(), "a/b/c/d");
+  }
+
+  TEST_CASE("path with dots hyphens and underscores is preserved") {
+    SUBCASE("dots in path") {
+      UrlParser p("dds://ns/path.with.dots");
+      CHECK_EQ(p.get_path(), "path.with.dots");
+    }
+
+    SUBCASE("hyphens and underscores") {
+      UrlParser p("shm://host/my-topic_name");
+      CHECK_EQ(p.get_path(), "my-topic_name");
+    }
+  }
+
+  TEST_CASE("query dictionary is empty when no query string is present") {
+    UrlParser p("shm://host/path");
+
+    CHECK(p.get_query_dictionary().empty());
+  }
+
+  TEST_CASE("to_string round-trip preserves transport host and path") {
     const std::string url = "shm://vehicle/speed";
     UrlParser p(url);
-    const std::string reconstructed = p.to_string();
+    std::string rebuilt = p.to_string();
 
-    // Transport and path must survive round-trip
-    CHECK(!reconstructed.empty());
-    CHECK(reconstructed.find("shm") != std::string::npos);
-    CHECK(reconstructed.find("vehicle") != std::string::npos);
-    CHECK(reconstructed.find("speed") != std::string::npos);
+    CHECK_FALSE(rebuilt.empty());
+    CHECK_NE(rebuilt.find("shm"), std::string::npos);
+    CHECK_NE(rebuilt.find("vehicle"), std::string::npos);
+    CHECK_NE(rebuilt.find("speed"), std::string::npos);
   }
 
-  TEST_CASE("URL with query reconstructed") {
+  TEST_CASE("to_string round-trip includes query key and value") {
     UrlParser p("dds://host/path?key=value");
-    const std::string s = p.to_string();
+    std::string s = p.to_string();
 
-    CHECK(s.find("dds") != std::string::npos);
-    CHECK(s.find("key") != std::string::npos);
-    CHECK(s.find("value") != std::string::npos);
+    CHECK_NE(s.find("key"), std::string::npos);
+    CHECK_NE(s.find("value"), std::string::npos);
   }
 
-  TEST_CASE("URL with fragment reconstructed") {
+  TEST_CASE("to_string round-trip includes fragment") {
     UrlParser p("url://host/path#frag");
-    const std::string s = p.to_string();
 
-    CHECK(s.find("frag") != std::string::npos);
+    CHECK_NE(p.to_string().find("frag"), std::string::npos);
   }
 
-  TEST_CASE("to_string returns non-empty for minimal URL") {
+  TEST_CASE("to_string returns non-empty for minimal url") {
     UrlParser p("intra://topic");
-    CHECK(!p.to_string().empty());
+
+    CHECK_FALSE(p.to_string().empty());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Component-map constructor
-// ---------------------------------------------------------------------------
+  TEST_CASE("non-hierarchical url stores transport and content") {
+    UrlParser p("mailto:user@example.com", kN);
 
-TEST_SUITE("impl-UrlParser - component-map constructor") {
-  TEST_CASE("construct from explicit component map") {
+    CHECK_EQ(p.get_transport(), "mailto");
+    CHECK_EQ(p.get_category(), kN);
+    CHECK_FALSE(p.get_content().empty());
+  }
+
+  TEST_CASE("urn opaque uri is parsed as non-hierarchical") {
+    UrlParser p("urn:isbn:978-3-16-148410-0", kN);
+
+    CHECK_EQ(p.get_transport(), "urn");
+    CHECK_EQ(p.get_category(), kN);
+  }
+
+  TEST_CASE("get_content throws for hierarchical url") {
+    UrlParser p("dds://host/path");
+
+    CHECK_THROWS((void)p.get_content());
+  }
+
+  TEST_CASE("category is preserved for hierarchical and non-hierarchical forms") {
+    SUBCASE("hierarchical") {
+      UrlParser p("shm://topic", kH);
+      CHECK_EQ(p.get_category(), kH);
+    }
+
+    SUBCASE("non-hierarchical") {
+      UrlParser p("data:text/plain,hello", kN);
+      CHECK_EQ(p.get_category(), kN);
+    }
+  }
+
+  TEST_CASE("construct from std::string produces same result as from const char pointer") {
+    std::string url = "zenoh://robot/lidar/scan";
+    UrlParser p(url);
+
+    CHECK_EQ(p.get_transport(), "zenoh");
+    CHECK_EQ(p.get_host(), "robot");
+    CHECK_EQ(p.get_path(), "lidar/scan");
+  }
+
+  TEST_CASE("component-map constructor builds url from explicit parts") {
     std::map<UrlParser::Component, std::string> comps;
     comps[UrlParser::Component::kTransport] = "dds";
     comps[UrlParser::Component::kHost] = "my_host";
@@ -326,234 +341,91 @@ TEST_SUITE("impl-UrlParser - component-map constructor") {
 
     UrlParser p(comps, kH, false);
 
-    CHECK(p.get_transport() == "dds");
-    CHECK(p.get_host() == "my_host");
+    CHECK_EQ(p.get_transport(), "dds");
+    CHECK_EQ(p.get_host(), "my_host");
   }
 
-  TEST_CASE("construct with replacement - transport override") {
+  TEST_CASE("component-map constructor with query produces query dictionary") {
+    std::map<UrlParser::Component, std::string> comps;
+    comps[UrlParser::Component::kTransport] = "intra";
+    comps[UrlParser::Component::kHost] = "host";
+    comps[UrlParser::Component::kPath] = "";
+    comps[UrlParser::Component::kQuery] = "key=value";
+
+    UrlParser p(comps, kH, false);
+
+    const auto& dict = p.get_query_dictionary();
+    REQUIRE_EQ(dict.count("key"), 1u);
+    CHECK_EQ(dict.at("key"), "value");
+  }
+
+  TEST_CASE("component-map constructor with port stores numeric port") {
+    std::map<UrlParser::Component, std::string> comps;
+    comps[UrlParser::Component::kTransport] = "someip";
+    comps[UrlParser::Component::kHost] = "127.0.0.1";
+    comps[UrlParser::Component::kPath] = "";
+    comps[UrlParser::Component::kPort] = "9090";
+
+    UrlParser p(comps, kH, false);
+
+    CHECK_EQ(p.get_port(), 9090);
+  }
+
+  TEST_CASE("component-map constructor with fragment stores fragment") {
+    std::map<UrlParser::Component, std::string> comps;
+    comps[UrlParser::Component::kTransport] = "fdbus";
+    comps[UrlParser::Component::kHost] = "svc";
+    comps[UrlParser::Component::kPath] = "";
+    comps[UrlParser::Component::kFragment] = "ipc";
+
+    UrlParser p(comps, kH, false);
+
+    CHECK_EQ(p.get_fragment(), "ipc");
+  }
+
+  TEST_CASE("copy-and-replace constructor overrides selected components") {
     UrlParser original("shm://vehicle/speed");
     std::map<UrlParser::Component, std::string> repl;
     repl[UrlParser::Component::kTransport] = "dds";
 
     UrlParser modified(original, repl);
-    CHECK(modified.get_transport() == "dds");
-    CHECK(modified.get_host() == original.get_host());
-    CHECK(modified.get_path() == original.get_path());
-  }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: std::string constructor
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-UrlParser - string constructor") {
-  TEST_CASE("construct from std::string") {
-    std::string url = "zenoh://robot/lidar/scan";
-    UrlParser p(url);
-
-    CHECK(p.get_transport() == "zenoh");
-    CHECK(p.get_host() == "robot");
-    CHECK(p.get_path() == "lidar/scan");
+    CHECK_EQ(modified.get_transport(), "dds");
+    CHECK_EQ(modified.get_host(), original.get_host());
+    CHECK_EQ(modified.get_path(), original.get_path());
   }
 
-  TEST_CASE("construct from const char*") {
-    UrlParser p("intra://test_topic");
-
-    CHECK(p.get_transport() == "intra");
-    CHECK(p.get_host() == "test_topic");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Edge cases
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-UrlParser - edge cases") {
-  TEST_CASE("multiple path segments") {
-    UrlParser p("dds://ns/a/b/c/d");
-
-    CHECK(p.get_transport() == "dds");
-    CHECK(p.get_host() == "ns");
-    CHECK(p.get_path() == "a/b/c/d");
-  }
-
-  TEST_CASE("URL with only transport and host - empty path") {
-    UrlParser p("intra://mytopic");
-
-    CHECK(p.get_transport() == "intra");
-    CHECK(p.get_host() == "mytopic");
-    CHECK(p.get_port() == 0);
-  }
-
-  TEST_CASE("query dict is empty when no query string") {
-    UrlParser p("shm://host/path");
-    CHECK(p.get_query_dictionary().empty());
-  }
-
-  TEST_CASE("fragment is empty when not present") {
-    UrlParser p("shm://host/path?q=1");
-    CHECK(p.get_fragment().empty());
-  }
-
-  TEST_CASE("IP address as host") {
-    UrlParser p("dds://192.168.0.1/topic");
-
-    CHECK(p.get_transport() == "dds");
-    CHECK(p.get_host() == "192.168.0.1");
-  }
-
-  TEST_CASE("host:port without path") {
-    UrlParser p("someip://localhost:8080");
-
-    CHECK(p.get_host() == "localhost");
-    CHECK(p.get_port() == 8080);
-  }
-
-  TEST_CASE("transport only - no authority") {
-    UrlParser p("intra://");
-    CHECK(p.get_transport() == "intra");
-    CHECK(p.get_host().empty());
-  }
-
-  TEST_CASE("path with dots") {
-    UrlParser p("dds://ns/path.with.dots");
-    CHECK(p.get_transport() == "dds");
-    CHECK(p.get_host() == "ns");
-    CHECK(p.get_path() == "path.with.dots");
-  }
-
-  TEST_CASE("path with hyphens and underscores") {
-    UrlParser p("shm://host/my-topic_name");
-    CHECK(p.get_path() == "my-topic_name");
-  }
-
-  TEST_CASE("query with multiple values for same separator") {
-    UrlParser p("dds://host/path?a=1&b=2&c=3&d=4", kH, kAmp);
-    const auto& dict = p.get_query_dictionary();
-    CHECK(dict.size() == 4);
-    CHECK(dict.at("a") == "1");
-    CHECK(dict.at("d") == "4");
-  }
-
-  TEST_CASE("query and fragment together") {
-    UrlParser p("dds://host/path?key=val#frag");
-    CHECK(p.get_query_dictionary().at("key") == "val");
-    CHECK(p.get_fragment() == "frag");
-  }
-
-  TEST_CASE("very long path") {
-    std::string long_path;
-    for (int i = 0; i < 50; ++i) {
-      if (i > 0) {
-        long_path += "/";
-      }
-
-      long_path += "segment" + std::to_string(i);
-    }
-    UrlParser p("dds://host/" + long_path);
-    CHECK(p.get_transport() == "dds");
-    CHECK(p.get_host() == "host");
-    CHECK(!p.get_path().empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: UrlParser - content accessor
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-UrlParser - content") {
-  TEST_CASE("get_content throws for hierarchical URL") {
-    UrlParser p("dds://host/path");
-    CHECK_THROWS((void)p.get_content());
-  }
-
-  TEST_CASE("get_content for non-hierarchical URL") {
-    UrlParser p("mailto:user@example.com", kN);
-    CHECK(!p.get_content().empty());
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: UrlParser - replacement constructor additional
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-UrlParser - replacement constructor") {
-  TEST_CASE("replace host") {
+  TEST_CASE("copy-and-replace constructor overrides host") {
     UrlParser original("dds://old_host/path");
     std::map<UrlParser::Component, std::string> repl;
     repl[UrlParser::Component::kHost] = "new_host";
 
     UrlParser modified(original, repl);
-    CHECK(modified.get_host() == "new_host");
-    CHECK(modified.get_transport() == "dds");
+
+    CHECK_EQ(modified.get_host(), "new_host");
+    CHECK_EQ(modified.get_transport(), "dds");
   }
 
-  TEST_CASE("replace query") {
+  TEST_CASE("copy-and-replace constructor overrides query and rebuilds dictionary") {
     UrlParser original("dds://host/path?old=value");
     std::map<UrlParser::Component, std::string> repl;
     repl[UrlParser::Component::kQuery] = "new=data";
 
     UrlParser modified(original, repl);
-    CHECK(modified.get_query() == "new=data");
 
-    const auto& dict = modified.get_query_dictionary();
-    REQUIRE(dict.count("new") == 1);
-    CHECK(dict.at("new") == "data");
+    CHECK_EQ(modified.get_query(), "new=data");
+    REQUIRE_EQ(modified.get_query_dictionary().count("new"), 1u);
+    CHECK_EQ(modified.get_query_dictionary().at("new"), "data");
   }
 
-  TEST_CASE("replace fragment") {
+  TEST_CASE("copy-and-replace constructor overrides fragment") {
     UrlParser original("dds://host/path#old_frag");
     std::map<UrlParser::Component, std::string> repl;
     repl[UrlParser::Component::kFragment] = "new_frag";
 
     UrlParser modified(original, repl);
-    CHECK(modified.get_fragment() == "new_frag");
-  }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: UrlParser - component-map constructor additional
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-UrlParser - component-map additional") {
-  TEST_CASE("construct with query component") {
-    std::map<UrlParser::Component, std::string> comps;
-    comps[UrlParser::Component::kTransport] = "intra";
-    comps[UrlParser::Component::kHost] = "host";
-    comps[UrlParser::Component::kPath] = "/topic";
-    comps[UrlParser::Component::kQuery] = "key=value";
-
-    UrlParser p(comps, kH, false);
-    CHECK(p.get_transport() == "intra");
-    CHECK(p.get_query() == "key=value");
-
-    const auto& dict = p.get_query_dictionary();
-    REQUIRE(dict.count("key") == 1);
-    CHECK(dict.at("key") == "value");
-  }
-
-  TEST_CASE("construct with port component") {
-    std::map<UrlParser::Component, std::string> comps;
-    comps[UrlParser::Component::kTransport] = "someip";
-    comps[UrlParser::Component::kHost] = "127.0.0.1";
-    comps[UrlParser::Component::kPort] = "9090";
-    comps[UrlParser::Component::kPath] = "/service";
-
-    UrlParser p(comps, kH, false);
-    CHECK(p.get_transport() == "someip");
-    CHECK(p.get_host() == "127.0.0.1");
-    CHECK(p.get_port() == 9090);
-  }
-
-  TEST_CASE("construct with fragment component") {
-    std::map<UrlParser::Component, std::string> comps;
-    comps[UrlParser::Component::kTransport] = "fdbus";
-    comps[UrlParser::Component::kHost] = "svc";
-    comps[UrlParser::Component::kPath] = "/path";
-    comps[UrlParser::Component::kFragment] = "ipc";
-
-    UrlParser p(comps, kH, false);
-    CHECK(p.get_fragment() == "ipc");
+    CHECK_EQ(modified.get_fragment(), "new_frag");
   }
 }
 

@@ -1,395 +1,143 @@
-# RunablePluginInterface 示例 (Plugin Runnable)
+# plugin_runnable — 自带 MessageLoop 的插件：`RunablePluginInterface`
 
-## 1. 概述
+`vlink::RunablePluginInterface` 是一种"自带事件循环"的插件：插件类直接继承 `MessageLoop`，可以注册 Timer、Subscriber、Server 等需要 loop 驱动的对象。host 负责加载与生命周期管理；插件在自己的线程里跑。
 
-本示例演示 `RunablePluginInterface`——VLink 中将 `MessageLoop` 事件循环与 `Plugin` 动态加载系统结合的高级插件接口。
+读完本示例你能掌握：
 
-继承 `RunablePluginInterface` 的插件拥有自己的事件循环线程，可以独立处理定时器回调、异步任务等。宿主通过标准化的生命周期方法（`async_run` / `on_init` / `on_deinit` / `quit` / `wait_for_quit`）管理插件。
+- `RunablePluginInterface` 与基础 plugin 的差异。
+- `on_init()` / `on_deinit()` 的语义和典型用法。
+- host 端的 async_run / on_init / on_deinit / quit / wait_for_quit 调用顺序。
+- 与 `ProxyServer::Config::runnable_list` 的集成。
 
-![RunablePluginInterface 生命周期](images/runnable-lifecycle.png)
+## 背景与适用场景
 
----
+适用：
 
-## 2. 目录结构
+- 长跑后台模块（监控、采集、心跳、桥接）。
+- 需要 Timer / Subscriber 但希望独立线程跑。
+- 想统一管理一组运行时插件的服务端（配合 `proxy/proxy_runnable_plugin/`）。
 
-```
-plugin_runnable/
-├── CMakeLists.txt              # 构建脚本：编译 .so + 宿主
-├── monitor_plugin.cc           # 插件实现（编译为 libmonitor_plugin.so）
-├── plugin_runnable.cc          # 宿主主程序
-├── images/
-│   ├── runnable-lifecycle.png     # 生命周期流程图
-│   └── runnable-lifecycle.drawio  # 流程图源文件
-└── README.md                   # 本文件
-```
+不适合：
 
----
+- 无状态的函数库（用基础 plugin）。
+- 需要 host 直接调用的 RPC 风格接口。
 
-## 3. 核心概念
+## 文件结构
 
-### 3.1 RunablePluginInterface 继承关系
+| 文件 | 角色 |
+|------|------|
+| `monitor_plugin.cc` | 插件：500ms Timer 计数；编译为 `libmonitor_plugin.so` |
+| `plugin_runnable.cc` | host：load、run、shutdown |
 
-```
-MessageLoop
-    └── RunablePluginInterface
-            └── MonitorPlugin (用户实现)
-```
+## 接口
 
-`RunablePluginInterface` 继承自 `MessageLoop`，因此每个插件实例都是一个完整的事件循环。它添加了两个生命周期方法：
+`RunablePluginInterface : public MessageLoop` 在 MessageLoop 基础上加两个生命周期方法：
 
-| 方法 | 调用时机 | 作用 |
+| 方法 | 调用时机 | 用途 |
 |------|---------|------|
-| `on_init()` | `async_run()` 之后 | 创建定时器、订阅者、初始化资源 |
-| `on_deinit()` | `quit()` 之前 | 停止定时器、释放资源、清理状态 |
+| `on_init()` | host 调 `async_run()` 之后 | 创建 Timer、Subscriber 等 |
+| `on_deinit()` | host 调 `quit()` 之前 | 释放资源 |
 
-### 3.2 接口定义
+## 代码导读
 
-`RunablePluginInterface` 定义在 `<vlink/extension/runnable_plugin_interface.h>` 中：
-
-```cpp
-class RunablePluginInterface : public MessageLoop {
-  VLINK_PLUGIN_REGISTER(RunablePluginInterface)
-
- protected:
-  RunablePluginInterface() = default;
-  ~RunablePluginInterface() override = default;
-
- public:
-  virtual void on_init() = 0;
-  virtual void on_deinit() = 0;
-};
-```
-
-关键点：
-- 插件 ID 来自 `RunablePluginInterface`（不是用户的实现类）
-- 构造函数和析构函数是 `protected` 的，防止直接实例化
-- 继承了 `MessageLoop` 的所有方法：`async_run()`、`quit()`、`post_task()`、`wait_for_quit()` 等
-
----
-
-## 4. 插件实现 (monitor_plugin.cc)
-
-### 4.1 代码结构
+### 1. 插件实现
 
 ```cpp
 class MonitorPlugin : public vlink::RunablePluginInterface {
-  VLINK_PLUGIN_REGISTER(vlink::RunablePluginInterface)  // [1]
-
+  VLINK_PLUGIN_REGISTER(vlink::RunablePluginInterface)
  public:
-  void on_init() override {                              // [2]
-    timer_ = std::make_unique<vlink::Timer>(
-        this, 500, vlink::Timer::kInfinite,              // [3]
-        [this]() {
-          int count = tick_count_.fetch_add(1) + 1;
-          int64_t elapsed_us = uptime_.get();
-          VLOG_I("[MonitorPlugin] tick #", count,
-                 "  uptime=", elapsed_us / 1000, " ms");
-        });
-    uptime_.start();
-    timer_->start();                                     // [4]
+  void on_init() override {
+    timer_ = std::make_unique<vlink::Timer>(this, 500, vlink::Timer::kInfinite, [this]() {
+      ++tick_;
+      VLOG_I("tick #", tick_);
+    });
+    timer_->start();
   }
 
-  void on_deinit() override {                            // [5]
-    if (timer_) {
-      timer_->stop();
-      timer_.reset();
-    }
-    uptime_.stop();
+  void on_deinit() override {
+    timer_->stop();
+    timer_.reset();
   }
 
  private:
+  int tick_ = 0;
   std::unique_ptr<vlink::Timer> timer_;
-  std::atomic<int> tick_count_{0};
-  vlink::ElapsedTimer uptime_;
 };
 
-VLINK_PLUGIN_DECLARE(MonitorPlugin, 1, 0)                // [6]
+VLINK_PLUGIN_DECLARE(MonitorPlugin, 1, 0)
 ```
 
-### 4.2 代码逐行分析
+Timer 构造时 `this` 是 `RunablePluginInterface*`，也是 `MessageLoop*`；timer 回调跑在插件自己的 loop 线程上。
 
-**[1] VLINK_PLUGIN_REGISTER(vlink::RunablePluginInterface)**
-
-注意使用完整的命名空间 `vlink::RunablePluginInterface`，而不是 `MonitorPlugin`。这确保插件 ID 与宿主的 `load<vlink::RunablePluginInterface>()` 匹配。
-
-**[2] on_init() -- 初始化**
-
-`on_init()` 在 `async_run()` 之后由宿主调用。此时 MessageLoop 已经在后台线程上运行，可以安全地创建定时器并启动它。
-
-**[3] Timer 构造**
+### 2. Host
 
 ```cpp
-vlink::Timer(this, 500, vlink::Timer::kInfinite, callback)
-```
-
-- `this` -- 将定时器绑定到插件自身的 MessageLoop
-- `500` -- 每 500 毫秒触发一次
-- `kInfinite` -- 无限次重复
-- `callback` -- 定时器触发时执行的回调
-
-Timer 的回调在 MessageLoop 线程上执行，与 `on_init()` / `on_deinit()` 在同一线程。
-
-**[4] timer_->start()**
-
-启动定时器。从此刻起，每 500ms 回调会在 MessageLoop 线程上触发一次。
-
-**[5] on_deinit() -- 清理**
-
-在宿主调用 `quit()` 之前，先调用 `on_deinit()` 让插件释放所有资源。这里停止并销毁定时器，打印统计信息。
-
-**[6] VLINK_PLUGIN_DECLARE(MonitorPlugin, 1, 0)**
-
-导出 C 入口点，版本 1.0。
-
----
-
-## 5. 宿主程序 (plugin_runnable.cc)
-
-### 5.1 完整生命周期
-
-```cpp
-// 1. 加载
 vlink::Plugin plugin;
-auto monitor = plugin.load<vlink::RunablePluginInterface>(
-    "monitor_plugin", 1, 0);
+auto p = plugin.load<vlink::RunablePluginInterface>("monitor_plugin", 1, 0);
+if (!p) return 1;
 
-// 2. 启动事件循环
-monitor->async_run();
+p->async_run();        // 启动 loop 后台线程
+p->on_init();           // 创建插件内部资源
 
-// 3. 初始化插件
-monitor->on_init();
+// host 主线程做自己的事...
+std::this_thread::sleep_for(2s);
 
-// 4. 让插件运行 3 秒
-std::this_thread::sleep_for(std::chrono::seconds(3));
-
-// 5. 停止序列
-monitor->on_deinit();      // 释放资源
-monitor->quit();           // 请求事件循环停止
-monitor->wait_for_quit();  // 等待后台线程退出
-
-// 6. 卸载
-monitor.reset();
-plugin.clear();
+p->on_deinit();         // 释放插件资源
+p->quit();              // 请求 loop 退出
+p->wait_for_quit();     // 等真正退出
 ```
 
-### 5.2 各步骤详解
-
-| 步骤 | 调用 | 线程 | 说明 |
-|------|------|------|------|
-| 1 | `load<RunablePluginInterface>()` | 主线程 | dlopen + vlink_plugin_create + new MonitorPlugin |
-| 2 | `async_run()` | 主线程 | 创建后台线程，开始运行 MessageLoop |
-| 3 | `on_init()` | 主线程* | 插件创建定时器和订阅者 |
-| 4 | (等待) | 主线程 | 定时器回调在后台 MessageLoop 线程上执行 |
-| 5a | `on_deinit()` | 主线程* | 插件停止定时器，释放资源 |
-| 5b | `quit()` | 主线程 | 通知 MessageLoop 退出 |
-| 5c | `wait_for_quit()` | 主线程 | 阻塞直到后台线程 join 完成 |
-| 6 | `reset()` + `clear()` | 主线程 | 销毁实例，dlclose 共享库 |
-
-> *注意：`on_init()` 和 `on_deinit()` 由宿主在主线程上调用，但它们创建的定时器和任务在后台 MessageLoop 线程上执行。如果需要确保 `on_init()` 中的操作在 MessageLoop 线程上执行，可以使用 `post_task()` 包装。
-
----
-
-## 6. Timer 与 MessageLoop 集成
-
-### 6.1 Timer 生命周期
-
-```
-on_init() 调用
-    |
-    v
-Timer(this, 500, kInfinite, callback)
-    |
-    v
-timer_->start()
-    |
-    v                     MessageLoop 后台线程
-    +-----> [500ms] -----> callback() 执行
-    +-----> [500ms] -----> callback() 执行
-    +-----> [500ms] -----> callback() 执行
-    |       ...
-    v
-on_deinit() 调用
-    |
-    v
-timer_->stop()  -- 停止调度新回调
-timer_.reset()  -- 销毁 Timer 对象
-```
-
-### 6.2 ElapsedTimer 用法
-
-`ElapsedTimer` 是一个高精度计时器，用于测量经过的时间：
+### 3. ProxyServer 集成
 
 ```cpp
-vlink::ElapsedTimer uptime_(
-    vlink::ElapsedTimer::kCpuTimestamp,  // 单调时钟（不受 NTP 影响）
-    vlink::ElapsedTimer::kMicro);        // 微秒精度
-
-uptime_.start();
-// ... 经过一段时间 ...
-int64_t us = uptime_.get();  // 获取已过微秒数
-uptime_.stop();
+vlink::ProxyServer::Config cfg;
+cfg.runnable_list = {"monitor_plugin"};   // 多个 runnable 插件
+vlink::ProxyServer server(cfg);
+server.start();
 ```
 
----
+`runnable_list` 让 ProxyServer 自动 load、init、run、deinit；详见 `../../proxy/proxy_runnable_plugin/`。
 
-## 7. CMake 构建
-
-```cmake
-# 插件共享库
-add_library(monitor_plugin SHARED monitor_plugin.cc)
-target_link_libraries(monitor_plugin vlink::all)
-set_target_properties(monitor_plugin PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
-)
-
-# 宿主可执行文件
-add_executable(example_plugin_runnable plugin_runnable.cc)
-target_link_libraries(example_plugin_runnable vlink::all)
-```
-
----
-
-## 8. 编译与运行
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_plugin_runnable monitor_plugin
-
 ./build/output/bin/example_plugin_runnable
 ```
 
-预期输出（简化）：
+预期输出（节选）：
 
 ```
-[I] === RunablePluginInterface example ===
-[I] RunablePluginInterface plugin_id: RunablePluginInterface
-[I] Plugin loaded.
-[I] Calling async_run() -- starting plugin event loop thread.
-[I] Calling on_init().
-[I] [MonitorPlugin] on_init -- creating 500ms timer
-[I] Sleeping 3 seconds while plugin runs...
-[I] [MonitorPlugin] tick #1  uptime=500 ms
-[I] [MonitorPlugin] tick #2  uptime=1001 ms
-[I] [MonitorPlugin] tick #3  uptime=1501 ms
-[I] [MonitorPlugin] tick #4  uptime=2002 ms
-[I] [MonitorPlugin] tick #5  uptime=2502 ms
-[I] [MonitorPlugin] tick #6  uptime=3002 ms
-[I] Calling on_deinit() -- plugin releases resources.
-[I] [MonitorPlugin] on_deinit -- stopping timer
-[I] [MonitorPlugin] total ticks=6  total uptime=3005 ms
-[I] Calling quit() -- requesting event loop stop.
-[I] Calling wait_for_quit() -- waiting for loop thread exit.
-[I] Releasing shared_ptr and clearing plugin loader.
-[I] Plugin runnable example complete.
+tick #1
+tick #2
+tick #3
+tick #4
+(2 秒后退出)
 ```
 
----
+## 常见陷阱
 
-## 9. 与 ProxyServer 集成
+1. **on_init/on_deinit 不在 loop 线程上**：它们在 host 调用线程上跑；如要在 loop 线程做事用 `post_task`。
+2. **忘记 on_deinit**：插件资源没释放；host 必须按 `async_run → on_init → ... → on_deinit → quit → wait_for_quit` 顺序。
+3. **`wait_for_quit` 不带超时**：可能永远阻塞；生产代码设超时然后 kill。
+4. **shared_ptr<RunablePlugin> 跨多 owner**：所有 owner 都释放后才真正 destroy + dlclose。
+5. **on_init 抛异常**：vlink 不处理；host 必须包 try/catch。
 
-VLink 的 `ProxyServer` 可以通过配置文件自动加载 `RunablePluginInterface` 插件，管理其完整生命周期。这意味着插件不需要自己编写宿主程序——ProxyServer 负责加载、启动、停止和卸载。
+## 设计要点
 
-### 9.1 典型集成模式
+- `RunablePluginInterface` 继承 `MessageLoop`，所有 MessageLoop API 都可用。
+- 插件可以注册 Subscriber、Timer、Server 等需要 loop 的组件。
+- `wait_for_quit` 会等待 loop 真的退出（包括内部 timer 析构）。
 
-```
-ProxyServer 启动
-    |
-    v
-读取配置文件 -> 发现插件列表
-    |
-    v
-对每个插件:
-    Plugin::load<RunablePluginInterface>(name, major, minor)
-    runnable->async_run()
-    runnable->on_init()
-    |
-    v
-ProxyServer 运行中（插件独立处理事件）
-    |
-    v
-ProxyServer 关闭:
-    runnable->on_deinit()
-    runnable->quit()
-    runnable->wait_for_quit()
-    Plugin::clear()
-```
+## 配图
 
----
+![Runnable lifecycle](./images/runnable-lifecycle.png)
 
-## 10. 高级用法
+图中展示 host 与 plugin 之间的生命周期时序：load → async_run → on_init → 业务运行 → on_deinit → quit → wait_for_quit → unload。
 
-### 10.1 在 on_init() 中创建订阅者
+## 参考
 
-```cpp
-void on_init() override {
-  // 创建订阅者，绑定到插件自身的 MessageLoop
-  sub_ = std::make_unique<vlink::Subscriber<vlink::Bytes>>("shm://sensor/data");
-  sub_->attach(this);  // this = 插件的 MessageLoop
-  sub_->listen([](const vlink::Bytes& data) {
-    VLOG_I("Received ", data.size(), " bytes");
-  });
-}
-```
-
-### 10.2 使用 post_task() 在 MessageLoop 线程上执行
-
-```cpp
-void on_init() override {
-  // 确保初始化代码在 MessageLoop 线程上执行
-  this->post_task([this]() {
-    // 这段代码运行在 MessageLoop 线程上
-    timer_ = std::make_unique<vlink::Timer>(this, 100, -1, []() {
-      VLOG_I("tick");
-    });
-    timer_->start();
-  });
-}
-```
-
-### 10.3 wait_for_quit 超时
-
-```cpp
-// 最多等 5 秒，超时后强制退出
-monitor->quit(true);  // force=true，丢弃队列中的待处理任务
-bool exited = monitor->wait_for_quit(5000);  // 5000ms 超时
-if (!exited) {
-  VLOG_W("Plugin did not exit within 5 seconds.");
-}
-```
-
----
-
-## 11. 注意事项
-
-- `on_init()` 必须在 `async_run()` 之后调用，此时事件循环已在运行
-- 不要在 `on_init()` / `on_deinit()` 中执行长时间阻塞操作
-- 所有 Timer 回调都在插件自身的 MessageLoop 线程上执行
-- 调用 `quit()` 后，MessageLoop 不再接受新任务
-- `wait_for_quit()` 默认无限等待，生产环境应设置超时
-- 插件 .so 在所有 `shared_ptr` 引用释放后才会被 dlclose
-- 先 `on_deinit()` 释放资源，再 `quit()` 停止循环，最后 `wait_for_quit()` 等待线程退出
-
----
-
-## 12. 常见问题
-
-**Q: on_init() 和 on_deinit() 在哪个线程执行？**
-
-它们由宿主调用，运行在宿主调用它们的线程上（通常是主线程）。但它们创建的定时器和订阅者的回调在 MessageLoop 的后台线程上执行。
-
-**Q: 可以在 on_init() 之前调用 async_run() 吗？**
-
-是的，这是正确的顺序。`async_run()` 启动后台线程，`on_init()` 在其上创建资源。
-
-**Q: 如果不调用 on_deinit() 直接 quit() 会怎样？**
-
-插件的资源（定时器、订阅者）会在析构函数中被销毁，但可能不够优雅。建议始终显式调用 `on_deinit()` 进行有序清理。
-
-**Q: 一个进程可以加载多个 RunablePluginInterface 插件吗？**
-
-可以。每个插件拥有独立的 MessageLoop 线程。使用不同的库名即可：
-
-```cpp
-auto plugin_a = loader.load<vlink::RunablePluginInterface>("plugin_a", 1, 0);
-auto plugin_b = loader.load<vlink::RunablePluginInterface>("plugin_b", 1, 0);
-```
+- `../plugin_basic/` — 基础 plugin 机制（先看）
+- `../plugin_schema/` — Schema 插件
+- `../../proxy/proxy_runnable_plugin/` — RunablePlugin 与 ProxyServer 的集成
+- `vlink/include/vlink/extension/runnable_plugin_interface.h` — 接口
+- 顶层 `doc/19-extensions.md` — 插件系统章节

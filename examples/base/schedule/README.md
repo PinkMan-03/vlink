@@ -1,104 +1,174 @@
-# VLink Schedule 示例
+# schedule — `Schedule::Config` 链式任务调度
 
-## 1. 概述
+`Schedule::Config` 是 vlink 任务调度的统一配置载体，用于 `MessageLoop` / `MultiLoop` / `ThreadPool::exec_task`。它把"延迟、优先级、入队超时、执行超时"四个维度封装成一个结构，配合链式 `on_then` / `on_else` / `on_catch` / `on_*_timeout` 实现"任务 + 后续动作"的声明式写法。
 
-本示例演示了 VLink `Schedule` 任务调度包装器的用法，包括 `Schedule::Config` 配置、`Status` 和 `RetStatus` RAII 句柄、`on_then`/`on_else` 结果链、异常捕获以及优先级调度。Schedule 提供了一种流式 API 来配置任务的延迟、优先级、超时和结果回调。
+本示例覆盖：
 
-## 2. 文件说明
+- `Schedule::Config` 三种典型构造方式。
+- 返回 void 的任务 + `Status` 链式（异常 / 超时）。
+- 返回 bool 的任务 + `RetStatus` 链式（on_then / on_else 短路）。
+- 异常拦截、优先级、status 有效性。
 
-| 文件 | 说明 |
-|------|------|
-| `schedule.cc` | Schedule 功能演示源码 |
-| `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
+## 背景与适用场景
 
-## 3. 构建与运行
+适用：
+
+- 需要把"任务 + 失败处理 + 超时处理"声明式组合在一处的场景。
+- 类 promise/future 编程风格，但更轻量。
+- 想给单个任务设置 schedule_timeout / execution_timeout 的场景。
+
+不适合：
+
+- 不需要任何后续动作的简单任务（直接 `post_task` 即可，更便宜）。
+- 严格的 Future composition（用 `std::future` + `invoke_task`）。
+
+## 核心 API
+
+| API | 签名/形式 | 说明 |
+|-----|----------|------|
+| `Schedule::Config` | `{ delay_ms=0, priority=0, schedule_timeout_ms=0, execution_timeout_ms=0 }` | 调度参数 |
+| `Schedule::Config(delay)` | 单参 | 仅设 delay_ms |
+| `Schedule::Config(delay, prio, sched_to, exec_to)` | 全参 | |
+| `MessageLoop::exec_task` | `template <typename Callable> Schedule::RetStatus exec_task(const Config&, Callable&&)` | 返回链式状态 |
+| `Status::on_catch` | `Status& on_catch(Function<void(std::exception&)>&&)` | 异常处理 |
+| `Status::on_schedule_timeout` | `Status&` | 入队超时回调 |
+| `Status::on_execution_timeout` | `Status&` | 执行超时回调 |
+| `Status::is_valid` | `bool is_valid() const` | 句柄是否有效 |
+| `RetStatus::on_then` | `RetStatus& on_then(Function<bool()>&&)` | 上一步返回 true 时调 |
+| `RetStatus::on_else` | `RetStatus& on_else(Function<void()>&&)` | 上一步返回 false 时调（短路） |
+
+## 代码导读
+
+### 1. Schedule::Config 构造
+
+```cpp
+Schedule::Config def;                                 // 全 0：立刻执行、默认优先级、无超时
+Schedule::Config full(100, 200, 5000, 3000);          // delay=100, prio=200, sched_to=5s, exec_to=3s
+Schedule::Config delay_only(50);                      // 只设 delay
+```
+
+### 2. void 任务 + Status
+
+```cpp
+MessageLoop loop;
+loop.async_run();
+
+loop.exec_task(Schedule::Config{}, []() { VLOG_I("  immediate void task"); })
+    .on_catch([](std::exception& e) { MLOG_E("  exception: {}", e.what()); });
+
+loop.exec_task(Schedule::Config{100, 0, 500, 500}, []() { VLOG_I("  delayed 100ms void task"); })
+    .on_schedule_timeout([]() { VLOG_W("  schedule timeout"); })
+    .on_execution_timeout([]() { VLOG_W("  execution timeout"); })
+    .on_catch([](std::exception& e) { MLOG_E("  caught: {}", e.what()); });
+```
+
+void 任务返回 `Status`，可链式注册 `on_catch` / `on_*_timeout`。
+
+### 3. bool 任务 + RetStatus
+
+```cpp
+loop.exec_task(Schedule::Config{},
+               []() -> bool {
+                 VLOG_I("  bool task -> true");
+                 return true;
+               })
+    .on_then([]() -> bool {
+      VLOG_I("  on_then(1)");
+      return true;
+    })
+    .on_then([]() -> bool {
+      VLOG_I("  on_then(2) -> false stops chain");
+      return false;
+    })
+    .on_then([]() -> bool {
+      VLOG_I("  on_then(3) NOT called");
+      return true;
+    })
+    .on_else([]() { VLOG_I("  on_else: triggered after on_then(2) false"); });
+```
+
+链路语义：任务/每个 on_then 都返回 bool。true 继续下一个 on_then；false 跳到第一个 on_else 并终止链。
+
+### 4. 异常拦截
+
+```cpp
+loop.exec_task(Schedule::Config{}, []() { throw std::runtime_error("simulated"); })
+    .on_catch([](std::exception& e) { MLOG_I("  on_catch caught: '{}'", e.what()); });
+```
+
+任务里抛 `std::exception` 派生异常被 `on_catch` 接住；未注册时异常被吞掉并打 Error 日志。
+
+### 5. 优先级 + Status 有效性
+
+```cpp
+MessageLoop loop(MessageLoop::kPriorityType);
+loop.async_run();
+loop.exec_task(Schedule::Config{0, MessageLoop::kLowestPriority}, []() { VLOG_I("  [LOW]"); });
+loop.exec_task(Schedule::Config{0, MessageLoop::kHighestPriority}, []() { VLOG_I("  [HIGH]"); });
+loop.exec_task(Schedule::Config{0, MessageLoop::kNormalPriority}, []() { VLOG_I("  [NORMAL]"); });
+
+auto status = loop.exec_task(Schedule::Config{}, []() { VLOG_I("  task body"); });
+MLOG_I("  is_valid={}", status.is_valid());
+```
+
+`is_valid()` 用于判断 status 句柄是否对应一个真正入队的任务（队满或其它原因可能拒绝）。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_schedule
 ./build/output/bin/example_schedule
 ```
 
-## 4. 核心概念
+预期输出（节选）：
 
-### 4.1 Schedule::Config
-
-```cpp
-Schedule::Config config(delay_ms, priority, schedule_timeout_ms, execution_timeout_ms);
+```
+=== Schedule::Config ===
+  default: delay=0ms prio=0 sched_to=0ms exec_to=0ms
+  full: delay=100ms prio=200 sched_to=5000ms exec_to=3000ms
+=== Void callback (Status) ===
+  immediate void task
+  delayed 100ms void task
+=== Bool callback (RetStatus) ===
+  --- returns true ---
+  bool task -> true
+  on_then(1)
+  on_then(2) -> false stops chain
+  on_else: triggered after on_then(2) false
+  --- returns false ---
+  bool task -> false
+  on_else: failure path
+=== Exception handling ===
+  on_catch caught: 'simulated'
+=== Priority scheduling ===
+  [HIGH]
+  [NORMAL]
+  [LOW]
+=== Status validity ===
+  task body
+  is_valid=1
 ```
 
-| 字段 | 类型 | 含义 | 默认值 |
-|------|------|------|--------|
-| `delay_ms` | `uint32_t` | 投递前延迟（通过一次性 Timer 实现） | 0 |
-| `priority` | `uint16_t` | 任务分发优先级 | 0 |
-| `schedule_timeout_ms` | `uint32_t` | 任务开始前的最长等待 | 0（禁用） |
-| `execution_timeout_ms` | `uint32_t` | 任务执行最长时间 | 0（禁用） |
+## 常见陷阱
 
-### 4.2 void 回调 -> Status
+1. **`on_catch` 不注册**：异常被吞掉只打日志；要传播必须显式 rethrow。
+2. **`execution_timeout` 不强制中断**：vlink 不杀任务线程，只触发回调。
+3. **bool task 返回 false 时 on_then 全跳过**：是按设计；不是 bug。
+4. **RetStatus 必须立即链式调**：保存到变量后 `.on_then` 仍可链式，但跨线程调用注册需要确保 Status 还有效。
+5. **`Schedule::Config{0, 0, 0, 0}` 与 `{}` 等价**：所有字段默认 0；不会做超时控制。
 
-```cpp
-loop.exec_task(config, []() { work(); })
-    .on_schedule_timeout([]() { /* 任务未按时开始 */ })
-    .on_execution_timeout([]() { /* 任务执行超时 */ })
-    .on_catch([](std::exception& e) { /* 异常处理 */ });
-```
+## 设计要点
 
-`Status` 是移动语义的 RAII 对象，支持链式注册三种回调：
-- `on_schedule_timeout`：任务在 `schedule_timeout_ms` 内未开始执行时触发
-- `on_execution_timeout`：任务执行时间超过 `execution_timeout_ms` 时触发
-- `on_catch`：任务回调抛出异常时触发，接收 `std::exception&` 参数
+- Status / RetStatus 内部用引用计数管理回调注册；过早析构会让回调被丢弃。
+- `on_then` 与 `on_else` 是 mutually exclusive 链：true 路径走 on_then 链；首次 false 跳 on_else 终止。
+- 超时是软超时；触发回调但不中断任务执行。
 
-### 4.3 bool 回调 -> RetStatus
+## 配图
 
-```cpp
-loop.exec_task(config, []() -> bool { return try_work(); })
-    .on_then([]() -> bool { return next_step(); })
-    .on_then([]() -> bool { return final_step(); })
-    .on_else([]() { handle_failure(); });
-```
+无专属配图。
 
-`RetStatus` 继承自 `Status`，额外支持：
-- `on_then`：当回调返回 `true` 时触发，可链式串联多个
-- `on_else`：当回调返回 `false` 时触发
+## 参考
 
-#### 4.3.1 on_then 链式执行规则
-
-1. 主回调返回 `true` -> 执行第一个 `on_then`
-2. `on_then(1)` 返回 `true` -> 执行 `on_then(2)`
-3. 任何 `on_then` 返回 `false` -> 停止链式执行，触发 `on_else`
-4. 主回调返回 `false` -> 跳过所有 `on_then`，直接触发 `on_else`
-
-### 4.4 异常处理
-
-```cpp
-loop.exec_task(config, []() { throw std::runtime_error("error"); })
-    .on_catch([](std::exception& e) { log_error(e.what()); });
-```
-
-异常在任务包装器内部被捕获并传递给 `on_catch` 回调。任务在异常后被视为失败。
-
-## 5. 代码执行流程
-
-1. **Config 构造**：演示默认、完整和仅延迟三种配置方式
-2. **void Status 链**：立即和延迟执行，注册超时和异常回调
-3. **bool RetStatus 链**：true 路径的 on_then 链和 false 路径的 on_else
-4. **异常处理**：任务抛出异常后 on_catch 捕获
-5. **优先级调度**：在 Priority 循环上使用不同优先级
-6. **有效性检查**：查询 Status 的 is_valid 状态
-
-## 6. 内部机制
-
-`Schedule::process()` 和 `Schedule::process_with_ret()` 是内部函数，由 `MessageLoop::exec_task()` 调用。它们：
-
-1. 将用户回调包装在一个带超时检测的闭包中
-2. 创建 `shared_ptr<Status::Impl>` 存储所有注册的回调
-3. 返回 `Status`/`RetStatus` 对象供用户链式注册回调
-4. 任务包装器和 Status 共享 `Status::Impl`，确保即使 Status 被销毁，回调仍有效
-
-## 7. 注意事项
-
-- 所有回调都在 MessageLoop 线程上执行
-- Status 是移动语义，不可拷贝
-- 内部通过 `shared_ptr` 引用计数管理，Status 销毁后注册的回调仍有效
-- `delay_ms > 0` 时通过内部一次性 Timer 实现延迟
-- `is_valid()` 为 `false` 表示任务未能成功投递（如队列已满）
+- `../message_loop_basic/` — MessageLoop 入门
+- `../message_loop_advanced/` — 多种 queue 类型 + 调度策略
+- `../task_handle/` — 带 cancellation_token 的 TaskHandle
+- `vlink/include/vlink/base/schedule.h` — Schedule::Config / Status / RetStatus 接口

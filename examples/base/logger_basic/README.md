@@ -1,252 +1,144 @@
-# VLink Logger 基础示例 -- 深入解析
+# logger_basic — vlink Logger 入门：四种调用风格 + 双 sink 级别控制
 
-## 1. 概述
+vlink Logger 是线程安全、双 sink（控制台 + 文件）、零分配的日志库。它给 C++ 项目提供四种调用风格，覆盖不同口味的工程组：流式 (`VLOG_*`)、format (`MLOG_*`)、printf (`CLOG_*`)、RAII 流 (`SLOG_*`)。同一进程可以混用所有风格，运行期可分别调控制台和文件的日志级别。
 
-VLink 的 `Logger` 是一个全局单例日志系统，通过 `Logger::init()` 初始化后可在任意位置通过宏输出日志。本示例深入演示日志初始化、四种输出风格、六种日志级别以及动态级别控制。
+读完本示例你能掌握：
 
-`Logger` 基于 spdlog 构建，但提供了 VLink 特有的增强功能：四种风格宏、编译时级别过滤、自动 `{file:line}` 注解以及零分配的 FastStream 风格。
+- 四种宏家族 `VLOG_*` / `MLOG_*` / `CLOG_*` / `SLOG_*` 各自的用法与适用场合。
+- `Logger::init` 双 sink 初始化。
+- 运行期通过 `set_console_level` / `set_file_level` 控制日志输出。
+- 6 个级别 (`kTrace`、`kDebug`、`kInfo`、`kWarn`、`kError`、`kFatal`) 的使用约定。
 
-## 2. 文件说明
+## 背景与适用场景
 
-| 文件 | 说明 |
-|------|------|
-| `logger_basic.cc` | 日志基础功能演示源码 |
-| `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
+vlink Logger 的设计目标：
 
-## 3. 构建与运行
+- **零开销**：调用宏在级别被过滤时只做一次原子读，不构造字符串。
+- **线程安全**：内部无锁队列 + 单一后台 flushing 线程。
+- **双 sink**：控制台输出与文件输出独立级别控制 —— 例如开发期文件记 Info+，控制台记 Trace+。
+- **四种风格**：让团队自由选择，不强制统一。
 
-```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_logger_basic
-./build/output/bin/example_logger_basic
-```
+vlink 自己所有的代码（包括传输层、序列化、扩展模块）都通过 Logger 输出日志。生产部署时通常把控制台关到 Warn 级别、文件保留 Info 级别。
 
-## 4. 四种输出风格详解
+## 核心 API
 
-VLink 提供四种风格的日志宏，适用于不同的开发场景和个人偏好。每种风格在所有六种级别（T/D/I/W/E/F）上都有对应的宏。
+| API | 签名 | 说明 |
+|-----|------|------|
+| `Logger::init` | `static void init(const std::string& app_name, const std::string& file_path = "")` | 初始化；file_path 为空则不写文件 |
+| `Logger::set_console_level` | `static void set_console_level(Level)` | 控制台级别（kTrace ~ kFatal） |
+| `Logger::set_file_level` | `static void set_file_level(Level)` | 文件级别 |
+| `Logger::flush` | `static void flush()` | 强制把缓冲写到 sink |
+| `Logger::Level` | enum | kTrace / kDebug / kInfo / kWarn / kError / kFatal |
+| `VLOG_T/D/I/W/E/F` | 宏 | 流式（operator<<），零分配拼接 |
+| `MLOG_T/D/I/W/E/F` | 宏 | `{}` 占位符，类似 fmt |
+| `CLOG_T/D/I/W/E/F` | 宏 | printf 风格 `%d` `%s` |
+| `SLOG_T/D/I/W/E/F` | 宏 | RAII iostream 风格，dtor flush |
 
-### 4.1 Stream 风格 (VLOG_*)
+## 代码导读
 
-```cpp
-VLOG_I("message: key=", value, " name=", name);
-```
-
-**内部实现**：使用 `FastStream` 的 `operator<<` 进行流式拼接。`FastStream` 是 VLink 自研的线程局部流对象，使用固定大小的栈缓冲区（4096 字节），**完全零堆分配**。
-
-**适用场景**：
-- 简单的消息拼接
-- 性能敏感的热路径
-- 需要零分配保证的实时系统
-
-**示例**：
-```cpp
-VLOG_T("Stream style [Trace]: counter=", 0, " name=", "alpha");
-VLOG_D("Stream style [Debug]: temperature=", 23.5, " unit=C");
-VLOG_I("Stream style [Info]: application started successfully");
-VLOG_W("Stream style [Warn]: disk usage is high, used=", 91, "%");
-VLOG_E("Stream style [Error]: failed to open config file");
-```
-
-### 4.2 Format 风格 (MLOG_*)
+### 1. 初始化双 sink
 
 ```cpp
-MLOG_I("connected to host={}, port={}", host, port);
+Logger::init("logger_basic_demo", "/tmp/vlink_logger_basic.log");
+Logger::set_console_level(Logger::kTrace);
+Logger::set_file_level(Logger::kInfo);
 ```
 
-**内部实现**：使用 Python/fmt 风格的 `{}` 占位符，通过 `vlink::format::format_to_n` 格式化到 4096 字节的线程局部缓冲区。支持位置参数和格式说明符。
+`init` 第一个参数是 app 名（写到每条日志的前缀），第二个是文件路径（可省略，省时只输出到控制台）。
 
-**适用场景**：
-- 需要格式化控制的复杂消息
-- 习惯 Python/fmt 风格的开发者
-- 需要在消息中嵌入多个参数
+控制台级别 Trace = 全部打印；文件级别 Info = Trace/Debug 不写文件。
 
-**示例**：
-```cpp
-MLOG_T("Format style [Trace]: value={}, label={}", 42, "beta");
-MLOG_D("Format style [Debug]: elapsed={}ms", 150);
-MLOG_I("Format style [Info]: connected to host={}, port={}", "192.168.1.1", 8080);
-MLOG_W("Format style [Warn]: retry attempt {}/{}", 3, 5);
-MLOG_E("Format style [Error]: timeout after {}ms", 5000);
-```
-
-### 4.3 C 风格 (CLOG_*)
+### 2. 四种风格示例
 
 ```cpp
-CLOG_I("PID=%d, name=%s", pid, name);
+// 流式：用 << 拼接，零分配
+VLOG_I("stream [I]: application started");
+VLOG_W("stream [W]: disk usage=", 91, "%");
+
+// format：{} 占位
+MLOG_I("format [I]: connected to host={}, port={}", "192.168.1.1", 8080);
+MLOG_W("format [W]: retry {}/{}", 3, 5);
+
+// printf：移植旧代码方便
+CLOG_I("c [I]: PID=%d started", 12345);
+CLOG_E("c [E]: errno=%d (%s)", 2, "No such file or directory");
+
+// RAII iostream：链式 << 直到分号
+SLOG_I << "raii [I]: init complete";
+SLOG_D << "raii [D]: x=" << 1.5 << " y=" << 2.5;
 ```
 
-**内部实现**：使用传统的 printf 风格 `%d/%s` 格式说明符，内部调用 `std::snprintf`。
-
-**适用场景**：
-- 从 C 代码迁移
-- 习惯 printf 的开发者
-- 需要精确的格式控制（如 `%.2f`）
-
-**示例**：
-```cpp
-CLOG_T("C style [Trace]: index=%d, tag=%s", 7, "gamma");
-CLOG_D("C style [Debug]: ratio=%.2f", 3.14);
-CLOG_I("C style [Info]: PID=%d started", 12345);
-CLOG_W("C style [Warn]: memory usage=%d%%", 85);
-CLOG_E("C style [Error]: errno=%d (%s)", 2, "No such file or directory");
-```
-
-### 4.4 RAII Stream 风格 (SLOG_*)
+### 3. 运行期调整级别
 
 ```cpp
-SLOG_I << "value=" << x << " status=" << status;
+VLOG_I("--- raising console level to kWarn ---");
+Logger::set_console_level(Logger::kWarn);
+VLOG_D("debug suppressed on console");
+VLOG_I("info suppressed on console");
+VLOG_W("warn still shown on console");
+VLOG_E("error still shown on console");
+
+Logger::set_console_level(Logger::kTrace);
+
+Logger::set_file_level(Logger::kError);
+VLOG_I("info -> console only, not file");
+VLOG_E("error -> both console and file");
 ```
 
-**内部实现**：使用 `WrapperStream` 模板类，支持标准 `<<` 操作符链式调用。临时对象析构时自动刷新消息到 sink。
+`set_console_level` 和 `set_file_level` 完全独立。运行期可以根据负载、SIGUSR1 等热切。
 
-**适用场景**：
-- 需要条件性拼接的复杂表达式
-- 习惯 iostream 风格的开发者
-- 需要在 if 分支中逐步构建消息
-
-**示例**：
-```cpp
-SLOG_T << "RAII stream [Trace]: id=" << 100 << " status=ok";
-SLOG_D << "RAII stream [Debug]: x=" << 1.5 << " y=" << 2.5;
-SLOG_I << "RAII stream [Info]: initialization complete";
-SLOG_W << "RAII stream [Warn]: connection unstable";
-SLOG_E << "RAII stream [Error]: data corruption detected";
-```
-
-### 4.5 四种风格对比
-
-| 风格 | 宏前缀 | 语法 | 堆分配 | 类型安全 | 编译检查 |
-|------|--------|------|--------|---------|---------|
-| Stream | `VLOG_` | 逗号拼接 | 零分配 | 是 | 是 |
-| Format | `MLOG_` | `{}` 占位符 | 零分配 | 是 | 部分 |
-| C      | `CLOG_` | `%d/%s` 格式 | 零分配 | 否 | 否 |
-| RAII   | `SLOG_` | `<<` 操作符 | 零分配 | 是 | 是 |
-
-**推荐使用优先级**：`VLOG_`（最快、最安全） > `MLOG_`（最灵活） > `SLOG_`（特殊场景） > `CLOG_`（兼容旧代码）
-
-## 5. 六种日志级别
-
-| 级别值 | 名称 | 宏后缀 | 用途 | 颜色 |
-|--------|------|--------|------|------|
-| 0 | kTrace | `_T` | 详细的内部追踪信息 | 灰色 |
-| 1 | kDebug | `_D` | 开发调试诊断信息 | 青色 |
-| 2 | kInfo | `_I` | 正常运行状态消息 | 绿色 |
-| 3 | kWarn | `_W` | 异常但可恢复的状况 | 黄色 |
-| 4 | kError | `_E` | 影响运行的错误 | 红色 |
-| 5 | kFatal | `_F` | 不可恢复的致命错误 | 加粗红色 |
-
-### 5.1 级别语义
-
-- **kTrace**：函数进入/退出、循环迭代、帧时序等高频信息。生产环境应编译时剔除。
-- **kDebug**：配置加载、连接建立、状态变化等开发调试信息。
-- **kInfo**：正常运行里程碑：启动完成、连接成功、数据库就绪等。
-- **kWarn**：可恢复的异常：重试、降级、超时等。
-- **kError**：需要关注的错误：连接失败、数据校验失败等。
-- **kFatal**：不可恢复的致命错误。**会抛出 `RuntimeError` 异常**。
-
-### 5.2 自动 Detail 注解
-
-当日志级别 >= `kDetailLevel`（默认 `kWarn`）时，宏自动在消息前添加 `{filename:line}` 信息：
-
-```
-[2026-03-28 10:00:00.123] [WARN]  {timer_basic.cc:42} This is a warning
-[2026-03-28 10:00:00.124] [ERROR] {timer_basic.cc:43} This is an error
-```
-
-## 6. 编译时级别过滤
-
-通过定义 `VLINK_LOG_LEVEL=N` 宏，可以在编译时**完全剔除**低于 N 级别的日志代码：
-
-```cmake
-target_compile_definitions(myapp PRIVATE VLINK_LOG_LEVEL=2)  # 剔除 Trace 和 Debug
-```
-
-| VLINK_LOG_LEVEL | 剔除的级别 | 保留的级别 |
-|-----------------|-----------|-----------|
-| 0 | 无 | 全部 |
-| 1 | Trace | Debug, Info, Warn, Error, Fatal |
-| 2 | Trace, Debug | Info, Warn, Error, Fatal |
-| 3 | Trace, Debug, Info | Warn, Error, Fatal |
-| 4 | Trace, Debug, Info, Warn | Error, Fatal |
-| 5 | Trace, Debug, Info, Warn, Error | Fatal |
-
-被剔除的宏会被预处理器替换为空操作，**完全零开销**。这对性能敏感的嵌入式系统特别重要。
-
-可以在运行时检查编译时最低级别：
-```cpp
-Logger::kMinimumLevel  // 编译时确定的最低级别
-```
-
-## 7. 动态级别控制
-
-```cpp
-// 设置控制台和文件 sink 的最低输出级别
-Logger::set_console_level(Logger::kWarn);   // 控制台只显示 Warn 及以上
-Logger::set_file_level(Logger::kDebug);     // 文件记录 Debug 及以上
-
-// 检查某个级别是否可写（用于避免构建昂贵的参数）
-if (Logger::is_writable(Logger::kDebug)) {
-    std::string expensive = build_debug_info();
-    VLOG_D("Debug: ", expensive);
-}
-```
-
-控制台和文件的输出级别可以独立配置，且可在运行时随时修改。
-
-## 8. 关键代码分析
-
-### 8.1 Logger 初始化
-
-```cpp
-Logger::init("app_name", "/path/to/logfile.log");
-```
-
-- `app_name`：嵌入日志输出中的标识，便于在多进程环境中区分来源
-- `log_path`：日志文件路径（可选，为空则不启用文件输出）
-- 必须在使用任何日志宏**之前**调用
-- 可以多次调用以重新配置
-
-### 8.2 日志刷新
+### 4. flush
 
 ```cpp
 Logger::flush();
 ```
 
-在异常终止前调用 `flush()` 确保缓冲的消息写入。`kFatal` 级别会自动触发 `flush()`。
+`flush()` 同步把所有缓冲刷盘；通常在 `quit()` / `abort()` 之前必调，避免日志丢失。
 
-## 9. 常见错误
+## 运行
 
-### 9.1 错误 1：在 Logger::init() 之前使用日志宏
-
-```cpp
-VLOG_I("This may crash or silently fail");
-Logger::init("myapp");  // 太晚了！
+```bash
+./build/output/bin/example_logger_basic
+# 日志文件: /tmp/vlink_logger_basic.log
 ```
 
-### 9.2 错误 2：在 kFatal 之后期望继续执行
+预期输出（节选）：
 
-```cpp
-VLOG_F("Fatal error: ", reason);
-// 这一行永远不会执行！VLOG_F 抛出 RuntimeError
-cleanup();
+```
+[I][logger_basic_demo] stream [I]: application started
+[W][logger_basic_demo] stream [W]: disk usage=91%
+[E][logger_basic_demo] stream [E]: failed to open config
+[T][logger_basic_demo] format [T]: value=42, label=beta
+[I][logger_basic_demo] format [I]: connected to host=192.168.1.1, port=8080
+[I][logger_basic_demo] c [I]: PID=12345 started
+[I][logger_basic_demo] raii [I]: init complete
+--- raising console level to kWarn ---
+[W][logger_basic_demo] warn still shown on console
+[E][logger_basic_demo] error still shown on console
+[I][logger_basic_demo] info -> console only, not file
+Logger basic example finished.
 ```
 
-### 9.3 错误 3：混淆编译时过滤和运行时过滤
+## 常见陷阱
 
-```cpp
-// 编译时：-DVLINK_LOG_LEVEL=2
-Logger::set_console_level(Logger::kTrace);  // 无效！Trace 已在编译时被剔除
-VLOG_T("This is completely removed by preprocessor");  // 空操作
-```
+1. **未 `init` 就用宏**：默认 sink 配置只输出到控制台；级别 Info。不一定符合需求。
+2. **fmt `{}` 占位符数量与参数不匹配**：MLOG_* 用 std::format / fmt 风格；不匹配会编译失败或运行时格式化异常。
+3. **CLOG 用 std::string**：CLOG 是 printf 风格，传 std::string 必须 `.c_str()`。
+4. **SLOG_* 没有 flush** 直到分号：长链 `SLOG_I << a << b << ...;` 在分号前不刷出，崩溃时这条丢。
+5. **跨进程不共享 sink**：每个进程独立 init，独立写文件。多进程要同一份日志请走集中式 Logger 后端或自己写文件路径区分。
 
-### 9.4 错误 4：在日志回调中递归使用日志
+## 设计要点
 
-```cpp
-Logger::register_console_handler([](Logger::Level, std::string_view msg) {
-    VLOG_I("Received: ", msg);  // 可能递归！
-});
-```
+- VLOG_ 系列基于 vlink 内置 `FastStream`，零分配（用 thread_local buffer）。
+- 后台 flushing 线程异步写文件 sink；不阻塞业务。
+- 6 级别中 `kFatal` 输出后会调 `std::abort()`（典型用于不可恢复错误）。
 
-## 10. 相关示例
+## 配图
 
-- [logger_advanced](../logger_advanced/) -- 自定义 handler、backtrace、fatal 异常捕获
+无专属配图。
+
+## 参考
+
+- `../logger_advanced/` — 自定义后端、backtrace、Fatal 行为、编译期级别过滤
+- `vlink/include/vlink/base/logger.h` — Logger 接口
+- `vlink/include/vlink/base/logger_plugin_interface.h` — 自定义 sink 接口

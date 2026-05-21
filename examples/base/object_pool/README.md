@@ -1,129 +1,164 @@
-# VLink ObjectPool 示例
+# object_pool — `vlink::ObjectPool<T>` 对象复用池
 
-## 1. 概述
+`vlink::ObjectPool<T>` 是一个固定容量的对象复用池：在工厂回调里构造、按需借出、归还时（可选）调 reset 回调清理状态。适合那些"构造开销大、复用频繁"的对象 —— 例如复杂的网络连接、缓冲区、消息对象。
 
-本示例演示了 VLink `ObjectPool<T>` 的对象池功能，包括 RAII 自动回收、共享指针模式、手动借还、四种重置策略、统计信息查询以及池耗尽处理。对象池通过重用已分配的对象来减少热路径上的堆分配压力。
+读完本示例你能掌握：
 
-## 2. 文件说明
+- RAII / shared / 手动三种借出方式。
+- 四种 ResetPolicy 的差异（None / Acquire / Release / Both）。
+- 池容量耗尽的行为。
+- 统计接口的用法。
 
-| 文件 | 说明 |
-|------|------|
-| `object_pool.cc` | ObjectPool 功能演示源码 |
-| `pooled_buffer.h` | 用于演示的 `Buffer` 类型定义（可重置 / 可计数） |
-| `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
+## 背景与适用场景
 
-## 3. 构建与运行
+适用：
+
+- 业务对象构造慢（含大量字段、内部分配）。
+- 高频借出+归还（典型周期 < 1ms）。
+- 想限制并发使用数（最多 N 个并存）。
+
+不适合：
+
+- 对象构造成本 < 一次锁开销（直接 new 更便宜）。
+- 对象需要在借出方之间安全共享（用 shared_ptr 模式）。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `ObjectPool(FactoryCallback factory, size_t initial_size, size_t max_size = 0, ResetCallback reset = nullptr, ResetPolicy = kPolicyRelease)` | 构造 | 工厂、初始尺寸、上限、reset 回调、reset 时机 |
+| `ObjectPool::ResetPolicy` | enum | `kPolicyNone` / `kPolicyAcquire` / `kPolicyRelease` / `kPolicyBoth` |
+| `ObjectPool::get` | `std::unique_ptr<T, PoolDeleter> get()` | RAII；析构归还 |
+| `ObjectPool::get_shared` | `std::shared_ptr<T> get_shared()` | 共享所有权；最后 release 时归还 |
+| `ObjectPool::borrow` | `T* borrow()` | 裸指针；调用方必须显式 give_back |
+| `ObjectPool::give_back` | `void give_back(T*)` | 归还借出的对象 |
+| `ObjectPool::size` / `borrowed` / `total_created` / `stats` | 同名 | 监控 |
+
+## ResetPolicy
+
+| Policy | 触发时机 |
+|--------|---------|
+| `kPolicyNone` | 不调 reset 回调 |
+| `kPolicyAcquire` | 借出（get）时调 |
+| `kPolicyRelease` | 归还时调（默认推荐） |
+| `kPolicyBoth` | 借出和归还都调 |
+
+## 代码导读
+
+### 1. RAII get
+
+```cpp
+ObjectPool<Buffer> pool(
+    /*factory=*/[]() { return std::make_unique<Buffer>(); },
+    /*initial=*/4,
+    /*max=*/8,
+    /*reset=*/[](Buffer& b) { b.clear(); },
+    ObjectPool<Buffer>::kPolicyRelease);
+
+{
+  auto ptr = pool.get();           // unique_ptr<Buffer, PoolDeleter>
+  ptr->append("data");
+}                                  // 离开作用域，自动归还 + reset
+```
+
+### 2. get_shared
+
+```cpp
+{
+  std::shared_ptr<Buffer> a = pool.get_shared();
+  std::shared_ptr<Buffer> b = a;   // 引用计数=2
+}                                  // 最后 release 时归还
+```
+
+### 3. 手动 borrow / give_back
+
+```cpp
+Buffer* p = pool.borrow();
+// 使用 p
+pool.give_back(p);
+```
+
+适合 C 风格回调或不能用 RAII 的代码路径。
+
+### 4. ResetPolicy 对比
+
+```cpp
+ObjectPool<Buffer> pool_release(factory, 4, 8, reset_cb, ObjectPool<Buffer>::kPolicyRelease);
+ObjectPool<Buffer> pool_acquire(factory, 4, 8, reset_cb, ObjectPool<Buffer>::kPolicyAcquire);
+ObjectPool<Buffer> pool_both(factory, 4, 8, reset_cb, ObjectPool<Buffer>::kPolicyBoth);
+ObjectPool<Buffer> pool_none(factory, 4, 8, nullptr, ObjectPool<Buffer>::kPolicyNone);
+```
+
+业务通常用 `kPolicyRelease`：归还时清状态，下次 get 时对象已就绪。
+
+### 5. 统计
+
+```cpp
+MLOG_I("  size={} borrowed={} total_created={}", pool.size(), pool.borrowed(), pool.total_created());
+auto s = pool.stats();
+// stats 字段：created / available / borrowed / max_size / acquire_count / release_count
+```
+
+### 6. 池耗尽
+
+```cpp
+ObjectPool<Buffer> small_pool(factory, 1, 1);
+auto p1 = small_pool.get();
+try {
+  auto p2 = small_pool.get();  // 抛 std::runtime_error
+} catch (const std::runtime_error& e) {
+  VLOG_I("pool exhausted: ", e.what());
+}
+```
+
+`max_size=0` 表示不限上限；非 0 时超出抛异常。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_object_pool
 ./build/output/bin/example_object_pool
 ```
 
-## 4. 核心概念
-
-### 4.1 获取 API
-
-| 方法 | 返回类型 | 自动归还 | 用途 |
-|------|---------|---------|------|
-| `get()` | `unique_ptr<T, PoolDeleter>` | 是 | 最常用，RAII 自动归还 |
-| `get_shared()` | `shared_ptr<T>` | 是 | 可复制，最后一个引用释放时归还 |
-| `borrow()` | `T*` | 否 | 手动管理，必须调用 `give_back()` |
-
-### 4.2 重置策略
-
-```cpp
-enum Policy {
-    kPolicyNone = 0,     // 不调用重置回调
-    kPolicyRelease = 1,  // 归还时重置（默认）
-    kPolicyAcquire = 2,  // 获取时重置
-    kPolicyBoth = 3,     // 获取和归还时都重置
-};
-```
-
-| 策略 | 获取时重置 | 归还时重置 | 适用场景 |
-|------|----------|----------|---------|
-| `kPolicyNone` | 否 | 否 | 不可变或无状态对象 |
-| `kPolicyRelease` | 否 | 是 | 归还前清理（默认） |
-| `kPolicyAcquire` | 是 | 否 | 使用前初始化 |
-| `kPolicyBoth` | 是 | 是 | 双重保证 |
-
-### 4.3 构造
-
-```cpp
-auto pool = std::make_shared<ObjectPool<T>>(
-    factory_callback,   // 创建新对象的工厂函数
-    initial_size,       // 预分配对象数量
-    max_size,           // 最大对象总数（0=无限）
-    reset_callback,     // 重置回调（可选）
-    policy              // 重置策略
-);
-```
-
-**重要**：ObjectPool 必须通过 `std::make_shared` 创建，因为 `PoolDeleter` 内部持有 `weak_ptr` 指向池对象。
-
-### 4.4 PoolDeleter 机制
-
-```cpp
-auto buf = pool->get();
-// buf 的类型是 unique_ptr<T, PoolDeleter>
-// PoolDeleter 持有 weak_ptr<ObjectPool<T>>
-// 析构时：
-//   - 如果 pool 仍存活 -> 对象归还到池中
-//   - 如果 pool 已销毁 -> 对象被 delete
-```
-
-## 5. 代码执行流程
-
-1. **RAII get()**：获取对象，使用后自动归还
-2. **get_shared()**：获取共享指针，最后引用释放时归还
-3. **borrow/give_back**：手动借还模式
-4. **重置策略**：演示 kPolicyAcquire、kPolicyBoth、kPolicyNone
-5. **统计信息**：查询 pool_size、borrowed、total_created、max_size
-6. **池耗尽**：超过 max_size 时抛出 runtime_error
-
-## 6. 线程安全
-
-所有公共方法通过内部互斥锁保护，可以从多个线程安全地并发调用 `get()`、`give_back()` 等方法。
-
-## 7. 统计信息
-
-```cpp
-auto stats = pool->stats();
-stats.pool_size;      // 当前空闲对象数
-stats.borrowed;       // 当前被持有的对象数
-stats.total_created;  // 总共创建过的对象数
-stats.max_size;       // 最大允许对象数
-```
-
-也可以单独查询：
-```cpp
-pool->size();           // 空闲对象数
-pool->borrowed();       // 被持有对象数
-pool->total_created();  // 总创建数
-pool->max_size();       // 最大限制
-```
-
-## 8. 对象生命周期
+预期输出（节选）：
 
 ```
-工厂创建 -> 首次 get() -> 使用中 -> unique_ptr 析构
-                                         |
-                                    PoolDeleter::operator()
-                                         |
-                              pool 存活？ -> 是 -> release() -> 入池等待重用
-                                         |
-                                         -> 否 -> delete
+=== RAII get ===
+  data
+=== get_shared ===
+  shared by 2
+=== borrow + give_back ===
+  manual ok
+=== ResetPolicy ===
+  Release: 4 resets
+  Acquire: 4 resets
+  Both:    8 resets
+  None:    0 resets
+=== Stats ===
+  size=4 borrowed=2 total_created=4
+=== Exhaustion ===
+  pool exhausted: ObjectPool: max_size reached
 ```
 
-如果 ObjectPool 在 unique_ptr 之前被销毁，PoolDeleter 检测到 `weak_ptr` 失效，直接 `delete` 对象而非归还。
+## 常见陷阱
 
-## 9. 注意事项
+1. **borrow 之后忘记 give_back**：泄漏；建议优先用 RAII。
+2. **kPolicyAcquire reset 慢**：每次 get 都跑；高频 get 时建议改 kPolicyRelease。
+3. **factory 内 throw**：vlink 行为按实现可能让池处于不一致状态；避免。
+4. **多线程 get 时 max_size 已满**：抛 runtime_error；高并发要么扩 max_size 要么 try-catch。
+5. **shared_ptr 跨线程长期持有**：占用池容量；可能让其它线程拿不到。
 
-- `max_size` 为 0 时池无限增长
-- `initial_size` 不能超过 `max_size`（如果 max_size > 0）
-- 工厂回调返回 nullptr 会抛出 `runtime_error`
-- 重置回调抛出异常时，归还操作中对象会被丢弃而非归还到池
-- `borrow()` 获取的对象**必须**通过 `give_back()` 归还，不可用于 `get()` 的返回值
-- ObjectPool 必须通过 `std::make_shared` 创建（因为内部使用 `enable_shared_from_this`）
-- 所有公共方法都是线程安全的
+## 设计要点
+
+- ObjectPool 内部用 SpinLock + 队列管理空闲对象。
+- 工厂函数延迟调用：实际 get 才创建；不预分配 initial_size 个对象（取决于实现细节）。
+- PoolDeleter 通过 unique_ptr 的 deleter 接口实现自动归还。
+
+## 配图
+
+无专属配图。
+
+## 参考
+
+- `../memory_pool/` — 不同抽象（按字节）
+- `../spin_lock/` — ObjectPool 内部用的同步原语
+- `vlink/include/vlink/base/object_pool.h` — ObjectPool 接口

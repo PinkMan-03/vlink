@@ -58,6 +58,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
+#include <string_view>
 
 #include "../base/macros.h"
 
@@ -88,6 +90,19 @@ struct VLINK_EXPORT_AND_ALIGNED(8) Header final {
    * Verifies via @c static_assert that the struct is exactly 40 bytes.
    */
   Header() noexcept;
+
+  /**
+   * @brief NUL-safe view of @c frame_id.
+   *
+   * @details
+   * @c frame_id is a fixed 16-byte buffer; producers and serialised wire data
+   * may fill the entire 16 bytes without a NUL terminator.  This accessor
+   * returns a @c string_view whose length is bounded by @c strnlen so that
+   * consumers cannot read past the buffer end.
+   */
+  [[nodiscard]] std::string_view frame_id_view() const noexcept {
+    return {frame_id, ::strnlen(frame_id, sizeof(frame_id))};
+  }
 };
 
 }  // namespace zerocopy

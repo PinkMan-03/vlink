@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)
@@ -17,11 +17,3 @@ if(NOT TARGET vlink)
 endif()
 
 add_subdirectory(url_basics)
-add_subdirectory(url_intra)
-add_subdirectory(url_dds)
-add_subdirectory(url_shm)
-add_subdirectory(url_someip)
-add_subdirectory(url_zenoh)
-add_subdirectory(url_mqtt)
-add_subdirectory(url_remap)
-add_subdirectory(url_environment)

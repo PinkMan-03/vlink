@@ -210,7 +210,7 @@ vlink-analyzer
 
 ### 14.5.7 零拷贝类型显示
 
-对于 VLink 零拷贝类型（`CameraFrame`、`PointCloud`、`RawData`），主窗口通过 `update_zero_copy_item_property` 解析并展示其 header 字段（frame_id、seq、time_meas、time_pub 等）。
+对于 VLink 零拷贝类型（`CameraFrame`、`PointCloud`、`RawData`、`OccupancyGrid`、`Tensor`、`ObjectArray`、`AudioFrame`），主窗口通过 `update_zero_copy_item_property` 解析并展示其 header 字段（frame_id、seq、time_meas、time_pub 等）及类型特有的元数据字段。其中 `CameraFrame` 与 `PointCloud` 另外支持专门的可视化对话框（CameraDialog / Point3DDialog）；其余类型仅在右侧属性树展示元数据，`ObjectArray` 会在子树中列出前 8 个 `Object` 记录的 label/position/class_id/track_id。
 
 ### 14.5.8 相机帧显示（CameraDialog）
 

@@ -27,12 +27,10 @@
 
 #include <doctest/doctest.h>
 
-#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
-//
 #include "../common_test.h"
 
 namespace {
@@ -55,7 +53,7 @@ enum class Signed8 : int8_t { kNeg = -3, kZero = 0, kPos = 5 };
 
 enum class Wide : int { kSparseOne = 1, kSparseTen = 10, kSparseHundred = 100 };
 
-enum Direction { kNorth, kSouth, kEast, kWest };  // unscoped
+enum Direction { kNorth, kSouth, kEast, kWest };
 
 }  // namespace
 
@@ -68,7 +66,7 @@ struct EnumRange<Wide> {
 }  // namespace vlink::NameDetector::customize
 
 TEST_SUITE("base-NameDetector") {
-  TEST_CASE("is_support reports true for fundamental types") {
+  TEST_CASE("is_support returns true for fundamental types") {
     CHECK(NameDetector::is_support<int>());
     CHECK(NameDetector::is_support<double>());
     CHECK(NameDetector::is_support<char>());
@@ -77,7 +75,7 @@ TEST_SUITE("base-NameDetector") {
     CHECK(NameDetector::is_support<int*>());
   }
 
-  TEST_CASE("is_support reports true for user-defined types") {
+  TEST_CASE("is_support returns true for user-defined types") {
     CHECK(NameDetector::is_support<MyStruct>());
     CHECK(NameDetector::is_support<MyClass>());
     CHECK(NameDetector::is_support<Color>());
@@ -85,93 +83,89 @@ TEST_SUITE("base-NameDetector") {
     CHECK(NameDetector::is_support<detector_ns::Nested>());
   }
 
-  TEST_CASE("get<T>() returns non-empty name for fundamental types") {
+  TEST_CASE("get returns non-empty name for fundamental types") {
     std::string_view int_name = NameDetector::get<int>();
     std::string_view double_name = NameDetector::get<double>();
     std::string_view char_name = NameDetector::get<char>();
 
-    CHECK(!int_name.empty());
-    CHECK(!double_name.empty());
-    CHECK(!char_name.empty());
-
+    CHECK_FALSE(int_name.empty());
+    CHECK_FALSE(double_name.empty());
+    CHECK_FALSE(char_name.empty());
     CHECK(int_name.find("int") != std::string_view::npos);
     CHECK(double_name.find("double") != std::string_view::npos);
   }
 
-  TEST_CASE("get<T>() distinguishes different types") {
+  TEST_CASE("get distinguishes different fundamental types") {
     CHECK(NameDetector::get<int>() != NameDetector::get<double>());
     CHECK(NameDetector::get<int>() != NameDetector::get<char>());
     CHECK(NameDetector::get<int>() != NameDetector::get<float>());
   }
 
-  TEST_CASE("get<T>() contains identifier for user struct/class") {
+  TEST_CASE("get contains identifier for user struct and class") {
     CHECK(NameDetector::get<MyStruct>().find("MyStruct") != std::string_view::npos);
     CHECK(NameDetector::get<MyClass>().find("MyClass") != std::string_view::npos);
   }
 
-  TEST_CASE("get<T>() strips struct/class prefix on Windows") {
+  TEST_CASE("get strips struct or class prefix on Windows") {
 #if defined(_WIN32) || defined(__CYGWIN__)
     std::string_view sv = NameDetector::get<MyStruct>();
     CHECK(sv.find("struct ") == std::string_view::npos);
     CHECK(sv.find("class ") == std::string_view::npos);
 #else
-    SUBCASE("non-Windows: nothing to strip, just verify name still present") {
-      CHECK(!NameDetector::get<MyStruct>().empty());
-    }
+    CHECK_FALSE(NameDetector::get<MyStruct>().empty());
 #endif
   }
 
-  TEST_CASE("get<T>() handles cv- and reference-qualifications via decay") {
+  TEST_CASE("get applies decay so cv and reference qualify the same") {
     CHECK(NameDetector::get<int>() == NameDetector::get<const int>());
     CHECK(NameDetector::get<int>() == NameDetector::get<int&>());
     CHECK(NameDetector::get<int>() == NameDetector::get<const int&>());
     CHECK(NameDetector::get<int>() == NameDetector::get<volatile int>());
   }
 
-  TEST_CASE("get<T>() returns name for templated types") {
+  TEST_CASE("get returns name for templated types containing identifier") {
     std::string_view sv = NameDetector::get<MyTemplate<int>>();
-    CHECK(!sv.empty());
+    CHECK_FALSE(sv.empty());
     CHECK(sv.find("MyTemplate") != std::string_view::npos);
   }
 
-  TEST_CASE("get<T>() returns name for std::vector<int>") {
+  TEST_CASE("get returns name for std::vector containing vector") {
     std::string_view sv = NameDetector::get<std::vector<int>>();
-    CHECK(!sv.empty());
+    CHECK_FALSE(sv.empty());
     CHECK(sv.find("vector") != std::string_view::npos);
   }
 
-  TEST_CASE("get<T>() result is stable across calls (same static storage)") {
+  TEST_CASE("get result is stable across calls sharing same data pointer") {
     std::string_view a = NameDetector::get<int>();
     std::string_view b = NameDetector::get<int>();
-
-    CHECK(a == b);
-    CHECK(a.data() == b.data());
-    CHECK(a.size() == b.size());
+    CHECK_EQ(a, b);
+    CHECK_EQ(a.data(), b.data());
+    CHECK_EQ(a.size(), b.size());
   }
 
-  TEST_CASE("get<T>().data() is null-terminated") {
+  TEST_CASE("get data pointer is null-terminated") {
     std::string_view sv = NameDetector::get<int>();
-    REQUIRE(!sv.empty());
-    CHECK(sv.data()[sv.size()] == '\0');
+    REQUIRE_FALSE(sv.empty());
+    CHECK_EQ(sv.data()[sv.size()], '\0');
   }
 
-  TEST_CASE("get_enum returns identifier for scoped enum class") {
-    CHECK(NameDetector::get_enum(Color::kRed) == "kRed");
-    CHECK(NameDetector::get_enum(Color::kGreen) == "kGreen");
-    CHECK(NameDetector::get_enum(Color::kBlue) == "kBlue");
+  TEST_CASE("get_enum returns identifier for scoped enum values") {
+    CHECK_EQ(NameDetector::get_enum(Color::kRed), "kRed");
+    CHECK_EQ(NameDetector::get_enum(Color::kGreen), "kGreen");
+    CHECK_EQ(NameDetector::get_enum(Color::kBlue), "kBlue");
   }
 
-  TEST_CASE("get_enum returns identifier for unscoped enum") {
-    CHECK(NameDetector::get_enum(kNorth) == "kNorth");
-    CHECK(NameDetector::get_enum(kSouth) == "kSouth");
-    CHECK(NameDetector::get_enum(kEast) == "kEast");
-    CHECK(NameDetector::get_enum(kWest) == "kWest");
+  TEST_CASE("get_enum returns identifier for unscoped enum values") {
+    CHECK_EQ(NameDetector::get_enum(kNorth), "kNorth");
+    CHECK_EQ(NameDetector::get_enum(kSouth), "kSouth");
+    CHECK_EQ(NameDetector::get_enum(kEast), "kEast");
+    CHECK_EQ(NameDetector::get_enum(kWest), "kWest");
   }
 
   TEST_CASE("get_enum handles negative enumerator values") {
-    CHECK(NameDetector::get_enum(Signed8::kNeg) == "kNeg");
-    CHECK(NameDetector::get_enum(Signed8::kZero) == "kZero");
-    CHECK(NameDetector::get_enum(Signed8::kPos) == "kPos");
+    CHECK_EQ(NameDetector::get_enum(Signed8::kNeg), "kNeg");
+    CHECK_EQ(NameDetector::get_enum(Signed8::kZero), "kZero");
+    CHECK_EQ(NameDetector::get_enum(Signed8::kPos), "kPos");
   }
 
   TEST_CASE("get_enum returns empty for value outside any named enumerator") {
@@ -179,7 +173,7 @@ TEST_SUITE("base-NameDetector") {
     CHECK(NameDetector::get_enum(bogus).empty());
   }
 
-  TEST_CASE("get_enum returns empty for value outside scanning range") {
+  TEST_CASE("get_enum returns empty for value outside default scanning range") {
     auto far_out = static_cast<Direction>(127);
     CHECK(NameDetector::get_enum(far_out).empty());
   }
@@ -189,44 +183,42 @@ TEST_SUITE("base-NameDetector") {
     CHECK(NameDetector::get_enum(Color::kGreen) != NameDetector::get_enum(Color::kBlue));
   }
 
-  TEST_CASE("get_enum honours customize::EnumRange specialisation (sparse)") {
-    CHECK(NameDetector::get_enum(Wide::kSparseOne) == "kSparseOne");
-    CHECK(NameDetector::get_enum(Wide::kSparseTen) == "kSparseTen");
-    CHECK(NameDetector::get_enum(Wide::kSparseHundred) == "kSparseHundred");
+  TEST_CASE("get_enum honours customize EnumRange for sparse enum") {
+    CHECK_EQ(NameDetector::get_enum(Wide::kSparseOne), "kSparseOne");
+    CHECK_EQ(NameDetector::get_enum(Wide::kSparseTen), "kSparseTen");
+    CHECK_EQ(NameDetector::get_enum(Wide::kSparseHundred), "kSparseHundred");
     CHECK(NameDetector::get_enum(static_cast<Wide>(50)).empty());
   }
 
-  TEST_CASE("get_enum works for enums declared in nested namespace") {
-    CHECK(NameDetector::get_enum(detector_ns::NestedColor::kRed) == "kRed");
-    CHECK(NameDetector::get_enum(detector_ns::NestedColor::kGreen) == "kGreen");
+  TEST_CASE("get_enum works for enums in nested namespaces") {
+    CHECK_EQ(NameDetector::get_enum(detector_ns::NestedColor::kRed), "kRed");
+    CHECK_EQ(NameDetector::get_enum(detector_ns::NestedColor::kGreen), "kGreen");
   }
 
-  TEST_CASE("get<T>() and get_enum results are usable at compile time") {
-    constexpr std::string_view kIntName = NameDetector::get<int>();
+  TEST_CASE("get and get_enum results are usable at compile time") {
+    static constexpr std::string_view kIntName = NameDetector::get<int>();
     static_assert(!kIntName.empty(), "compile-time type name must be non-empty");
 
-    constexpr std::string_view kRedName = NameDetector::get_enum(Color::kRed);
+    static constexpr std::string_view kRedName = NameDetector::get_enum(Color::kRed);
     static_assert(kRedName == std::string_view{"kRed"}, "compile-time enum name must match");
 
-    CHECK(!kIntName.empty());
-    CHECK(kRedName == "kRed");
+    CHECK_FALSE(kIntName.empty());
+    CHECK_EQ(kRedName, "kRed");
   }
 
-  TEST_CASE("get_enum result is stable across calls") {
+  TEST_CASE("get_enum result is stable across repeated calls") {
     auto a = NameDetector::get_enum(Color::kRed);
     auto b = NameDetector::get_enum(Color::kRed);
-
-    CHECK(a == b);
-    CHECK(a.data() == b.data());
+    CHECK_EQ(a, b);
+    CHECK_EQ(a.data(), b.data());
   }
 
-  TEST_CASE("internal kCount counts enumerators within range") {
+  TEST_CASE("kCount counts enumerators within range") {
     using vlink::NameDetector::detail::kCount;
-
-    CHECK(kCount<Color> == 3);
+    CHECK_EQ(kCount<Color>, 3);
     CHECK(kCount<Signed8> >= 3);
-    CHECK(kCount<Direction> == 4);
-    CHECK(kCount<Wide> == 3);
+    CHECK_EQ(kCount<Direction>, 4);
+    CHECK_EQ(kCount<Wide>, 3);
   }
 }
 

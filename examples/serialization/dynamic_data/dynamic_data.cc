@@ -21,35 +21,32 @@
  * limitations under the License.
  */
 
-// VLink core communication API
-#include <vlink/vlink.h>
-// DynamicData type-erased container
+#include <vlink/base/logger.h>
 #include <vlink/extension/dynamic_data.h>
+#include <vlink/vlink.h>
 
-#include <iostream>
 #include <string>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// DynamicData serialization example
-///
-/// DynamicData is a type-erased container (kDynamicType = 2) that stores any serializable
-/// value together with a type-name tag in a single Bytes buffer. This allows:
-///   1. Multiple different types to share the SAME topic URL
-///   2. Runtime type inspection via get_type()
-///   3. Deferred deserialization -- transport the raw data first, deserialize later
-///
-/// Internal layout: [type name in the first kOffset = 20 bytes] [serialized payload]
-/// The literal length passed to load() (including NUL) must be < 20 (static_assert).
-///
-/// Key API:
-///   - load("TypeName", value)  -> serialize value with a type tag
-///   - as<T>()                  -> deserialize back to type T
-///   - convert(T& out)          -> deserialize into an existing object
-///   - get_type()               -> retrieve the embedded type name
-///   - operator>> / operator<<  -> wire-format serialization for transport
+// ---------------------------------------------------------------------------
+// dynamic_data.cc
+//
+// DynamicData is VLink's "envelope" message type for heterogeneous topics.
+// Wire layout:
+//   [20-byte type-name header (NUL-padded)][serialized payload bytes]
+// The type-name string is a runtime tag that the subscriber inspects via
+// get_type() to dispatch to the right typed accessor (as<T>() / convert()).
+// The payload itself is encoded with the same Serializer that the typed
+// Publisher<T>/Subscriber<T> would use, so DynamicData can carry any type
+// the static serializer supports (POD, std::string, Bytes, custom...).
+//
+// Common use cases:
+//   * A single topic carrying multiple message families (sensor multiplex).
+//   * Bridges/proxies that forward messages without knowing their static T.
+//   * Bag tools that replay arbitrary topics by reading the type tag.
+// ---------------------------------------------------------------------------
 
-// A simple POD type to demonstrate DynamicData wrapping
 struct Temperature {
   double celsius;
   uint32_t sensor_id;
@@ -60,87 +57,72 @@ struct Pressure {
   uint32_t sensor_id;
 };
 
+// DynamicData has its own routing tag (kDynamicType) so the Serializer
+// knows to prefix the 20-byte type header before the payload bytes.
+static_assert(vlink::Serializer::get_type_of<vlink::DynamicData>() == vlink::Serializer::kDynamicType);
+
 int main() {
   vlink::MessageLoop loop;
 
-  // ======== Compile-time type verification ========
-  static_assert(vlink::Serializer::get_type_of<vlink::DynamicData>() == vlink::Serializer::kDynamicType,
-                "DynamicData must be detected as kDynamicType");
-
-  // ======== Basic DynamicData usage ========
-  std::cout << "[Basic Usage]" << std::endl;
-
-  // Load a string value into DynamicData with a type name tag
+  // ---- In-memory load/retrieve (no transport involved) ----
+  // load(name, value) stores the type tag and serializes the value into the
+  // internal byte buffer. as<T>() returns a fresh T constructed by running
+  // the inverse Serializer<T> on the stored bytes.
   vlink::DynamicData dd_str;
   dd_str.load("StringMsg", std::string("Hello from DynamicData!"));
-  std::cout << "  Type: " << dd_str.get_type() << std::endl;
-  std::cout << "  Empty: " << std::boolalpha << dd_str.is_empty() << std::endl;
+  VLOG_I("[Basic] type=", dd_str.get_type(), " value=\"", dd_str.as<std::string>(), "\"");
 
-  // Retrieve the value using as<T>()
-  auto recovered_str = dd_str.as<std::string>();
-  std::cout << "  Value: \"" << recovered_str << "\"" << std::endl;
-
-  // Load a POD type
+  // convert(T&) is the by-reference variant of as<T>() -- useful when the
+  // caller already owns the destination (avoids the extra move from as<T>()).
   vlink::DynamicData dd_temp;
-  Temperature temp{36.6, 42};
-  dd_temp.load("Temperature", temp);
-  std::cout << "\n  Type: " << dd_temp.get_type() << std::endl;
-
-  // Retrieve using convert(T&)
+  dd_temp.load("Temperature", Temperature{36.6, 42});
   Temperature restored_temp{};
   dd_temp.convert(restored_temp);
-  std::cout << "  celsius: " << restored_temp.celsius << " sensor_id: " << restored_temp.sensor_id << std::endl;
+  VLOG_I("[Basic] type=", dd_temp.get_type(), " celsius=", restored_temp.celsius,
+         " sensor_id=", restored_temp.sensor_id);
 
-  // ======== Multi-type on a single topic ========
-  // DynamicData allows DIFFERENT types on the SAME topic URL
-  std::cout << "\n[Multi-type Topic]" << std::endl;
-
+  // ---- Multi-type on a single topic URL ----
+  // The subscriber receives every sample, regardless of payload type, and
+  // routes via get_type(). This is the canonical pattern for "any message"
+  // topics like /diagnostics or /status.
   int msg_count = 0;
   vlink::Subscriber<vlink::DynamicData> sub("dds://example/dynamic/multi");
   sub.attach(&loop);
+  // Callback runs on `loop`'s thread once per delivered sample.
   sub.listen([&msg_count](const vlink::DynamicData& dd) {
     msg_count++;
     std::string type_name(dd.get_type());
 
-    std::cout << "  [Sub] #" << msg_count << " type=\"" << type_name << "\"";
-
-    // Dispatch based on the runtime type tag
-
     if (type_name == "Temperature") {
       auto t = dd.as<Temperature>();
-      std::cout << " celsius=" << t.celsius << " sensor=" << t.sensor_id;
+      VLOG_I("[Sub] #", msg_count, " Temperature celsius=", t.celsius, " sensor=", t.sensor_id);
     } else if (type_name == "Pressure") {
       auto p = dd.as<Pressure>();
-      std::cout << " hpa=" << p.hpa << " sensor=" << p.sensor_id;
+      VLOG_I("[Sub] #", msg_count, " Pressure hpa=", p.hpa, " sensor=", p.sensor_id);
     } else if (type_name == "Status") {
-      auto s = dd.as<std::string>();
-      std::cout << " status=\"" << s << "\"";
+      VLOG_I("[Sub] #", msg_count, " Status=\"", dd.as<std::string>(), "\"");
     }
-
-    std::cout << std::endl;
   });
 
   vlink::Publisher<vlink::DynamicData> pub("dds://example/dynamic/multi");
   pub.attach(&loop);
 
+  // One-shot 50ms timer publishes a heterogeneous burst. Timer callback runs
+  // on `loop`'s thread, same as the subscriber callback.
   vlink::Timer timer(&loop, 50, 1);
   timer.start([&pub]() {
-    // Publish Temperature on the shared topic
     vlink::DynamicData dd1;
     dd1.load("Temperature", Temperature{22.5, 1});
     pub.publish(dd1);
 
-    // Publish Pressure on the SAME topic
     vlink::DynamicData dd2;
     dd2.load("Pressure", Pressure{1013.25, 2});
     pub.publish(dd2);
 
-    // Publish a string status on the SAME topic
     vlink::DynamicData dd3;
     dd3.load("Status", std::string("all_sensors_ok"));
     pub.publish(dd3);
 
-    // Publish another Temperature
     vlink::DynamicData dd4;
     dd4.load("Temperature", Temperature{-5.0, 3});
     pub.publish(dd4);
@@ -151,38 +133,37 @@ int main() {
   loop.quit();
   loop.wait_for_quit();
 
-  // ======== Wire format: operator>> and operator<< ========
-  std::cout << "\n[Wire Format]" << std::endl;
-
+  // ---- Wire-format round-trip via operator>>/<< ----
+  // Demonstrates the raw codec: dd >> bytes serializes [20-byte tag][payload];
+  // bytes >> dd parses it back. Used by bag tools / proxies that operate on
+  // the wire buffer directly without going through pub/sub.
   vlink::DynamicData dd_wire;
   dd_wire.load("TestType", Temperature{100.0, 99});
 
-  // Serialize to wire format (Bytes)
   vlink::Bytes wire_bytes;
   dd_wire >> wire_bytes;
-  std::cout << "  Serialized wire size: " << wire_bytes.size() << " bytes" << std::endl;
 
-  // Deserialize from wire format
   vlink::DynamicData dd_from_wire;
   dd_from_wire << wire_bytes;
-  std::cout << "  Recovered type: " << dd_from_wire.get_type() << std::endl;
 
   Temperature from_wire{};
   dd_from_wire.convert(from_wire);
-  std::cout << "  celsius: " << from_wire.celsius << " sensor_id: " << from_wire.sensor_id << std::endl;
+  VLOG_I("[Wire] size=", wire_bytes.size(), " type=", dd_from_wire.get_type(), " celsius=", from_wire.celsius,
+         " sensor=", from_wire.sensor_id);
 
-  // ======== Equality comparison ========
-  std::cout << "\n[Equality]" << std::endl;
+  // ---- Equality comparison ----
+  // operator== compares both the type tag AND the serialized payload bytes,
+  // so two DynamicData values are equal iff they carry the same logical
+  // message. Useful for dedup / change-detection in subscribers.
   vlink::DynamicData a;
   vlink::DynamicData b;
   a.load("Test", 42);
   b.load("Test", 42);
-  std::cout << "  Same content: " << std::boolalpha << (a == b) << std::endl;
+  VLOG_I("[Eq] same=", a == b);
 
   b.load("Test", 99);
-  std::cout << "  Different content: " << (a != b) << std::endl;
+  VLOG_I("[Eq] differ=", a != b);
 
-  std::cout << "\n[Summary] Messages received: " << msg_count << std::endl;
-
+  VLOG_I("[Summary] received=", msg_count);
   return 0;
 }

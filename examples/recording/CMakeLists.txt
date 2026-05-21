@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2026 by Thun Lu. All rights reserved.
+# Copyright (C) 2026 by Thun Lu. All rights reserved. Licensed under the Apache License, Version 2.0.
 #
 
 cmake_minimum_required(VERSION 3.15...3.31)
@@ -17,7 +17,6 @@ if(NOT TARGET vlink)
 endif()
 
 add_subdirectory(record_basic)
-add_subdirectory(record_bag_writer)
-add_subdirectory(record_bag_reader)
+add_subdirectory(record_bag)
 add_subdirectory(record_mcap)
 add_subdirectory(record_compression)

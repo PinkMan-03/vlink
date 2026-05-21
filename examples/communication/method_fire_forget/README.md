@@ -1,185 +1,167 @@
-# Method Fire-and-Forget -- VLink 即发即忘模式示例
+# method_fire_forget — Method 模型单向调用：`send()` 不等响应
 
-## 1. 通信模型概览
+本示例演示 Method 模型的第三种形态 —— **fire-and-forget（发后不管）**。客户端通过 `send()` 把请求送出去就立刻返回，不等服务端回 reply；服务端注册的 `listen` 回调只接收请求，不构造也不发送响应。
 
-![通信模型概览](../event_basic/images/communication-models-overview.png)
+这是 RPC 的"轻量版"，常用于日志收集、通知下发、指标上报等"不关心结果"的场景。它在 vlink 里用**省略模板参数 `Resp`** 的方式表达 —— `Server<Req>` / `Client<Req>` 比 `Server<Req,Resp>` / `Client<Req,Resp>` 在编译期就少了响应通道。
 
-## 2. 概述
+读完本示例你能掌握：
 
-本示例演示 VLink **方法模型** 的即发即忘（Fire-and-Forget）模式：`Server<Req>` 只接收请求不发送响应，`Client<Req>` 使用 `send()` 发送请求后立即返回。
+- 单向 RPC 的模板形态：`Server<Req>` / `Client<Req>` 的声明区别。
+- `send(req)` 与 `invoke(req)` 的语义和成本差异。
+- 三种典型场景：日志收集、通知命令、高频突发。
 
-![Method Fire-and-Forget Flow](images/method-fire-forget-flow.png)
+## 背景与适用场景
 
-```
-Client<Req> ──send(req)──> [dds://] ──> Server<Req>: callback(req)
-                                          (无响应返回)
-```
+适用场景：
 
-## 3. 即发即忘 vs 完整 RPC
+- 应用日志、审计、Trace 上报：丢一两条不致命，关键是上报代价低。
+- 通知 / 命令下发：让对方知道发生了某事，是否真的执行有自己的状态机判断。
+- 高频遥测：吞吐压倒一切的场景，每次都等 reply 会引入 RTT 时延。
 
-| 特性 | 即发即忘 | 完整 RPC |
-|------|---------|---------|
-| Server 模板 | `Server<Req>` | `Server<Req, Resp>` |
-| Client 模板 | `Client<Req>` | `Client<Req, Resp>` |
-| Server 回调 | `void(const Req&)` | `void(const Req&, Resp&)` |
-| Client 发送 | `send(req)` | `invoke(req)` |
-| 等待响应 | 否 | 是 |
-| 适用场景 | 日志、通知、非关键命令 | 查询、计算、需要确认的操作 |
+不适合：
 
-## 4. 核心 API
+- 必须知道是否处理成功（用 `method_sync` 或 `method_async`）。
+- 客户端需要服务端回填某些字段（用 `method_sync`）。
+- 命令成功率必须 100%（fire-and-forget 不提供失败重传机制；需要应用层补偿）。
 
-### 4.1 Server<Req> (无 Resp 类型)
+底层语义：fire-and-forget 在传输层等价于"单向 Event"。Server 端用 `listen(cb)` 注册回调，Client 端用 `send(req)` 把消息推过去，**没有 request_id 关联响应**。Server 端不能给特定请求回响应，但仍可以反向用 Publisher 主动广播状态。
 
-```cpp
-Server<LogEntry> server(url);
-server.listen([](const LogEntry& entry) {
-    // 处理请求，不发送响应
-});
-```
+## 核心 API
 
-当 `RespT` 省略时（默认为 `Traits::EmptyType`），Server 只接收请求。`listen` 回调的签名变为 `void(const Req&)`，没有 `Resp&` 参数。
+| API | 签名 | 说明 |
+|-----|------|------|
+| `vlink::Server<Req>` | `explicit Server(const std::string& url, InitType type = kWithInit)` | 服务端，省略 RespT，等价于 `Server<Req, Traits::EmptyType>` |
+| `Server::listen` | `bool listen(ReqCallback&& cb)` | 回调入参只有 `const Req&`，没有 resp 输出参数 |
+| `vlink::Client<Req>` | `explicit Client(const std::string& url, InitType type = kWithInit)` | 客户端，省略 RespT |
+| `Client::send` | `bool send(const Req&)` | 非阻塞发送；返回 false 表示传输层拒绝（如 Reliability=Reliable 时队列满） |
+| `Client::wait_for_connected` | `bool wait_for_connected(std::chrono::milliseconds timeout)` | 与双向 Client 行为一致 |
 
-### 4.2 Client<Req> (无 Resp 类型)
+## 代码导读
 
-```cpp
-Client<LogEntry> client(url);
-bool ok = client.send(entry);
-```
-
-`send()` 方法仅在 `RespT == EmptyType` 时可用。它将请求发送到 Server 后立即返回，不等待任何响应。返回值 `true` 表示传输层成功接受了请求。
-
-## 5. 关键代码分析
-
-### 5.1 基本即发即忘
+### 1. 日志收集服务
 
 ```cpp
 Server<LogEntry> log_server("dds://logging/collector");
-log_server.listen([](const LogEntry& entry) {
-    // 处理日志条目，无需回复
+log_server.attach(&server_loop);
+
+std::atomic<int> log_count{0};
+log_server.listen([&log_count](const LogEntry& entry) {
+  static constexpr const char* kLevelStr[] = {"DEBUG", "INFO", "WARN", "ERROR"};
+  const char* lvl = (entry.level >= 0 && entry.level <= 3) ? kLevelStr[entry.level] : "?";
+  VLOG_I("[log-server] [", lvl, "] source=", entry.source_id, " ts=", entry.timestamp);
+  log_count.fetch_add(1);
 });
 
 Client<LogEntry> log_client("dds://logging/collector");
 log_client.wait_for_connected(2000ms);
-bool ok = log_client.send(entry);
-```
 
-这是最简洁的 RPC 模式：
-1. Server 注册处理回调
-2. Client 连接到 Server
-3. Client 调用 `send()` 发送请求
-4. Server 收到请求，执行回调
-5. 没有响应环节，流程完成
+for (int i = 0; i < 5; ++i) {
+  LogEntry entry{};
+  entry.level = i % 4;
+  entry.source_id = 100 + i;
+  entry.timestamp = ...;
 
-### 5.2 通知命令模式
-
-```cpp
-Server<NotifyCommand> notify_server("dds://control/notifications");
-notify_server.listen([](const NotifyCommand& cmd) {
-    // 执行命令（启动电机、重置传感器等）
-});
-
-Client<NotifyCommand> notify_client("dds://control/notifications");
-notify_client.send({1, 10, 100});  // 启动电机
-notify_client.send({5, 10, 0});    // 停止电机
-```
-
-即发即忘模式非常适合控制命令场景：
-- 命令发送方不需要等待确认
-- 命令执行方可以按队列顺序处理
-- 减少了往返延迟
-
-### 5.3 高吞吐量场景
-
-```cpp
-constexpr int kBurstSize = 100;
-for (int i = 0; i < kBurstSize; ++i) {
-    burst_client.send(entry);
+  bool ok = log_client.send(entry);
+  VLOG_I("[log-client] sent #", i, " ok=", ok);
 }
 ```
 
-由于 `send()` 不等待响应，它的吞吐量远高于 `invoke()`：
-- `invoke()`: 必须等待每次响应返回才能发下一个请求
-- `send()`: 可以连续发送，不阻塞
+`Server<LogEntry>`（注意没有第二个模板参数）的 listen 回调签名是 `void(const Req&)`。`send()` 返回 `bool` 表示是否被传输层接收，**不等于服务端是否真正处理**。
 
-这使得即发即忘模式特别适合高频遥测数据和日志收集。
-
-## 6. 使用场景
-
-| 场景 | 说明 |
-|------|------|
-| 日志收集 | 多个模块将日志发送到中央收集器 |
-| 遥测数据 | 传感器高频上报原始数据 |
-| 单向命令 | 向执行器发送非关键控制指令 |
-| 事件通知 | 广播状态变更通知 |
-| 心跳报告 | 周期性上报存活状态 |
-
-## 7. Server 三种 listen 模式对比
+### 2. 通知命令模式
 
 ```cpp
-// 模式 1: 即发即忘（本示例）
-Server<Req> server(url);
-server.listen([](const Req& req) { ... });
+Server<NotifyCommand> notify_server("dds://control/notifications");
+notify_server.attach(&server_loop);
 
-// 模式 2: 同步回复（参见 method_sync）
-Server<Req, Resp> server(url);
-server.listen([](const Req& req, Resp& resp) { resp = ...; });
-
-// 模式 3: 异步回复（参见 method_async）
-Server<Req, Resp> server(url);
-server.listen_for_reply([&server](uint64_t req_id, const Req& req) {
-    // ... 稍后 ...
-    server.reply(req_id, resp);
+std::atomic<int> cmd_count{0};
+notify_server.listen([&cmd_count](const NotifyCommand& cmd) {
+  VLOG_I("[notify-server] cmd=", cmd.command_id, " target=", cmd.target_id, " payload=", cmd.payload);
+  cmd_count.fetch_add(1);
 });
+
+Client<NotifyCommand> notify_client("dds://control/notifications");
+notify_client.wait_for_connected(2000ms);
+
+NotifyCommand commands[] = {{1, 10, 100}, {2, 10, 50}, {3, 20, 0}, {4, 30, 1}, {5, 10, 0}};
+
+for (const auto& cmd : commands) {
+  bool ok = notify_client.send(cmd);
+  VLOG_I("[notify-client] sent cmd=", cmd.command_id, " ok=", ok);
+}
 ```
 
-## 8. 编译与运行
+同样的模式可以用于"提示对方"、"广播命令"等。`NotifyCommand` 是 POD，序列化走 memcpy。
+
+### 3. 高频突发吞吐
+
+```cpp
+static constexpr int kBurstSize = 100;
+int send_ok = 0;
+
+for (int i = 0; i < kBurstSize; ++i) {
+  LogEntry entry{1, i, static_cast<int64_t>(i)};
+
+  if (burst_client.send(entry)) {
+    ++send_ok;
+  }
+}
+
+std::this_thread::sleep_for(500ms);
+VLOG_I("[burst] sent=", send_ok, "/", kBurstSize, " received=", burst_count.load(), "/", kBurstSize);
+```
+
+100 次 `send()` 紧凑发出，统计客户端发送成功数和服务端实际接收数。差值反映传输层是否在你的 QoS 下做了丢弃（默认 KeepLast(1)，差值可能很大；用 Reliable + KeepAll 才能精确零丢）。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_method_fire_forget
 ./build/output/bin/example_method_fire_forget
 ```
 
-## 9. 预期输出
+预期输出（节选）：
 
 ```
-[I] === VLink Method Fire-and-Forget Example ===
-[I] --- Section 1: Basic fire-and-forget ---
-[I] [LogServer] Listening on dds://logging/collector
-[I] --- Section 2: Client send() ---
-[I] [LogClient] Sent log entry #0 ok=1
-[I] [LogServer] [DEBUG] source=100 ts=1234567890
-[I] [LogClient] Sent log entry #1 ok=1
-[I] [LogServer] [INFO] source=101 ts=1234567891
+[log-client] sent #0 ok=1
+[log-server] [DEBUG] source=100 ts=...
+[log-client] sent #1 ok=1
+[log-server] [INFO] source=101 ts=...
 ...
-[I] [LogServer] Total logs received: 5
-[I] --- Section 3: Notification commands ---
-[I] [NotifyClient] Sent cmd=1 ok=1
-[I] [NotifyServer] cmd=1 target=10 payload=100
+[log-server] received=5
+[notify-client] sent cmd=1 ok=1
+[notify-server] cmd=1 target=10 payload=100
 ...
-[I] --- Section 4: High-throughput send ---
-[I] [Burst] Sent: 100/100
-[I] [Burst] Received: 100/100
-[I] === Example complete ===
+[notify-server] received=5
+[burst] sent=100/100 received=100/100   # 取决于 QoS
 ```
 
-## 10. 文件结构
+URL 用 `dds://`；切到 `intra://` 也能跑。
 
-| 文件 | 说明 |
-|------|------|
-| `log_types.h` | POD 消息类型 `LogEntry` / `NotifyCommand` 的定义 |
-| `method_fire_forget.cc` | 主程序：Server + Client 在同一进程 |
-| `CMakeLists.txt` | 构建配置 |
+## 常见陷阱
 
-## 11. 扩展思考
+1. **`send()` 返回 true 不代表服务端成功处理** —— 只代表传输层接收了消息。Reliable QoS 下 `send` 可能阻塞或返回 false（队列满）。
+2. **server 回调里抛异常**：fire-and-forget 没有反馈通道，异常会被吞掉，难以排错。建议回调里 try/catch + 自己上报。
+3. **高频突发 + KeepLast(1) QoS**：服务端只能看到最后几条，前面的全被覆盖。需要全收要么改 QoS（KeepAll 或大 depth），要么换 reliable 队列后端（shm + Reliable）。
+4. **client.send() 跑在主线程**：本示例 send 在 main 线程跑，安全；如果你想从多个线程并发 send，注意 vlink Client 对并发 send 不要求加锁，但 server 端回调仍是 loop 串行。
+5. **混用 send 和 invoke**：`Client<Req>` 没有 `invoke()`，只有 `send()`。要切回有响应的形态必须用 `Client<Req, Resp>`。
 
-- 即发即忘模式不提供传输保证。如果需要"至少一次"投递语义，可以：
-  - 在应用层实现 ACK 机制（使用完整 RPC + 超时重试）
-  - 使用 MQTT 传输的 QoS 1/2（`mqtt://topic?qos=1`）
-- `send()` 返回 `false` 通常表示未连接到 Server 或传输层错误，但不保证 Server 已处理完毕。
-- 在生产环境中，日志收集器建议使用独立的 MessageLoop 并设置足够的 pipeline 深度，避免日志积压导致阻塞。
-- 即发即忘模式可以与事件模型（Publisher/Subscriber）互换使用。选择依据：事件模型拓扑是 N:N 广播，即发即忘 RPC 是 N:1 汇聚；按参与者关系选择。
+## 设计要点
 
-## 12. 相关文档
+- 模板省略 `RespT` 时 vlink 内部用 `Traits::EmptyType` 替代；编译期分支去掉响应通道。
+- fire-and-forget 在传输层等价于 Event：QoS 配置直接影响 send 行为（Reliable 阻塞/丢失语义、KeepLast 深度）。
+- 对吞吐敏感的链路：fire-and-forget 比双向 invoke 少一次 reply RTT，但仍然要序列化 Req；要进一步减少开销可以走 `zerocopy/zerocopy_loan` 的 loan API。
+- 如果服务端处理失败需要反馈，常见做法是反向用一个 Event 通道把"失败事件"广播出去，而不是改用双向 RPC。
 
-详细原理参见 [doc/04-method-model.md](../../../doc/04-method-model.md)。
+## 配图
+
+![Fire-and-forget flow](./images/method-fire-forget-flow.png)
+
+图中演示 Client.send() 立即返回、Server 异步处理的非阻塞流程。
+
+## 参考
+
+- `../method_sync/` — 双向同步 RPC
+- `../method_async/` — 异步回调 / future 形态
+- `../event_basic/` — 与 Event 模型的对比（fire-and-forget 也是单向）
+- `vlink/include/vlink/client.h`、`server.h` — Client/Server 完整接口
+- 顶层 `doc/04-method-model.md` — Method 模型规范

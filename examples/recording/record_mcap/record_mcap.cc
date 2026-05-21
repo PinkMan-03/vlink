@@ -21,14 +21,11 @@
  * limitations under the License.
  */
 
-// MCAP format writer and reader
-#include <vlink/extension/vcap_reader.h>
-#include <vlink/extension/vcap_writer.h>
-// Generic BagWriter/BagReader factory (auto-detects format by extension)
+#include <vlink/base/logger.h>
 #include <vlink/extension/bag_reader.h>
 #include <vlink/extension/bag_writer.h>
-// VLink core
-#include <vlink/base/logger.h>
+#include <vlink/extension/vcap_reader.h>
+#include <vlink/extension/vcap_writer.h>
 #include <vlink/vlink.h>
 
 #include <atomic>
@@ -36,157 +33,155 @@
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// MCAP format recording example
-///
-/// Demonstrates:
-///   1. Creating an MCAP writer via BagWriter::create() with .vcap extension
-///   2. Creating an VCAPWriter explicitly
-///   3. Recording with compression in MCAP format
-///   4. Reading back MCAP files with VCAPReader
-///   5. Split mode with MCAP files
-///
-/// MCAP (Message Capture Archive Protocol) is a modular, indexed binary format
-/// that supports channel-level schemas, checksums, and multiple compression codecs.
-/// MCAP files can be opened by Foxglove Studio and other MCAP-compatible tools.
+// ---------------------------------------------------------------------------
+// record_mcap.cc
+//
+// VLink has two on-disk container families:
+//   * VDB  -- VLink-native database bag. Optimised for VLink serializer
+//             types, very compact, SQLite-backed when enabled. Best for
+//             internal pipelines and high-frequency capture.
+//   * VCAP -- Foxglove MCAP-compatible container. Interoperable with the
+//             Foxglove ecosystem (visualisation, conversion). Slightly
+//             higher per-message overhead than VDB.
+//
+// File extension picks the writer:
+//   .vdb / .vdbx  -> BagWriter (VDB; "x" suffix = split-capable).
+//   .vcap / .vcapx -> VCAPWriter (MCAP container).
+//
+// BagWriter::create(path, cfg) inspects the extension and instantiates
+// the right concrete writer; you can also instantiate VCAPWriter/VDBWriter
+// directly when the format must be pinned.
+//
+// CompressType behaviour per backend:
+//   kCompressNone -- raw payload bytes.
+//   kCompressZstd -- best ratio; widely supported by VCAP readers.
+//   kCompressLzav -- fast, VLink-internal; VDB only.
+//   kCompressLz4  -- balanced; supported in both VDB and VCAP.
+// ---------------------------------------------------------------------------
+
 int main() {
-  // ======== MCAP via BagWriter::create() ========
-  // When the path ends with .vcap or .vcapx, create() returns an VCAPWriter
+  // ---- Section 1: MCAP via BagWriter::create() factory ----
+  // Extension dispatch chooses VCAPWriter automatically.
   {
-    VLOG_I("=== MCAP via BagWriter::create() ===");
+    VLOG_I("[1] MCAP via BagWriter::create()");
 
     auto writer = vlink::BagWriter::create("/tmp/mcap_auto.vcap");
     writer->async_run();
 
-    // Push messages -- same API as VDBWriter
     for (int i = 0; i < 100; ++i) {
-      std::string payload = "mcap_message_" + std::to_string(i);
+      const std::string payload = "mcap_message_" + std::to_string(i);
       writer->push("dds://mcap/topic_a", "raw", vlink::SchemaType::kRaw, vlink::ActionType::kPublish,
                    vlink::Bytes::from_string(payload));
     }
 
-    VLOG_I("Auto-detected VCAPWriter: 100 messages pushed to .vcap file.");
+    VLOG_I("  100 messages pushed to .vcap file");
   }
 
-  // ======== Explicit VCAPWriter Construction ========
+  // ---- Section 2: explicit VCAPWriter with Zstd compression ----
+  // Pin the writer type so the format never gets reinterpreted from the
+  // extension. Zstd level 5 is a sane default; raise to 19 for archival.
   {
-    VLOG_I("=== Explicit VCAPWriter ===");
+    VLOG_I("[2] Explicit VCAPWriter with Zstd");
 
     vlink::BagWriter::Config config;
     config.tag_name = "mcap_explicit_test";
-    config.compress = vlink::BagWriter::CompressType::kCompressZstd;  // Zstandard compression
+    config.compress = vlink::BagWriter::CompressType::kCompressZstd;
     config.compress_level = 5;
 
-    // Directly construct VCAPWriter instead of using the factory
     auto writer = std::make_shared<vlink::VCAPWriter>("/tmp/mcap_explicit.vcap", config);
     writer->async_run();
 
-    // Push messages from multiple topics
-    int64_t ts = 2000000LL;  // 2 seconds in microseconds
+    int64_t ts = 2000000LL;
+
     for (int i = 0; i < 50; ++i) {
       writer->push("dds://mcap/sensor_a", "raw", vlink::SchemaType::kRaw, vlink::ActionType::kPublish,
                    vlink::Bytes::create(256), &ts);
-      ts += 50000LL;  // 50ms intervals
-
+      ts += 50000LL;
       writer->push("dds://mcap/sensor_b", "raw", vlink::SchemaType::kRaw, vlink::ActionType::kPublish,
                    vlink::Bytes::create(128), &ts);
       ts += 50000LL;
     }
 
-    VLOG_I("Explicit VCAPWriter: is_dumping =", writer->is_dumping());
+    VLOG_I("  explicit writer is_dumping=", writer->is_dumping());
   }
 
-  // ======== MCAP with Split Mode ========
+  // ---- Section 3: MCAP split mode (.vcapx) ----
+  // The 'x' suffix on the extension enables auto-rotation. split_by_size
+  // is the per-segment ceiling; split_name_by_time appends a timestamp.
   {
-    VLOG_I("=== MCAP Split Mode ===");
+    VLOG_I("[3] MCAP split mode");
 
     vlink::BagWriter::Config config;
-    config.split_by_size = 1024 * 50;  // Split every 50 KB
+    config.split_by_size = 1024 * 50;
     config.split_name_by_time = true;
 
     auto writer = vlink::BagWriter::create("/tmp/mcap_split.vcapx", config);
-
-    writer->register_split_callback(
-        [](int split_index, const std::string& filename) { VLOG_I("MCAP split:", split_index, "->", filename); },
-        false);
-
+    // Split callback runs on the writer's background thread per rotation.
+    writer->register_split_callback([](int idx, const std::string& fn) { VLOG_I("  split idx=", idx, " file=", fn); },
+                                    false);
     writer->async_run();
 
-    // Push enough data to trigger splits
     for (int i = 0; i < 300; ++i) {
-      vlink::Bytes data = vlink::Bytes::create(512);
-      writer->push("dds://mcap/split_topic", "raw", vlink::SchemaType::kRaw, vlink::ActionType::kPublish, data);
+      writer->push("dds://mcap/split_topic", "raw", vlink::SchemaType::kRaw, vlink::ActionType::kPublish,
+                   vlink::Bytes::create(512));
     }
 
-    VLOG_I("Split mode: is_split_mode =", writer->is_split_mode());
-    VLOG_I("Split mode: split_index =", writer->get_split_index());
+    VLOG_I("  split_mode=", writer->is_split_mode(), " split_index=", writer->get_split_index());
   }
 
-  // Allow writes to flush
   std::this_thread::sleep_for(500ms);
 
-  // ======== Read MCAP via BagReader::create() ========
+  // ---- Section 4: read MCAP via BagReader::create() factory ----
+  // Same extension-dispatch story as the writer. detect_schema() returns
+  // any embedded type schemas the MCAP carries (proto/CDR descriptors).
   {
-    VLOG_I("=== Read MCAP via BagReader::create() ===");
+    VLOG_I("[4] Read MCAP via BagReader::create()");
 
     auto reader = vlink::BagReader::create("/tmp/mcap_auto.vcap");
-
-    // Inspect metadata
     const auto& info = reader->get_info();
-    VLOG_I("Storage type:", info.storage_type);
-    VLOG_I("Message count:", info.message_count);
-    VLOG_I("Duration:", info.total_duration, "ms");
-    VLOG_I("URLs recorded:", info.url_metas.size());
+    VLOG_I("  storage=", info.storage_type, " count=", info.message_count, " duration=", info.total_duration, " ms");
 
-    for (const auto& meta : info.url_metas) {
-      VLOG_I("  URL:", meta.url, "count:", meta.count, "action:", static_cast<int>(meta.action_type),
-             "ser:", meta.ser_type);
+    for (const auto& m : info.url_metas) {
+      VLOG_I("    url=", m.url, " count=", m.count, " ser=", m.ser_type);
     }
 
-    // Detect embedded schemas
     auto schemas = reader->detect_schema();
-    VLOG_I("Embedded schemas:", schemas.size());
+    VLOG_I("  embedded schemas: ", schemas.size());
 
-    // Playback
     std::atomic<int> msg_count{0};
+    // Output callback fires on the reader's playback thread, ts-ordered.
     reader->register_output_callback(
-        [&msg_count](int64_t timestamp, const std::string& url, vlink::ActionType, const vlink::Bytes& data) {
+        [&msg_count](int64_t ts, const std::string& url, vlink::ActionType, const vlink::Bytes& data) {
           ++msg_count;
 
           if (msg_count <= 3) {
-            VLOG_I("  Read: ts:", timestamp, "url:", url, "size:", data.size());
+            VLOG_I("  read ts=", ts, " url=", url, " size=", data.size());
           }
         });
-
-    reader->register_finish_callback(
-        [](bool interrupted) { VLOG_I("MCAP playback finished. interrupted:", interrupted); });
-
+    // Finish callback fires once when the playback thread drains.
+    reader->register_finish_callback([](bool interrupted) { VLOG_I("  finished, interrupted=", interrupted); });
     reader->async_run();
 
-    vlink::BagReader::Config config;
-    config.rate = 50.0;  // Fast playback
-    reader->play(config);
+    vlink::BagReader::Config cfg;
+    cfg.rate = 50.0;
+    reader->play(cfg);
 
     std::this_thread::sleep_for(3s);
-    VLOG_I("Total MCAP messages read:", msg_count.load());
+    VLOG_I("  total MCAP messages read: ", msg_count.load());
   }
 
-  // ======== Explicit VCAPReader ========
+  // ---- Section 5: explicit VCAPReader ----
+  // Direct VCAPReader for tooling that needs MCAP-specific accessors
+  // (get_ser_type returns the per-URL serializer label embedded in MCAP).
   {
-    VLOG_I("=== Explicit VCAPReader ===");
+    VLOG_I("[5] Explicit VCAPReader");
 
     auto reader = std::make_shared<vlink::VCAPReader>("/tmp/mcap_explicit.vcap");
-
     const auto& info = reader->get_info();
-    VLOG_I("Tag:", info.tag_name);
-    VLOG_I("Compression:", info.compression_type);
-    VLOG_I("Messages:", info.message_count);
-
-    // Query serialization type for a specific URL
-    std::string ser = reader->get_ser_type("dds://mcap/sensor_a");
-    VLOG_I("ser_type for sensor_a:", ser);
+    VLOG_I("  tag=", info.tag_name, " compression=", info.compression_type, " messages=", info.message_count);
+    VLOG_I("  ser_type[sensor_a]=", reader->get_ser_type("dds://mcap/sensor_a"));
   }
 
-  VLOG_I("All MCAP examples complete.");
-
+  VLOG_I("MCAP examples complete.");
   return 0;
 }

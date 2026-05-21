@@ -1,180 +1,169 @@
-# Event Advanced -- VLink 事件模型进阶示例
+# event_advanced — Event 模型进阶：连接检测、强制发布、扇出、延迟统计
 
-## 1. 通信模型概览
+本示例覆盖 Publisher/Subscriber 在生产场景下的几个关键扩展能力：
 
-![通信模型概览](../event_basic/images/communication-models-overview.png)
+- **异步感知订阅者**：通过 `detect_subscribers()` 在订阅者加入/离开时被回调通知，替代轮询 `has_subscribers()`。
+- **强制发布**：在 0 个订阅者的情况下也把消息送进传输层（典型用法：把 latest 状态预先广播给后加入的订阅者）。
+- **多订阅者扇出**：同一 URL 下挂多个 Subscriber，每条消息都会被复制送给每一个，演示 fan-out 行为。
+- **延迟与丢包统计**：开启 `set_latency_and_lost_enabled(true)` 后，订阅端可以查询单条消息的 publisher→subscriber 端到端时延（微秒）和累计丢包计数。
 
-## 2. 概述
+这是写真实模块（感知、规划、监控、健康检查）时必须用到的一组 API。`event_basic` 给出了最小骨架；本示例把所有"调一次就够"的高阶 API 集中在一个文件里。
 
-本示例在基础事件模型之上，演示 Publisher/Subscriber 的高级功能：订阅者检测、延迟跟踪、强制发布和多订阅者扇出。
+## 背景与适用场景
 
-![Event Advanced Flow](images/event-advanced-flow.png)
+`Publisher::publish()` 的默认行为是"没有订阅者就什么都不做"，节省序列化和传输开销。但有两种场景需要打破这个默认：
 
-```
-Publisher ──detect_subscribers(cb)──> 异步通知连接状态变化
-Publisher ──publish(msg, force=true)──> 即使无订阅者也强制发布
-Subscriber ──set_latency_and_lost_enabled(true)──> 启用延迟/丢失跟踪
-Multiple Subscribers ──listen()──> 同一 topic 的扇出分发
-```
+1. **延迟订阅者**：订阅者比 Publisher 晚启动时，前几条消息会被默默丢弃。
+2. **状态/配置广播**：希望把一个状态值"放在那"，谁来订阅都能立即拿到最新值。这种场景 vlink 推荐用 Field 模型（`Setter`/`Getter`），但有时仍需用 Event 强制发布。
 
-## 3. 功能清单
+`detect_subscribers()` 让 Publisher 知道**自己被谁订阅**，从而可以推送一份初始化数据 / 触发链路状态机变更。`wait_for_subscribers(timeout)` 是它的同步阻塞版本，用于程序入口、单元测试。
 
-| 功能 | API | 说明 |
-|------|-----|------|
-| 订阅者异步检测 | `detect_subscribers(callback)` | 订阅者连接/断开时触发回调 |
-| 阻塞等待订阅者 | `wait_for_subscribers(timeout)` | 阻塞直到至少一个订阅者出现 |
-| 非阻塞查询 | `has_subscribers()` | 返回当前是否有订阅者 |
-| 强制发布 | `publish(msg, true)` | 无订阅者时仍然发送 |
-| 延迟跟踪 | `set_latency_and_lost_enabled(true)` | 启用端到端延迟测量 |
-| 读取延迟 | `get_latency()` | 返回最近一条消息的延迟（微秒） |
-| 丢失统计 | `get_lost()` | 返回累积的消息丢失统计 |
+延迟/丢包统计是排查链路抖动、网络拥塞、DDS Reliability 配置不当时的核心工具，但**必须在 `listen()` 之前**调用 `set_latency_and_lost_enabled(true)` 才生效（一旦 listen 之后再开，已经走过的数据路径不会回填统计字段）。
 
-## 4. 关键代码分析
+## 核心 API
 
-### 4.1 detect_subscribers -- 异步连接通知
+| API | 签名 | 说明 |
+|-----|------|------|
+| `Publisher::detect_subscribers` | `void detect_subscribers(ConnectCallback&& cb)` | 注册订阅者到达/离开的异步回调，回调入参 `bool has` |
+| `Publisher::has_subscribers` | `bool has_subscribers() const` | 当前是否有任何订阅者（非阻塞） |
+| `Publisher::wait_for_subscribers` | `bool wait_for_subscribers(std::chrono::milliseconds timeout = kDefaultInterval)` | 同步等到至少一个订阅者；超时返回 false |
+| `Publisher::publish` | `bool publish(const T& msg, bool force = false)` | `force=true` 时即使无订阅者也下发 |
+| `Subscriber::set_latency_and_lost_enabled` | `void set_latency_and_lost_enabled(bool enable)` | 开启端到端延迟+丢包统计；**必须在 `listen()` 之前调用** |
+| `Subscriber::get_latency` | `int64_t get_latency() const` | 上一条消息的延迟（微秒） |
+| `Subscriber::get_lost` | `SampleLostInfo get_lost() const` | `{ uint64_t total; uint64_t lost; }` 累计计数 |
+| `MessageLoop::wait_for_idle` | `bool wait_for_idle(uint32_t timeout_ms)` | 阻塞等到 loop 中的待执行任务全部跑完 |
+
+## 代码导读
+
+### 1. 启动后台 loop
 
 ```cpp
-pub.detect_subscribers([](bool has_subscribers) {
-    VLOG_I("[Publisher] Subscriber presence changed: ", has_subscribers);
+MessageLoop loop;
+loop.set_name("main_loop");
+loop.async_run();
+```
+
+`async_run()` 在内部起一个工作线程驱动 loop，主线程继续往下跑。与 `event_basic` 中的 `loop.run()`（主线程阻塞）相对：这里主线程要继续注册各种 API，所以 loop 必须跑在后台。
+
+### 2. 订阅者连接检测 + 强制发布
+
+```cpp
+Publisher<SensorReading> pub(kUrl);
+pub.attach(&loop);
+pub.detect_subscribers([](bool has) { VLOG_I("[pub] subscribers present: ", has); });
+VLOG_I("[pub] has_subscribers (before): ", pub.has_subscribers());
+
+SensorReading forced{0, -1.0};
+VLOG_I("[pub] normal publish (no subs): ", pub.publish(forced));        // 返回 false
+VLOG_I("[pub] forced publish (no subs): ", pub.publish(forced, true));  // 返回 true
+```
+
+`detect_subscribers()` 是异步通知：传输层 discovery 检测到订阅者加入/离开会调一次。回调投递到 `attach()` 指定的 loop 上跑。
+`publish(msg, true)` 把"强制下发"语义带进 Event 模型 —— 实际写代码里更常见的是用 `mark_as_setter()` 把 Publisher 临时切换为类 Field 的语义。
+
+### 3. 多订阅者扇出
+
+```cpp
+Subscriber<SensorReading> sub1(kUrl);
+sub1.attach(&loop);
+sub1.listen([&count1](const SensorReading& msg) {
+  VLOG_I("[sub1] id=", msg.sensor_id, " value=", msg.value);
+  count1.fetch_add(1);
+});
+
+Subscriber<SensorReading> sub2(kUrl);
+sub2.attach(&loop);
+sub2.listen([&count2](const SensorReading&) { count2.fetch_add(1); });
+```
+
+同一 URL 上挂任意多个 Subscriber，每条消息会被框架复制一份送给每一个。本示例三个订阅者 attach 到**同一个 loop**，所以三个回调实际是顺序串行执行的；如果分别 attach 到不同 loop，三个回调将真正并行。
+
+### 4. 启用延迟与丢包统计
+
+```cpp
+Subscriber<SensorReading> sub3(kUrl);
+sub3.attach(&loop);
+sub3.set_latency_and_lost_enabled(true);  // 必须先开，再 listen
+sub3.listen([&sub3, &count3](const SensorReading& msg) {
+  count3.fetch_add(1);
+  VLOG_I("[sub3] id=", msg.sensor_id, " latency=", sub3.get_latency(), "us");
 });
 ```
 
-`detect_subscribers` 注册一个回调，在订阅者连接状态发生变化时触发：
-- `has_subscribers = true`：至少有一个订阅者连接
-- `has_subscribers = false`：最后一个订阅者断开
+`get_latency()` 返回最近一条消息的发布到接收延迟，以微秒为单位，使用 `Header::time_pub` 与本地接收时间做差。底层依赖时钟同步（同机进程同步，跨机依赖 PTP/NTP）。
 
-如果注册时已经有订阅者存在，回调会立即同步触发。该功能在跨进程传输（如 `shm://`、`dds://`）中尤为重要，因为跨进程的订阅者可能随时加入或退出。
-
-### 4.2 has_subscribers -- 非阻塞查询
+### 5. 等待订阅就绪后批量发布
 
 ```cpp
-bool has = pub.has_subscribers();
+VLOG_I("[pub] wait_for_subscribers: ", pub.wait_for_subscribers(2000ms));
+
+for (int i = 1; i <= 5; ++i) {
+  pub.publish({i, 10.0 + i * 0.1});
+  std::this_thread::sleep_for(100ms);
+}
 ```
 
-非阻塞查询当前是否有活跃的订阅者。返回传输层最近一次已知的对端状态。对于 `dds://`，状态更新依赖 DDS 发现机制。
+5 条消息以 100ms 间隔顺序下发，loop 上三个订阅者各收到 5 条。`wait_for_subscribers` 带 2s 超时；DDS 后端的 discovery 通常在 100-500ms 内完成。
 
-### 4.3 强制发布
+### 6. 收尾：查询丢包统计
 
 ```cpp
-bool ok_normal = pub.publish(forced_msg);        // 无订阅者 => 空操作
-bool ok_forced = pub.publish(forced_msg, true);  // force=true => 始终发送
+loop.wait_for_idle(2000);
+
+SampleLostInfo lost = sub3.get_lost();
+VLOG_I("[sub3] total=", lost.total, " lost=", lost.lost);
 ```
 
-默认情况下，`publish()` 在没有订阅者时是空操作，返回 `false`。传入 `force=true` 可以强制发送数据，适用于以下场景：
-- **数据录制**：即使没有实时订阅者，数据也需要写入 bag 文件
-- **日志收集**：确保每条日志都被传输
-- **Field 模型内部**：Setter 内部使用 force=true 确保值被缓存
+`wait_for_idle()` 等 loop 上待执行任务全跑完，确保最后几条消息的回调已被处理。然后查询丢包计数 —— 理想状态 `lost.lost == 0`。
 
-### 4.4 多订阅者扇出
-
-```cpp
-Subscriber<SensorReading> sub1("dds://advanced/sensor");
-Subscriber<SensorReading> sub2("dds://advanced/sensor");
-Subscriber<SensorReading> sub3("dds://advanced/sensor");
-```
-
-多个 Subscriber 可以监听同一 URL。Publisher 的每条消息会被扇出（fan-out）到所有活跃的 Subscriber。每个 Subscriber 独立接收完整的消息副本，各自的回调互不干扰。
-
-### 4.5 延迟跟踪
-
-```cpp
-sub3.set_latency_and_lost_enabled(true);
-sub3.listen([&sub3](const SensorReading& msg) {
-    int64_t latency_us = sub3.get_latency();
-    VLOG_I("latency=", latency_us, "us");
-});
-```
-
-- `set_latency_and_lost_enabled(true)` 必须在 `listen()` 之前调用
-- `get_latency()` 返回最近一条消息的端到端延迟，单位为微秒
-- 延迟测量基于发布时间戳和接收时间戳之差
-
-### 4.6 丢失统计
-
-```cpp
-SampleLostInfo lost_info = sub3.get_lost();
-VLOG_I("total=", lost_info.total, " lost=", lost_info.lost);
-```
-
-`SampleLostInfo` 包含两个字段：
-- `total`: 预期收到的消息总数（已送达 + 已丢失）
-- `lost`: 丢失或被丢弃的消息数量
-
-对于 `dds://` 传输，在可靠（Reliable）QoS 模式下丢失通常为 0。在 BestEffort 模式或网络拥塞时，缓冲区溢出可能导致消息丢失。
-
-## 5. 消息扇出流程
-
-```
-pub.publish(SensorReading{id=1, value=10.1})
-   |
-   ├──> Sub1: listen callback --> VLOG_I("Sub1 received")
-   |
-   ├──> Sub2: listen callback --> sub2_count++
-   |
-   └──> Sub3: listen callback --> 测量 latency, sub3_count++
-```
-
-## 6. 编译与运行
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_event_advanced example_event_advanced_subscriber example_event_advanced_publisher
 ./build/output/bin/example_event_advanced
 ```
 
-## 7. 预期输出
+预期输出（节选）：
 
 ```
-[I] === VLink Event Advanced Example ===
-[I] --- Section 1: detect_subscribers ---
-[I] [Publisher] has_subscribers (before): 0
-[I] --- Section 2: Force publish ---
-[I] [Publisher] Normal publish (no subs): 0
-[I] [Publisher] Forced publish (no subs): 1
-[I] --- Section 3: Multiple subscribers ---
-[I] [Publisher] Subscriber presence changed: 1
-[I] --- Section 4: Latency and lost tracking ---
-[I] --- Section 5: wait_for_subscribers ---
-[I] [Publisher] wait_for_subscribers: 1
-[I] --- Section 6: Publish and observe ---
-[I] [Sub1] sensor_id=1 value=10.1
-[I] [Sub3-latency] sensor_id=1 latency=5us
+[pub] subscribers present: 0
+[pub] has_subscribers (before): 0
+[pub] normal publish (no subs): 0
+[pub] forced publish (no subs): 1
+[pub] subscribers present: 1
+[pub] wait_for_subscribers: 1
+[sub1] id=1 value=10.1
+[sub3] id=1 latency=80us
+[sub1] id=2 value=10.2
 ...
-[I] --- Section 7: Delivery statistics ---
-[I] [Sub3] total=5 lost=0
-[I] [Sub1] received: 5
-[I] [Sub2] received: 5
-[I] [Sub3] received: 5
-[I] === Example complete ===
+[sub3] total=5 lost=0
+sub1=5 sub2=5 sub3=5
 ```
 
-## 8. 文件结构
+URL `dds://advanced/sensor` 需要 vlink 启用了 FastDDS 组件；改成 `intra://advanced/sensor` 可在无 DDS 环境跑通。
 
-| 文件 | 说明 |
-|------|------|
-| `sensor_types.h` | POD 消息类型 `SensorReading` 的定义 |
-| `event_advanced.cc` | 单进程合并示例（Publisher + 多 Subscriber） |
-| `publisher_main.cc` | 多进程拆分：Publisher 端（独立可执行文件） |
-| `subscriber_main.cc` | 多进程拆分：Subscriber 端（独立可执行文件） |
-| `CMakeLists.txt` | 构建配置（生成 3 个可执行文件） |
+## 常见陷阱
 
-### 8.1 多进程运行方式
+1. **`set_latency_and_lost_enabled(true)` 在 `listen()` 之后调用** —— 不生效，`get_latency()` 一直返回 0。
+2. **`detect_subscribers` 回调里阻塞** —— 回调跑在 loop 线程，长时间阻塞会推迟所有 Subscriber/Timer 回调。
+3. **`publish(msg, true)` 滥用** —— 高频强发会让传输层不断序列化、入队；建议只在初始化广播状态时用。
+4. **多订阅者 attach 同一 loop** —— 看起来"并行"，实际是串行执行。CPU 密集型回调需要分散到不同 loop 或 `ThreadPool`。
+5. **跨机时钟未同步** —— `get_latency()` 数值不可信，可能出现负数。
 
-```bash
-# 终端 1: 启动 Subscriber
-./build/output/bin/example_event_advanced_subscriber
+## 设计要点
 
-# 终端 2: 启动 Publisher
-./build/output/bin/example_event_advanced_publisher
-```
+- `detect_subscribers()` 与 `has_subscribers()` 是互补的：前者是被动通知，后者是主动查询，工程上推荐前者。
+- `SampleLostInfo` 的 `total` 是 publisher 端编号差累计（订阅者从 publisher 序列号推断丢失），需要 publisher 端正确填充 `Header::seq`。
+- `wait_for_subscribers(timeout)` 在 timeout 之前若所有订阅都已就绪会立刻返回；保持 timeout > discovery 时间（DDS 推荐 ≥ 500ms）。
+- Latency 计算依赖发送端时钟与接收端时钟的一致性；跨机部署强烈建议启用 PTP（chrony / linuxptp）。
 
-## 9. 扩展思考
+## 配图
 
-- `detect_subscribers` 可用于实现"按需发布"模式：只有当订阅者存在时才启动数据采集。
-- 延迟跟踪可用于 QoS 监控：当延迟超过阈值时触发告警。
-- 在生产环境中，应监控 `get_lost()` 的丢失率，超过阈值时考虑增大缓冲区深度或降低发布频率。
-- 多订阅者模式可用于实现"旁路监控"：一个 Subscriber 处理业务逻辑，另一个 Subscriber 记录日志或性能指标。
+无专属配图。Event 模型的整体角色图见 `../event_basic/images/communication-models-overview.png`。
 
-## 10. 相关文档
+## 参考
 
-详细原理参见 [doc/03-event-model.md](../../../doc/03-event-model.md)。
+- `../event_basic/` — Event 模型基础（Publisher + Subscriber + Timer）
+- `../method_async/` — Method 模型的异步回调与连接检测的对照
+- `../../qos/` — 通过 QoS 配置可靠性、历史深度从而影响丢包统计
+- `vlink/include/vlink/publisher.h`、`subscriber.h` — Publisher/Subscriber 完整接口
+- 顶层 `doc/03-event-model.md` — Event 模型规范

@@ -1,139 +1,164 @@
-# VLink 录制基础示例
+# record_basic — vlink 录制入门：`set_record_path()` 与 `VLINK_BAG_PATH`
 
-## 1. 概述
+本示例是 vlink 录制系统最简形态：在 Publisher/Subscriber 等通信原语上调一行 `set_record_path("/tmp/x.vdb")`，所有上下行消息就被自动写入 bag 文件。也演示如何通过环境变量 `VLINK_BAG_PATH` 一次性把全进程所有消息录到同一个 bag。
 
-本示例演示了 VLink 框架中两种核心录制机制：**逐节点录制**（per-node recording）和**全局录制**（global recording）。录制功能允许将通信过程中的所有消息持久化到 bag 文件中，便于后续回放、调试和分析。
+读完本示例你能掌握：
 
-![录制与回放流程](images/recording-flow.png)
+- 节点级录制最简代码：1 行 API、不改业务逻辑。
+- 全局录制 + tag 标签的用法。
+- 三种通信模型（Event / Method / Field）的录制对照。
+- 怎么用 `BagWriter::global_get()` 探测全局 writer 状态。
 
-VLink 支持两种 bag 文件格式：
-- **SQLite 格式**（`.vdb` 扩展名）：默认格式，使用 SQLite 数据库存储，支持快速索引和查询
-- **MCAP 格式**（`.vcap` / `.vcapx` 扩展名）：开放标准格式，兼容 Foxglove Studio 等可视化工具
+## 背景与适用场景
 
-## 2. 录制机制详解
+适用：
 
-### 2.1 逐节点录制（Per-Node Recording）
+- 长跑业务录制：感知 / 规划 / 控制模块的全部输入输出。
+- 回归测试：录一段真实数据，离线回放跑业务代码。
+- 问题复现：把出错前后几分钟的数据保存下来送给开发者。
 
-逐节点录制通过在任意 VLink 通信节点上调用 `set_record_path(path)` 来启用。每个节点独立记录自己发送或接收的消息。
+不适合：
 
-```cpp
-Publisher<Bytes> pub("dds://record_basic/event");
-pub.set_record_path("/tmp/record_basic_pub.vdb");
-```
+- 实时监控（用 ProxyAPI，见 `../proxy/`）。
+- 录制频率极高的小消息（每秒上百万次）—— bag 文件写入会成为瓶颈。
 
-**关键特性：**
+录制内容包含：URL、类型名、SchemaType、ActionType（publish / setter set / server request / client response 等）、原始 Bytes、时间戳。回放时按时序重放，附带原始 URL 和 schema 信息。
 
-- **独立性**：每个节点可以使用不同的 bag 文件路径，实现分开录制
-- **共享写入器**：如果多个节点使用相同的路径，VLink 内部通过 `BagWriter::filter_get()` 自动复用同一个 `BagWriter` 实例，避免文件冲突
-- **传输限制**：`intra://` 方案和 CDR 格式的 DDS 消息不支持录制（内部消息已在进程内处理，CDR 消息有特殊编码）
-- **全模型支持**：Publisher、Subscriber、Server、Client、Setter、Getter 六种节点类型均支持 `set_record_path()`
+## 核心 API
 
-### 2.2 全局录制（Global Recording via VLINK_BAG_PATH）
+| API | 签名 | 说明 |
+|-----|------|------|
+| `Publisher<T>::set_record_path` | `void set_record_path(const std::string& path)` | 节点级录制；空串关闭 |
+| `Subscriber<T>::set_record_path` | 同上 | |
+| `Server<Req,Resp>::set_record_path` | 同上 | |
+| `Client<Req,Resp>::set_record_path` | 同上 | |
+| `Setter<T>::set_record_path` | 同上 | |
+| `Getter<T>::set_record_path` | 同上 | |
+| `BagWriter::global_get` | `static BagWriter* global_get()` | 探测全局 writer（由 `VLINK_BAG_PATH` 创建） |
+| 环境变量 `VLINK_BAG_PATH` | path | 启动时自动创建全局 BagWriter |
+| 环境变量 `VLINK_BAG_TAG` | string | 给 bag 加 tag |
 
-全局录制通过设置 `VLINK_BAG_PATH` 环境变量来启用。VLink 会自动创建一个进程级别的全局 `BagWriter` 单例，所有节点的消息自动记录到该文件中，无需逐个节点调用 `set_record_path()`。
+## 代码导读
 
-```bash
-VLINK_BAG_PATH=/tmp/global_record.vdb ./example_record_basic
-```
-
-**全局录制的优势：**
-
-- **零侵入**：不需要修改任何应用代码
-- **集中存储**：所有通信数据集中在一个 bag 文件中
-- **运行时可控**：通过环境变量动态开启或关闭
-
-### 2.3 Bag 文件标签（VLINK_BAG_TAG）
-
-设置 `VLINK_BAG_TAG` 环境变量可以为录制的 bag 文件添加标签字符串。标签会被嵌入到 bag 文件的元数据头中，方便后续识别和分类。
-
-```bash
-VLINK_BAG_PATH=/tmp/record.vdb VLINK_BAG_TAG=regression_test ./example_record_basic
-```
-
-### 2.4 全局写入器 API
-
-在代码中可以通过 `BagWriter::global_get()` 获取全局 BagWriter 实例指针：
+### 1. 节点级录制
 
 ```cpp
-auto* global_writer = BagWriter::global_get();
-if (global_writer) {
-    // 全局录制已激活
-    global_writer->push("dds://my/topic", "raw",
-                        SchemaType::kRaw,
-                        ActionType::kPublish, data);
+vlink::Publisher<std::string> pub("dds://example/topic");
+pub.set_record_path("/tmp/pub_record.vdb");
+
+vlink::Subscriber<std::string> sub("dds://example/topic");
+sub.set_record_path("/tmp/sub_record.vdb");
+sub.listen([](const std::string& msg) { VLOG_I("got: ", msg); });
+
+pub.wait_for_subscribers();
+pub.publish("hello");
+```
+
+两个独立的 vdb 文件分别记录 Publisher 输出和 Subscriber 输入。
+
+### 2. 全局录制
+
+```cpp
+// 通过环境变量启动：
+// VLINK_BAG_PATH=/tmp/global.vdb ./example_record_basic
+
+auto* writer = vlink::BagWriter::global_get();
+if (writer) {
+  VLOG_I("global writer present");
 }
 ```
 
-该函数：
-- 若 `VLINK_BAG_PATH` 已设置，首次调用时自动创建全局 `BagWriter` 并启动事件循环
-- 若环境变量未设置，返回 `nullptr`
+`VLINK_BAG_PATH` 不为空时，vlink 自动创建全局 writer；所有节点（不论是否显式 set_record_path）的消息都被汇集到这个全局 bag。
 
-## 3. set_record_path() API 详解
+### 3. tag 标签
 
 ```cpp
-void Node<ImplT, SecT>::set_record_path(const std::string& path);
+// VLINK_BAG_PATH=/tmp/global.vdb VLINK_BAG_TAG=test_session_001 ./example
 ```
 
-**参数说明：**
+tag 写入 bag 元信息，用于事后过滤、关联实验编号、版本号等。
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `path` | `const std::string&` | bag 文件的输出路径。`.vdb`/`.vdbx` 使用 SQLite，`.vcap`/`.vcapx` 使用 MCAP |
+### 4. Server/Client 录制
 
-**行为说明：**
+```cpp
+vlink::Server<Req, Resp> server(url);
+server.set_record_path("/tmp/rpc_record.vdb");
+server.listen([](const Req& req, Resp& resp) { /* ... */ });
 
-- 内部调用 `BagWriter::filter_get(path)` 获取或创建 `BagWriter` 实例
-- 路径后缀不支持时不会创建 writer；支持 `.vdb/.vdbx/.vcap/.vcapx`
-- 如果已有同路径的 writer 存在，则复用
-- `BagWriter` 的生命周期由 `shared_ptr` 管理，最后一个引用释放时自动关闭文件
-- 对 `intra://` 和 CDR DDS 消息不生效（静默忽略）
+vlink::Client<Req, Resp> client(url);
+client.set_record_path("/tmp/rpc_record.vdb");
+client.invoke(...);
+```
 
-## 4. 支持的通信模型
+同一个 path 多个节点共享 → 同一 bag 文件按 URL 区分记录。
 
-| 通信模型 | 节点类型 | 录制的 ActionType |
-|----------|----------|-------------------|
-| Event（事件） | Publisher | `kPublish` |
-| Event（事件） | Subscriber | `kSubscribe` |
-| Method（RPC） | Server | `kServerRequest` / `kServerResponse` |
-| Method（RPC） | Client | `kClientRequest` / `kClientResponse` |
-| Field（字段） | Setter | `kSet` |
-| Field（字段） | Getter | `kGet` |
+### 5. Setter/Getter 录制
 
-## 5. 编译和运行
+```cpp
+vlink::Setter<int> setter(url);
+setter.set_record_path("/tmp/field_record.vdb");
+setter.set(42);
+
+vlink::Getter<int> getter(url);
+getter.set_record_path("/tmp/field_record.vdb");
+```
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_record_basic
-
-# 运行（逐节点录制）
+# 默认：每节点独立录制
 ./build/output/bin/example_record_basic
 
-# 运行（全局录制）
+# 全局录制：
 VLINK_BAG_PATH=/tmp/global_record.vdb ./build/output/bin/example_record_basic
 
-# 运行（全局录制 + 标签）
-VLINK_BAG_PATH=/tmp/global_record.vdb VLINK_BAG_TAG=my_tag ./build/output/bin/example_record_basic
+# 带 tag：
+VLINK_BAG_PATH=/tmp/global_record.vdb VLINK_BAG_TAG=test_session \
+  ./build/output/bin/example_record_basic
 ```
 
-## 6. 输出文件说明
+预期产物：
 
-运行后会在 `/tmp/` 目录下生成以下 bag 文件：
+```
+/tmp/pub_record.vdb        # Publisher 录制
+/tmp/sub_record.vdb        # Subscriber 录制
+/tmp/rpc_record.vdb        # Server + Client
+/tmp/field_record.vdb      # Setter + Getter
+/tmp/global_record.vdb     # 全局（若设了 VLINK_BAG_PATH）
+```
 
-| 文件 | 内容 |
-|------|------|
-| `record_basic_pub.vdb` | Publisher 发送的所有消息 |
-| `record_basic_sub.vdb` | Subscriber 接收的所有消息 |
-| `record_basic_rpc.vdb` | Server/Client RPC 交互的请求和响应 |
-| `record_basic_field.vdb` | Setter/Getter 字段值的读写操作 |
-| `global_record.vdb`（如设置环境变量） | 所有节点的全部消息 |
+事后用 `record_bag/` 示例的 BagReader 回放：
 
-## 7. 注意事项
+```cpp
+auto reader = vlink::BagReader::create("/tmp/pub_record.vdb");
+reader->register_output_callback([](int64_t ts, const std::string& url, ...) { /* ... */ });
+reader->play({});
+```
 
-1. **录制是异步的**：`set_record_path()` 和 `BagWriter::push()` 将消息加入内部队列，实际写入由 `MessageLoop` 的后台线程执行
-2. **线程安全**：`BagWriter::push()` 是线程安全的，多个节点可以同时向同一个 writer 推送消息
-3. **资源释放**：建议在程序退出前预留足够的时间（如 `sleep`），确保所有排队的消息已写入磁盘
-4. **磁盘空间**：长时间录制会消耗大量磁盘空间，生产环境建议配合分割模式和压缩功能使用（参见 `record_bag_writer` 和 `record_compression` 示例）
+## 常见陷阱
 
-## 8. 相关文档
+1. **set_record_path 后忘 init**：node 在构造时（kWithInit 默认）已经 init；record_path 在 init 后再设可能不生效，按实现细节。建议构造前或构造直后立即调。
+2. **path 跨进程共享**：同一 path 多进程同时写 vdb（SQLite）可能冲突；全局 writer 是进程内共享，跨进程要各自 path。
+3. **bag 文件未关闭**：BagWriter 在进程退出时 flush；非正常退出（kill -9）可能丢尾部数据。
+4. **VLINK_BAG_PATH + 节点 set_record_path 同时设**：节点路径优先；不会重复写。
+5. **回放时 schema 不可用**：消息按 Bytes 形式存储；要解码必须订阅时知道 `T`。
 
-详细原理参见 [doc/12-bag-recording.md](../../../doc/12-bag-recording.md)。
+## 设计要点
+
+- 录制是异步的：内部 BagWriter 是 MessageLoop 派生类，push 投递到内部队列后立即返回。
+- 写入是 batch + WAL（vdb）；性能高但增加几 ms 延迟。
+- VLINK_BAG_PATH 是 process-wide singleton；跨线程安全。
+
+## 配图
+
+![Recording flow](./images/recording-flow.png)
+
+图中展示节点 → BagWriter → 文件的录制数据流。
+
+## 参考
+
+- `../record_bag/` — 直接 BagWriter / BagReader API
+- `../record_mcap/` — MCAP 格式
+- `../record_compression/` — 压缩对比
+- 顶层 `doc/12-bag-recording.md` — 录制系统完整章节
+- 顶层 `doc/21-environment-vars.md` — `VLINK_BAG_PATH` / `VLINK_BAG_TAG`

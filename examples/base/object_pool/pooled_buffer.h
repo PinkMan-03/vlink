@@ -23,33 +23,33 @@
 
 #pragma once
 
-/**
- * @file pooled_buffer.h
- * @brief A sample resource type managed by ObjectPool.
- *
- * Buffer represents a pre-allocated byte array with a "used" watermark.
- * It demonstrates the reset pattern expected by ObjectPool's reset callback.
- */
-
 #include <vlink/base/logger.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
+// -----------------------------------------------------------------------------
+// pooled_buffer: tiny user-defined object used by the ObjectPool example. The
+// pool reuses Buffer instances across acquisitions; reset() is the user
+// callback that the pool invokes on acquire/release per the configured
+// policy, returning the buffer to a "fresh" state without freeing storage.
+// -----------------------------------------------------------------------------
 namespace pooled_buffer {
 
-// A sample resource type managed by the pool.
-// The data vector is allocated once at construction; reset() merely
-// clears the watermark without releasing memory.
 struct Buffer {
   std::vector<uint8_t> data;
   size_t used{0};
 
+  // Ctor allocates the backing storage once per Buffer; the pool keeps the
+  // Buffer alive across many borrow/return cycles so this allocation is
+  // amortised. The MLOG_D fires only when the pool actually creates a new
+  // slot (not on subsequent reuse).
   explicit Buffer(size_t capacity = 1024) : data(capacity, 0) { MLOG_D("  Buffer created (capacity={})", capacity); }
 
-  // Reset the buffer state without deallocating.
-  // This is called by ObjectPool's reset callback.
+  // Reset is what the pool invokes per its policy. We DO NOT touch data
+  // (the storage stays warm); only the logical "used" length is rolled
+  // back to zero.
   void reset() {
     used = 0;
     VLOG_D("  Buffer reset");

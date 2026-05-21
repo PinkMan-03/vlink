@@ -28,9 +28,13 @@
 #include <vlink/extension/discovery_viewer.h>
 #include <vlink/version.h>
 #include <vlink/vlink.h>
+#include <vlink/zerocopy/audio_frame.h>
 #include <vlink/zerocopy/camera_frame.h>
+#include <vlink/zerocopy/object_array.h>
+#include <vlink/zerocopy/occupancy_grid.h>
 #include <vlink/zerocopy/point_cloud.h>
 #include <vlink/zerocopy/raw_data.h>
+#include <vlink/zerocopy/tensor.h>
 
 #if __has_include(<google/protobuf/compiler/importer.h>) && __has_include(<google/protobuf/text_format.h>)
 
@@ -642,7 +646,7 @@ static void import_fbs(std::shared_ptr<flatbuffers::Parser>& parser, const std::
 static std::string format_zerocopy_header(const vlink::zerocopy::Header& header) {
   std::string s;
   s += "header {\n";
-  s += "  frame_id: " + std::string(header.frame_id) + "\n";
+  s += "  frame_id: " + std::string(header.frame_id_view()) + "\n";
   s += "  seq: " + std::to_string(header.seq) + "\n";
   s += "  time_meas: " + vlink::Helpers::format_date(header.time_meas) + "\n";
   s += "  time_pub: " + vlink::Helpers::format_date(header.time_pub) + "\n";
@@ -682,6 +686,97 @@ static std::string format_point_cloud(const vlink::zerocopy::PointCloud& pc) {
   return s;
 }
 
+static std::string format_occupancy_grid(const vlink::zerocopy::OccupancyGrid& og) {
+  std::string s = format_zerocopy_header(og.header);
+  s += "map_id: " + std::string(og.map_id()) + "\n";
+  s += "channel: " + std::to_string(og.channel()) + "\n";
+  s += "freq: " + std::to_string(og.freq()) + "\n";
+  s += "width: " + std::to_string(og.width()) + "\n";
+  s += "height: " + std::to_string(og.height()) + "\n";
+  s += "resolution: " + std::to_string(og.resolution()) + "\n";
+  s += "origin_x: " + std::to_string(og.origin_x()) + "\n";
+  s += "origin_y: " + std::to_string(og.origin_y()) + "\n";
+  s += "origin_z: " + std::to_string(og.origin_z()) + "\n";
+  s += "origin_yaw: " + std::to_string(og.origin_yaw()) + "\n";
+  s += "cell_type: " + std::string(vlink::NameDetector::get_enum(og.cell_type())) + "\n";
+  s += "default_value: " + std::to_string(og.default_value()) + "\n";
+  s += "value_min: " + std::to_string(og.value_min()) + "\n";
+  s += "value_max: " + std::to_string(og.value_max()) + "\n";
+  s += "occupied_threshold: " + std::to_string(og.occupied_threshold()) + "\n";
+  s += "free_threshold: " + std::to_string(og.free_threshold()) + "\n";
+  s += "valid_cell_count: " + std::to_string(og.valid_cell_count()) + "\n";
+  s += "update_time_ns: " + std::to_string(og.update_time_ns()) + "\n";
+  s += "size: " + std::to_string(og.size()) + "\n";
+  s += "data: {...}\n";
+  return s;
+}
+
+static std::string format_tensor(const vlink::zerocopy::Tensor& tensor) {
+  std::string s = format_zerocopy_header(tensor.header);
+  s += "name: " + std::string(tensor.name()) + "\n";
+  s += "model_id: " + std::string(tensor.model_id()) + "\n";
+  s += "layout: " + std::string(tensor.layout()) + "\n";
+  s += "dtype: " + std::string(vlink::NameDetector::get_enum(tensor.dtype())) + "\n";
+  s += "device: " + std::string(vlink::NameDetector::get_enum(tensor.device())) + "\n";
+  s += "rank: " + std::to_string(static_cast<uint32_t>(tensor.rank())) + "\n";
+  s += "num_elements: " + std::to_string(tensor.num_elements()) + "\n";
+  s += "element_size: " + std::to_string(static_cast<uint32_t>(tensor.element_size())) + "\n";
+  s += "batch_size: " + std::to_string(tensor.batch_size()) + "\n";
+
+  std::string shape_str = "[";
+
+  for (uint8_t i = 0; i < tensor.rank(); ++i) {
+    if (i > 0) {
+      shape_str += ", ";
+    }
+
+    shape_str += std::to_string(tensor.shape_at(i));
+  }
+
+  shape_str += "]";
+  s += "shape: " + shape_str + "\n";
+  s += "quant_scale: " + std::to_string(tensor.quant_scale()) + "\n";
+  s += "quant_zero_point: " + std::to_string(tensor.quant_zero_point()) + "\n";
+  s += "channel: " + std::to_string(tensor.channel()) + "\n";
+  s += "freq: " + std::to_string(tensor.freq()) + "\n";
+  s += "update_time_ns: " + std::to_string(tensor.update_time_ns()) + "\n";
+  s += "size: " + std::to_string(tensor.size()) + "\n";
+  s += "data: {...}\n";
+  return s;
+}
+
+static std::string format_object_array(const vlink::zerocopy::ObjectArray& arr) {
+  std::string s = format_zerocopy_header(arr.header);
+  s += "source_id: " + std::string(arr.source_id()) + "\n";
+  s += "channel: " + std::to_string(arr.channel()) + "\n";
+  s += "freq: " + std::to_string(arr.freq()) + "\n";
+  s += "count: " + std::to_string(arr.count()) + "\n";
+  s += "pack_size: " + std::to_string(arr.pack_size()) + "\n";
+  s += "update_time_ns: " + std::to_string(arr.update_time_ns()) + "\n";
+  s += "data: {...}\n";
+  return s;
+}
+
+static std::string format_audio_frame(const vlink::zerocopy::AudioFrame& frame) {
+  std::string s = format_zerocopy_header(frame.header);
+  s += "channel: " + std::to_string(frame.channel()) + "\n";
+  s += "freq: " + std::to_string(frame.freq()) + "\n";
+  s += "sample_rate: " + std::to_string(frame.sample_rate()) + "\n";
+  s += "num_samples: " + std::to_string(frame.num_samples()) + "\n";
+  s += "num_channels: " + std::to_string(static_cast<uint32_t>(frame.num_channels())) + "\n";
+  s += "bit_depth: " + std::to_string(static_cast<uint32_t>(frame.bit_depth())) + "\n";
+  s += "bitrate: " + std::to_string(frame.bitrate()) + "\n";
+  s += "format: " + std::string(vlink::NameDetector::get_enum(frame.format())) + "\n";
+  s += "layout: " + std::string(vlink::NameDetector::get_enum(frame.layout())) + "\n";
+  s += "codec: " + std::string(frame.codec()) + "\n";
+  s += "language: " + std::string(frame.language()) + "\n";
+  s += "duration_ns: " + std::to_string(frame.duration_ns()) + "\n";
+  s += "update_time_ns: " + std::to_string(frame.update_time_ns()) + "\n";
+  s += "size: " + std::to_string(frame.size()) + "\n";
+  s += "data: {...}\n";
+  return s;
+}
+
 static bool extract_zerocopy_header_value(const vlink::zerocopy::Header& header, const std::string& field,
                                           VariantType& result) {
   if (field == "header.seq") {
@@ -700,7 +795,7 @@ static bool extract_zerocopy_header_value(const vlink::zerocopy::Header& header,
   }
 
   if (field == "header.frame_id") {
-    result = std::string(header.frame_id);
+    result = std::string(header.frame_id_view());
     return true;
   }
 
@@ -892,6 +987,385 @@ static bool extract_zerocopy_value(const std::string& ser, const vlink::Bytes& b
     return false;
   }
 
+  if (ser.find("OccupancyGrid") != std::string::npos) {
+    vlink::zerocopy::OccupancyGrid og;
+
+    if VUNLIKELY (!vlink::Serializer::convert(bytes, og)) {
+      return false;
+    }
+
+    if (extract_zerocopy_header_value(og.header, field, result)) {
+      return true;
+    }
+
+    if (field == "map_id") {
+      result = std::string(og.map_id());
+      return true;
+    }
+
+    if (field == "channel") {
+      result = static_cast<int64_t>(og.channel());
+      return true;
+    }
+
+    if (field == "freq") {
+      result = static_cast<int64_t>(og.freq());
+      return true;
+    }
+
+    if (field == "width") {
+      result = static_cast<int64_t>(og.width());
+      return true;
+    }
+
+    if (field == "height") {
+      result = static_cast<int64_t>(og.height());
+      return true;
+    }
+
+    if (field == "resolution") {
+      result = static_cast<double>(og.resolution());
+      return true;
+    }
+
+    if (field == "origin_x") {
+      result = static_cast<double>(og.origin_x());
+      return true;
+    }
+
+    if (field == "origin_y") {
+      result = static_cast<double>(og.origin_y());
+      return true;
+    }
+
+    if (field == "origin_z") {
+      result = static_cast<double>(og.origin_z());
+      return true;
+    }
+
+    if (field == "origin_yaw") {
+      result = static_cast<double>(og.origin_yaw());
+      return true;
+    }
+
+    if (field == "cell_type") {
+      result = static_cast<int64_t>(og.cell_type());
+      return true;
+    }
+
+    if (field == "default_value") {
+      result = static_cast<int64_t>(og.default_value());
+      return true;
+    }
+
+    if (field == "value_min") {
+      result = static_cast<double>(og.value_min());
+      return true;
+    }
+
+    if (field == "value_max") {
+      result = static_cast<double>(og.value_max());
+      return true;
+    }
+
+    if (field == "occupied_threshold") {
+      result = static_cast<double>(og.occupied_threshold());
+      return true;
+    }
+
+    if (field == "free_threshold") {
+      result = static_cast<double>(og.free_threshold());
+      return true;
+    }
+
+    if (field == "valid_cell_count") {
+      result = static_cast<int64_t>(og.valid_cell_count());
+      return true;
+    }
+
+    if (field == "update_time_ns") {
+      result = static_cast<int64_t>(og.update_time_ns());
+      return true;
+    }
+
+    if (field == "size") {
+      result = static_cast<int64_t>(og.size());
+      return true;
+    }
+
+    if (field == "data") {
+      result = std::string("<binary:" + std::to_string(og.size()) + ">");
+      return true;
+    }
+
+    return false;
+  }
+
+  if (ser.find("Tensor") != std::string::npos) {
+    vlink::zerocopy::Tensor tensor;
+
+    if VUNLIKELY (!vlink::Serializer::convert(bytes, tensor)) {
+      return false;
+    }
+
+    if (extract_zerocopy_header_value(tensor.header, field, result)) {
+      return true;
+    }
+
+    if (field == "name") {
+      result = std::string(tensor.name());
+      return true;
+    }
+
+    if (field == "model_id") {
+      result = std::string(tensor.model_id());
+      return true;
+    }
+
+    if (field == "layout") {
+      result = std::string(tensor.layout());
+      return true;
+    }
+
+    if (field == "dtype") {
+      result = static_cast<int64_t>(tensor.dtype());
+      return true;
+    }
+
+    if (field == "device") {
+      result = static_cast<int64_t>(tensor.device());
+      return true;
+    }
+
+    if (field == "rank") {
+      result = static_cast<int64_t>(tensor.rank());
+      return true;
+    }
+
+    if (field == "num_elements") {
+      result = static_cast<int64_t>(tensor.num_elements());
+      return true;
+    }
+
+    if (field == "element_size") {
+      result = static_cast<int64_t>(tensor.element_size());
+      return true;
+    }
+
+    if (field == "batch_size") {
+      result = static_cast<int64_t>(tensor.batch_size());
+      return true;
+    }
+
+    if (field == "quant_scale") {
+      result = static_cast<double>(tensor.quant_scale());
+      return true;
+    }
+
+    if (field == "quant_zero_point") {
+      result = static_cast<int64_t>(tensor.quant_zero_point());
+      return true;
+    }
+
+    if (field == "channel") {
+      result = static_cast<int64_t>(tensor.channel());
+      return true;
+    }
+
+    if (field == "freq") {
+      result = static_cast<int64_t>(tensor.freq());
+      return true;
+    }
+
+    if (field == "update_time_ns") {
+      result = static_cast<int64_t>(tensor.update_time_ns());
+      return true;
+    }
+
+    if (field == "size") {
+      result = static_cast<int64_t>(tensor.size());
+      return true;
+    }
+
+    if (field == "data") {
+      result = std::string("<binary:" + std::to_string(tensor.size()) + ">");
+      return true;
+    }
+
+    if (field == "shape") {
+      std::string shape_str = "[";
+
+      for (uint8_t i = 0; i < tensor.rank(); ++i) {
+        if (i > 0) {
+          shape_str += ", ";
+        }
+
+        shape_str += std::to_string(tensor.shape_at(i));
+      }
+
+      shape_str += "]";
+      result = shape_str;
+      return true;
+    }
+
+    if (vlink::Helpers::has_startwith(field, "shape[")) {
+      auto pos_left = field.find('[');
+      auto pos_right = field.find(']');
+      int dim_pos = -1;
+
+      if (pos_left != std::string::npos && pos_right != std::string::npos && pos_right > pos_left) {
+        std::from_chars(field.data() + pos_left + 1, field.data() + pos_right, dim_pos);
+      }
+
+      if (dim_pos < 0 || dim_pos >= tensor.rank()) {
+        return false;
+      }
+
+      result = static_cast<int64_t>(tensor.shape_at(static_cast<uint8_t>(dim_pos)));
+      return true;
+    }
+
+    return false;
+  }
+
+  if (ser.find("ObjectArray") != std::string::npos) {
+    vlink::zerocopy::ObjectArray arr;
+
+    if VUNLIKELY (!vlink::Serializer::convert(bytes, arr)) {
+      return false;
+    }
+
+    if (extract_zerocopy_header_value(arr.header, field, result)) {
+      return true;
+    }
+
+    if (field == "source_id") {
+      result = std::string(arr.source_id());
+      return true;
+    }
+
+    if (field == "channel") {
+      result = static_cast<int64_t>(arr.channel());
+      return true;
+    }
+
+    if (field == "freq") {
+      result = static_cast<int64_t>(arr.freq());
+      return true;
+    }
+
+    if (field == "count") {
+      result = static_cast<int64_t>(arr.count());
+      return true;
+    }
+
+    if (field == "pack_size") {
+      result = static_cast<int64_t>(arr.pack_size());
+      return true;
+    }
+
+    if (field == "update_time_ns") {
+      result = static_cast<int64_t>(arr.update_time_ns());
+      return true;
+    }
+
+    if (field == "data") {
+      result = std::string("<objects:" + std::to_string(arr.count()) + ">");
+      return true;
+    }
+
+    return false;
+  }
+
+  if (ser.find("AudioFrame") != std::string::npos) {
+    vlink::zerocopy::AudioFrame frame;
+
+    if VUNLIKELY (!vlink::Serializer::convert(bytes, frame)) {
+      return false;
+    }
+
+    if (extract_zerocopy_header_value(frame.header, field, result)) {
+      return true;
+    }
+
+    if (field == "channel") {
+      result = static_cast<int64_t>(frame.channel());
+      return true;
+    }
+
+    if (field == "freq") {
+      result = static_cast<int64_t>(frame.freq());
+      return true;
+    }
+
+    if (field == "sample_rate") {
+      result = static_cast<int64_t>(frame.sample_rate());
+      return true;
+    }
+
+    if (field == "num_samples") {
+      result = static_cast<int64_t>(frame.num_samples());
+      return true;
+    }
+
+    if (field == "num_channels") {
+      result = static_cast<int64_t>(frame.num_channels());
+      return true;
+    }
+
+    if (field == "bit_depth") {
+      result = static_cast<int64_t>(frame.bit_depth());
+      return true;
+    }
+
+    if (field == "bitrate") {
+      result = static_cast<int64_t>(frame.bitrate());
+      return true;
+    }
+
+    if (field == "format") {
+      result = static_cast<int64_t>(frame.format());
+      return true;
+    }
+
+    if (field == "layout") {
+      result = static_cast<int64_t>(frame.layout());
+      return true;
+    }
+
+    if (field == "codec") {
+      result = std::string(frame.codec());
+      return true;
+    }
+
+    if (field == "language") {
+      result = std::string(frame.language());
+      return true;
+    }
+
+    if (field == "duration_ns") {
+      result = static_cast<int64_t>(frame.duration_ns());
+      return true;
+    }
+
+    if (field == "update_time_ns") {
+      result = static_cast<int64_t>(frame.update_time_ns());
+      return true;
+    }
+
+    if (field == "size") {
+      result = static_cast<int64_t>(frame.size());
+      return true;
+    }
+
+    if (field == "data") {
+      result = std::string("<binary:" + std::to_string(frame.size()) + ">");
+      return true;
+    }
+
+    return false;
+  }
+
   return false;
 }
 
@@ -914,6 +1388,30 @@ static std::string format_zerocopy_message(const std::string& ser, const vlink::
     if (vlink::Serializer::convert(bytes, pc)) {
       return format_point_cloud(pc);
     }
+  } else if (ser.find("OccupancyGrid") != std::string::npos) {
+    vlink::zerocopy::OccupancyGrid og;
+
+    if (vlink::Serializer::convert(bytes, og)) {
+      return format_occupancy_grid(og);
+    }
+  } else if (ser.find("Tensor") != std::string::npos) {
+    vlink::zerocopy::Tensor tensor;
+
+    if (vlink::Serializer::convert(bytes, tensor)) {
+      return format_tensor(tensor);
+    }
+  } else if (ser.find("ObjectArray") != std::string::npos) {
+    vlink::zerocopy::ObjectArray arr;
+
+    if (vlink::Serializer::convert(bytes, arr)) {
+      return format_object_array(arr);
+    }
+  } else if (ser.find("AudioFrame") != std::string::npos) {
+    vlink::zerocopy::AudioFrame frame;
+
+    if (vlink::Serializer::convert(bytes, frame)) {
+      return format_audio_frame(frame);
+    }
   }
 
   return "<unsupported zerocopy type>";
@@ -922,17 +1420,49 @@ static std::string format_zerocopy_message(const std::string& ser, const vlink::
 static vlink::Bytes extract_zerocopy_binary(const std::string& ser, const vlink::Bytes& bytes,
                                             const std::string& field) {
   if (field == "data") {
-    if (ser.find("CameraFrame") != std::string::npos) {
-      vlink::zerocopy::CameraFrame frame;
-
-      if (vlink::Serializer::convert(bytes, frame)) {
-        return vlink::Bytes::deep_copy(frame.data(), frame.size());
-      }
-    } else if (ser.find("RawData") != std::string::npos) {
+    if (ser.find("RawData") != std::string::npos) {
       vlink::zerocopy::RawData raw_data;
 
       if (vlink::Serializer::convert(bytes, raw_data)) {
-        return vlink::Bytes::deep_copy(raw_data.data(), raw_data.size());
+        return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(raw_data.data()), raw_data.size());
+      }
+    } else if (ser.find("CameraFrame") != std::string::npos) {
+      vlink::zerocopy::CameraFrame frame;
+
+      if (vlink::Serializer::convert(bytes, frame)) {
+        return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(frame.data()), frame.size());
+      }
+    } else if (ser.find("PointCloud") != std::string::npos) {
+      vlink::zerocopy::PointCloud pc;
+
+      if (vlink::Serializer::convert(bytes, pc)) {
+        size_t payload_size = static_cast<size_t>(pc.size()) * static_cast<size_t>(pc.pack_size());
+        return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(pc.get_internal_data()), payload_size);
+      }
+    } else if (ser.find("OccupancyGrid") != std::string::npos) {
+      vlink::zerocopy::OccupancyGrid og;
+
+      if (vlink::Serializer::convert(bytes, og)) {
+        return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(og.data()), og.size());
+      }
+    } else if (ser.find("Tensor") != std::string::npos) {
+      vlink::zerocopy::Tensor tensor;
+
+      if (vlink::Serializer::convert(bytes, tensor)) {
+        return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(tensor.data()), tensor.size());
+      }
+    } else if (ser.find("ObjectArray") != std::string::npos) {
+      vlink::zerocopy::ObjectArray arr;
+
+      if (vlink::Serializer::convert(bytes, arr)) {
+        size_t payload_size = static_cast<size_t>(arr.count()) * static_cast<size_t>(arr.pack_size());
+        return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(arr.data()), payload_size);
+      }
+    } else if (ser.find("AudioFrame") != std::string::npos) {
+      vlink::zerocopy::AudioFrame frame;
+
+      if (vlink::Serializer::convert(bytes, frame)) {
+        return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(frame.data()), frame.size());
       }
     }
   }

@@ -21,6 +21,22 @@
  * limitations under the License.
  */
 
+// DDS + DynamicData sample.
+//
+// DynamicData is VLink's runtime type-erased payload container. It lets a
+// single Publisher / Server endpoint carry multiple unrelated message types
+// over the same topic: each frame embeds a short type tag (<= 19 chars) and
+// the receiver dispatches on it. Here we use Protobuf message types and DDS
+// transport, but the same pattern works for any serializer / transport.
+// Typical engineering scenario: a generic "command bus" or "telemetry bus"
+// where the channel schema is open-ended and would otherwise require one
+// topic per message type.
+//
+// Core API:
+//   - DynamicData().load("TypeName", value)  serialize + tag
+//   - dd.get_type()                          read the type tag
+//   - dd.as<T>()                             deserialize to concrete T
+
 // DynamicData: runtime dynamic type container
 #include <vlink/extension/dynamic_data.h>
 // VLink core communication API
@@ -37,83 +53,71 @@
 #include "dds_dynamic.pb.h"
 #endif
 
-using namespace vlink;                 // NOLINT(build/namespaces, google-build-using-namespace)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// DynamicData dynamic type example
-///
-/// DynamicData is VLink's runtime type-erased container that allows transmitting different
-/// message types on the same channel. Each message carries a type tag (up to 19 characters),
-/// and the receiver selects the deserialization method based on the tag.
-///
-/// This example demonstrates:
-///   1. Method model: Client/Server using DynamicData to transmit different request and response types
-///   2. Event model: Publisher/Subscriber using DynamicData to transmit mixed-type messages
-///
-/// Core API:
-///   - DynamicData().load("TypeName", value)  -- serialize and tag with a type name
-///   - dd.get_type()                          -- get the type tag string
-///   - dd.as<T>()                             -- deserialize to a concrete type
-///   - dd.convert(T& out)                     -- deserialize into an output parameter
 int main() {
-  // ======== Method Model (RPC) + DynamicData ========
-  // Server receives DynamicData requests and dispatches based on the type tag
-  Server<DynamicData, DynamicData> server("dds://dynamic/method");
+  // ======== Method model (RPC) + DynamicData ========
+  // Server accepts arbitrary request types and answers with arbitrary response
+  // types -- the contract is enforced only by the tag strings agreed between
+  // peers, not by the C++ type system.
+  vlink::Server<vlink::DynamicData, vlink::DynamicData> server("dds://dynamic/method");
 
-  server.listen([](const DynamicData& req, DynamicData& res) {
-    // Dispatch based on the type tag
+  // listen() callback fires on a DDS worker thread per incoming request.
+  server.listen([](const vlink::DynamicData& req, vlink::DynamicData& res) {
+    // Dispatch on the embedded tag string.
 
     if (req.get_type() == "type1") {
-      // Deserialize DynamicData to pb::Request
+      // Deserialize DynamicData -> pb::Request.
       if (req.as<pb::Request>().type() == 521) {
-        // Respond with a string-typed result
-        res = DynamicData().load("type1", "I love you");
+        // Respond with a string-typed result wrapped back into DynamicData.
+        res = vlink::DynamicData().load("type1", "I love you");
       }
     } else if (req.get_type() == "type2") {
-      // Deserialize DynamicData to pb::Message
+      // Deserialize DynamicData -> pb::Message.
       if (req.as<pb::Message>().value() == "forever") {
-        // Respond with an int-typed result
-        res = DynamicData().load("type2", 1314);
+        // Respond with an int-typed result.
+        res = vlink::DynamicData().load("type2", 1314);
       }
     }
   });
 
-  // Client sends different types of requests
-  Client<DynamicData, DynamicData> client("dds://dynamic/method");
+  // Client sends different request types over the same endpoint.
+  vlink::Client<vlink::DynamicData, vlink::DynamicData> client("dds://dynamic/method");
 
-  // Listen for Server online/offline events
+  // detect_connected() callback fires when DDS discovery sees the matched Server
+  // come online / offline -- useful for liveness reporting.
   client.detect_connected([](bool connected) { VLOG_I("server status:", connected); });
 
-  // Construct the first type of request
+  // First request: pb::Request typed.
   pb::Request req1;
   req1.set_type(521);
 
-  // Send a type1 request; load() automatically serializes the Protobuf message and tags it
-  auto resp1 = client.invoke(DynamicData().load("type1", req1));
+  // load() serializes the Protobuf message via vlink::serializer and tags it.
+  auto resp1 = client.invoke(vlink::DynamicData().load("type1", req1));
 
   if (resp1.has_value()) {
-    // Deserialize the response to std::string
+    // The server answered with a tagged std::string; deserialize accordingly.
     VLOG_I("resp1:", resp1.value().as<std::string>());
   }
 
-  // Construct the second type of request
+  // Second request: pb::Message typed.
   pb::Message req2;
   req2.set_value("forever");
 
-  // Send a type2 request
-  auto resp2 = client.invoke(DynamicData().load("type2", req2));
+  auto resp2 = client.invoke(vlink::DynamicData().load("type2", req2));
 
   if (resp2.has_value()) {
-    // Deserialize the response to int
+    // The server answered with a tagged int.
     VLOG_I("resp2:", resp2.value().as<int>());
   }
 
-  // ======== Event Model (Pub/Sub) + DynamicData ========
-  // Subscriber receives mixed-type event messages
-  Subscriber<DynamicData> sub("dds://dynamic/event");
+  // ======== Event model (Pub/Sub) + DynamicData ========
+  // Subscriber receives mixed-type events on a single topic.
+  vlink::Subscriber<vlink::DynamicData> sub("dds://dynamic/event");
 
-  sub.listen([](const DynamicData& msg) {
-    // Select the deserialization method based on the type tag
+  // Callback fires on DDS worker thread per event.
+  sub.listen([](const vlink::DynamicData& msg) {
+    // Dispatch on tag to pick the correct deserialization target.
 
     if (msg.get_type() == "Request") {
       VLOG_I("msg1:", msg.as<pb::Request>().type());
@@ -122,21 +126,21 @@ int main() {
     }
   });
 
-  // Publisher publishes different types of messages to the same topic
-  Publisher<DynamicData> pub("dds://dynamic/event");
+  // Publisher emits different concrete types over the same topic.
+  vlink::Publisher<vlink::DynamicData> pub("dds://dynamic/event");
   pub.wait_for_subscribers();
 
-  // Publish a Request-type message
+  // Emit a Request-typed event.
   pb::Request req;
   req.set_type(521);
-  pub.publish(DynamicData().load("Request", req));
+  pub.publish(vlink::DynamicData().load("Request", req));
 
-  // Publish a Response-type message (the same topic can carry different types)
+  // Emit a Response-typed event on the same topic.
   pb::Response resp;
   resp.set_value("love");
-  pub.publish(DynamicData().load("Response", resp));
+  pub.publish(vlink::DynamicData().load("Response", resp));
 
-  // Wait for message delivery to complete
+  // Allow DDS to flush before main returns and destructs the publisher.
   std::this_thread::sleep_for(100ms);
 
   return 0;

@@ -28,16 +28,10 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <type_traits>
 
-//
 #include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helper: a minimal MessageConvertPlugin that records each call.
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -47,17 +41,16 @@ class FakeConvertPlugin final : public MessageConvertPlugin {
 
   bool init(const std::string& config) override {
     init_called = true;
-    init_config = config;
-    return init_return_value;
+    last_config = config;
+    return init_result;
   }
 
-  [[nodiscard]] bool can_convert(const std::string& vlink_ser, ConvertTarget target) override {
+  bool can_convert(const std::string& vlink_ser, ConvertTarget target) override {
     return vlink_ser == handled_ser && (target == ConvertTarget::kFoxglove || target == ConvertTarget::kRerun);
   }
 
-  [[nodiscard]] bool get_schema_info(const std::string& vlink_ser, ConvertTarget target, std::string& type_name,
-                                     std::string& encoding, std::string& schema_encoding,
-                                     std::string& schema_data) override {
+  bool get_schema_info(const std::string& vlink_ser, ConvertTarget target, std::string& type_name,
+                       std::string& encoding, std::string& schema_encoding, std::string& schema_data) override {
     if (vlink_ser != handled_ser) {
       return false;
     }
@@ -77,45 +70,36 @@ class FakeConvertPlugin final : public MessageConvertPlugin {
     return true;
   }
 
-  [[nodiscard]] bool convert(const std::string& vlink_ser, const Bytes& raw, ConvertTarget target,
-                             Bytes& payload) override {
+  bool convert(const std::string& vlink_ser, const Bytes& raw, ConvertTarget target, Bytes& payload) override {
     if (vlink_ser != handled_ser) {
       return false;
     }
 
     last_target = target;
     last_input_size = raw.size();
-    payload = Bytes::create(static_cast<size_t>(payload_size_));
+    payload = Bytes::create(output_size);
     return true;
   }
 
   bool init_called{false};
-  bool init_return_value{true};
-  std::string init_config;
+  bool init_result{true};
+  std::string last_config;
   std::string handled_ser{"my_pkg.MyMessage"};
   ConvertTarget last_target{ConvertTarget::kFoxglove};
   size_t last_input_size{0};
-  size_t payload_size_{16};
+  size_t output_size{16u};
 };
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ConvertTarget enum
-// ---------------------------------------------------------------------------
+TEST_SUITE("extension-MessageConvertPlugin") {
+  TEST_CASE("convert target enum values are sequential and distinct") {
+    CHECK_EQ(static_cast<uint8_t>(ConvertTarget::kFoxglove), 0u);
+    CHECK_EQ(static_cast<uint8_t>(ConvertTarget::kRerun), 1u);
+    CHECK_NE(ConvertTarget::kFoxglove, ConvertTarget::kRerun);
+  }
 
-TEST_SUITE("extension-MessageConvertPlugin - ConvertTarget enum") {
-  TEST_CASE("kFoxglove == 0") { CHECK(static_cast<uint8_t>(ConvertTarget::kFoxglove) == 0); }
-
-  TEST_CASE("kRerun == 1") { CHECK(static_cast<uint8_t>(ConvertTarget::kRerun) == 1); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: WebChannel / VlinkPublish struct defaults
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-MessageConvertPlugin - WebChannel struct") {
-  TEST_CASE("WebChannel default-constructs to empty fields") {
+  TEST_CASE("web channel default construction yields all empty fields") {
     WebChannel ch;
     CHECK(ch.topic.empty());
     CHECK(ch.encoding.empty());
@@ -124,93 +108,85 @@ TEST_SUITE("extension-MessageConvertPlugin - WebChannel struct") {
     CHECK(ch.schema.empty());
   }
 
-  TEST_CASE("WebChannel fields are settable") {
+  TEST_CASE("web channel fields are independently mutable") {
     WebChannel ch;
     ch.topic = "/cmd";
     ch.encoding = "json";
     ch.schema_name = "Cmd";
     ch.schema_encoding = "jsonschema";
     ch.schema = "{}";
-    CHECK(ch.topic == "/cmd");
-    CHECK(ch.encoding == "json");
-    CHECK(ch.schema_name == "Cmd");
-    CHECK(ch.schema_encoding == "jsonschema");
-    CHECK(ch.schema == "{}");
+    CHECK_EQ(ch.topic, "/cmd");
+    CHECK_EQ(ch.encoding, "json");
+    CHECK_EQ(ch.schema_name, "Cmd");
+    CHECK_EQ(ch.schema_encoding, "jsonschema");
+    CHECK_EQ(ch.schema, "{}");
   }
 
-  TEST_CASE("VlinkPublish default-constructs to kUnknown schema_type") {
+  TEST_CASE("vlink publish default construction yields kUnknown schema type") {
     VlinkPublish p;
     CHECK(p.url.empty());
     CHECK(p.serialization.empty());
-    CHECK(p.schema_type == SchemaType::kUnknown);
+    CHECK_EQ(p.schema_type, SchemaType::kUnknown);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: MessageConvertPlugin - traits
-// ---------------------------------------------------------------------------
+  TEST_CASE("interface is abstract and non-copyable") {
+    CHECK(std::is_abstract_v<MessageConvertPlugin>);
+    CHECK_FALSE(std::is_copy_constructible_v<MessageConvertPlugin>);
+    CHECK_FALSE(std::is_copy_assignable_v<MessageConvertPlugin>);
+  }
 
-TEST_SUITE("extension-MessageConvertPlugin - traits") {
-  TEST_CASE("interface is abstract") { CHECK(std::is_abstract_v<MessageConvertPlugin>); }
-
-  TEST_CASE("interface is not copy-constructible") { CHECK_FALSE(std::is_copy_constructible_v<MessageConvertPlugin>); }
-
-  TEST_CASE("interface is not copy-assignable") { CHECK_FALSE(std::is_copy_assignable_v<MessageConvertPlugin>); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: MessageConvertPlugin - subclass behaviour
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-MessageConvertPlugin - subclass behaviour") {
-  TEST_CASE("init forwards config and return value") {
+  TEST_CASE("init forwards config string and returns plugin's return value") {
     FakeConvertPlugin plugin;
-    bool ok = plugin.init("{\"key\":\"value\"}");
-    CHECK(ok);
+    CHECK(plugin.init("{\"key\":\"value\"}"));
     CHECK(plugin.init_called);
-    CHECK(plugin.init_config == "{\"key\":\"value\"}");
+    CHECK_EQ(plugin.last_config, "{\"key\":\"value\"}");
   }
 
-  TEST_CASE("can_convert filters by handled type") {
+  TEST_CASE("init returns false when plugin signals failure") {
+    FakeConvertPlugin plugin;
+    plugin.init_result = false;
+    CHECK_FALSE(plugin.init(""));
+  }
+
+  TEST_CASE("can_convert accepts handled type for both targets") {
     FakeConvertPlugin plugin;
     CHECK(plugin.can_convert("my_pkg.MyMessage", ConvertTarget::kFoxglove));
     CHECK(plugin.can_convert("my_pkg.MyMessage", ConvertTarget::kRerun));
-    CHECK_FALSE(plugin.can_convert("other.Message", ConvertTarget::kFoxglove));
+    CHECK_FALSE(plugin.can_convert("other.Type", ConvertTarget::kFoxglove));
+    CHECK_FALSE(plugin.can_convert("other.Type", ConvertTarget::kRerun));
   }
 
-  TEST_CASE("get_schema_info fills foxglove fields") {
+  TEST_CASE("get_schema_info fills foxglove schema fields for kFoxglove") {
     FakeConvertPlugin plugin;
     std::string type_name;
     std::string encoding;
     std::string schema_encoding;
     std::string schema_data;
 
-    bool ok = plugin.get_schema_info("my_pkg.MyMessage", ConvertTarget::kFoxglove, type_name, encoding, schema_encoding,
-                                     schema_data);
-    CHECK(ok);
-    CHECK(type_name == "foxglove.Test");
-    CHECK(encoding == "flatbuffers");
-    CHECK(schema_encoding == "flatbuffers");
-    CHECK(schema_data == "BFBS_BYTES");
+    CHECK(plugin.get_schema_info("my_pkg.MyMessage", ConvertTarget::kFoxglove, type_name, encoding, schema_encoding,
+                                 schema_data));
+    CHECK_EQ(type_name, "foxglove.Test");
+    CHECK_EQ(encoding, "flatbuffers");
+    CHECK_EQ(schema_encoding, "flatbuffers");
+    CHECK_EQ(schema_data, "BFBS_BYTES");
   }
 
-  TEST_CASE("get_schema_info leaves schema fields empty for rerun") {
+  TEST_CASE("get_schema_info clears schema fields for kRerun") {
     FakeConvertPlugin plugin;
     std::string type_name;
     std::string encoding;
     std::string schema_encoding = "preset";
     std::string schema_data = "preset";
 
-    bool ok = plugin.get_schema_info("my_pkg.MyMessage", ConvertTarget::kRerun, type_name, encoding, schema_encoding,
-                                     schema_data);
-    CHECK(ok);
-    CHECK(type_name == "Points3D");
-    CHECK(encoding == "json");
+    CHECK(plugin.get_schema_info("my_pkg.MyMessage", ConvertTarget::kRerun, type_name, encoding, schema_encoding,
+                                 schema_data));
+    CHECK_EQ(type_name, "Points3D");
+    CHECK_EQ(encoding, "json");
     CHECK(schema_encoding.empty());
     CHECK(schema_data.empty());
   }
 
-  TEST_CASE("get_schema_info returns false for unhandled types") {
+  TEST_CASE("get_schema_info returns false for unhandled type") {
     FakeConvertPlugin plugin;
     std::string a;
     std::string b;
@@ -219,59 +195,51 @@ TEST_SUITE("extension-MessageConvertPlugin - subclass behaviour") {
     CHECK_FALSE(plugin.get_schema_info("other.Type", ConvertTarget::kFoxglove, a, b, c, d));
   }
 
-  TEST_CASE("convert produces a non-empty payload of the configured size") {
+  TEST_CASE("convert produces payload of expected size and records input info") {
     FakeConvertPlugin plugin;
-    Bytes raw = Bytes::create(32U);
+    Bytes raw = Bytes::create(32u);
     Bytes payload;
 
-    bool ok = plugin.convert("my_pkg.MyMessage", raw, ConvertTarget::kFoxglove, payload);
-
-    CHECK(ok);
-    CHECK(plugin.last_input_size == 32U);
-    CHECK(plugin.last_target == ConvertTarget::kFoxglove);
-    CHECK(payload.size() == 16U);
+    CHECK(plugin.convert("my_pkg.MyMessage", raw, ConvertTarget::kFoxglove, payload));
+    CHECK_EQ(plugin.last_input_size, 32u);
+    CHECK_EQ(plugin.last_target, ConvertTarget::kFoxglove);
+    CHECK_EQ(payload.size(), 16u);
   }
 
-  TEST_CASE("convert returns false for unhandled types") {
+  TEST_CASE("convert returns false for unhandled type") {
     FakeConvertPlugin plugin;
-    Bytes raw = Bytes::create(8U);
+    Bytes raw = Bytes::create(8u);
     Bytes payload;
     CHECK_FALSE(plugin.convert("other.Type", raw, ConvertTarget::kFoxglove, payload));
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: MessageConvertPlugin - default frontend hooks
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-MessageConvertPlugin - default frontend hooks") {
-  TEST_CASE("default extract_timestamp returns -1") {
+  TEST_CASE("extract_timestamp default implementation returns -1") {
     FakeConvertPlugin plugin;
-    Bytes raw = Bytes::create(8U);
+    Bytes raw = Bytes::create(8u);
     int64_t ts = plugin.extract_timestamp("my_pkg.MyMessage", raw, ConvertTarget::kFoxglove);
-    CHECK(ts == -1);
+    CHECK_EQ(ts, -1);
   }
 
-  TEST_CASE("default can_convert_frontend returns false") {
+  TEST_CASE("can_convert_frontend default implementation returns false") {
     FakeConvertPlugin plugin;
     WebChannel ch;
     ch.topic = "any";
     CHECK_FALSE(plugin.can_convert_frontend(ch, ConvertTarget::kFoxglove));
   }
 
-  TEST_CASE("default get_publish_info returns false and leaves output unchanged") {
+  TEST_CASE("get_publish_info default implementation returns false and leaves output unchanged") {
     FakeConvertPlugin plugin;
     WebChannel ch;
     VlinkPublish pub;
     pub.url = "preset";
     CHECK_FALSE(plugin.get_publish_info(ch, ConvertTarget::kFoxglove, pub));
-    CHECK(pub.url == "preset");
+    CHECK_EQ(pub.url, "preset");
   }
 
-  TEST_CASE("default convert_frontend returns false") {
+  TEST_CASE("convert_frontend default implementation returns false") {
     FakeConvertPlugin plugin;
     WebChannel ch;
-    Bytes raw = Bytes::create(4U);
+    Bytes raw = Bytes::create(4u);
     Bytes payload;
     CHECK_FALSE(plugin.convert_frontend(ch, raw, ConvertTarget::kFoxglove, payload));
   }

@@ -21,123 +21,87 @@
  * limitations under the License.
  */
 
-/**
- * @file event_basic.cc
- * @brief Basic Publisher/Subscriber example with Timer-driven periodic publishing.
- *
- * Demonstrates the VLink Event Model fundamentals:
- *   - Publisher<T>: sends messages via publish()
- *   - Subscriber<T>: receives messages via listen() callback
- *   - Timer: drives periodic publish on a MessageLoop thread
- *   - MessageLoop: event loop for dispatching callbacks
- *   - Utils::register_terminate_signal: graceful SIGINT/SIGTERM shutdown
- */
-
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
 #include <atomic>
-#include <string>
-#include <thread>
+#include <chrono>
+
+#include "sensor_types.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-// POD type defined in sensor_types.h -- see that file for field descriptions
-#include "sensor_types.h"
-
+// event_basic: Event model over DDS with a periodic Timer and signal handling.
+//
+// Demonstrates:
+//   - vlink::Publisher / vlink::Subscriber on the "dds://" backend
+//     (cross-process, network-capable).
+//   - vlink::MessageLoop driven *synchronously* via run() -- main() itself
+//     becomes the loop thread (no extra worker needed).
+//   - vlink::Timer scheduled on the loop for periodic publication.
+//   - vlink::Utils::register_terminate_signal for clean Ctrl+C shutdown.
+//
+// Typical scenarios: long-running sensor producer, daemon-style publishers.
 int main() {
-  // ---------------------------------------------------------------
-  // Step 1: Initialize logger and register signal handler
-  // ---------------------------------------------------------------
-  VLOG_I("=== VLink Event Basic Example ===");
-
-  std::atomic<bool> running{true};
-  vlink::Utils::register_terminate_signal([&running](int sig) {
-    VLOG_I("Signal ", sig, " received, shutting down...");
-    running = false;
-  });
-
-  // ---------------------------------------------------------------
-  // Step 2: Create a MessageLoop for the subscriber and timer
-  // ---------------------------------------------------------------
-  vlink::MessageLoop loop;
-  loop.set_name("main_loop");
-  loop.async_run();
-
-  // ---------------------------------------------------------------
-  // Step 3: Create a Subscriber and register a callback
-  //
-  // The callback fires on the loop thread each time a message
-  // arrives on "dds://sensor/temperature".
-  // ---------------------------------------------------------------
-  vlink::Subscriber<SensorData> sub("dds://sensor/temperature");
-  sub.attach(&loop);
-
-  std::atomic<int> received_count{0};
-  sub.listen([&received_count](const SensorData& data) {
-    VLOG_I("[Subscriber] id=", data.id, " value=", data.value, " ts=", data.timestamp);
-    received_count++;
-  });
-
-  VLOG_I("[Subscriber] Listening on dds://sensor/temperature");
-
-  // ---------------------------------------------------------------
-  // Step 4: Create a Publisher on the same URL
-  // ---------------------------------------------------------------
-  vlink::Publisher<SensorData> pub("dds://sensor/temperature");
-  VLOG_I("[Publisher]  Publishing on dds://sensor/temperature");
-
-  // Wait until the subscriber is connected before publishing
-  pub.wait_for_subscribers();
-  VLOG_I("[Publisher]  Subscriber detected, starting timer...");
-
-  // ---------------------------------------------------------------
-  // Step 5: Use a Timer to publish periodically
-  //
-  // Timer fires every 500ms on the loop thread.  The callback
-  // creates a SensorData message with an incrementing sequence
-  // number and publishes it.
-  // ---------------------------------------------------------------
-  std::atomic<int> publish_count{0};
+  static constexpr char kUrl[] = "dds://sensor/temperature";
   static constexpr int kMaxPublish = 10;
 
-  vlink::Timer timer(&loop, 500, vlink::Timer::kInfinite, [&pub, &publish_count, &running]() {
-    if (publish_count >= kMaxPublish) {
-      running = false;
+  vlink::MessageLoop loop;
+  loop.set_name("main_loop");
+
+  // Install SIGINT/SIGTERM handler. The lambda is invoked from signal context
+  // but only calls loop.quit(), which is signal-safe (thread-safe atomic flag).
+  vlink::Utils::register_terminate_signal([&loop](int) { loop.quit(); });
+
+  vlink::Subscriber<SensorData> sub(kUrl);
+  // Bind subscriber dispatch to the loop BEFORE listen(); see hello_pubsub
+  // for the "attach-before-listen" rationale.
+  sub.attach(&loop);
+
+  // Atomic counter shared with the loop-thread callback below.
+  std::atomic<int> received{0};
+  // Fires on the loop thread once per delivered sample.
+  sub.listen([&received](const SensorData& data) {
+    VLOG_I("[sub] id=", data.id, " value=", data.value, " ts=", data.timestamp);
+    received.fetch_add(1);
+  });
+
+  vlink::Publisher<SensorData> pub(kUrl);
+  // Block until at least one subscriber is matched -- avoids losing the first
+  // few samples on transports that drop pre-discovery traffic.
+  pub.wait_for_subscribers();
+
+  // Periodic timer attached to the loop: callback fires on the loop thread
+  // every 500ms indefinitely (kInfinite). Calling loop.quit() from the
+  // callback when the budget is reached cleanly stops both the timer and
+  // the run() call below.
+  std::atomic<int> published{0};
+  vlink::Timer timer(&loop, 500, vlink::Timer::kInfinite, [&pub, &published, &loop]() {
+    int seq = published.fetch_add(1) + 1;
+
+    if (seq > kMaxPublish) {
+      loop.quit();
       return;
     }
 
-    int seq = publish_count.fetch_add(1) + 1;
-    SensorData data{};  // Value-initialization: all members zeroed
+    SensorData data{};
     data.id = seq;
     data.value = 20.0F + static_cast<float>(seq) * 0.5F;
     data.timestamp = static_cast<int64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
             .count());
 
-    bool ok = pub.publish(data);
-    VLOG_I("[Publisher]  Published #", seq, " value=", data.value, " ok=", ok);
+    pub.publish(data);
+    VLOG_I("[pub] #", seq, " value=", data.value);
   });
   timer.start();
 
-  // ---------------------------------------------------------------
-  // Step 6: Main loop -- wait until finished or signal received
-  // ---------------------------------------------------------------
-  while (running) {
-    std::this_thread::sleep_for(100ms);
-  }
+  // Synchronous run(): turns *this* thread into the loop thread. Blocks until
+  // either the timer callback or the signal handler calls loop.quit().
+  // (Contrast hello_pubsub which uses async_run() + manual main work.)
+  loop.run();
 
-  // ---------------------------------------------------------------
-  // Step 7: Clean shutdown
-  // ---------------------------------------------------------------
-  timer.stop();
-  loop.wait_for_idle(1000);
-
-  VLOG_I("Published: ", publish_count.load(), " Received: ", received_count.load());
-  VLOG_I("=== Example complete ===");
-
-  loop.quit();
-  loop.wait_for_quit();
+  VLOG_I("published=", published.load(), " received=", received.load());
 
   return 0;
 }

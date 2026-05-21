@@ -696,9 +696,9 @@ vlink-bag tag /tmp/test.vdb "highway_test_20260317"
 
 ### 13.8.1 功能说明
 
-`vlink-dump` 用于从实时通信或 bag 文件中提取特定字段的值，输出为 CSV、JSON 或图片/视频等格式。支持 Protobuf 消息的字段路径表达式，以及 VLink 零拷贝类型（CameraFrame、PointCloud、RawData）的内置字段。
+`vlink-dump` 用于从实时通信或 bag 文件中提取特定字段的值，输出为 CSV、JSON 或图片/视频等格式。支持 Protobuf 消息的字段路径表达式，以及 VLink 零拷贝类型（CameraFrame、PointCloud、RawData、OccupancyGrid、Tensor、ObjectArray、AudioFrame）的内置字段。
 
-**前提条件：** 需要 Protobuf compiler 支持（`VLINK_HAS_PROTOBUF_COMPILER`）。对于 Protobuf 消息须通过 `-d` 参数或 `VLINK_PROTO_DIR` 环境变量指定 `.proto` 文件目录；对于 FlatBuffers 消息须通过 `--fbs_dir` 参数或 `VLINK_FBS_DIR` 环境变量指定 `.fbs` 文件目录。零拷贝类型（CameraFrame、PointCloud、RawData）无需额外配置。数学表达式功能需要 exprtk 库支持。
+**前提条件：** 需要 Protobuf compiler 支持（`VLINK_HAS_PROTOBUF_COMPILER`）。对于 Protobuf 消息须通过 `-d` 参数或 `VLINK_PROTO_DIR` 环境变量指定 `.proto` 文件目录；对于 FlatBuffers 消息须通过 `--fbs_dir` 参数或 `VLINK_FBS_DIR` 环境变量指定 `.fbs` 文件目录。零拷贝类型（CameraFrame、PointCloud、RawData、OccupancyGrid、Tensor、ObjectArray、AudioFrame）无需额外配置。数学表达式功能需要 exprtk 库支持。
 
 ### 13.8.2 命令行参数
 
@@ -768,11 +768,15 @@ status.velocity.x
 
 **VLink 零拷贝类型内置字段：**
 
-| 类型          | 支持的条件表达式                                                                                                          |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `CameraFrame` | `header.frame_id`、`header.seq`、`header.time_meas`、`header.time_pub`、`width`、`height`、`channel`、`freq`、`format`、`stream`、`size`、`data` |
-| `PointCloud`  | `header.frame_id`、`header.seq`、`header.time_meas`、`header.time_pub`、`size`、`pack_size`、`data[N].field`              |
-| `RawData`     | `header.frame_id`、`header.seq`、`header.time_meas`、`header.time_pub`、`size`、`data`                                    |
+| 类型              | 支持的条件表达式                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `CameraFrame`     | `header.frame_id`、`header.seq`、`header.time_meas`、`header.time_pub`、`width`、`height`、`channel`、`freq`、`format`、`stream`、`size`、`data` |
+| `PointCloud`     | `header.frame_id`、`header.seq`、`header.time_meas`、`header.time_pub`、`size`、`pack_size`、`data[N].field`              |
+| `RawData`         | `header.frame_id`、`header.seq`、`header.time_meas`、`header.time_pub`、`size`、`data`                                    |
+| `OccupancyGrid`   | `header.*`、`width`、`height`、`resolution`、`origin_x/y/z`、`origin_yaw`、`cell_type`、`default_value`、`value_min/max`、`occupied/free_threshold`、`map_id`、`channel`、`freq`、`update_time_ns`、`valid_cell_count`、`size`、`data` |
+| `Tensor`          | `header.*`、`name`、`model_id`、`layout`、`dtype`、`rank`、`num_elements`、`element_size`、`device`、`batch_size`、`quant_scale`、`quant_zero_point`、`shape[N]`、`channel`、`freq`、`update_time_ns`、`size`、`data` |
+| `ObjectArray`     | `header.*`、`source_id`、`channel`、`freq`、`count`、`pack_size`、`update_time_ns`、`data`（per-record 字段访问不支持） |
+| `AudioFrame`      | `header.*`、`sample_rate`、`num_samples`、`num_channels`、`bit_depth`、`bitrate`、`format`、`layout`、`codec`、`language`、`duration_ns`、`channel`、`freq`、`update_time_ns`、`size`、`data` |
 
 ### 13.8.5 使用示例
 

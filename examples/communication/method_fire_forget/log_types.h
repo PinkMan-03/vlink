@@ -25,18 +25,20 @@
 
 #include <cstdint>
 
-/// POD log entry for the method_fire_forget example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
+// Payload types for method_fire_forget. Both PODs ("Standard" serializer).
+// Used with vlink::Server<Req> / vlink::Client<Req> (no response type) so
+// every send() is one-way and never produces a reply.
+//
+// LogEntry      log sink record. level: 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR.
+// NotifyCommand one-way command broadcast (id + target + opaque payload).
 struct LogEntry {
-  int level;          // Log level: 0=debug, 1=info, 2=warn, 3=error
-  int source_id;      // Originating module ID
-  int64_t timestamp;  // Timestamp in milliseconds since epoch
+  int level;
+  int source_id;
+  int64_t timestamp;
 };
 
-/// POD notification command for the method_fire_forget example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
 struct NotifyCommand {
-  int command_id;  // Unique command identifier
-  int target_id;   // Target device or module ID
-  int payload;     // Command-specific payload value
+  int command_id;
+  int target_id;
+  int payload;
 };

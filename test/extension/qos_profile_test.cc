@@ -30,267 +30,210 @@
 #include <string>
 #include <unordered_map>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Individual profiles
-// ---------------------------------------------------------------------------
+TEST_SUITE("extension-QosProfile") {
+  TEST_CASE("every named profile has valid=true") {
+    SUBCASE("kEvent") { CHECK(QosProfile::kEvent.valid); }
+    SUBCASE("kMethod") { CHECK(QosProfile::kMethod.valid); }
+    SUBCASE("kField") { CHECK(QosProfile::kField.valid); }
+    SUBCASE("kSensor") { CHECK(QosProfile::kSensor.valid); }
+    SUBCASE("kParameter") { CHECK(QosProfile::kParameter.valid); }
+    SUBCASE("kService") { CHECK(QosProfile::kService.valid); }
+    SUBCASE("kClock") { CHECK(QosProfile::kClock.valid); }
+    SUBCASE("kStatic") { CHECK(QosProfile::kStatic.valid); }
+    SUBCASE("kLight") { CHECK(QosProfile::kLight.valid); }
+    SUBCASE("kPoor") { CHECK(QosProfile::kPoor.valid); }
+    SUBCASE("kBetter") { CHECK(QosProfile::kBetter.valid); }
+    SUBCASE("kBest") { CHECK(QosProfile::kBest.valid); }
+    SUBCASE("kLarge") { CHECK(QosProfile::kLarge.valid); }
+  }
 
-TEST_SUITE("extension-QosProfile - individual profiles") {
-  TEST_CASE("kEvent profile") {
+  TEST_CASE("kEvent is reliable keep-last-10 volatile sync realtime") {
     const Qos& q = QosProfile::kEvent;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 10);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityRealTime);
-    CHECK(q.additions.is_express == false);
-
-    std::string name(q.name);
-    CHECK(name == "event");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 10);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityRealTime);
+    CHECK_FALSE(q.additions.is_express);
+    CHECK_EQ(std::string(q.name), "event");
   }
 
-  TEST_CASE("kMethod profile") {
+  TEST_CASE("kMethod is reliable keep-all volatile sync high priority") {
     const Qos& q = QosProfile::kMethod;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepAll);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityHigh);
-
-    std::string name(q.name);
-    CHECK(name == "method");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepAll);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityHigh);
+    CHECK_EQ(std::string(q.name), "method");
   }
 
-  TEST_CASE("kField profile") {
+  TEST_CASE("kField is reliable keep-last-1 transient-local sync high priority") {
     const Qos& q = QosProfile::kField;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 1);
-    CHECK(q.durability.kind == Qos::Durability::kTransientLocal);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityHigh);
-
-    std::string name(q.name);
-    CHECK(name == "field");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 1);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kTransientLocal);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityHigh);
+    CHECK_EQ(std::string(q.name), "field");
   }
 
-  TEST_CASE("kSensor profile") {
+  TEST_CASE("kSensor is best-effort keep-last-20 volatile async normal express") {
     const Qos& q = QosProfile::kSensor;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kBestEffort);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 20);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kASync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityNormal);
-    CHECK(q.additions.is_express == true);
-
-    std::string name(q.name);
-    CHECK(name == "sensor");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kBestEffort);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 20);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kASync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityNormal);
+    CHECK(q.additions.is_express);
+    CHECK_EQ(std::string(q.name), "sensor");
   }
 
-  TEST_CASE("kParameter profile") {
+  TEST_CASE("kParameter is reliable keep-last-1000 volatile sync normal") {
     const Qos& q = QosProfile::kParameter;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 1000);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityNormal);
-
-    std::string name(q.name);
-    CHECK(name == "parameter");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 1000);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityNormal);
+    CHECK_EQ(std::string(q.name), "parameter");
   }
 
-  TEST_CASE("kService profile") {
+  TEST_CASE("kService is reliable keep-last-10 transient-local sync normal") {
     const Qos& q = QosProfile::kService;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 10);
-    CHECK(q.durability.kind == Qos::Durability::kTransientLocal);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-
-    std::string name(q.name);
-    CHECK(name == "service");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 10);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kTransientLocal);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(std::string(q.name), "service");
   }
 
-  TEST_CASE("kClock profile") {
+  TEST_CASE("kClock is best-effort keep-last-1 volatile async low priority") {
     const Qos& q = QosProfile::kClock;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kBestEffort);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 1);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kASync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityLow);
-
-    std::string name(q.name);
-    CHECK(name == "clock");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kBestEffort);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 1);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kASync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityLow);
+    CHECK_EQ(std::string(q.name), "clock");
   }
 
-  TEST_CASE("kStatic profile") {
+  TEST_CASE("kStatic is reliable keep-all transient-local sync normal") {
     const Qos& q = QosProfile::kStatic;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepAll);
-    CHECK(q.durability.kind == Qos::Durability::kTransientLocal);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-
-    std::string name(q.name);
-    CHECK(name == "static");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepAll);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kTransientLocal);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(std::string(q.name), "static");
   }
 
-  TEST_CASE("kLight profile") {
+  TEST_CASE("kLight is reliable keep-last-1 volatile async high priority") {
     const Qos& q = QosProfile::kLight;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 1);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kASync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityHigh);
-
-    std::string name(q.name);
-    CHECK(name == "light");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 1);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kASync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityHigh);
+    CHECK_EQ(std::string(q.name), "light");
   }
 
-  TEST_CASE("kPoor profile") {
+  TEST_CASE("kPoor is best-effort keep-last-5 volatile async background priority") {
     const Qos& q = QosProfile::kPoor;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kBestEffort);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 5);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kASync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityBackground);
-
-    std::string name(q.name);
-    CHECK(name == "poor");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kBestEffort);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 5);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kASync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityBackground);
+    CHECK_EQ(std::string(q.name), "poor");
   }
 
-  TEST_CASE("kBetter profile") {
+  TEST_CASE("kBetter is best-effort keep-last-50 volatile sync realtime priority") {
     const Qos& q = QosProfile::kBetter;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kBestEffort);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 50);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityRealTime);
-
-    std::string name(q.name);
-    CHECK(name == "better");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kBestEffort);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 50);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityRealTime);
+    CHECK_EQ(std::string(q.name), "better");
   }
 
-  TEST_CASE("kBest profile") {
+  TEST_CASE("kBest is reliable keep-last-200 volatile sync realtime priority") {
     const Qos& q = QosProfile::kBest;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 200);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityRealTime);
-
-    std::string name(q.name);
-    CHECK(name == "best");
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 200);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityRealTime);
+    CHECK_EQ(std::string(q.name), "best");
   }
 
-  TEST_CASE("kLarge profile") {
+  TEST_CASE("kLarge is reliable keep-last-500 extended heartbeat volatile sync low priority") {
     const Qos& q = QosProfile::kLarge;
-
-    CHECK(q.valid == true);
-    CHECK(q.reliability.kind == Qos::Reliability::kReliable);
-    CHECK(q.history.kind == Qos::History::kKeepLast);
-    CHECK(q.history.depth == 500);
-    CHECK(q.reliability.heartbeat_time == 500);
-    CHECK(q.durability.kind == Qos::Durability::kVolatile);
-    CHECK(q.publish_mode.kind == Qos::PublishMode::kSync);
-    CHECK(q.additions.priority == Qos::Additions::kPriorityLow);
-
-    std::string name(q.name);
-    CHECK(name == "large");
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: get_available_qos_map
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-QosProfile - get_available_qos_map") {
-  TEST_CASE("map is not empty") {
-    const auto& m = QosProfile::get_available_qos_map();
-    CHECK(!m.empty());
+    CHECK_EQ(q.reliability.kind, Qos::Reliability::kReliable);
+    CHECK_EQ(q.history.kind, Qos::History::kKeepLast);
+    CHECK_EQ(q.history.depth, 500);
+    CHECK_EQ(q.reliability.heartbeat_time, 500);
+    CHECK_EQ(q.durability.kind, Qos::Durability::kVolatile);
+    CHECK_EQ(q.publish_mode.kind, Qos::PublishMode::kSync);
+    CHECK_EQ(q.additions.priority, Qos::Additions::kPriorityLow);
+    CHECK_EQ(std::string(q.name), "large");
   }
 
-  TEST_CASE("map contains all 13 expected profiles") {
+  TEST_CASE("get_available_qos_map contains all 13 expected profiles") {
     const auto& m = QosProfile::get_available_qos_map();
-
-    CHECK(m.count("event") == 1);
-    CHECK(m.count("method") == 1);
-    CHECK(m.count("field") == 1);
-    CHECK(m.count("sensor") == 1);
-    CHECK(m.count("parameter") == 1);
-    CHECK(m.count("service") == 1);
-    CHECK(m.count("clock") == 1);
-    CHECK(m.count("static") == 1);
-    CHECK(m.count("light") == 1);
-    CHECK(m.count("poor") == 1);
-    CHECK(m.count("better") == 1);
-    CHECK(m.count("best") == 1);
-    CHECK(m.count("large") == 1);
-
-    CHECK(m.size() >= 13);
+    CHECK_FALSE(m.empty());
+    CHECK(m.count("event") == 1u);
+    CHECK(m.count("method") == 1u);
+    CHECK(m.count("field") == 1u);
+    CHECK(m.count("sensor") == 1u);
+    CHECK(m.count("parameter") == 1u);
+    CHECK(m.count("service") == 1u);
+    CHECK(m.count("clock") == 1u);
+    CHECK(m.count("static") == 1u);
+    CHECK(m.count("light") == 1u);
+    CHECK(m.count("poor") == 1u);
+    CHECK(m.count("better") == 1u);
+    CHECK(m.count("best") == 1u);
+    CHECK(m.count("large") == 1u);
+    CHECK_GE(m.size(), 13u);
   }
 
-  TEST_CASE("map entries have valid=true") {
+  TEST_CASE("every map entry has valid=true") {
     const auto& m = QosProfile::get_available_qos_map();
-
     for (const auto& [name, qos] : m) {
-      CHECK(qos.valid == true);
+      CHECK(qos.valid);
     }
   }
 
-  TEST_CASE("sensor entry is BestEffort ASync") {
-    const auto& m = QosProfile::get_available_qos_map();
-
-    auto it = m.find("sensor");
-    REQUIRE(it != m.end());
-    CHECK(it->second.reliability.kind == Qos::Reliability::kBestEffort);
-    CHECK(it->second.publish_mode.kind == Qos::PublishMode::kASync);
-  }
-
-  TEST_CASE("field entry is TransientLocal") {
-    const auto& m = QosProfile::get_available_qos_map();
-
-    auto it = m.find("field");
-    REQUIRE(it != m.end());
-    CHECK(it->second.durability.kind == Qos::Durability::kTransientLocal);
-  }
-
-  TEST_CASE("map is returned by const reference - same address on repeated calls") {
+  TEST_CASE("get_available_qos_map returns a stable reference") {
     const auto& m1 = QosProfile::get_available_qos_map();
     const auto& m2 = QosProfile::get_available_qos_map();
+    CHECK_EQ(&m1, &m2);
+  }
 
-    CHECK(&m1 == &m2);
+  TEST_CASE("sensor map entry is best-effort async") {
+    const auto& m = QosProfile::get_available_qos_map();
+    auto it = m.find("sensor");
+    REQUIRE(it != m.end());
+    CHECK_EQ(it->second.reliability.kind, Qos::Reliability::kBestEffort);
+    CHECK_EQ(it->second.publish_mode.kind, Qos::PublishMode::kASync);
+  }
+
+  TEST_CASE("field map entry is transient-local") {
+    const auto& m = QosProfile::get_available_qos_map();
+    auto it = m.find("field");
+    REQUIRE(it != m.end());
+    CHECK_EQ(it->second.durability.kind, Qos::Durability::kTransientLocal);
   }
 }
 

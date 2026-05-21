@@ -17,6 +17,5 @@ if(NOT TARGET vlink)
 endif()
 
 add_subdirectory(plugin_basic)
-add_subdirectory(plugin_create)
 add_subdirectory(plugin_runnable)
 add_subdirectory(plugin_schema)

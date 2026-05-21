@@ -34,19 +34,16 @@
 #include <string>
 #include <type_traits>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// Helper types used across test cases
-// ---------------------------------------------------------------------------
+namespace {
 
-struct Foo {
+struct WithBar {
   int bar{0};
   void method() {}
 };
 
-struct Baz {};
+struct WithoutBar {};
 
 struct CallableObj {
   void operator()() {}
@@ -70,285 +67,175 @@ std::ostringstream& operator>>(std::ostringstream& os, StreamableObj& s) {
   return os;
 }
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: EmptyType
-// ---------------------------------------------------------------------------
+}  // namespace
 
-TEST_SUITE("base-Traits - EmptyType") {
-  TEST_CASE("EmptyType is default-constructible") {
+TEST_SUITE("base-Traits") {
+  TEST_CASE("EmptyType is default-constructible with sizeof 1") {
     Traits::EmptyType e;
     (void)e;
-    CHECK(true);
+    CHECK_EQ(sizeof(Traits::EmptyType), 1u);
   }
 
-  TEST_CASE("EmptyType has no members (sizeof is 1)") { CHECK(sizeof(Traits::EmptyType) == 1u); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: ExpectFalse
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - ExpectFalse") {
-  TEST_CASE("ExpectFalse<int> is false_type") { CHECK(Traits::ExpectFalse<int>::value == false); }
-
-  TEST_CASE("ExpectFalse<std::string> is false_type") { CHECK(Traits::ExpectFalse<std::string>::value == false); }
-
-  TEST_CASE("ExpectFalse<void> is false_type") { CHECK(Traits::ExpectFalse<void>::value == false); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Callable
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - Callable") {
-  TEST_CASE("lambda with no args is Callable") {
-    auto lambda = []() {};
-    CHECK(Traits::Callable<decltype(lambda)>::value);
+  TEST_CASE("ExpectFalse always yields false_type regardless of template argument") {
+    CHECK_FALSE(Traits::ExpectFalse<int>::value);
+    CHECK_FALSE(Traits::ExpectFalse<std::string>::value);
+    CHECK_FALSE(Traits::ExpectFalse<void>::value);
+    CHECK_FALSE(Traits::ExpectFalse<WithBar>::value);
   }
 
-  TEST_CASE("std::function<void()> is Callable") { CHECK(Traits::Callable<std::function<void()>>::value); }
-
-  TEST_CASE("functor object with operator() is Callable") { CHECK(Traits::Callable<CallableObj>::value); }
-
-  TEST_CASE("plain int is not Callable") { CHECK(!Traits::Callable<int>::value); }
-
-  TEST_CASE("struct without operator() is not Callable") { CHECK(!Traits::Callable<NonCallable>::value); }
-
-  TEST_CASE("void function pointer is Callable") {
-    using FnPtr = void (*)();
-    CHECK(Traits::Callable<FnPtr>::value);
+  TEST_CASE("Callable detects zero-argument callable types") {
+    auto lam = [] {};
+    CHECK(Traits::Callable<decltype(lam)>::value);
+    CHECK(Traits::Callable<std::function<void()>>::value);
+    CHECK(Traits::Callable<CallableObj>::value);
+    CHECK(Traits::Callable<void (*)()>::value);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Assignable
-// ---------------------------------------------------------------------------
+  TEST_CASE("Callable rejects non-callable types") {
+    CHECK_FALSE(Traits::Callable<int>::value);
+    CHECK_FALSE(Traits::Callable<NonCallable>::value);
+    CHECK_FALSE(Traits::Callable<std::string>::value);
+  }
 
-TEST_SUITE("base-Traits - Assignable") {
-  TEST_CASE("int is assignable from int") { CHECK(Traits::Assignable<int, int>::value); }
-
-  TEST_CASE("double is assignable from int (implicit conversion)") { CHECK(Traits::Assignable<double, int>::value); }
-
-  TEST_CASE("std::string is assignable from const char*") {
+  TEST_CASE("Assignable detects valid assignment expressions") {
+    CHECK((Traits::Assignable<int, int>::value));
+    CHECK((Traits::Assignable<double, int>::value));
     CHECK((Traits::Assignable<std::string, const char*>::value));
   }
 
-  TEST_CASE("int is not assignable from std::string") { CHECK(!(Traits::Assignable<int, std::string>::value)); }
-}
+  TEST_CASE("Assignable rejects invalid assignment expressions") {
+    CHECK_FALSE((Traits::Assignable<int, std::string>::value));
+    CHECK_FALSE((Traits::Assignable<WithBar, int>::value));
+  }
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: EqualityComparable
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - EqualityComparable") {
-  TEST_CASE("int == int is comparable") { CHECK((Traits::EqualityComparable<int, int>::value)); }
-
-  TEST_CASE("std::string == std::string is comparable") {
+  TEST_CASE("EqualityComparable detects operator== support") {
+    CHECK((Traits::EqualityComparable<int, int>::value));
     CHECK((Traits::EqualityComparable<std::string, std::string>::value));
+    CHECK((Traits::EqualityComparable<double, int>::value));
   }
 
-  TEST_CASE("struct without == operator is not comparable") {
-    // Foo has no operator== defined
-    CHECK(!(Traits::EqualityComparable<Foo, Foo>::value));
+  TEST_CASE("EqualityComparable rejects types without operator==") {
+    CHECK_FALSE((Traits::EqualityComparable<WithBar, WithBar>::value));
+    CHECK_FALSE((Traits::EqualityComparable<WithoutBar, WithoutBar>::value));
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: GreaterComparable
-// ---------------------------------------------------------------------------
+  TEST_CASE("GreaterComparable detects both less-than and greater-than support") {
+    CHECK((Traits::GreaterComparable<int, int>::value));
+    CHECK((Traits::GreaterComparable<double, double>::value));
+    CHECK((Traits::GreaterComparable<float, float>::value));
+  }
 
-TEST_SUITE("base-Traits - GreaterComparable") {
-  TEST_CASE("int supports < and > with int") { CHECK((Traits::GreaterComparable<int, int>::value)); }
+  TEST_CASE("GreaterComparable rejects types lacking comparison operators") {
+    CHECK_FALSE((Traits::GreaterComparable<WithBar, WithBar>::value));
+    CHECK_FALSE((Traits::GreaterComparable<WithoutBar, WithoutBar>::value));
+  }
 
-  TEST_CASE("double supports < and > with double") { CHECK((Traits::GreaterComparable<double, double>::value)); }
-
-  TEST_CASE("struct without < and > is not GreaterComparable") { CHECK(!(Traits::GreaterComparable<Foo, Foo>::value)); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Operatorable
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - Operatorable") {
-  TEST_CASE("ostringstream supports << and >> with StreamableObj") {
+  TEST_CASE("Operatorable detects stream insertion and extraction support") {
     CHECK((Traits::Operatorable<std::ostringstream, StreamableObj>::value));
-  }
-
-  TEST_CASE("int does not support << and >> with int in ostringstream context") {
-    // int << int is a bitshift, but ostringstream << int is insertion;
-    // We check int against int: bitshift exists for << but >> is also valid
     CHECK((Traits::Operatorable<int, int>::value));
   }
 
-  TEST_CASE("Foo struct has no stream operators") { CHECK(!(Traits::Operatorable<Foo, Foo>::value)); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: IsAtomic
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - IsAtomic") {
-  TEST_CASE("std::atomic<int> is atomic") { CHECK(Traits::IsAtomic<std::atomic<int>>::value); }
-
-  TEST_CASE("std::atomic<bool> is atomic") { CHECK(Traits::IsAtomic<std::atomic<bool>>::value); }
-
-  TEST_CASE("plain int is not atomic") { CHECK(!Traits::IsAtomic<int>::value); }
-
-  TEST_CASE("std::string is not atomic") { CHECK(!Traits::IsAtomic<std::string>::value); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: IsSharedPtr
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - IsSharedPtr") {
-  TEST_CASE("std::shared_ptr<int> is a shared_ptr") { CHECK(Traits::IsSharedPtr<std::shared_ptr<int>>::value); }
-
-  TEST_CASE("std::shared_ptr<Foo> is a shared_ptr") { CHECK(Traits::IsSharedPtr<std::shared_ptr<Foo>>::value); }
-
-  TEST_CASE("plain int is not a shared_ptr") { CHECK(!Traits::IsSharedPtr<int>::value); }
-
-  TEST_CASE("std::unique_ptr<int> is not a shared_ptr") { CHECK(!Traits::IsSharedPtr<std::unique_ptr<int>>::value); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: RemoveSharedPtr
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - RemoveSharedPtr") {
-  TEST_CASE("shared_ptr<int> unwraps to int") {
-    bool same = std::is_same_v<Traits::RemoveSharedPtr<std::shared_ptr<int>>::Type, int>;
-    CHECK(same);
+  TEST_CASE("Operatorable rejects types without stream operators") {
+    CHECK_FALSE((Traits::Operatorable<WithBar, WithBar>::value));
+    CHECK_FALSE((Traits::Operatorable<WithoutBar, WithoutBar>::value));
   }
 
-  TEST_CASE("shared_ptr<Foo> unwraps to Foo") {
-    bool same = std::is_same_v<Traits::RemoveSharedPtr<std::shared_ptr<Foo>>::Type, Foo>;
-    CHECK(same);
+  TEST_CASE("IsAtomic detects std::atomic specializations") {
+    CHECK(Traits::IsAtomic<std::atomic<int>>::value);
+    CHECK(Traits::IsAtomic<std::atomic<bool>>::value);
+    CHECK(Traits::IsAtomic<std::atomic<uint64_t>>::value);
   }
 
-  TEST_CASE("non-shared_ptr type stays unchanged") {
-    bool same = std::is_same_v<Traits::RemoveSharedPtr<int>::Type, int>;
-    CHECK(same);
+  TEST_CASE("IsAtomic rejects non-atomic types") {
+    CHECK_FALSE(Traits::IsAtomic<int>::value);
+    CHECK_FALSE(Traits::IsAtomic<std::string>::value);
+    CHECK_FALSE(Traits::IsAtomic<WithBar>::value);
   }
 
-  TEST_CASE("std::string stays unchanged") {
-    bool same = std::is_same_v<Traits::RemoveSharedPtr<std::string>::Type, std::string>;
-    CHECK(same);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: has_member / VLINK_HAS_MEMBER
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - has_member") {
-  TEST_CASE("Foo has member bar via macro") {
-    // NOLINT(readability-identifier-naming)
-    constexpr bool result = VLINK_HAS_MEMBER(Foo, bar);
-    CHECK(result);
+  TEST_CASE("IsSharedPtr detects std::shared_ptr specializations") {
+    CHECK(Traits::IsSharedPtr<std::shared_ptr<int>>::value);
+    CHECK(Traits::IsSharedPtr<std::shared_ptr<WithBar>>::value);
+    CHECK(Traits::IsSharedPtr<std::shared_ptr<std::string>>::value);
   }
 
-  TEST_CASE("Foo does not have member xyz_nonexistent via macro") {
-    // NOLINT(readability-identifier-naming)
-    constexpr bool result = VLINK_HAS_MEMBER(Foo, xyz_nonexistent);
-    CHECK(!result);
+  TEST_CASE("IsSharedPtr rejects non-shared_ptr types") {
+    CHECK_FALSE(Traits::IsSharedPtr<int>::value);
+    CHECK_FALSE(Traits::IsSharedPtr<std::unique_ptr<int>>::value);
+    CHECK_FALSE(Traits::IsSharedPtr<std::string>::value);
   }
 
-  TEST_CASE("Baz does not have member bar") {
-    // NOLINT(readability-identifier-naming)
-    constexpr bool result = VLINK_HAS_MEMBER(Baz, bar);
-    CHECK(!result);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: is_non_char_ptr
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - is_non_char_ptr") {
-  TEST_CASE("int* is a non-char pointer") { CHECK(Traits::is_non_char_ptr<int*>()); }
-
-  TEST_CASE("Foo* is a non-char pointer") { CHECK(Traits::is_non_char_ptr<Foo*>()); }
-
-  TEST_CASE("char* is NOT a non-char pointer") { CHECK(!Traits::is_non_char_ptr<char*>()); }
-
-  TEST_CASE("const char* is NOT a non-char pointer") { CHECK(!Traits::is_non_char_ptr<const char*>()); }
-
-  TEST_CASE("plain int is not a pointer at all") { CHECK(!Traits::is_non_char_ptr<int>()); }
-
-  TEST_CASE("void* is a non-char pointer") { CHECK(Traits::is_non_char_ptr<void*>()); }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: is_integer
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - is_integer") {
-  TEST_CASE("short is integer") {
-    CHECK(Traits::is_integer<short>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("RemoveSharedPtr unwraps element type from shared_ptr") {
+    CHECK((std::is_same_v<Traits::RemoveSharedPtr<std::shared_ptr<int>>::Type, int>));
+    CHECK((std::is_same_v<Traits::RemoveSharedPtr<std::shared_ptr<WithBar>>::Type, WithBar>));
   }
 
-  TEST_CASE("int is integer") {
-    CHECK(Traits::is_integer<int>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("RemoveSharedPtr leaves non-shared_ptr types unchanged") {
+    CHECK((std::is_same_v<Traits::RemoveSharedPtr<int>::Type, int>));
+    CHECK((std::is_same_v<Traits::RemoveSharedPtr<std::string>::Type, std::string>));
+    CHECK((std::is_same_v<Traits::RemoveSharedPtr<WithBar>::Type, WithBar>));
   }
 
-  TEST_CASE("unsigned int is integer") {
-    CHECK(Traits::is_integer<unsigned int>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("VLINK_HAS_MEMBER detects accessible data members at compile time") {
+    static constexpr bool has_bar = VLINK_HAS_MEMBER(WithBar, bar);
+    static constexpr bool baz_no_bar = VLINK_HAS_MEMBER(WithoutBar, bar);
+
+    CHECK(has_bar);
+    CHECK_FALSE(baz_no_bar);
   }
 
-  TEST_CASE("long long is integer") {
-    CHECK(Traits::is_integer<long long>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("VLINK_HAS_MEMBER returns false for non-existent member names") {
+    static constexpr bool result = VLINK_HAS_MEMBER(WithBar, xyz_nonexistent);
+
+    CHECK_FALSE(result);
   }
 
-  TEST_CASE("uint64_t is integer") {
-    CHECK(Traits::is_integer<uint64_t>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("is_non_char_ptr returns true for non-char pointer types") {
+    CHECK(Traits::is_non_char_ptr<int*>());
+    CHECK(Traits::is_non_char_ptr<WithBar*>());
+    CHECK(Traits::is_non_char_ptr<void*>());
+    CHECK(Traits::is_non_char_ptr<double*>());
   }
 
-  TEST_CASE("bool is NOT integer") {
-    CHECK(!Traits::is_integer<bool>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("is_non_char_ptr returns false for char pointers and non-pointers") {
+    CHECK_FALSE(Traits::is_non_char_ptr<char*>());
+    CHECK_FALSE(Traits::is_non_char_ptr<const char*>());
+    CHECK_FALSE(Traits::is_non_char_ptr<int>());
+    CHECK_FALSE(Traits::is_non_char_ptr<std::string>());
   }
 
-  TEST_CASE("char is NOT integer") {
-    CHECK(!Traits::is_integer<char>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("is_integer returns true for short int long and unsigned variants") {
+    CHECK(Traits::is_integer<short>());      // NOLINT(runtime/int)
+    CHECK(Traits::is_integer<int>());        // NOLINT(runtime/int)
+    CHECK(Traits::is_integer<long>());       // NOLINT(runtime/int)
+    CHECK(Traits::is_integer<long long>());  // NOLINT(runtime/int)
+    CHECK(Traits::is_integer<unsigned int>());
+    CHECK(Traits::is_integer<uint64_t>());
+    CHECK(Traits::is_integer<const int>());
   }
 
-  TEST_CASE("signed char is NOT integer") {
-    CHECK(!Traits::is_integer<signed char>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("is_integer returns false for bool char signed char unsigned char and floats") {
+    CHECK_FALSE(Traits::is_integer<bool>());
+    CHECK_FALSE(Traits::is_integer<char>());
+    CHECK_FALSE(Traits::is_integer<signed char>());
+    CHECK_FALSE(Traits::is_integer<unsigned char>());
+    CHECK_FALSE(Traits::is_integer<float>());
+    CHECK_FALSE(Traits::is_integer<double>());
   }
 
-  TEST_CASE("unsigned char is NOT integer") {
-    CHECK(!Traits::is_integer<unsigned char>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("is_floating returns true for float double and long double") {
+    CHECK(Traits::is_floating<float>());
+    CHECK(Traits::is_floating<double>());
+    CHECK(Traits::is_floating<long double>());  // NOLINT(runtime/int)
+    CHECK(Traits::is_floating<const float>());
+    CHECK(Traits::is_floating<const double>());
   }
 
-  TEST_CASE("double is NOT integer") {
-    CHECK(!Traits::is_integer<double>());  // NOLINT(runtime/int, google-runtime-int)
+  TEST_CASE("is_floating returns false for integer and bool types") {
+    CHECK_FALSE(Traits::is_floating<int>());
+    CHECK_FALSE(Traits::is_floating<bool>());
+    CHECK_FALSE(Traits::is_floating<char>());
+    CHECK_FALSE(Traits::is_floating<uint64_t>());
   }
-
-  TEST_CASE("const int is integer (CV stripped)") {
-    CHECK(Traits::is_integer<const int>());  // NOLINT(runtime/int, google-runtime-int)
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: is_floating
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("base-Traits - is_floating") {
-  TEST_CASE("float is floating") { CHECK(Traits::is_floating<float>()); }
-
-  TEST_CASE("double is floating") { CHECK(Traits::is_floating<double>()); }
-
-  TEST_CASE("long double is floating") {
-    CHECK(Traits::is_floating<long double>());  // NOLINT(runtime/int, google-runtime-int)
-  }
-
-  TEST_CASE("int is NOT floating") { CHECK(!Traits::is_floating<int>()); }
-
-  TEST_CASE("bool is NOT floating") {
-    CHECK(!Traits::is_floating<bool>());  // NOLINT(runtime/int, google-runtime-int)
-  }
-
-  TEST_CASE("const float is floating (CV stripped)") { CHECK(Traits::is_floating<const float>()); }
 }
 
 // NOLINTEND

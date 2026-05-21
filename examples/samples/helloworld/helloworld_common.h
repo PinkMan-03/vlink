@@ -23,91 +23,24 @@
 
 #pragma once
 
-#include <vlink/base/logger.h>
-#include <vlink/base/utils.h>
-
 #include <string>
 
-#define DDS_METHOD_URL "dds://helloworld/method"
-#define DDS_EVENT_URL "dds://helloworld/event"
-
-#define DDSC_METHOD_URL "ddsc://helloworld/method"
-#define DDSC_EVENT_URL "ddsc://helloworld/event"
-
-#define SOMEIP_METHOD_URL "someip://0x01/0x02?method=0x1"
-#define SOMEIP_EVENT_URL "someip://0x01/0x02?groups=0x1&event=0x2"
-
-#define SHM_METHOD_URL "shm://helloworld/method"
-#define SHM_EVENT_URL "shm://helloworld/event"
-
-#define FDBUS_METHOD_URL "fdbus://helloworld/method"
-#define FDBUS_EVENT_URL "fdbus://helloworld/event"
-
-#define QNX_METHOD_URL "qnx://helloworld/method"
-#define QNX_EVENT_URL "qnx://helloworld/event"
+#include "../common_transport.h"
 
 namespace Common {  // NOLINT(readability-identifier-naming)
 
-std::string get_method_url() {
-  auto url = vlink::Utils::get_env("METHOD_URL");
-
-  if (!url.empty()) {
-    VLOG_I("METHOD_URL=", url);
-    return url;
-  }
-
-  auto transport = vlink::Utils::get_env("METHOD_TRANSPORT", "dds");
-
-  if (transport == "dds") {
-    url = DDS_METHOD_URL;
-  } else if (transport == "ddsc") {
-    url = DDSC_METHOD_URL;
-  } else if (transport == "someip") {
-    url = SOMEIP_METHOD_URL;
-  } else if (transport == "shm") {
-    url = SHM_METHOD_URL;
-  } else if (transport == "fdbus") {
-    url = FDBUS_METHOD_URL;
-  } else if (transport == "qnx") {
-    url = QNX_METHOD_URL;
-  } else {
-    url = DDS_METHOD_URL;
-  }
-
-  VLOG_I("METHOD_URL=", url);
-
-  return url;
+// Resolve the RPC channel URL. METHOD_URL (full) overrides METHOD_TRANSPORT
+// (scheme only); default scheme is dds://. The SOME/IP fallback uses service
+// 0x01 / instance 0x02, method 0x1 -- adjust to match your service catalog.
+inline std::string get_method_url() {
+  return get_transport_url("METHOD_URL", "METHOD_TRANSPORT", "helloworld/method", "someip://0x01/0x02?method=0x1");
 }
 
-std::string get_event_url() {
-  auto url = vlink::Utils::get_env("EVENT_URL");
-
-  if (!url.empty()) {
-    VLOG_I("EVENT_URL=", url);
-    return url;
-  }
-
-  auto transport = vlink::Utils::get_env("EVENT_TRANSPORT", "dds");
-
-  if (transport == "dds") {
-    url = DDS_EVENT_URL;
-  } else if (transport == "ddsc") {
-    url = DDSC_EVENT_URL;
-  } else if (transport == "someip") {
-    url = SOMEIP_EVENT_URL;
-  } else if (transport == "shm") {
-    url = SHM_EVENT_URL;
-  } else if (transport == "fdbus") {
-    url = FDBUS_EVENT_URL;
-  } else if (transport == "qnx") {
-    url = QNX_EVENT_URL;
-  } else {
-    url = DDS_EVENT_URL;
-  }
-
-  VLOG_I("EVENT_URL=", url);
-
-  return url;
+// Resolve the event (pub/sub) channel URL. Same precedence rules as above.
+// SOME/IP fallback uses service 0x01 / instance 0x02, eventgroup 0x1, event 0x2.
+inline std::string get_event_url() {
+  return get_transport_url("EVENT_URL", "EVENT_TRANSPORT", "helloworld/event",
+                           "someip://0x01/0x02?groups=0x1&event=0x2");
 }
 
 }  // namespace Common

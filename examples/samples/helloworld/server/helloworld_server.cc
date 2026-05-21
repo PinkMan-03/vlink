@@ -21,74 +21,75 @@
  * limitations under the License.
  */
 
-// VLink message loop and utility library
+// Helloworld server sample.
+//
+// Demonstrates both the Method model (RPC) and the Event model (pub/sub) of VLink
+// in a single process, using Protobuf-generated messages (Helloworld::Request,
+// Helloworld::Response, Helloworld::Message). The transport backend is selected
+// at runtime via environment variables in helloworld_common.h (defaults to DDS),
+// so the same binary works over dds://, ddsc://, shm://, fdbus://, qnx://, or
+// someip:// without recompilation -- this is the canonical VLink URL-driven
+// dispatch pattern. Typical engineering scenario: a long-lived service that
+// answers synchronous RPC requests while periodically broadcasting status events
+// to many subscribers.
+
+#include <vlink/base/logger.h>
 #include <vlink/base/message_loop.h>
 #include <vlink/base/utils.h>
-// VLink core communication API (Publisher, Server, etc.)
-#include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
 #include <iostream>
 
-// Protobuf generated message types
-// Android platform uses a different include path
 #if defined(__ANDROID__) && __has_include("helloworld/proto/helloworld.pb.h")
 #include "helloworld/proto/helloworld.pb.h"
 #else
 #include "helloworld.pb.h"
 #endif
 
-// Common configuration header providing transport URL selection helper functions
 #include "./helloworld_common.h"
 
-using namespace vlink;  // NOLINT(build/namespaces, google-build-using-namespace)
-
-/// HelloWorld server program
-/// Features:
-///   1. Provides an RPC service (method model): receives two integers and returns their sum
-///   2. Periodically publishes event messages (event model): publishes a message with an incrementing counter every
-///   100ms
-/// Demonstrates two VLink communication models working together in a single process
 int main(int argc, char* argv[]) {
   (void)argc;
   (void)argv;
 
-  // Singleton check: ensure the same program is not running more than once
-
-  if (!Utils::check_singleton("helloworld_server")) {
+  // Singleton guard: prevent two server instances from competing for the same
+  // transport endpoint (DDS topic / SHM segment / SOME/IP service id). The
+  // underlying primitive is a named OS lock keyed on "helloworld_server".
+  if (!vlink::Utils::check_singleton("helloworld_server")) {
     std::cerr << "Program has started." << std::endl;
     return 1;
   }
 
-  // Create a message loop and register Ctrl+C signal handler
-  MessageLoop message_loop;
-  Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
+  // The MessageLoop drives Timer ticks and any other deferred work on this
+  // thread. We bind it to SIGINT/SIGTERM via register_terminate_signal so the
+  // process exits gracefully -- loop.quit() unblocks loop.run() and lets
+  // RAII destructors close transports cleanly instead of being killed mid-IO.
+  vlink::MessageLoop message_loop;
+  vlink::Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
 
-  // ======== Method Model (RPC) ========
-  // Create a Server: request type is Helloworld::Request, response type is Helloworld::Response
-  // The URL is determined by environment variables for the transport backend (defaults to dds://helloworld/method)
-  Server<Helloworld::Request, Helloworld::Response> server(Common::get_method_url());
-
-  // Register a synchronous request/response callback: process the request and fill in the response directly
+  // ======== Method model (RPC) ========
+  // Server<Req, Resp> auto-detects Protobuf serialization from the message
+  // type. The listen() callback runs on the transport's internal worker thread
+  // (NOT the MessageLoop), so keep it short and thread-safe.
+  vlink::Server<Helloworld::Request, Helloworld::Response> server(Common::get_method_url());
   server.listen([](const Helloworld::Request& req, Helloworld::Response& resp) {
     CLOG_D("[Server] Receive left = %d, right = %d.", req.left(), req.right());
-    // Compute the sum of the two numbers as the response
     resp.set_sum(req.left() + req.right());
   });
 
-  // ======== Event Model (Pub/Sub) ========
-  // Create a Publisher: publishes Helloworld::Message type event messages
-  Publisher<Helloworld::Message> pub(Common::get_event_url());
+  // ======== Event model (Pub/Sub) ========
+  // Publisher constructed with the resolved URL; serialization is again driven
+  // by the Protobuf trait detection inside vlink::serializer.
+  vlink::Publisher<Helloworld::Message> pub(Common::get_event_url());
 
-  // Create a timer: fires every 100ms
-  Timer timer;
-  timer.attach(&message_loop);             // Bind to the message loop
-  timer.set_interval(100);                 // Interval of 100 milliseconds
-  timer.set_loop_count(Timer::kInfinite);  // Repeat indefinitely
+  // Periodic broadcast every 100ms. Timer must be attach()-ed to a MessageLoop
+  // before start(); the callback fires on the loop thread.
+  vlink::Timer timer;
+  timer.attach(&message_loop);
+  timer.set_interval(100);
+  timer.set_loop_count(vlink::Timer::kInfinite);
 
   int index = 0;
-
-  // Timer callback: construct a Protobuf message and publish it
   timer.start([&pub, &index]() {
     index++;
     Helloworld::Message msg;
@@ -96,7 +97,7 @@ int main(int argc, char* argv[]) {
     pub.publish(msg);
   });
 
-  // Block and run the message loop until the quit signal is received
+  // Blocks until quit() is invoked by the signal handler.
   message_loop.run();
 
   return 0;

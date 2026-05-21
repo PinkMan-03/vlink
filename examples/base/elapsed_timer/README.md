@@ -1,140 +1,179 @@
-# VLink ElapsedTimer 示例
+# elapsed_timer — `vlink::ElapsedTimer` 高精度耗时测量
 
-## 1. 概述
+`vlink::ElapsedTimer` 是 vlink 内置的耗时测量工具，覆盖：
 
-本示例演示了 VLink `ElapsedTimer` 的高精度计时功能，包括毫秒/微秒/纳秒三种精度、墙钟时间与 CPU 活跃时间两种时钟源、restart 原子重置，以及静态时间戳工具函数。
+- 两种时钟源 —— **`kCpuTimestamp`**（壁钟）和 **`kCpuActiveTime`**（仅 CPU 实际执行时间，排除阻塞 / 睡眠）。
+- 三种精度 —— `kMilli` / `kMicro` / `kNano`。
+- 起停 / restart 圈计 / 静态时间戳查询。
 
-## 2. 文件说明
+注意：`ElapsedTimer` 不触发回调，**只用于测量**。如果要"N 秒后触发"，用 `vlink::Timer`；如果要"判断当前时间是否到截止"，用 `vlink::DeadlineTimer`。
 
-| 文件 | 说明 |
-|------|------|
-| `elapsed_timer.cc` | ElapsedTimer 功能演示源码 |
-| `CMakeLists.txt` | 构建配置，链接 `vlink::all` |
+读完本示例你能掌握：
 
-## 3. 构建与运行
+- 两种 method 各自的适用场合。
+- 三种精度的取值范围与开销。
+- `restart()` 圈计与 stop 的语义差异。
+- 几个静态时间戳函数何时直接拿来用。
 
-```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_elapsed_timer
-./build/output/bin/example_elapsed_timer
+## 背景与适用场景
+
+适用场景：
+
+- 单段代码耗时测量（profiling、benchmark）。
+- 监控埋点：业务函数执行时长上报到 metric 系统。
+- 圈计：多段耗时 lap1 / lap2 / lap3。
+- 拿当前时间戳：日志、消息时间戳、TTL 判断。
+
+不适合：
+
+- 跨进程时间同步（用 PTP / NTP / chrony）。
+- 高精度（< 100ns）测量：调用 `get()` 本身有几十纳秒开销。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `ElapsedTimer()` | 默认 | `kCpuTimestamp` + `kMilli` |
+| `ElapsedTimer(Method, Accuracy)` | 构造 | 显式选时钟源 + 精度 |
+| `ElapsedTimer::Method` | enum | `kCpuTimestamp` / `kCpuActiveTime` |
+| `ElapsedTimer::Accuracy` | enum | `kMilli` / `kMicro` / `kNano` |
+| `start` / `stop` | `void` | 起停 |
+| `is_active` | `bool is_active() const` | 是否在跑 |
+| `get` | `int64_t get() const` | 当前已经累计的时间；未 start 返回 -1 |
+| `restart` | `int64_t restart()` | 原子读出 + 重置 |
+| `get_method` / `get_accuracy` | const | 配置查询 |
+| `ElapsedTimer::get_sys_timestamp` | `static int64_t (Accuracy)` | 系统钟（受 NTP 影响） |
+| `ElapsedTimer::get_cpu_timestamp` | `static int64_t (Accuracy)` | CPU 钟（monotonic） |
+| `ElapsedTimer::get_cpu_active_time` | `static int64_t (Accuracy)` | 当前进程 CPU 累计时间 |
+
+## 代码导读
+
+### 1. 默认 ms 测量
+
+```cpp
+ElapsedTimer timer;
+timer.start();
+std::this_thread::sleep_for(100ms);
+MLOG_I("  elapsed={}ms (expect ~100)", timer.get());
+timer.stop();
 ```
 
-## 4. 核心概念
+默认 `kCpuTimestamp + kMilli`。`get()` 在 start 之前返回 -1。
 
-### 4.1 两种时钟源 (Method)
-
-| 时钟源 | 枚举值 | 底层实现 | 用途 |
-|--------|--------|---------|------|
-| `kCpuTimestamp` | 0 | `CLOCK_MONOTONIC_RAW` / `steady_clock` | 单调递增的墙钟时间，不受 NTP 调整影响 |
-| `kCpuActiveTime` | 1 | `getrusage` / `GetProcessTimes` | 进程实际消耗的 CPU 时间（用户态+内核态） |
-
-`kCpuTimestamp` 适合测量实际经过的时间（包括线程休眠），`kCpuActiveTime` 只计算 CPU 实际工作的时间，不包括 sleep 或等待 I/O 的时间。
-
-### 4.2 三种精度 (Accuracy)
-
-| 精度 | 枚举值 | 单位 | 64位范围 |
-|------|--------|------|----------|
-| `kMilli` | 0 | 毫秒 | ~2.92 亿年 |
-| `kMicro` | 1 | 微秒 | ~29.2 万年 |
-| `kNano` | 2 | 纳秒 | ~292 年 |
-
-### 4.3 基本用法
+### 2. Micro 和 Nano 精度
 
 ```cpp
 ElapsedTimer timer(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMicro);
 timer.start();
-do_work();
-int64_t elapsed = timer.get();  // 微秒，未启动返回 -1
-timer.stop();
+std::this_thread::sleep_for(50ms);
+MLOG_I("  elapsed={}us (expect ~50000)", timer.get());
+
+ElapsedTimer ns_timer(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kNano);
+ns_timer.start();
+// ... CPU work ...
+MLOG_I("  CPU work elapsed={}ns", ns_timer.get());
 ```
 
-### 4.4 restart - 原子重置
+精度越高 int64 范围越短：kMilli ~292 兆年，kMicro ~292 千年，kNano ~292 年；实际工程都够用。
+
+### 3. CPU active time
 
 ```cpp
-int64_t lap = timer.restart();
-```
-
-原子地获取已经过的时间并重置起始点。等效于 `get()` + `start()`，但通过原子交换实现，避免竞态。适合连续测量多个阶段的耗时。
-
-### 4.5 静态工具函数
-
-```cpp
-uint64_t sys_ts = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMilli);
-uint64_t cpu_ts = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
-uint64_t active = ElapsedTimer::get_cpu_active_time(ElapsedTimer::kMicro);
-```
-
-| 函数 | 说明 |
-|------|------|
-| `get_sys_timestamp` | 系统实时时钟（可被 NTP 调整） |
-| `get_cpu_timestamp` | 单调递增时钟（不受 NTP 影响） |
-| `get_cpu_active_time` | 进程累计 CPU 时间 |
-
-## 5. 代码执行流程
-
-1. **默认毫秒计时**：sleep 100ms 并测量
-2. **微秒精度**：sleep 50ms 并测量（~50000us）
-3. **纳秒精度**：测量 CPU 计算耗时
-4. **CPU 活跃时间**：测量纯计算的 CPU 时间
-5. **restart 连续测量**：两个 lap 的连续计时
-6. **静态工具**：获取系统/CPU/进程时间戳
-7. **配置查询**：查询 method 和 accuracy 设置
-
-## 6. 线程安全
-
-`ElapsedTimer` 内部使用 `std::atomic<int64_t>` 存储起始时间，`get()` 的并发读是安全的。但从不同线程并发调用 `start()`/`stop()` 会导致语义上的竞态（虽然不会导致未定义行为）。
-
-## 7. 典型使用场景
-
-### 7.1 函数耗时分析
-
-```cpp
-ElapsedTimer timer(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMicro);
+ElapsedTimer timer(ElapsedTimer::kCpuActiveTime, ElapsedTimer::kMicro);
 timer.start();
-process_data();
-MLOG_I("process_data took {}us", timer.get());
-timer.stop();
+
+volatile double sum = 0;
+for (int i = 0; i < 1000000; ++i) {
+  sum += std::sqrt(static_cast<double>(i));
+}
+
+MLOG_I("  CPU active={}us", timer.get());
 ```
 
-### 7.2 连续 Lap 计时
+`kCpuActiveTime` 排除被阻塞 / 睡眠的时间，只算 CPU 真的在跑的时间。用于 profiling CPU 密集型函数；典型场景是判断是不是 IO bound（壁钟和 CPU active 差很多）。
+
+### 4. restart 圈计
 
 ```cpp
 ElapsedTimer timer(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMilli);
 timer.start();
-step_1();
-MLOG_I("Step 1: {}ms", timer.restart());
-step_2();
-MLOG_I("Step 2: {}ms", timer.restart());
-step_3();
-MLOG_I("Step 3: {}ms", timer.restart());
+std::this_thread::sleep_for(100ms);
+MLOG_I("  lap1={}ms", timer.restart());   // 读出 ~100，重置
+std::this_thread::sleep_for(50ms);
+MLOG_I("  lap2={}ms", timer.restart());   // 读出 ~50，重置
 timer.stop();
 ```
 
-### 7.3 CPU 利用率分析
+`restart()` 原子读+重置，避免"读完再清"的竞态。
+
+### 5. 静态时间戳工具
 
 ```cpp
-ElapsedTimer wall(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMicro);
-ElapsedTimer cpu(ElapsedTimer::kCpuActiveTime, ElapsedTimer::kMicro);
-wall.start();
-cpu.start();
-work_with_io();
-double utilization = 100.0 * cpu.get() / wall.get();
-MLOG_I("CPU utilization: {:.1f}%", utilization);
+MLOG_I("  sys ms     = {}", ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMilli));
+MLOG_I("  cpu ms     = {}", ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMilli));
+MLOG_I("  cpu active = {}us", ElapsedTimer::get_cpu_active_time(ElapsedTimer::kMicro));
+MLOG_I("  sys ns     = {}", ElapsedTimer::get_sys_timestamp(ElapsedTimer::kNano));
 ```
 
-## 8. 平台差异
+不需要 start/stop 就能拿当前时间戳。
 
-| 特性 | Linux | Windows | macOS |
-|------|-------|---------|-------|
-| `get_sys_timestamp` | `clock_gettime(CLOCK_REALTIME)` | `system_clock` | `system_clock` |
-| `get_cpu_timestamp` | `clock_gettime(CLOCK_MONOTONIC_RAW)` | `steady_clock` | `steady_clock` |
-| `get_cpu_active_time` | `getrusage(RUSAGE_SELF)` | `GetProcessTimes` | `getrusage` |
+- `get_sys_timestamp`：系统钟（real-time clock）；受 NTP / 用户手动改时间影响。
+- `get_cpu_timestamp`：单调钟（monotonic）；从某个固定点累计，不会倒退。
+- `get_cpu_active_time`：当前进程 user+kernel 累计 CPU 时间。
 
-## 9. 注意事项
+## 运行
 
-- 定时器构造后**不会自动启动**，必须显式调用 `start()`
-- `get()` 在未启动或已停止时返回 `-1`
-- Linux 上 `get_sys_timestamp` 在 `high_resolution=true` 时使用 `clock_gettime`（纳秒级精度）
-- `kCpuTimestamp` 在 Linux 上使用 `CLOCK_MONOTONIC_RAW`，不受 NTP 调整影响
-- 对象大小为 64 字节对齐以避免 false sharing
-- `restart()` 通过原子 `exchange` 实现，在多读者场景下是安全的
+```bash
+./build/output/bin/example_elapsed_timer
+```
+
+预期输出（节选）：
+
+```
+=== Default (ms) ===
+  elapsed=100ms (expect ~100)
+  is_active after stop=0
+=== Microsecond ===
+  elapsed=50012us (expect ~50000)
+=== Nanosecond ===
+  CPU work elapsed=1234567ns
+=== CPU active time ===
+  CPU active=23456us
+=== restart ===
+  lap1=100ms
+  lap2=50ms
+=== Static utilities ===
+  sys ms     = 1716266400000
+  cpu ms     = 12345678
+  cpu active = 567us
+  sys ns     = 1716266400123456789
+=== Config query ===
+  method=1 (0=CpuTimestamp 1=CpuActiveTime)
+  accuracy=2 (0=Milli 1=Micro 2=Nano)
+  is_active before start=0 get=-1
+```
+
+## 常见陷阱
+
+1. **未 start 直接 get**：返回 -1。
+2. **跨线程访问同一 ElapsedTimer**：vlink 不保证 thread-safety；每个线程持有自己的实例。
+3. **`kCpuActiveTime` 在 macOS 上不可用**：vlink 在 macOS 用 `mach_thread_info`，行为略不同；详见头文件。
+4. **`get_sys_timestamp` 用作消息时间戳**：跨机时不可靠（NTP 可能跳变）；持久化场景请用 `get_cpu_timestamp`。
+5. **stop 后再 get**：返回 stop 时的总耗时，不会继续累计；再 start 会从 0 开始。
+
+## 设计要点
+
+- `kCpuTimestamp` 内部用 `clock_gettime(CLOCK_MONOTONIC_RAW)`（Linux）或 `steady_clock`（标准 C++ fallback）。
+- `kCpuActiveTime` 在 Linux 上用 `getrusage(RUSAGE_THREAD)`；macOS 上不同。
+- `get()` 自身开销几十纳秒到一百纳秒；纳秒级测量的边际误差不可忽略。
+
+## 配图
+
+无专属配图。
+
+## 参考
+
+- `../deadline_timer/` — 绝对截止时间检测
+- `../timer/` — 周期触发回调
+- `vlink/include/vlink/base/elapsed_timer.h` — ElapsedTimer 接口
+- `vlink/include/vlink/base/cached_timestamp.h` — 缓存时间戳（高频读取场景）

@@ -40,14 +40,12 @@
 #include <utility>
 #include <vector>
 
+#include "../common_test.h"
 #include "./base/graph_task.h"
 #include "./base/message_loop.h"
 #include "./base/schedule.h"
 #include "./base/task_handle.h"
 #include "./base/thread_pool.h"
-
-//
-#include "../common_test.h"
 
 using vlink::MessageLoop;
 using vlink::Co::await_future;
@@ -70,15 +68,6 @@ static_assert(std::is_move_constructible_v<vlink::Co::ScheduleAwaiter>);
 static_assert(std::is_move_constructible_v<vlink::Co::YieldAwaiter>);
 static_assert(std::is_move_constructible_v<vlink::Co::DelayAwaiter>);
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-//
-// All coroutine bodies are FREE FUNCTIONS that take their state via
-// parameters.  Capturing into a coroutine lambda is unsafe: the lambda
-// temporary dies at the end of the expression while the coroutine body
-// runs later, so any [&]/[=] capture access is UB.
-
 namespace {
 
 class SmallQueueMessageLoop final : public MessageLoop {
@@ -93,6 +82,7 @@ void sleep_ms(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms
 template <typename PredicateT>
 bool wait_until(PredicateT&& predicate, std::chrono::milliseconds timeout = std::chrono::milliseconds(1000)) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
+
   while (std::chrono::steady_clock::now() < deadline) {
     if (predicate()) {
       return true;
@@ -124,15 +114,15 @@ Task<> body_compose(MessageLoop* loop, std::promise<int>* out) {
   co_return;
 }
 
-Task<> body_yield(MessageLoop* loop, std::atomic<int>* sequence_, std::promise<void>* done) {
-  int v1 = sequence_->fetch_add(1, std::memory_order_acq_rel);
+Task<> body_yield(MessageLoop* loop, std::atomic<int>* seq, std::promise<void>* done) {
+  int v1 = seq->fetch_add(1, std::memory_order_acq_rel);
   CHECK(v1 == 0);
 
-  loop->post_task([sequence_] { sequence_->fetch_add(1, std::memory_order_acq_rel); });
+  loop->post_task([seq] { seq->fetch_add(1, std::memory_order_acq_rel); });
 
   co_await yield(*loop);
 
-  int v3 = sequence_->fetch_add(1, std::memory_order_acq_rel);
+  int v3 = seq->fetch_add(1, std::memory_order_acq_rel);
   CHECK(v3 == 2);
 
   done->set_value();
@@ -176,11 +166,13 @@ Task<> body_signal_then_await_future(MessageLoop* loop, std::future<int> input, 
 Task<> body_signal_then_await_future_cancel(MessageLoop* loop, std::future<int> input, std::promise<void>* awaiting,
                                             std::atomic<bool>* caught, std::promise<void>* done) {
   awaiting->set_value();
+
   try {
     (void)co_await await_future(*loop, std::move(input));
   } catch (const Exception::OperationCancelled&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -221,6 +213,7 @@ Task<> body_catches(std::atomic<bool>* caught, std::promise<void>* done) {
   } catch (const std::runtime_error&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -237,6 +230,7 @@ Task<> body_inc_steps(MessageLoop* loop, std::atomic<int>* steps, int n, std::pr
     steps->fetch_add(1, std::memory_order_acq_rel);
     co_await yield(*loop);
   }
+
   done->set_value();
   co_return;
 }
@@ -250,11 +244,13 @@ Task<> body_exec_sets(MessageLoop* loop, std::atomic<bool>* ran, std::promise<vo
 
 Task<> body_exec_throws(MessageLoop* loop, std::atomic<bool>* caught, std::promise<void>* done) {
   vlink::Schedule::Config cfg(0);
+
   try {
     co_await exec(*loop, cfg, [] { throw std::runtime_error("boom"); });
   } catch (const std::runtime_error&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -295,9 +291,11 @@ Task<> body_when_any_int(MessageLoop* loop, std::promise<std::pair<size_t, int>>
 
 Task<> body_when_all_void(MessageLoop* loop, std::atomic<int>* counter, std::promise<void>* done) {
   std::vector<Task<void>> tasks;
+
   for (int i = 0; i < 5; ++i) {
     tasks.emplace_back(body_delay_then_void(loop, 10));
   }
+
   co_await when_all(*loop, std::move(tasks));
   counter->store(5, std::memory_order_release);
   done->set_value();
@@ -390,11 +388,13 @@ Task<> body_signal_then_await_graph(MessageLoop* loop, vlink::GraphTaskPtr graph
 Task<> body_signal_then_await_graph_cancel(MessageLoop* loop, vlink::GraphTaskPtr graph, std::promise<void>* awaiting,
                                            std::atomic<bool>* caught, std::promise<void>* done) {
   awaiting->set_value();
+
   try {
     co_await await_graph(*loop, std::move(graph));
   } catch (const Exception::OperationCancelled&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -439,6 +439,7 @@ Task<> body_await_future_catch(MessageLoop* loop, std::future<int> fut, std::ato
   } catch (const std::runtime_error&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -490,17 +491,20 @@ Task<> body_when_all_with_throwing(MessageLoop* loop, std::atomic<bool>* caught_
   } catch (...) {
     caught_other->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
 
 Task<> body_await_moved_from_task(std::atomic<bool>* caught, std::promise<void>* done) {
   Task<int> empty;
+
   try {
     (void)co_await std::move(empty);
   } catch (const std::logic_error&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -511,6 +515,7 @@ Task<> body_await_null_graph(MessageLoop* loop, std::atomic<bool>* caught, std::
   } catch (const std::invalid_argument&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -522,6 +527,7 @@ Task<> body_when_any_empty_throws(MessageLoop* loop, std::atomic<bool>* caught, 
   } catch (const std::invalid_argument&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -533,6 +539,7 @@ Task<> body_when_any_void_empty_throws(MessageLoop* loop, std::atomic<bool>* cau
   } catch (const std::invalid_argument&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -562,6 +569,7 @@ Task<> body_when_any_all_throw(MessageLoop* loop, std::atomic<bool>* caught_runt
   } catch (...) {
     caught_other->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -578,10 +586,11 @@ Task<> body_when_any_partial_fail(MessageLoop* loop, std::promise<std::pair<size
 
 Task<> body_schedule_throws_on_post_fail(MessageLoop* target, std::atomic<bool>* caught, std::promise<void>* done) {
   try {
-    co_await Coroutine::schedule(*target);
+    co_await vlink::Coroutine::schedule(*target);
   } catch (const std::runtime_error&) {
     caught->store(true, std::memory_order_release);
   }
+
   done->set_value();
   co_return;
 }
@@ -611,10 +620,6 @@ Task<> body_nested_when_all(MessageLoop* loop, std::atomic<int>* counter, std::p
 }
 
 }  // namespace
-
-// ---------------------------------------------------------------------------
-// TEST SUITE
-// ---------------------------------------------------------------------------
 
 TEST_SUITE("base-Coroutine") {
   TEST_CASE("Task<void> spawn runs body once") {
@@ -658,7 +663,7 @@ TEST_SUITE("base-Coroutine") {
 
     co_spawn(loop, body_compose(&loop, &done));
 
-    CHECK(fut.get() == 85);  // 36 + 49
+    CHECK(fut.get() == 85);
 
     loop.quit();
     loop.wait_for_quit();
@@ -668,11 +673,11 @@ TEST_SUITE("base-Coroutine") {
     MessageLoop loop;
     loop.async_run();
 
-    std::atomic<int> sequence_{0};
+    std::atomic<int> seq{0};
     std::promise<void> done;
     auto fut = done.get_future();
 
-    co_spawn(loop, body_yield(&loop, &sequence_, &done));
+    co_spawn(loop, body_yield(&loop, &seq, &done));
 
     fut.get();
     loop.quit();
@@ -774,6 +779,7 @@ TEST_SUITE("base-Coroutine") {
 
     CHECK(loop.post_task([&] {
       loop_blocked.store(true, std::memory_order_release);
+
       while (!release_loop.load(std::memory_order_acquire)) {
         std::this_thread::yield();
       }
@@ -837,12 +843,15 @@ TEST_SUITE("base-Coroutine") {
 
     std::atomic<bool> release_loop{false};
     std::atomic<bool> loop_blocked{false};
+
     CHECK(loop.post_task([&] {
       loop_blocked.store(true, std::memory_order_release);
+
       while (!release_loop.load(std::memory_order_acquire)) {
         std::this_thread::yield();
       }
     }));
+
     CHECK(wait_until([&loop_blocked] { return loop_blocked.load(std::memory_order_acquire); }));
 
     input.set_value(11);
@@ -915,7 +924,7 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("co_spawn fails-safe when loop is quitting (no crash, no resume)") {
+  TEST_CASE("co_spawn fails-safe when loop is quitting") {
     MessageLoop loop;
     loop.async_run();
     loop.quit();
@@ -966,10 +975,12 @@ TEST_SUITE("base-Coroutine") {
 
     CHECK(target.post_task([&] {
       target_blocked.store(true, std::memory_order_release);
+
       while (!release_target.load(std::memory_order_acquire)) {
         std::this_thread::yield();
       }
     }));
+
     CHECK(wait_until([&target_blocked] { return target_blocked.load(std::memory_order_acquire); }));
 
     vlink::PostTaskOptions options;
@@ -1024,12 +1035,12 @@ TEST_SUITE("base-Coroutine") {
 
     Task<int> b = std::move(a);
     CHECK(b.valid());
-    CHECK_FALSE(a.valid());
+    CHECK_FALSE(a.valid());  // NOLINT(bugprone-use-after-move)
 
     Task<int> c;
     c = std::move(b);
     CHECK(c.valid());
-    CHECK_FALSE(b.valid());
+    CHECK_FALSE(b.valid());  // NOLINT(bugprone-use-after-move)
   }
 
   TEST_CASE("multiple coroutines on same loop interleave via yield") {
@@ -1215,7 +1226,7 @@ TEST_SUITE("base-Coroutine") {
     std::atomic<int> step{0};
     auto a = vlink::GraphTask::create("A", [step_ptr = &step] { step_ptr->fetch_add(1, std::memory_order_release); });
     auto b = vlink::GraphTask::create("B", [step_ptr = &step] { step_ptr->fetch_add(10, std::memory_order_release); });
-    a->precede(b);  // Taskflow: a runs before b; a is root, b is leaf
+    a->precede(b);
 
     std::promise<int> done;
     auto fut = done.get_future();
@@ -1249,6 +1260,7 @@ TEST_SUITE("base-Coroutine") {
 
     CHECK(loop.post_task([&] {
       loop_blocked.store(true, std::memory_order_release);
+
       while (!release_loop.load(std::memory_order_acquire)) {
         std::this_thread::yield();
       }
@@ -1315,12 +1327,15 @@ TEST_SUITE("base-Coroutine") {
 
     std::atomic<bool> release_loop{false};
     std::atomic<bool> loop_blocked{false};
+
     CHECK(loop.post_task([&] {
       loop_blocked.store(true, std::memory_order_release);
+
       while (!release_loop.load(std::memory_order_acquire)) {
         std::this_thread::yield();
       }
     }));
+
     CHECK(wait_until([&loop_blocked] { return loop_blocked.load(std::memory_order_acquire); }));
 
     graph->execute(&pool);
@@ -1343,12 +1358,14 @@ TEST_SUITE("base-Coroutine") {
     std::promise<void> barrier_started;
     auto release_future = release.get_future();
     auto barrier_fut = barrier_started.get_future();
+
     loop.post_task_with_priority(
         [release_future = std::move(release_future), &barrier_started]() mutable {
           barrier_started.set_value();
           release_future.wait();
         },
         MessageLoop::kHighestPriority);
+
     REQUIRE(barrier_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
 
     std::atomic<int> first_executed{0};
@@ -1379,12 +1396,14 @@ TEST_SUITE("base-Coroutine") {
     std::promise<void> barrier_started;
     auto release_future = release.get_future();
     auto barrier_fut = barrier_started.get_future();
+
     loop.post_task_with_priority(
         [release_future = std::move(release_future), &barrier_started]() mutable {
           barrier_started.set_value();
           release_future.wait();
         },
         MessageLoop::kHighestPriority);
+
     REQUIRE(barrier_fut.wait_for(std::chrono::milliseconds(1000)) == std::future_status::ready);
 
     std::vector<int> order;
@@ -1538,7 +1557,7 @@ TEST_SUITE("base-Coroutine") {
     MessageLoop loop;
     loop.async_run();
 
-    constexpr int kCount = 500;
+    static constexpr int kCount = 500;
     auto finished = std::make_shared<std::atomic<int>>(0);
 
     for (int i = 0; i < kCount; ++i) {
@@ -1546,10 +1565,12 @@ TEST_SUITE("base-Coroutine") {
     }
 
     int deadline_ms = 2000;
+
     while (finished->load(std::memory_order_acquire) < kCount && deadline_ms > 0) {
       sleep_ms(5);
       deadline_ms -= 5;
     }
+
     CHECK(finished->load(std::memory_order_acquire) == kCount);
 
     loop.quit();
@@ -1623,7 +1644,7 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("co_spawn_with_priority on kNormalType silently runs without honoring priority") {
+  TEST_CASE("co_spawn_with_priority on kNormalType runs without honoring priority") {
     MessageLoop loop;
     loop.async_run();
 
@@ -1668,7 +1689,7 @@ TEST_SUITE("base-Coroutine") {
     loop_b.wait_for_quit();
   }
 
-  TEST_CASE("when_any picks the already-completed sub-task as winner (still awaits all)") {
+  TEST_CASE("when_any picks the already-completed sub-task as winner") {
     MessageLoop loop;
     loop.async_run();
 
@@ -1685,7 +1706,7 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("when_all<int> with a throwing sub-task rethrows the original exception type, not future_error") {
+  TEST_CASE("when_all<int> with a throwing sub-task rethrows the original exception type") {
     MessageLoop loop;
     loop.async_run();
 
@@ -1710,7 +1731,7 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("when_any<int> with all sub-tasks throwing rethrows the first observed exception, not future_error") {
+  TEST_CASE("when_any<int> with all sub-tasks throwing rethrows the first observed exception") {
     MessageLoop loop;
     loop.async_run();
 
@@ -1837,7 +1858,7 @@ TEST_SUITE("base-Coroutine") {
     loop.wait_for_quit();
   }
 
-  TEST_CASE("schedule awaiter throws std::runtime_error when loop is quitting (post fails)") {
+  TEST_CASE("schedule awaiter throws std::runtime_error when loop is quitting") {
     MessageLoop loop;
     loop.async_run();
     loop.quit();

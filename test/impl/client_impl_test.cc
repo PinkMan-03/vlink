@@ -31,15 +31,9 @@
 #include <chrono>
 #include <thread>
 
+#include "../common_test.h"
 #include "./base/bytes.h"
 #include "./impl/types.h"
-
-//
-#include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helpers: concrete subclass to test ClientImpl (which has pure virtuals)
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -51,13 +45,13 @@ class TestClientImpl : public ClientImpl {
   void init() override {}
   void deinit() override {}
 
-  bool is_connected() const override { return connected_.load(); }
+  [[nodiscard]] bool is_connected() const override { return connected_.load(); }
 
   bool call(const Bytes& /*req_data*/, MsgCallback&& /*callback*/, std::chrono::milliseconds /*timeout*/) override {
     return false;
   }
 
-  void set_connected(bool connected) { connected_ = connected; }
+  void set_connected(bool v) { connected_ = v; }
 
  private:
   std::atomic_bool connected_{false};
@@ -65,17 +59,13 @@ class TestClientImpl : public ClientImpl {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ClientImpl - construction
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-ClientImpl - construction") {
+TEST_SUITE("impl-ClientImpl") {
   TEST_CASE("constructor sets kClient impl_type") {
     TestClientImpl client;
-    CHECK(client.impl_type == kClient);
+    CHECK_EQ(client.impl_type, kClient);
   }
 
-  TEST_CASE("is_connected returns false initially") {
+  TEST_CASE("is_connected returns false on construction") {
     TestClientImpl client;
     CHECK(client.is_connected() == false);
   }
@@ -84,46 +74,43 @@ TEST_SUITE("impl-ClientImpl - construction") {
     TestClientImpl client;
     CHECK(client.is_resp_type == false);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ClientImpl - detect_connected
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-ClientImpl - detect_connected") {
-  TEST_CASE("callback is stored and not called when not connected") {
+  TEST_CASE("is_interrupted returns false on construction") {
     TestClientImpl client;
+    CHECK(client.is_interrupted() == false);
+  }
 
+  TEST_CASE("detect_connected callback not called when not connected") {
+    TestClientImpl client;
     bool called = false;
     client.detect_connected([&](bool) { called = true; });
-
     CHECK(called == false);
   }
 
-  TEST_CASE("callback fires immediately if already connected") {
+  TEST_CASE("detect_connected callback fires immediately when already connected") {
     TestClientImpl client;
     client.set_connected(true);
     client.update_connected();
 
     bool called = false;
-    bool connected_value = false;
-    client.detect_connected([&](bool connected) {
+    bool received = false;
+    client.detect_connected([&](bool v) {
       called = true;
-      connected_value = connected;
+      received = v;
     });
 
     CHECK(called == true);
-    CHECK(connected_value == true);
+    CHECK(received == true);
   }
 
-  TEST_CASE("callback fires when server appears after registration") {
+  TEST_CASE("detect_connected callback fires when server appears after registration") {
     TestClientImpl client;
-
     std::atomic_bool called{false};
-    std::atomic_bool connected_value{false};
-    client.detect_connected([&](bool connected) {
+    std::atomic_bool received{false};
+
+    client.detect_connected([&](bool v) {
       called = true;
-      connected_value = connected;
+      received = v;
     });
 
     CHECK(called == false);
@@ -132,56 +119,72 @@ TEST_SUITE("impl-ClientImpl - detect_connected") {
     client.update_connected();
 
     CHECK(called == true);
-    CHECK(connected_value == true);
+    CHECK(received == true);
   }
 
-  TEST_CASE("callback fires on disconnect") {
+  TEST_CASE("detect_connected callback fires on disconnect after connect") {
     TestClientImpl client;
+    int count = 0;
+    bool last = false;
+
     client.set_connected(true);
     client.update_connected();
 
-    int call_count = 0;
-    bool last_connected = false;
-    client.detect_connected([&](bool connected) {
-      ++call_count;
-      last_connected = connected;
+    client.detect_connected([&](bool v) {
+      ++count;
+      last = v;
     });
 
-    CHECK(call_count == 1);
-    CHECK(last_connected == true);
+    CHECK(count == 1);
+    CHECK(last == true);
 
     client.set_connected(false);
     client.update_connected();
 
-    CHECK(call_count == 2);
-    CHECK(last_connected == false);
+    CHECK(count == 2);
+    CHECK(last == false);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ClientImpl - wait_for_connected
-// ---------------------------------------------------------------------------
+  TEST_CASE("update_connected is no-op when state has not changed") {
+    TestClientImpl client;
+    int count = 0;
+    client.detect_connected([&](bool) { ++count; });
 
-TEST_SUITE("impl-ClientImpl - wait_for_connected") {
-  TEST_CASE("returns true immediately if connected") {
+    client.update_connected();
+
+    CHECK(count == 0);
+  }
+
+  TEST_CASE("update_connected fires callback on each state transition") {
+    TestClientImpl client;
+    int count = 0;
+    client.detect_connected([&](bool) { ++count; });
+
+    client.set_connected(true);
+    client.update_connected();
+    CHECK(count == 1);
+
+    client.set_connected(false);
+    client.update_connected();
+    CHECK(count == 2);
+  }
+
+  TEST_CASE("wait_for_connected returns true immediately when already connected") {
     TestClientImpl client;
     client.set_connected(true);
-
     CHECK(client.wait_for_connected(100ms) == true);
   }
 
-  TEST_CASE("returns false on timeout when not connected") {
+  TEST_CASE("wait_for_connected returns false on timeout when not connected") {
     TestClientImpl client;
-
     auto start = std::chrono::steady_clock::now();
     bool result = client.wait_for_connected(50ms);
     auto elapsed = std::chrono::steady_clock::now() - start;
-
     CHECK(result == false);
     CHECK(elapsed >= 40ms);
   }
 
-  TEST_CASE("returns true when server appears during wait") {
+  TEST_CASE("wait_for_connected returns true when server appears during wait") {
     TestClientImpl client;
 
     std::thread t([&]() {
@@ -192,83 +195,138 @@ TEST_SUITE("impl-ClientImpl - wait_for_connected") {
 
     bool result = client.wait_for_connected(500ms);
     t.join();
-
     CHECK(result == true);
   }
 
-  TEST_CASE("interrupt unblocks wait") {
-    TestClientImpl client;
-
-    std::thread t([&]() {
-      std::this_thread::sleep_for(20ms);
-      client.interrupt();
-    });
-
-    bool result = client.wait_for_connected(500ms);
-    t.join();
-
-    (void)result;
-
-    CHECK(client.is_interrupted() == true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: ClientImpl - update_connected
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-ClientImpl - update_connected") {
-  TEST_CASE("no-op when state has not changed") {
-    TestClientImpl client;
-
-    int call_count = 0;
-    client.detect_connected([&](bool) { ++call_count; });
-
-    client.update_connected();
-    CHECK(call_count == 0);
-  }
-
-  TEST_CASE("fires callback on state change") {
-    TestClientImpl client;
-
-    int call_count = 0;
-    client.detect_connected([&](bool) { ++call_count; });
-
-    client.set_connected(true);
-    client.update_connected();
-    CHECK(call_count == 1);
-
-    client.set_connected(false);
-    client.update_connected();
-    CHECK(call_count == 2);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: ClientImpl - interrupt
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-ClientImpl - interrupt") {
-  TEST_CASE("interrupt sets flag and notifies cv") {
+  TEST_CASE("interrupt sets interrupted flag") {
     TestClientImpl client;
     client.interrupt();
     CHECK(client.is_interrupted() == true);
   }
 
-  TEST_CASE("interrupt wakes blocked wait_for_connected") {
+  TEST_CASE("interrupt unblocks wait_for_connected") {
     TestClientImpl client;
+    std::atomic_bool done{false};
 
-    std::atomic_bool wait_done{false};
     std::thread t([&]() {
       client.wait_for_connected(-1ms);
-      wait_done = true;
+      done = true;
     });
 
     std::this_thread::sleep_for(20ms);
     client.interrupt();
-
     t.join();
-    CHECK(wait_done == true);
+
+    CHECK(done == true);
+    CHECK(client.is_interrupted() == true);
+  }
+
+  TEST_CASE("reset_interrupted clears the interrupted flag") {
+    TestClientImpl client;
+    client.interrupt();
+    CHECK(client.is_interrupted() == true);
+    client.reset_interrupted();
+    CHECK(client.is_interrupted() == false);
+  }
+
+  TEST_CASE("impl_type is kClient not other roles") {
+    TestClientImpl client;
+
+    CHECK_NE(client.impl_type, kPublisher);
+    CHECK_NE(client.impl_type, kSubscriber);
+    CHECK_NE(client.impl_type, kServer);
+    CHECK_EQ(client.impl_type, kClient);
+  }
+
+  TEST_CASE("set_property and get_property persist on client") {
+    TestClientImpl client;
+
+    client.set_property("timeout.ms", "500");
+    CHECK_EQ(client.get_property("timeout.ms"), "500");
+  }
+
+  TEST_CASE("get_property returns empty for unset key") {
+    TestClientImpl client;
+
+    CHECK(client.get_property("no.such.key").empty());
+  }
+
+  TEST_CASE("detect_connected fires on multiple transitions") {
+    TestClientImpl client;
+    std::vector<bool> events;
+
+    client.detect_connected([&](bool v) { events.push_back(v); });
+
+    client.set_connected(true);
+    client.update_connected();
+    client.set_connected(false);
+    client.update_connected();
+    client.set_connected(true);
+    client.update_connected();
+
+    REQUIRE_EQ(events.size(), 3u);
+    CHECK(events[0]);
+    CHECK_FALSE(events[1]);
+    CHECK(events[2]);
+  }
+
+  TEST_CASE("is_resp_type can be set and read back") {
+    TestClientImpl client;
+
+    client.is_resp_type = true;
+    CHECK(client.is_resp_type == true);
+
+    client.is_resp_type = false;
+    CHECK(client.is_resp_type == false);
+  }
+
+  TEST_CASE("concurrent update_connected calls do not crash") {
+    TestClientImpl client;
+    std::atomic<int> count{0};
+
+    client.detect_connected([&](bool) { count.fetch_add(1, std::memory_order_relaxed); });
+    client.set_connected(true);
+
+    std::vector<std::thread> threads;
+    threads.reserve(4);
+
+    for (int i = 0; i < 4; ++i) {
+      threads.emplace_back([&] { client.update_connected(); });
+    }
+
+    for (auto& t : threads) {
+      t.join();
+    }
+
+    CHECK(count.load() >= 1);
+  }
+
+  TEST_CASE("wait_for_connected with infinite timeout unblocks on interrupt") {
+    TestClientImpl client;
+    std::atomic<bool> returned{false};
+
+    std::thread t([&] {
+      client.wait_for_connected(-1ms);
+      returned.store(true, std::memory_order_release);
+    });
+
+    std::this_thread::sleep_for(30ms);
+    client.interrupt();
+    t.join();
+
+    CHECK(returned.load(std::memory_order_acquire));
+    CHECK(client.is_interrupted());
+  }
+
+  TEST_CASE("call always returns false in base implementation") {
+    TestClientImpl client;
+    Bytes req;
+    bool called = false;
+
+    bool ok = client.call(req, [&](const Bytes&) { called = true; }, 100ms);
+
+    CHECK_FALSE(ok);
+    CHECK_FALSE(called);
   }
 }
 

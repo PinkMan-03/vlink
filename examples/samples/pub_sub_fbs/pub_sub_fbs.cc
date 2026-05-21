@@ -21,17 +21,31 @@
  * limitations under the License.
  */
 
-/**
- * @file pub_sub_fbs.cc
- * @brief DDS-C + FlatBuffers event sample based on an e-commerce user/order schema.
- *
- * The sample focuses on the VLink Event model:
- *   - Publisher<UserT> publishes FlatBuffers Object API values.
- *   - Subscriber<User*> receives zero-copy FlatBuffers pointers.
- *
- * The generated schema lives in fbs/helloworld.fbs and models a nested User ->
- * Profile -> Address / Order / Item structure.
- */
+// DDS-C + FlatBuffers pub/sub sample with a non-trivial schema.
+//
+// Two roles in one binary, picked by argv[1]:
+//   sub  -- Subscriber<hw::User*> consumes events with zero-copy reads.
+//   pub  -- Publisher<hw::UserT>  emits Object-API values every 500 ms.
+//
+// The User schema contains nested tables (Profile, Address, Vec2), strings,
+// vectors of strings, and a vector of nested Orders -- this exercises the
+// FlatBuffers (de)serialization path far more thoroughly than the trivial
+// helloworld schema. The key learning point is the deliberate asymmetric
+// templating:
+//
+//   Publisher<hw::UserT>   -- Object API (NativeTable). UserT owns its members
+//                              via std::unique_ptr / std::string / std::vector,
+//                              making construction trivial; VLink packs it into
+//                              a FlatBuffers buffer on publish().
+//   Subscriber<hw::User*>  -- Table pointer (kFlatPtrType). Reads accessors
+//                              directly on the wire buffer with NO copy /
+//                              NO unpacking. The pointer is ONLY valid inside
+//                              the callback; capturing it for later use is a
+//                              use-after-free.
+//
+// Typical engineering scenario: high-frequency telemetry where the sender
+// builds rich nested objects from app state and many subscribers need the
+// lowest possible per-message CPU cost on the read side.
 
 #include <vlink/base/condition_variable.h>
 #include <vlink/base/logger.h>
@@ -50,19 +64,20 @@
 #include "helloworld_generated.h"
 #endif
 
-using namespace vlink;                 // NOLINT(build/namespaces, google-build-using-namespace)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
 namespace hw = Helloworld::fbs;
 
-namespace {
-
 constexpr auto kEventUrl = "ddsc://samples/pub_sub_fbs/user";
 constexpr uint32_t kPublishIntervalMs = 500U;
 
-const char* safe_c_str(const flatbuffers::String* value) { return value ? value->c_str() : ""; }
+// Null-safe accessor for FlatBuffers string fields (returns "" instead of UB).
+static const char* safe_c_str(const flatbuffers::String* value) { return value ? value->c_str() : ""; }
 
-std::unique_ptr<hw::ItemT> make_item(const std::string& sku, const std::string& name, float price, int quantity) {
+// Build one Item NativeTable. Returns unique_ptr because OrderT owns items by
+// unique_ptr for FlatBuffers Object-API parity.
+static std::unique_ptr<hw::ItemT> make_item(const std::string& sku, const std::string& name, float price,
+                                            int quantity) {
   auto item = std::make_unique<hw::ItemT>();
   item->sku = sku;
   item->name = name;
@@ -71,7 +86,8 @@ std::unique_ptr<hw::ItemT> make_item(const std::string& sku, const std::string& 
   return item;
 }
 
-std::unique_ptr<hw::OrderT> make_order(uint64_t seq) {
+// Build one Order with two child items. Status rotates to exercise the enum.
+static std::unique_ptr<hw::OrderT> make_order(uint64_t seq) {
   auto order = std::make_unique<hw::OrderT>();
   order->order_id = "ORDER-20260409-" + std::to_string(seq);
 
@@ -100,7 +116,10 @@ std::unique_ptr<hw::OrderT> make_order(uint64_t seq) {
   return order;
 }
 
-hw::UserT make_user(uint64_t seq) {
+// Assemble a User NativeTable with nested profile / address / location / tags
+// and one child order. All allocations are owned by user (via unique_ptr) so
+// destruction at scope-exit is straightforward.
+static hw::UserT make_user(uint64_t seq) {
   hw::UserT user;
   user.user_id = 10000 + seq;
   user.name = "user_" + std::to_string(seq);
@@ -123,7 +142,10 @@ hw::UserT make_user(uint64_t seq) {
   return user;
 }
 
-void print_user_summary(const hw::User* user) {
+// Read-only walk over a received User Table. Every accessor returns a raw
+// pointer into the wire buffer -- valid only for the duration of the callback
+// that owns it (the Subscriber callback below).
+static void print_user_summary(const hw::User* user) {
   if (!user) {
     VLOG_W("[Subscriber] null User pointer.");
     return;
@@ -153,26 +175,27 @@ void print_user_summary(const hw::User* user) {
            " item_count=", items ? items->size() : 0);
   }
 }
-
-}  // namespace
-
 int run_sub() {
   std::atomic_int received_count{0};
 
-  // Subscriber uses FlatBuffers pointer type, so fields are read directly from
-  // the received buffer without unpacking into an intermediate UserT object.
-  Subscriber<hw::User*> sub(kEventUrl);
+  // Subscriber<hw::User*>: zero-copy read pointer. The framework hands back a
+  // FlatBuffers Table pointer that aliases the inbound buffer -- no UserT
+  // allocation, no field copy. Pointer lifetime = callback scope.
+  vlink::Subscriber<hw::User*> sub(kEventUrl);
   sub.listen([&received_count](const hw::User* user) {
     int current = received_count.fetch_add(1) + 1;
     VLOG_I("[Subscriber] received #", current);
+    // Safe: print_user_summary is fully synchronous within the callback.
     print_user_summary(user);
   });
 
+  // Park on a condition variable until Ctrl+C; the signal handler only
+  // notify_one()s, which is async-signal-safe-compatible with our cv.
   std::mutex mtx;
   std::unique_lock lock(mtx);
   vlink::ConditionVariable cv;
 
-  Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });
+  vlink::Utils::register_terminate_signal([&cv](int) { cv.notify_one(); });
 
   VLOG_I("[Subscriber] listening on ", kEventUrl, ", press Ctrl+C to quit.");
   cv.wait(lock);
@@ -183,20 +206,25 @@ int run_sub() {
 }
 
 int run_pub() {
-  // Publisher uses the Object API type because UserT is easier to construct and
-  // VLink will serialize it into FlatBuffers bytes automatically.
-  MessageLoop message_loop;
-  Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
+  // Publisher<hw::UserT>: Object API value type. We build a fully-populated
+  // UserT, hand it to publish(), and VLink serializes it into a FlatBuffers
+  // buffer transparently. Easier to write than building a flatbuffers builder
+  // by hand, at the cost of one pack step per publish.
+  vlink::MessageLoop message_loop;
+  vlink::Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
 
-  Publisher<hw::UserT> pub(kEventUrl);
+  vlink::Publisher<hw::UserT> pub(kEventUrl);
   uint64_t publish_seq = 0;
 
   VLOG_I("[Publisher] start timer on ", kEventUrl, ", publish every ", kPublishIntervalMs, "ms, press Ctrl+C to quit.");
 
-  Timer timer;
+  // Periodic timer ticks on the MessageLoop thread; the lambda captures pub
+  // and the sequence counter by reference. publish() returns false if no
+  // subscriber is matched -- still safe to call.
+  vlink::Timer timer;
   timer.attach(&message_loop);
   timer.set_interval(kPublishIntervalMs);
-  timer.set_loop_count(Timer::kInfinite);
+  timer.set_loop_count(vlink::Timer::kInfinite);
   timer.start([&pub, &publish_seq]() {
     ++publish_seq;
     auto user = make_user(publish_seq);

@@ -21,88 +21,80 @@
  * limitations under the License.
  */
 
-// Example: Logger basic usage - initialization, 4 styles, all levels, level control
-
 #include <vlink/base/logger.h>
 
+// -----------------------------------------------------------------------------
+// Logger basic example
+//
+// Module:   vlink/base/logger.h
+// Scenario: Walk every public logging entry-point shipped with VLink. Four
+//           macro families are exercised:
+//             VLOG_*   stream-concat style: VLOG_I("x=", x, " y=", y);
+//             MLOG_*   {fmt}-style format:   MLOG_I("x={} y={}", x, y);
+//             CLOG_*   printf-style:         CLOG_I("x=%d y=%d", x, y);
+//             SLOG_*   RAII ostream:         SLOG_I << "x=" << x;
+//           All four route through the same backend; pick whichever reads
+//           best at the call-site. Console and file levels are independent;
+//           set_console_level / set_file_level demote-or-promote at runtime.
+// -----------------------------------------------------------------------------
 int main() {
-  // 1. Initialize the logger with an application name and optional log file path.
   vlink::Logger::init("logger_basic_demo", "/tmp/vlink_logger_basic.log");
-
-  // 2. Set console and file output levels.
-  //    Messages below this level will be filtered out for the respective sink.
   vlink::Logger::set_console_level(vlink::Logger::kTrace);
   vlink::Logger::set_file_level(vlink::Logger::kInfo);
 
-  // ---------------------------------------------------------------
-  // 3. Stream style (VLOG_*) - uses operator<< composition via FastStream.
-  //    Zero heap allocation; ideal for simple concatenation.
-  // ---------------------------------------------------------------
-  VLOG_T("Stream style [Trace]: counter=", 0, " name=", "alpha");
-  VLOG_D("Stream style [Debug]: temperature=", 23.5, " unit=C");
-  VLOG_I("Stream style [Info]: application started successfully");
-  VLOG_W("Stream style [Warn]: disk usage is high, used=", 91, "%");
-  VLOG_E("Stream style [Error]: failed to open config file");
+  // VLOG_* -- stream-concat. Each argument is converted via operator<<;
+  // works with any type with an ostream overload (incl. Bytes, Uuid, ...).
+  VLOG_T("stream [T]: counter=", 0, " name=", "alpha");
+  VLOG_D("stream [D]: temperature=", 23.5, " unit=C");
+  VLOG_I("stream [I]: application started");
+  VLOG_W("stream [W]: disk usage=", 91, "%");
+  VLOG_E("stream [E]: failed to open config");
 
-  // ---------------------------------------------------------------
-  // 4. Format style (MLOG_*) - uses Python-style {} placeholders.
-  //    Powered by vlink::format (similar to fmt/std::format).
-  // ---------------------------------------------------------------
-  MLOG_T("Format style [Trace]: value={}, label={}", 42, "beta");
-  MLOG_D("Format style [Debug]: elapsed={}ms", 150);
-  MLOG_I("Format style [Info]: connected to host={}, port={}", "192.168.1.1", 8080);
-  MLOG_W("Format style [Warn]: retry attempt {}/{}", 3, 5);
-  MLOG_E("Format style [Error]: timeout after {}ms", 5000);
+  // MLOG_* -- {fmt}-style. Compile-time format string checking when fmt is
+  // built with FMT_ENFORCE_COMPILE_STRING; preferred for typed formatting.
+  MLOG_T("format [T]: value={}, label={}", 42, "beta");
+  MLOG_D("format [D]: elapsed={}ms", 150);
+  MLOG_I("format [I]: connected to host={}, port={}", "192.168.1.1", 8080);
+  MLOG_W("format [W]: retry {}/{}", 3, 5);
+  MLOG_E("format [E]: timeout after {}ms", 5000);
 
-  // ---------------------------------------------------------------
-  // 5. C style (CLOG_*) - uses printf-style %d/%s format specifiers.
-  //    Calls std::snprintf internally.
-  // ---------------------------------------------------------------
-  CLOG_T("C style [Trace]: index=%d, tag=%s", 7, "gamma");
-  CLOG_D("C style [Debug]: ratio=%.2f", 3.14);
-  CLOG_I("C style [Info]: PID=%d started", 12345);
-  CLOG_W("C style [Warn]: memory usage=%d%%", 85);
-  CLOG_E("C style [Error]: errno=%d (%s)", 2, "No such file or directory");
+  // CLOG_* -- printf-style. Useful when porting legacy code; no type safety
+  // beyond the compiler's format-string checker.
+  CLOG_T("c [T]: index=%d, tag=%s", 7, "gamma");
+  CLOG_D("c [D]: ratio=%.2f", 3.14);
+  CLOG_I("c [I]: PID=%d started", 12345);
+  CLOG_W("c [W]: memory usage=%d%%", 85);
+  CLOG_E("c [E]: errno=%d (%s)", 2, "No such file or directory");
 
-  // ---------------------------------------------------------------
-  // 6. RAII stream style (SLOG_*) - uses WrapperStream with operator<<.
-  //    The message is flushed when the temporary object is destroyed.
-  // ---------------------------------------------------------------
-  SLOG_T << "RAII stream [Trace]: id=" << 100 << " status=ok";
-  SLOG_D << "RAII stream [Debug]: x=" << 1.5 << " y=" << 2.5;
-  SLOG_I << "RAII stream [Info]: initialization complete";
-  SLOG_W << "RAII stream [Warn]: connection unstable";
-  SLOG_E << "RAII stream [Error]: data corruption detected";
+  // SLOG_* -- RAII stream that flushes on destruction. Convenient for code
+  // that already produces an ostream chain; the temporary destructs at the
+  // end of the full-expression (semicolon), so a single SLOG_X << ... is
+  // emitted as one log line.
+  SLOG_T << "raii [T]: id=" << 100 << " status=ok";
+  SLOG_D << "raii [D]: x=" << 1.5 << " y=" << 2.5;
+  SLOG_I << "raii [I]: init complete";
+  SLOG_W << "raii [W]: connection unstable";
+  SLOG_E << "raii [E]: data corruption detected";
 
-  // ---------------------------------------------------------------
-  // 7. Demonstrate dynamic level switching at runtime.
-  //    Raise console level to kWarn so Trace/Debug/Info are suppressed.
-  // ---------------------------------------------------------------
-  VLOG_I("--- Raising console level to kWarn ---");
+  // Dynamic console level: only messages >= the configured level reach the
+  // console sink. File sink is independent so we can keep verbose audit
+  // logs on disk while keeping the console quiet.
+  VLOG_I("--- raising console level to kWarn ---");
   vlink::Logger::set_console_level(vlink::Logger::kWarn);
+  VLOG_D("debug suppressed on console");
+  VLOG_I("info suppressed on console");
+  VLOG_W("warn still shown on console");
+  VLOG_E("error still shown on console");
 
-  VLOG_D("This Debug message will NOT appear on console");
-  VLOG_I("This Info message will NOT appear on console");
-  VLOG_W("This Warn message WILL appear on console");
-  VLOG_E("This Error message WILL appear on console");
-
-  // Restore console level to kTrace for subsequent messages.
   vlink::Logger::set_console_level(vlink::Logger::kTrace);
-  VLOG_I("Console level restored to kTrace");
 
-  // ---------------------------------------------------------------
-  // 8. Demonstrate set_file_level to control file output granularity.
-  // ---------------------------------------------------------------
+  // Dynamic file level: tighten the file sink to errors only; INFO lines
+  // still reach the console but no longer get persisted.
   vlink::Logger::set_file_level(vlink::Logger::kError);
-  VLOG_I("This Info message goes to console but NOT to file");
-  VLOG_E("This Error message goes to BOTH console and file");
+  VLOG_I("info -> console only, not file");
+  VLOG_E("error -> both console and file");
 
-  // ---------------------------------------------------------------
-  // 9. Flush the logger to ensure all buffered messages are written.
-  // ---------------------------------------------------------------
   vlink::Logger::flush();
-
   VLOG_I("Logger basic example finished.");
-
   return 0;
 }

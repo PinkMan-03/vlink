@@ -21,6 +21,15 @@
  * limitations under the License.
  */
 
+// DDS-C (Cyclone DDS) + Protobuf sample.
+//
+// Same shape as dds_idl.cc but uses the ddsc:// transport (Cyclone DDS) and
+// Protobuf message types. VLink's serializer trait auto-detects pb::Message
+// classes and uses Protobuf wire format -- no DdsConf::register_url required
+// because the framework wraps Protobuf into an opaque CDR-compatible payload.
+// Typical engineering scenario: Cyclone-DDS-based system where teams prefer
+// Protobuf schemas (versioning, ecosystem tooling) over native DDS IDL.
+
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
@@ -32,21 +41,22 @@
 #include "ddsc_proto.pb.h"
 #endif
 
-using namespace vlink;                 // NOLINT(build/namespaces, google-build-using-namespace)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
 int main() {
-  // Method
-  Server<pb::Request, pb::Response> server("ddsc://phone/method");
+  // ======== Method model (RPC) ========
+  vlink::Server<pb::Request, pb::Response> server("ddsc://phone/method");
 
+  // Callback fires on a Cyclone DDS worker thread per request.
   server.listen([](const pb::Request& req, pb::Response& res) {
     if (req.type() == 10086) {
       res.set_value("calling...");
     }
   });
 
-  Client<pb::Request, pb::Response> client("ddsc://phone/method");
+  vlink::Client<pb::Request, pb::Response> client("ddsc://phone/method");
 
+  // Reports Cyclone DDS discovery match transitions.
   client.detect_connected([](bool connected) { VLOG_I("server status:", connected); });
 
   pb::Request req;
@@ -58,12 +68,14 @@ int main() {
     VLOG_I("status:", resp.value().value());
   }
 
-  // Event
-  Subscriber<pb::Message> sub("ddsc://phone/event");
+  // ======== Event model (Pub/Sub) ========
+  vlink::Subscriber<pb::Message> sub("ddsc://phone/event");
+  // Generic-lambda style callback; receives by const-ref.
   sub.listen([](const auto& msg) { VLOG_I("timestamp:", msg.value()); });
 
-  Publisher<pb::Message> pub("ddsc://phone/event");
+  vlink::Publisher<pb::Message> pub("ddsc://phone/event");
   pb::Message msg;
+  // Block until at least one subscriber matched, so the first publish is not lost.
   pub.wait_for_subscribers();
 
   msg.set_value("00:00");

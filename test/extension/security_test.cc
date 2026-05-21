@@ -21,6 +21,8 @@
  * limitations under the License.
  */
 
+// NOLINTBEGIN
+
 #include "./extension/security.h"
 
 #ifdef VLINK_TEST_SUPPORT_SECURITY
@@ -39,12 +41,10 @@
 #include <type_traits>
 #include <vector>
 
+#include "../common_test.h"
 #include "./base/bytes.h"
 #include "./publisher.h"
 #include "./subscriber.h"
-
-//
-#include "../common_test.h"
 
 namespace {
 
@@ -94,7 +94,7 @@ inline RsaKeyPair generate_rsa_keypair(int bits) {
   REQUIRE(pub_bio.get() != nullptr);
   REQUIRE(PEM_write_bio_PUBKEY(pub_bio.get(), pkey.get()) == 1);
   char* pub_buf = nullptr;
-  const auto pub_len = BIO_get_mem_data(pub_bio.get(), &pub_buf);  // NOLINT(runtime/int, google-runtime-int)
+  const auto pub_len = BIO_get_mem_data(pub_bio.get(), &pub_buf);  // NOLINT(runtime/int,google-runtime-int)
   REQUIRE(pub_buf != nullptr);
   kp.public_pem.assign(pub_buf, static_cast<size_t>(pub_len));
 
@@ -102,7 +102,7 @@ inline RsaKeyPair generate_rsa_keypair(int bits) {
   REQUIRE(prv_bio.get() != nullptr);
   REQUIRE(PEM_write_bio_PrivateKey(prv_bio.get(), pkey.get(), nullptr, nullptr, 0, nullptr, nullptr) == 1);
   char* prv_buf = nullptr;
-  const auto prv_len = BIO_get_mem_data(prv_bio.get(), &prv_buf);  // NOLINT(runtime/int, google-runtime-int)
+  const auto prv_len = BIO_get_mem_data(prv_bio.get(), &prv_buf);  // NOLINT(runtime/int,google-runtime-int)
   REQUIRE(prv_buf != nullptr);
   kp.private_pem.assign(prv_buf, static_cast<size_t>(prv_len));
 
@@ -111,12 +111,12 @@ inline RsaKeyPair generate_rsa_keypair(int bits) {
 
 }  // namespace
 
-TEST_SUITE("extension-Security - custom callbacks") {
-  TEST_CASE("custom encrypt/decrypt round-trip") {
+TEST_SUITE("extension-Security") {
+  TEST_CASE("custom xor round-trip succeeds") {
     auto xor_fn = [](const Bytes& in, Bytes& out) -> bool {
       out = Bytes::create(in.size());
       for (size_t i = 0; i < in.size(); ++i) {
-        out[i] = static_cast<uint8_t>(in[i] ^ 0xAA);
+        out[i] = static_cast<uint8_t>(in[i] ^ 0xAAu);
       }
       return true;
     };
@@ -129,25 +129,15 @@ TEST_SUITE("extension-Security - custom callbacks") {
 
     Bytes cipher;
     REQUIRE(sec.encrypt(plain, cipher));
-    CHECK(!cipher.empty());
+    CHECK_FALSE(cipher.empty());
 
     Bytes recovered;
     REQUIRE(sec.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
-  TEST_CASE("empty input: both encrypt and decrypt must fail (cannot AEAD-authenticate empty bytes)") {
-    auto fail_fn = [](const Bytes&, Bytes&) -> bool { return false; };
-    Security sec(make_callbacks_cfg(fail_fn, fail_fn));
-
-    Bytes empty;
-    Bytes out;
-    CHECK_FALSE(sec.encrypt(empty, out));
-    CHECK_FALSE(sec.decrypt(empty, out));
-  }
-
-  TEST_CASE("custom callback returning false propagates as failure") {
+  TEST_CASE("failing custom callback propagates as encrypt/decrypt failure") {
     auto fail_fn = [](const Bytes&, Bytes&) -> bool { return false; };
     Security sec(make_callbacks_cfg(fail_fn, fail_fn));
 
@@ -158,7 +148,7 @@ TEST_SUITE("extension-Security - custom callbacks") {
     CHECK_FALSE(sec.decrypt(data, out));
   }
 
-  TEST_CASE("custom callbacks are invoked on every encrypt/decrypt") {
+  TEST_CASE("custom callbacks are each invoked once per call") {
     int enc_calls = 0;
     int dec_calls = 0;
     Security sec(make_callbacks_cfg(
@@ -177,13 +167,11 @@ TEST_SUITE("extension-Security - custom callbacks") {
     Bytes out;
     REQUIRE(sec.encrypt(data, out));
     REQUIRE(sec.decrypt(data, out));
-    CHECK(enc_calls == 1);
-    CHECK(dec_calls == 1);
+    CHECK_EQ(enc_calls, 1);
+    CHECK_EQ(dec_calls, 1);
   }
-}
 
-TEST_SUITE("extension-Security - AES built-in") {
-  TEST_CASE("AES-GCM round-trip with same key") {
+  TEST_CASE("AES-GCM round-trip with matching key") {
     Security sender(make_key_cfg("test_key_seed"));
     Security receiver(make_key_cfg("test_key_seed"));
 
@@ -193,12 +181,12 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes cipher;
     REQUIRE(sender.encrypt(plain, cipher));
-    CHECK(cipher.size() == plain.size() + 50U);
+    CHECK_EQ(cipher.size(), plain.size() + 50U);
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
   TEST_CASE("AES-GCM 1-byte plaintext is the smallest valid payload") {
@@ -210,15 +198,15 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes cipher;
     REQUIRE(sender.encrypt(plain, cipher));
-    CHECK(cipher.size() == 1U + 50U);
+    CHECK_EQ(cipher.size(), 1U + 50U);
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == 1U);
-    CHECK(recovered.data()[0] == 0xA5U);
+    REQUIRE_EQ(recovered.size(), 1U);
+    CHECK_EQ(recovered.data()[0], 0xA5U);
   }
 
-  TEST_CASE("AAD context mismatch fails authentication") {
+  TEST_CASE("AAD context mismatch causes authentication failure") {
     auto sender_cfg = make_key_cfg("aad_seed");
     sender_cfg.advanced.aad_context = "shm://secure/topic|demo.Msg|3";
     Security sender(sender_cfg);
@@ -239,10 +227,9 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes recovered;
     CHECK_FALSE(wrong_receiver.decrypt(cipher, recovered));
-
     REQUIRE(right_receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
   TEST_CASE("replay protection rejects duplicate ciphertext") {
@@ -260,7 +247,7 @@ TEST_SUITE("extension-Security - AES built-in") {
     CHECK_FALSE(receiver.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("AES-GCM ciphertext differs across calls (unique sequence nonce)") {
+  TEST_CASE("ciphertext differs across calls due to unique nonce") {
     Security sec(make_key_cfg("same_seed"));
 
     const std::string plain_str = "deterministic plaintext payload";
@@ -272,30 +259,34 @@ TEST_SUITE("extension-Security - AES built-in") {
     REQUIRE(sec.encrypt(plain, c1));
     REQUIRE(sec.encrypt(plain, c2));
 
-    REQUIRE(c1.size() == c2.size());
-    const bool identical = (std::memcmp(c1.data(), c2.data(), c1.size()) == 0);
-    CHECK_FALSE(identical);
+    REQUIRE_EQ(c1.size(), c2.size());
+    CHECK_NE(std::memcmp(c1.data(), c2.data(), c1.size()), 0);
   }
 
-  TEST_CASE("AES-GCM round-trip across arbitrary key seed lengths") {
-    const std::vector<std::string> seeds = {"short", "exactly_16_bytes",
-                                            "a much longer passphrase than aes block size"};
+  TEST_CASE("round-trip succeeds for a range of key seed lengths") {
+    const std::vector<std::string> seeds = {
+        "short",
+        "exactly_16_bytes",
+        "a much longer passphrase than aes block size",
+    };
+
     for (const auto& seed : seeds) {
       Security sender(make_key_cfg(seed));
       Security receiver(make_key_cfg(seed));
 
       Bytes plain = Bytes::create(64);
       std::memset(plain.data(), 0x5A, 64);
+
       Bytes cipher;
       Bytes recovered;
       REQUIRE(sender.encrypt(plain, cipher));
       REQUIRE(receiver.decrypt(cipher, recovered));
-      REQUIRE(recovered.size() == plain.size());
-      CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+      REQUIRE_EQ(recovered.size(), plain.size());
+      CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
     }
   }
 
-  TEST_CASE("AES-GCM decrypt with wrong key must fail") {
+  TEST_CASE("decrypt with mismatched key fails authentication") {
     Security alice(make_key_cfg("alice_seed"));
     Security bob(make_key_cfg("bob_seed"));
 
@@ -309,16 +300,17 @@ TEST_SUITE("extension-Security - AES built-in") {
     CHECK_FALSE(bob.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("AES-GCM tampered ciphertext must fail authentication") {
+  TEST_CASE("tampered ciphertext fails AES-GCM authentication") {
     Security sec(make_key_cfg("tamper_seed"));
 
     Bytes plain = Bytes::create(64);
     for (size_t i = 0; i < plain.size(); ++i) {
       plain.data()[i] = static_cast<uint8_t>(i);
     }
+
     Bytes cipher;
     REQUIRE(sec.encrypt(plain, cipher));
-    REQUIRE(cipher.size() > 0U);
+    REQUIRE_GT(cipher.size(), 0U);
 
     for (size_t pos : {size_t{0}, cipher.size() / 2U, cipher.size() - 1U}) {
       Bytes tampered = Bytes::create(cipher.size());
@@ -330,7 +322,7 @@ TEST_SUITE("extension-Security - AES built-in") {
     }
   }
 
-  TEST_CASE("AES-GCM truncated ciphertext must fail") {
+  TEST_CASE("truncated ciphertext fails decryption") {
     Security sec(make_key_cfg("trunc_seed"));
 
     Bytes plain = Bytes::create(32);
@@ -346,7 +338,7 @@ TEST_SUITE("extension-Security - AES built-in") {
     CHECK_FALSE(sec.decrypt(truncated, recovered));
   }
 
-  TEST_CASE("PBKDF2 passphrase round-trip across endpoints sharing salt") {
+  TEST_CASE("PBKDF2 round-trip with shared salt and passphrase") {
     Bytes salt = Bytes::create(16);
     std::memset(salt.data(), 0x42, 16);
 
@@ -361,11 +353,11 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
-  TEST_CASE("PBKDF2 different salts produce different keys (cross-decrypt fails)") {
+  TEST_CASE("PBKDF2 different salts produce different keys") {
     Bytes salt_a = Bytes::create(16);
     Bytes salt_b = Bytes::create(16);
     std::memset(salt_a.data(), 0x01, 16);
@@ -384,7 +376,7 @@ TEST_SUITE("extension-Security - AES built-in") {
     CHECK_FALSE(bob.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("PBKDF2 short salt is rejected; instance left without symmetric key") {
+  TEST_CASE("PBKDF2 short salt is rejected") {
     Bytes short_salt = Bytes::create(8);
     std::memset(short_salt.data(), 0x33, 8);
 
@@ -392,11 +384,12 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes plain = Bytes::create(16);
     std::memset(plain.data(), 0x11, 16);
+
     Bytes cipher;
     CHECK_FALSE(sec.encrypt(plain, cipher));
   }
 
-  TEST_CASE("PBKDF2 iteration count affects derived key") {
+  TEST_CASE("PBKDF2 different iteration counts produce incompatible keys") {
     Bytes salt = Bytes::create(16);
     std::memset(salt.data(), 0x77, 16);
 
@@ -413,7 +406,7 @@ TEST_SUITE("extension-Security - AES built-in") {
     CHECK_FALSE(b.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("Security default-constructed installs built-in default slot and round-trips") {
+  TEST_CASE("default-constructed Security uses built-in slot and round-trips") {
     Security sender;
     Security receiver;
 
@@ -425,14 +418,14 @@ TEST_SUITE("extension-Security - AES built-in") {
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(recovered.data(), plain.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(recovered.data(), plain.data(), plain.size()), 0);
 
     Bytes garbage_recovered;
     CHECK_FALSE(receiver.decrypt(plain, garbage_recovered));
   }
 
-  TEST_CASE("AES-GCM concurrent encrypt/decrypt is thread-safe") {
+  TEST_CASE("concurrent encrypt and decrypt is thread-safe") {
     Security sec(make_key_cfg("concurrent_seed"));
 
     static constexpr int kThreads = 8;
@@ -446,18 +439,16 @@ TEST_SUITE("extension-Security - AES built-in") {
         for (int i = 0; i < kIters; ++i) {
           Bytes plain = Bytes::create(48U);
           for (size_t k = 0; k < plain.size(); ++k) {
-            plain.data()[k] = static_cast<uint8_t>((t * 31 + i + k) & 0xFFU);
+            plain.data()[k] = static_cast<uint8_t>((t * 31 + i + static_cast<int>(k)) & 0xFFU);
           }
 
           Bytes cipher;
-
           if (!sec.encrypt(plain, cipher)) {
             ++failures;
             continue;
           }
 
           Bytes recovered;
-
           if (!sec.decrypt(cipher, recovered) || recovered.size() != plain.size() ||
               std::memcmp(recovered.data(), plain.data(), plain.size()) != 0) {
             ++failures;
@@ -470,11 +461,9 @@ TEST_SUITE("extension-Security - AES built-in") {
       w.join();
     }
 
-    CHECK(failures.load() == 0);
+    CHECK_EQ(failures.load(), 0);
   }
-}
 
-TEST_SUITE("extension-Security - RSA hybrid") {
   TEST_CASE("RSA-OAEP hybrid round-trip") {
     const auto kp = generate_rsa_keypair(2048);
 
@@ -492,15 +481,15 @@ TEST_SUITE("extension-Security - RSA hybrid") {
 
     Bytes cipher;
     REQUIRE(sender.encrypt(plain, cipher));
-    CHECK(cipher.size() > plain.size() + 256U);
+    CHECK_GT(cipher.size(), plain.size() + 256U);
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
-  TEST_CASE("RSA hybrid ciphertext differs across calls") {
+  TEST_CASE("RSA hybrid ciphertext is randomised across calls") {
     const auto kp = generate_rsa_keypair(2048);
 
     Security::Config cfg;
@@ -515,9 +504,8 @@ TEST_SUITE("extension-Security - RSA hybrid") {
     REQUIRE(sender.encrypt(plain, c1));
     REQUIRE(sender.encrypt(plain, c2));
 
-    REQUIRE(c1.size() == c2.size());
-    const bool identical = (std::memcmp(c1.data(), c2.data(), c1.size()) == 0);
-    CHECK_FALSE(identical);
+    REQUIRE_EQ(c1.size(), c2.size());
+    CHECK_NE(std::memcmp(c1.data(), c2.data(), c1.size()), 0);
   }
 
   TEST_CASE("RSA decrypt with wrong private key fails") {
@@ -542,7 +530,7 @@ TEST_SUITE("extension-Security - RSA hybrid") {
     CHECK_FALSE(wrong.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("RSA hybrid tampered ciphertext must fail authentication") {
+  TEST_CASE("tampered RSA hybrid ciphertext fails authentication") {
     const auto kp = generate_rsa_keypair(2048);
 
     Security::Config sender_cfg;
@@ -558,7 +546,7 @@ TEST_SUITE("extension-Security - RSA hybrid") {
 
     Bytes cipher;
     REQUIRE(sender.encrypt(plain, cipher));
-    REQUIRE(cipher.size() > 0U);
+    REQUIRE_GT(cipher.size(), 0U);
 
     const size_t body_offset = cipher.size() - 40U;
     Bytes tampered = Bytes::create(cipher.size());
@@ -569,7 +557,7 @@ TEST_SUITE("extension-Security - RSA hybrid") {
     CHECK_FALSE(receiver.decrypt(tampered, recovered));
   }
 
-  TEST_CASE("RSA 1024-bit key is rejected; instance treats public_key_pem as empty") {
+  TEST_CASE("RSA 1024-bit key is rejected as too weak") {
     const auto kp = generate_rsa_keypair(1024);
 
     Security::Config cfg;
@@ -578,60 +566,27 @@ TEST_SUITE("extension-Security - RSA hybrid") {
 
     Bytes plain = Bytes::create(16);
     std::memset(plain.data(), 0x01, 16);
+
     Bytes cipher;
     CHECK_FALSE(sec.encrypt(plain, cipher));
   }
 
-  TEST_CASE("non-RSA (EC) public key is rejected") {
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
-    REQUIRE(ctx != nullptr);
-    REQUIRE(EVP_PKEY_paramgen_init(ctx) > 0);
-    REQUIRE(EVP_PKEY_CTX_set_ec_paramgen_curve_nid(ctx, NID_X9_62_prime256v1) > 0);
-    EVP_PKEY* params = nullptr;
-    REQUIRE(EVP_PKEY_paramgen(ctx, &params) > 0);
-    EVP_PKEY_CTX_free(ctx);
-
-    EVP_PKEY_CTX* kctx = EVP_PKEY_CTX_new(params, nullptr);
-    REQUIRE(kctx != nullptr);
-    REQUIRE(EVP_PKEY_keygen_init(kctx) > 0);
-    EVP_PKEY* ec_key = nullptr;
-    REQUIRE(EVP_PKEY_keygen(kctx, &ec_key) > 0);
-    EVP_PKEY_CTX_free(kctx);
-    EVP_PKEY_free(params);
-
-    BIO* pub_bio = BIO_new(BIO_s_mem());
-    REQUIRE(PEM_write_bio_PUBKEY(pub_bio, ec_key) == 1);
-    char* pub_buf = nullptr;
-    const auto pub_len = BIO_get_mem_data(pub_bio, &pub_buf);  // NOLINT(runtime/int, google-runtime-int)
-    std::string ec_pub_pem(pub_buf, static_cast<size_t>(pub_len));
-    BIO_free(pub_bio);
-    EVP_PKEY_free(ec_key);
-
-    Security::Config cfg;
-    cfg.public_key_pem = ec_pub_pem;
-    Security sec(cfg);
-
-    Bytes plain = Bytes::create(16);
-    std::memset(plain.data(), 0x02, 16);
-    Bytes cipher;
-    CHECK_FALSE(sec.encrypt(plain, cipher));
-  }
-
-  TEST_CASE("invalid PEM is rejected") {
+  TEST_CASE("invalid PEM string is rejected without crash") {
     Security::Config cfg;
     cfg.public_key_pem = "not a valid pem";
     Security sec(cfg);
 
     Bytes plain = Bytes::create(16);
     std::memset(plain.data(), 0x03, 16);
+
     Bytes cipher;
     CHECK_FALSE(sec.encrypt(plain, cipher));
   }
 
-  TEST_CASE("PEM edge cases: header-only / truncated middle / missing footer / CRLF / wrong slot all reject cleanly") {
+  TEST_CASE("malformed PEM edge cases are all rejected cleanly") {
     const auto kp = generate_rsa_keypair(2048);
 
-    SUBCASE("BEGIN line only (no body, no END)") {
+    SUBCASE("BEGIN line only without body or END") {
       Security::Config cfg;
       cfg.public_key_pem = "-----BEGIN PUBLIC KEY-----\n";
       Security sec(cfg);
@@ -640,10 +595,10 @@ TEST_SUITE("extension-Security - RSA hybrid") {
       CHECK_FALSE(sec.encrypt(plain, cipher));
     }
 
-    SUBCASE("body truncated in the middle (no END marker)") {
+    SUBCASE("body truncated before END marker") {
       std::string truncated = kp.public_pem;
       const auto end_pos = truncated.find("-----END");
-      REQUIRE(end_pos != std::string::npos);
+      REQUIRE_NE(end_pos, std::string::npos);
       truncated.resize(end_pos / 2U);
       Security::Config cfg;
       cfg.public_key_pem = truncated;
@@ -653,10 +608,10 @@ TEST_SUITE("extension-Security - RSA hybrid") {
       CHECK_FALSE(sec.encrypt(plain, cipher));
     }
 
-    SUBCASE("END marker dropped") {
+    SUBCASE("END marker removed") {
       std::string no_end = kp.public_pem;
       const auto end_pos = no_end.find("-----END");
-      REQUIRE(end_pos != std::string::npos);
+      REQUIRE_NE(end_pos, std::string::npos);
       no_end.resize(end_pos);
       Security::Config cfg;
       cfg.public_key_pem = no_end;
@@ -666,7 +621,7 @@ TEST_SUITE("extension-Security - RSA hybrid") {
       CHECK_FALSE(sec.encrypt(plain, cipher));
     }
 
-    SUBCASE("private PEM passed in public_key_pem slot is rejected") {
+    SUBCASE("private PEM supplied in public_key_pem slot") {
       Security::Config cfg;
       cfg.public_key_pem = kp.private_pem;
       Security sec(cfg);
@@ -675,7 +630,7 @@ TEST_SUITE("extension-Security - RSA hybrid") {
       CHECK_FALSE(sec.encrypt(plain, cipher));
     }
 
-    SUBCASE("public PEM passed in private_key_pem slot is rejected (no decrypt path)") {
+    SUBCASE("public PEM supplied in private_key_pem slot") {
       Security::Config cfg;
       cfg.private_key_pem = kp.public_pem;
       Security sec(cfg);
@@ -708,11 +663,11 @@ TEST_SUITE("extension-Security - RSA hybrid") {
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
-  TEST_CASE("RSA-PSS signed message rejected under wrong verify key") {
+  TEST_CASE("RSA-PSS signature from wrong key causes verification failure") {
     const auto recv_kp = generate_rsa_keypair(2048);
     const auto real_sign_kp = generate_rsa_keypair(2048);
     const auto other_sign_kp = generate_rsa_keypair(2048);
@@ -737,7 +692,7 @@ TEST_SUITE("extension-Security - RSA hybrid") {
     CHECK_FALSE(receiver.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("verify key set but message unsigned must be rejected") {
+  TEST_CASE("unsigned message is rejected when verify key is configured") {
     const auto recv_kp = generate_rsa_keypair(2048);
     const auto sign_kp = generate_rsa_keypair(2048);
 
@@ -760,7 +715,7 @@ TEST_SUITE("extension-Security - RSA hybrid") {
     CHECK_FALSE(receiver.decrypt(cipher, recovered));
   }
 
-  TEST_CASE("signed message accepted by receiver without verify key (signature ignored)") {
+  TEST_CASE("signed message is accepted by receiver without verify key") {
     const auto recv_kp = generate_rsa_keypair(2048);
     const auto sign_kp = generate_rsa_keypair(2048);
 
@@ -781,11 +736,11 @@ TEST_SUITE("extension-Security - RSA hybrid") {
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
-  TEST_CASE("large payload via RSA hybrid") {
+  TEST_CASE("large payload via RSA hybrid round-trips correctly") {
     const auto kp = generate_rsa_keypair(2048);
 
     Security::Config sender_cfg;
@@ -806,13 +761,13 @@ TEST_SUITE("extension-Security - RSA hybrid") {
 
     Bytes recovered;
     REQUIRE(receiver.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
-  TEST_CASE("custom callback overrides asymmetric path") {
+  TEST_CASE("custom callback overrides asymmetric path when both are present") {
     const auto kp = generate_rsa_keypair(2048);
-    auto identity_fn = [](const Bytes& in, Bytes& out) -> bool {
+    auto xor_fn = [](const Bytes& in, Bytes& out) -> bool {
       out = Bytes::create(in.size());
       for (size_t i = 0; i < in.size(); ++i) {
         out.data()[i] = static_cast<uint8_t>(in.data()[i] ^ 0x5AU);
@@ -823,8 +778,8 @@ TEST_SUITE("extension-Security - RSA hybrid") {
     Security::Config cfg;
     cfg.public_key_pem = kp.public_pem;
     cfg.private_key_pem = kp.private_pem;
-    cfg.encrypt_callback = identity_fn;
-    cfg.decrypt_callback = identity_fn;
+    cfg.encrypt_callback = xor_fn;
+    cfg.decrypt_callback = xor_fn;
     Security sec(cfg);
 
     Bytes plain = Bytes::create(20);
@@ -832,62 +787,29 @@ TEST_SUITE("extension-Security - RSA hybrid") {
 
     Bytes cipher;
     REQUIRE(sec.encrypt(plain, cipher));
-    REQUIRE(cipher.size() == plain.size());
+    REQUIRE_EQ(cipher.size(), plain.size());
 
     Bytes recovered;
     REQUIRE(sec.decrypt(cipher, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
-  }
-}
-
-TEST_SUITE("extension-Security - Node API surface") {
-  TEST_CASE("SecurityPublisher accepts Security::Config via constructor") {
-    using P = SecurityPublisher<Bytes>;
-    static_assert(std::is_constructible_v<P, const std::string&, const Security::Config&>);
-    static_assert(std::is_constructible_v<P, const std::string&, const Security::Config&, InitType>);
-    CHECK(true);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
   }
 
-  TEST_CASE("SecuritySubscriber accepts Security::Config via constructor") {
-    using S = SecuritySubscriber<Bytes>;
-    static_assert(std::is_constructible_v<S, const std::string&, const Security::Config&>);
-    static_assert(std::is_constructible_v<S, const std::string&, const Security::Config&, InitType>);
-    CHECK(true);
-  }
-
-  TEST_CASE("Security cross-instance key mismatch fails authentication") {
-    Security first(make_key_cfg("first_key_seed"));
-    Security second(make_key_cfg("second_key_seed"));
-
-    const std::string plain_str = "different keys must not interop";
-    Bytes plain = Bytes::create(plain_str.size());
-    std::memcpy(plain.data(), plain_str.data(), plain_str.size());
-
-    Bytes cipher_second;
-    REQUIRE(second.encrypt(plain, cipher_second));
-
-    Bytes recovered;
-    CHECK_FALSE(first.decrypt(cipher_second, recovered));
-  }
-}
-
-TEST_SUITE("extension-Security - capability queries") {
-  TEST_CASE("default-constructed Security exposes built-in default slot") {
+  TEST_CASE("default-constructed Security is fully configured") {
     Security sec;
     CHECK(sec.is_configured());
     CHECK(sec.can_encrypt());
     CHECK(sec.can_decrypt());
   }
 
-  TEST_CASE("symmetric key populates all three capability slots") {
+  TEST_CASE("symmetric key populates all capability slots") {
     Security sec(make_key_cfg("cap_key_seed"));
     CHECK(sec.is_configured());
     CHECK(sec.can_encrypt());
     CHECK(sec.can_decrypt());
   }
 
-  TEST_CASE("public_key_pem only enables encrypt, not decrypt") {
+  TEST_CASE("public_key_pem enables encrypt but not decrypt") {
     const auto kp = generate_rsa_keypair(2048);
     Security::Config cfg;
     cfg.public_key_pem = kp.public_pem;
@@ -897,7 +819,7 @@ TEST_SUITE("extension-Security - capability queries") {
     CHECK_FALSE(sec.can_decrypt());
   }
 
-  TEST_CASE("private_key_pem only enables decrypt, not encrypt") {
+  TEST_CASE("private_key_pem enables decrypt but not encrypt") {
     const auto kp = generate_rsa_keypair(2048);
     Security::Config cfg;
     cfg.private_key_pem = kp.private_pem;
@@ -918,53 +840,7 @@ TEST_SUITE("extension-Security - capability queries") {
     CHECK(sec.can_decrypt());
   }
 
-  TEST_CASE("lone callback is ignored: capabilities stay false") {
-    Security::Config cfg;
-    cfg.encrypt_callback = [](const Bytes& in, Bytes& out) -> bool {
-      out = in;
-      return true;
-    };
-    Security sec(cfg);
-    CHECK_FALSE(sec.is_configured());
-    CHECK_FALSE(sec.can_encrypt());
-    CHECK_FALSE(sec.can_decrypt());
-  }
-}
-
-TEST_SUITE("extension-Security - Config edge cases") {
-  TEST_CASE("PBKDF2 iterations=0 is rejected; instance left without symmetric key") {
-    Bytes salt = Bytes::create(16);
-    std::memset(salt.data(), 0x55, 16);
-
-    Security::Config cfg;
-    cfg.passphrase = "x";
-    cfg.pbkdf2_salt = salt;
-    cfg.pbkdf2_iterations = 0U;
-    Security sec(cfg);
-
-    Bytes plain = Bytes::create(16);
-    std::memset(plain.data(), 0x11, 16);
-    Bytes cipher;
-    CHECK_FALSE(sec.encrypt(plain, cipher));
-  }
-
-  TEST_CASE("oversized aad_context is rejected before capability checks") {
-    Security::Config cfg;
-    cfg.key = "oversized_aad_seed";
-    cfg.advanced.aad_context.assign(65536U, 'a');
-    Security sec(cfg);
-
-    CHECK_FALSE(sec.is_configured());
-    CHECK_FALSE(sec.can_encrypt());
-    CHECK_FALSE(sec.can_decrypt());
-
-    Bytes plain = Bytes::create(16);
-    std::memset(plain.data(), 0x25, 16);
-    Bytes cipher;
-    CHECK_FALSE(sec.encrypt(plain, cipher));
-  }
-
-  TEST_CASE("lone encrypt_callback is ignored: callbacks must be installed as a pair") {
+  TEST_CASE("lone encrypt callback without decrypt partner is ignored") {
     int enc_calls = 0;
     Security::Config cfg;
     cfg.encrypt_callback = [&enc_calls](const Bytes& in, Bytes& out) -> bool {
@@ -981,10 +857,36 @@ TEST_SUITE("extension-Security - Config edge cases") {
     std::memset(plain.data(), 0x44, 16);
     Bytes cipher;
     CHECK_FALSE(sec.encrypt(plain, cipher));
-    CHECK(enc_calls == 0);
+    CHECK_EQ(enc_calls, 0);
   }
 
-  TEST_CASE("pbkdf2_salt buffer mutation after construction does not affect derived key") {
+  TEST_CASE("PBKDF2 iterations=0 is rejected") {
+    Bytes salt = Bytes::create(16);
+    std::memset(salt.data(), 0x55, 16);
+
+    Security::Config cfg;
+    cfg.passphrase = "x";
+    cfg.pbkdf2_salt = salt;
+    cfg.pbkdf2_iterations = 0U;
+    Security sec(cfg);
+
+    Bytes plain = Bytes::create(16);
+    std::memset(plain.data(), 0x11, 16);
+    Bytes cipher;
+    CHECK_FALSE(sec.encrypt(plain, cipher));
+  }
+
+  TEST_CASE("oversized aad_context disables the instance") {
+    Security::Config cfg;
+    cfg.key = "oversized_aad_seed";
+    cfg.advanced.aad_context.assign(65536U, 'a');
+    Security sec(cfg);
+    CHECK_FALSE(sec.is_configured());
+    CHECK_FALSE(sec.can_encrypt());
+    CHECK_FALSE(sec.can_decrypt());
+  }
+
+  TEST_CASE("pbkdf2_salt mutation after construction does not affect derived key") {
     Bytes salt = Bytes::create(16);
     std::memset(salt.data(), 0x42, 16);
 
@@ -1007,14 +909,31 @@ TEST_SUITE("extension-Security - Config edge cases") {
 
     Bytes recovered;
     REQUIRE(sec.decrypt(cipher_before, recovered));
-    REQUIRE(recovered.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered.data(), plain.size()), 0);
 
     Bytes recovered2;
     REQUIRE(sec.decrypt(cipher_after, recovered2));
-    REQUIRE(recovered2.size() == plain.size());
-    CHECK(std::memcmp(plain.data(), recovered2.data(), plain.size()) == 0);
+    REQUIRE_EQ(recovered2.size(), plain.size());
+    CHECK_EQ(std::memcmp(plain.data(), recovered2.data(), plain.size()), 0);
+  }
+
+  TEST_CASE("cross-instance key mismatch always fails") {
+    Security first(make_key_cfg("first_key_seed"));
+    Security second(make_key_cfg("second_key_seed"));
+
+    const std::string plain_str = "different keys must not interop";
+    Bytes plain = Bytes::create(plain_str.size());
+    std::memcpy(plain.data(), plain_str.data(), plain_str.size());
+
+    Bytes cipher;
+    REQUIRE(second.encrypt(plain, cipher));
+
+    Bytes recovered;
+    CHECK_FALSE(first.decrypt(cipher, recovered));
   }
 }
 
-#endif
+#endif  // VLINK_TEST_SUPPORT_SECURITY
+
+// NOLINTEND

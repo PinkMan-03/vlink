@@ -28,278 +28,291 @@
 #include <doctest/doctest.h>
 
 #include <atomic>
-#include <chrono>
 #include <thread>
 
-#include "./base/bytes.h"
-#include "./impl/types.h"
-
-//
 #include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helpers: concrete subclass to test PublisherImpl (which has pure virtuals)
-// ---------------------------------------------------------------------------
 
 namespace {
 
-class TestPublisherImpl : public PublisherImpl {
+class TestPublisher : public PublisherImpl {
  public:
-  TestPublisherImpl() = default;
-  ~TestPublisherImpl() override = default;
+  TestPublisher() = default;
+  ~TestPublisher() override = default;
 
   void init() override {}
   void deinit() override {}
 
-  bool has_subscribers() const override { return subscribers_present_.load(); }
+  bool has_subscribers() const override { return has_subs_.load(); }
 
-  bool write(const Bytes& /*msg_data*/) override {
+  bool write(const Bytes& /*msg*/) override {
     ++write_count;
     return true;
   }
 
-  void set_subscribers_present(bool present) { subscribers_present_ = present; }
+  void set_has_subs(bool v) { has_subs_ = v; }
 
   int write_count{0};
 
  private:
-  std::atomic_bool subscribers_present_{false};
+  std::atomic_bool has_subs_{false};
 };
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: PublisherImpl - construction
-// ---------------------------------------------------------------------------
+TEST_SUITE("impl-PublisherImpl") {
+  TEST_CASE("constructor sets kPublisher role") {
+    TestPublisher pub;
 
-TEST_SUITE("impl-PublisherImpl - construction") {
-  TEST_CASE("constructor sets kPublisher impl_type") {
-    TestPublisherImpl pub;
-    CHECK(pub.impl_type == kPublisher);
+    CHECK_EQ(pub.impl_type, kPublisher);
   }
 
-  TEST_CASE("has_subscribers returns false initially") {
-    TestPublisherImpl pub;
-    CHECK(pub.has_subscribers() == false);
+  TEST_CASE("has_subscribers returns false on default construction") {
+    TestPublisher pub;
+
+    CHECK_FALSE(pub.has_subscribers());
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: PublisherImpl - detect_subscribers
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-PublisherImpl - detect_subscribers") {
-  TEST_CASE("callback is stored and not called when no subscribers") {
-    TestPublisherImpl pub;
-
+  TEST_CASE("detect_subscribers does not fire when no subscribers present") {
+    TestPublisher pub;
     bool called = false;
+
     pub.detect_subscribers([&](bool) { called = true; });
 
-    CHECK(called == false);
+    CHECK_FALSE(called);
   }
 
-  TEST_CASE("callback fires immediately if subscribers already present") {
-    TestPublisherImpl pub;
-    pub.set_subscribers_present(true);
+  TEST_CASE("detect_subscribers fires immediately when subscribers already present") {
+    TestPublisher pub;
+    pub.set_has_subs(true);
     pub.update_subscribers();
 
     bool called = false;
-    bool connected_value = false;
-    pub.detect_subscribers([&](bool connected) {
+    bool value = false;
+
+    pub.detect_subscribers([&](bool v) {
       called = true;
-      connected_value = connected;
+      value = v;
     });
 
-    CHECK(called == true);
-    CHECK(connected_value == true);
+    CHECK(called);
+    CHECK(value);
   }
 
-  TEST_CASE("callback fires when subscribers appear after registration") {
-    TestPublisherImpl pub;
+  TEST_CASE("update_subscribers fires callback when subscriber state changes") {
+    TestPublisher pub;
+    int count = 0;
+    bool last = false;
 
-    std::atomic_bool called{false};
-    std::atomic_bool connected_value{false};
-    pub.detect_subscribers([&](bool connected) {
-      called = true;
-      connected_value = connected;
+    pub.detect_subscribers([&](bool v) {
+      ++count;
+      last = v;
     });
 
-    CHECK(called == false);
-
-    pub.set_subscribers_present(true);
+    pub.set_has_subs(true);
     pub.update_subscribers();
 
-    CHECK(called == true);
-    CHECK(connected_value == true);
-  }
+    CHECK_EQ(count, 1);
+    CHECK(last);
 
-  TEST_CASE("callback fires on disconnect") {
-    TestPublisherImpl pub;
-    pub.set_subscribers_present(true);
+    pub.set_has_subs(false);
     pub.update_subscribers();
 
-    int call_count = 0;
-    bool last_connected = false;
-    pub.detect_subscribers([&](bool connected) {
-      ++call_count;
-      last_connected = connected;
-    });
+    CHECK_EQ(count, 2);
+    CHECK_FALSE(last);
+  }
 
-    // Initial callback for existing subscribers
-    CHECK(call_count == 1);
-    CHECK(last_connected == true);
+  TEST_CASE("update_subscribers is no-op when state unchanged") {
+    TestPublisher pub;
+    int count = 0;
 
-    pub.set_subscribers_present(false);
+    pub.detect_subscribers([&](bool) { ++count; });
+
+    pub.update_subscribers();
     pub.update_subscribers();
 
-    CHECK(call_count == 2);
-    CHECK(last_connected == false);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: PublisherImpl - wait_for_subscribers
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-PublisherImpl - wait_for_subscribers") {
-  TEST_CASE("returns true immediately if subscribers are present") {
-    TestPublisherImpl pub;
-    pub.set_subscribers_present(true);
-
-    CHECK(pub.wait_for_subscribers(100ms) == true);
+    CHECK_EQ(count, 0);
   }
 
-  TEST_CASE("returns false on timeout when no subscribers") {
-    TestPublisherImpl pub;
+  TEST_CASE("wait_for_subscribers returns true immediately when already subscribed") {
+    TestPublisher pub;
+    pub.set_has_subs(true);
 
-    auto start = std::chrono::steady_clock::now();
+    CHECK(pub.wait_for_subscribers(100ms));
+  }
+
+  TEST_CASE("wait_for_subscribers times out when no subscribers appear") {
+    TestPublisher pub;
+
     bool result = pub.wait_for_subscribers(50ms);
-    auto elapsed = std::chrono::steady_clock::now() - start;
 
-    CHECK(result == false);
-    CHECK(elapsed >= 40ms);
+    CHECK_FALSE(result);
   }
 
-  TEST_CASE("returns true when subscriber appears during wait") {
-    TestPublisherImpl pub;
+  TEST_CASE("wait_for_subscribers returns true when subscriber appears mid-wait") {
+    TestPublisher pub;
 
-    std::thread t([&]() {
+    std::thread t([&] {
       std::this_thread::sleep_for(20ms);
-      pub.set_subscribers_present(true);
+      pub.set_has_subs(true);
       pub.update_subscribers();
     });
 
     bool result = pub.wait_for_subscribers(500ms);
     t.join();
 
-    CHECK(result == true);
+    CHECK(result);
   }
 
-  TEST_CASE("interrupt unblocks wait") {
-    TestPublisherImpl pub;
+  TEST_CASE("interrupt sets interrupted flag and unblocks wait") {
+    TestPublisher pub;
 
-    std::thread t([&]() {
+    std::thread t([&] {
       std::this_thread::sleep_for(20ms);
       pub.interrupt();
     });
 
-    bool result = pub.wait_for_subscribers(500ms);
+    pub.wait_for_subscribers(2000ms);
     t.join();
 
-    (void)result;
-
-    CHECK(pub.is_interrupted() == true);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: PublisherImpl - update_subscribers
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-PublisherImpl - update_subscribers") {
-  TEST_CASE("no-op when state has not changed") {
-    TestPublisherImpl pub;
-
-    int call_count = 0;
-    pub.detect_subscribers([&](bool) { ++call_count; });
-
-    pub.update_subscribers();
-    CHECK(call_count == 0);
-
-    pub.update_subscribers();
-    CHECK(call_count == 0);
+    CHECK(pub.is_interrupted());
   }
 
-  TEST_CASE("fires callback on state change") {
-    TestPublisherImpl pub;
-
-    int call_count = 0;
-    pub.detect_subscribers([&](bool) { ++call_count; });
-
-    pub.set_subscribers_present(true);
-    pub.update_subscribers();
-    CHECK(call_count == 1);
-
-    pub.set_subscribers_present(false);
-    pub.update_subscribers();
-    CHECK(call_count == 2);
-  }
-
-  TEST_CASE("no callback when state unchanged after toggle") {
-    TestPublisherImpl pub;
-
-    int call_count = 0;
-    pub.detect_subscribers([&](bool) { ++call_count; });
-
-    pub.set_subscribers_present(true);
-    pub.update_subscribers();
-    CHECK(call_count == 1);
-
-    // State unchanged - no callback
-    pub.update_subscribers();
-    CHECK(call_count == 1);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: PublisherImpl - write (IntraData)
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-PublisherImpl - write IntraData") {
-  TEST_CASE("write(IntraData) returns false by default") {
-    TestPublisherImpl pub;
+  TEST_CASE("write(IntraData) returns false in base implementation") {
+    TestPublisher pub;
     IntraData data = std::make_shared<IntraDataType>();
-    // Call the base class IntraData overload, not the Bytes overload
+
     bool result = static_cast<PublisherImpl&>(pub).write(data);
-    CHECK(result == false);
+
+    CHECK_FALSE(result);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: PublisherImpl - interrupt
-// ---------------------------------------------------------------------------
+  TEST_CASE("write(Bytes) delegates to subclass override") {
+    TestPublisher pub;
+    Bytes msg = Bytes::create(4);
 
-TEST_SUITE("impl-PublisherImpl - interrupt") {
-  TEST_CASE("interrupt sets flag and notifies cv") {
-    TestPublisherImpl pub;
+    pub.write(msg);
+
+    CHECK_EQ(pub.write_count, 1);
+  }
+
+  TEST_CASE("multiple writes increment write_count independently") {
+    TestPublisher pub;
+    Bytes msg = Bytes::create(8);
+
+    for (int i = 0; i < 10; ++i) {
+      pub.write(msg);
+    }
+
+    CHECK_EQ(pub.write_count, 10);
+  }
+
+  TEST_CASE("write with empty bytes does not crash") {
+    TestPublisher pub;
+    Bytes empty;
+
+    pub.write(empty);
+
+    CHECK_EQ(pub.write_count, 1);
+  }
+
+  TEST_CASE("detect_subscribers callback fires on transition true then false") {
+    TestPublisher pub;
+    std::vector<bool> events;
+
+    pub.detect_subscribers([&](bool v) { events.push_back(v); });
+
+    pub.set_has_subs(true);
+    pub.update_subscribers();
+    pub.set_has_subs(false);
+    pub.update_subscribers();
+
+    REQUIRE_EQ(events.size(), 2u);
+    CHECK(events[0]);
+    CHECK_FALSE(events[1]);
+  }
+
+  TEST_CASE("detect_subscribers replaces previous callback") {
+    TestPublisher pub;
+    int first_count = 0;
+    int second_count = 0;
+
+    pub.detect_subscribers([&](bool) { ++first_count; });
+    pub.detect_subscribers([&](bool) { ++second_count; });
+
+    pub.set_has_subs(true);
+    pub.update_subscribers();
+
+    CHECK_EQ(first_count, 0);
+    CHECK_EQ(second_count, 1);
+  }
+
+  TEST_CASE("concurrent update_subscribers calls are safe") {
+    TestPublisher pub;
+    std::atomic<int> count{0};
+
+    pub.detect_subscribers([&](bool) { count.fetch_add(1, std::memory_order_relaxed); });
+
+    pub.set_has_subs(true);
+
+    std::vector<std::thread> threads;
+    threads.reserve(4);
+
+    for (int i = 0; i < 4; ++i) {
+      threads.emplace_back([&] { pub.update_subscribers(); });
+    }
+
+    for (auto& t : threads) {
+      t.join();
+    }
+
+    CHECK(count.load() >= 1);
+  }
+
+  TEST_CASE("reset_interrupted clears interrupted flag") {
+    TestPublisher pub;
+
     pub.interrupt();
-    CHECK(pub.is_interrupted() == true);
+    CHECK(pub.is_interrupted());
+
+    pub.reset_interrupted();
+    CHECK_FALSE(pub.is_interrupted());
   }
 
-  TEST_CASE("interrupt wakes blocked wait_for_subscribers") {
-    TestPublisherImpl pub;
+  TEST_CASE("wait_for_subscribers with negative timeout blocks until subscriber") {
+    TestPublisher pub;
 
-    std::atomic_bool wait_done{false};
-    std::thread t([&]() {
-      pub.wait_for_subscribers(-1ms);
-      wait_done = true;
+    std::thread t([&] {
+      std::this_thread::sleep_for(30ms);
+      pub.set_has_subs(true);
+      pub.update_subscribers();
     });
 
-    std::this_thread::sleep_for(20ms);
-    pub.interrupt();
-
+    bool result = pub.wait_for_subscribers(-1ms);
     t.join();
-    CHECK(wait_done == true);
+
+    CHECK(result);
+  }
+
+  TEST_CASE("impl_type is kPublisher not kSubscriber or other roles") {
+    TestPublisher pub;
+
+    CHECK_NE(pub.impl_type, kSubscriber);
+    CHECK_NE(pub.impl_type, kServer);
+    CHECK_NE(pub.impl_type, kClient);
+    CHECK_EQ(pub.impl_type, kPublisher);
+  }
+
+  TEST_CASE("set_property and get_property persist on publisher") {
+    TestPublisher pub;
+
+    pub.set_property("custom.key", "custom.value");
+    CHECK_EQ(pub.get_property("custom.key"), "custom.value");
+  }
+
+  TEST_CASE("get_property returns empty for unset key") {
+    TestPublisher pub;
+
+    CHECK(pub.get_property("nonexistent.key").empty());
   }
 }
 

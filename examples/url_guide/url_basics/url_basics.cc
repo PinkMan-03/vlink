@@ -21,112 +21,85 @@
  * limitations under the License.
  */
 
-// VLink core communication API
 #include <vlink/base/logger.h>
+#include <vlink/impl/url_parser.h>
 #include <vlink/vlink.h>
 
-// URL parser for decomposing and inspecting VLink URLs
-#include <vlink/impl/url_parser.h>
-
-#include <iostream>
+#include <map>
 #include <string>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// VLink URL Format Anatomy Example
-///
-/// This example demonstrates the complete VLink URL format:
-///   transport://host/path[?key=value&key=value][#fragment]
-///
-/// Each component serves a specific purpose in the transport configuration:
-///   - transport:   selects the transport backend (intra, shm, dds, zenoh, someip, mqtt, etc.)
-///   - host:     primary topic/address identifier
-///   - path:     secondary topic path (combined with host to form the full address)
-///   - query:    transport-specific parameters as key=value pairs
-///   - fragment: mode or hint passed to the transport (e.g., queue/direct, broker URI)
-///
-/// The URL is parsed by UrlParser into individual components that can be inspected.
+// ---------------------------------------------------------------------------
+// url_basics.cc
+//
+// VLink uses a URL string as the single source of truth for "where + how"
+// a message flows: changing the wire backend is just changing the URL
+// prefix, no code edits required. The UrlParser parses any URL into its
+// canonical components:
+//
+//   <transport>://<host>/<path>?<query>#<fragment>
+//
+// Components:
+//   transport -- backend tag (intra / shm / dds / ddsc / ddsr / ddst /
+//                zenoh / someip / mqtt / fdbus / qnx). Drives backend
+//                selection during Node construction.
+//   host      -- logical address; for local backends this is the first
+//                segment of the topic name.
+//   path      -- remainder of the topic identifier (slash-separated).
+//   query     -- key/value pairs (domain, depth, qos profile name, etc.)
+//                parsed into a dictionary the backend consults at attach.
+//   fragment  -- backend-specific hint (e.g. `#direct` for intra zero-copy,
+//                broker spec for mqtt, mode tag for fdbus/qnx).
+//
+// Component dictionary construction and clone-with-override below show how
+// tooling builds/edits URLs without string surgery. Static classifier
+// helpers (is_local_type / is_intra_type / get_sort_index) expose the URL
+// category without instantiating any Node, useful for ordering decisions
+// in proxies and bag tools.
+// ---------------------------------------------------------------------------
 
-/// Helper function to parse and print all components of a VLink URL
-void demonstrate_url_parsing(const std::string& url_str) {
-  VLOG_I("========================================");
-  VLOG_I("URL:", url_str);
-
-  // Parse the URL using UrlParser
+// Pretty-print every UrlParser-exposed field. The query dictionary is built
+// lazily on first access; subsequent get_query_dictionary() calls are O(1).
+static void show(const std::string& url_str) {
   vlink::UrlParser parser(url_str);
 
-  // Extract and display each component
-  VLOG_I("  transport:   ", parser.get_transport());
-  VLOG_I("  host:     ", parser.get_host());
-  VLOG_I("  path:     ", parser.get_path());
-  VLOG_I("  query:    ", parser.get_query());
-  VLOG_I("  fragment: ", parser.get_fragment());
-  VLOG_I("  port:     ", parser.get_port());
+  VLOG_I("URL:", url_str);
+  VLOG_I("  transport=", parser.get_transport(), " host=", parser.get_host(), " path=", parser.get_path(),
+         " port=", parser.get_port());
+  VLOG_I("  query=", parser.get_query(), " fragment=", parser.get_fragment());
 
-  // Display parsed query dictionary (key-value pairs)
   const auto& dict = parser.get_query_dictionary();
 
   if (!dict.empty()) {
-    VLOG_I("  query parameters:");
     for (const auto& [key, value] : dict) {
-      VLOG_I("    ", key, " = ", value);
+      VLOG_I("    ", key, "=", value);
     }
   }
 
-  // Reconstruct the URL from parsed components
-  VLOG_I("  reconstructed: ", parser.to_string());
-  VLOG_I("========================================");
+  VLOG_I("  reconstructed=", parser.to_string());
 }
-
 int main() {
-  // ======== Section 1: URL Format for Each Transport ========
-  // Demonstrate how URLs are structured for different VLink transports
+  // ---- Anatomy: one parser walk per transport family ----
+  // Each example exercises a different transport-specific quirk so the
+  // output makes the URL grammar concrete.
+  show("intra://sensor/lidar?event=scan&pipeline=4#direct");
+  show("shm://vehicle/speed?domain=1&depth=16&history=5&wait=1");
+  show("dds://vehicle/speed?domain=42&depth=10&qos=sensor");
+  show("ddsc://navigation/path?domain=1&qos=reliable");
+  show("zenoh://robot/arm/joint1?domain=0&qos=sensor");
+  show("someip://4660/22136?groups=1,2&event=16&field=1");
+  show("mqtt://home/temperature?qos=1#tcp://192.168.1.100:1883");
+  show("fdbus://audio/volume?event=level_changed#svc");
+  show("qnx://sensor/radar?event=target_detected");
 
-  // 1. intra:// - In-process messaging (no IPC overhead)
-  //    Format: intra://address[?event=name&pipeline=N][#queue|#direct]
-  demonstrate_url_parsing("intra://sensor/lidar");
-  demonstrate_url_parsing("intra://sensor/lidar?event=scan&pipeline=4#direct");
-
-  // 2. shm:// - Shared memory via Iceoryx (zero-copy IPC)
-  //    Format: shm://address[?event=name&domain=N&depth=N&history=N&wait=0|1]
-  demonstrate_url_parsing("shm://vehicle/speed");
-  demonstrate_url_parsing("shm://vehicle/speed?domain=1&depth=16&history=5&wait=1");
-
-  // 3. dds:// - Fast-DDS RTPS (cross-machine network)
-  //    Format: dds://topic[?domain=N&depth=N&qos=profile_name]
-  demonstrate_url_parsing("dds://vehicle/speed");
-  demonstrate_url_parsing("dds://vehicle/speed?domain=42&depth=10&qos=sensor");
-
-  // 4. ddsc:// - CycloneDDS (alternative DDS backend)
-  //    Format: ddsc://topic[?domain=N&depth=N&qos=profile_name]
-  demonstrate_url_parsing("ddsc://navigation/path?domain=1&qos=reliable");
-
-  // 5. zenoh:// - Eclipse Zenoh protocol
-  //    Format: zenoh://address[?event=name&domain=N&qos=profile_name][#fragment]
-  demonstrate_url_parsing("zenoh://robot/arm/joint1?domain=0&qos=sensor");
-
-  // 6. someip:// - SOME/IP automotive middleware
-  //    Format: someip://service_id/instance_id?method=X (RPC)
-  //    Format: someip://service_id/instance_id?groups=G&event=E (Event)
-  demonstrate_url_parsing("someip://4660/22136?method=1");
-  demonstrate_url_parsing("someip://4660/22136?groups=1,2&event=16&field=1");
-
-  // 7. mqtt:// - MQTT IoT protocol
-  //    Format: mqtt://address[?event=name&domain=N&qos=0|1|2][#broker_uri]
-  demonstrate_url_parsing("mqtt://home/temperature?qos=2");
-  demonstrate_url_parsing("mqtt://home/temperature?qos=1#tcp://192.168.1.100:1883");
-
-  // 8. fdbus:// - FDBus IPC
-  //    Format: fdbus://address[?event=name][#svc|#ipc]
-  demonstrate_url_parsing("fdbus://audio/volume?event=level_changed#svc");
-
-  // 9. qnx:// - QNX native IPC
-  //    Format: qnx://address[?event=name]
-  demonstrate_url_parsing("qnx://sensor/radar?event=target_detected");
-
-  // ======== Section 2: Construct URLs from Components ========
-  // Build a URL from individual UrlParser::Component entries
+  // ---- Build a URL from individual components ----
+  // Component dictionary -> canonical URL string. The Category argument
+  // (kHierarchical) controls whether the parser emits `://` (hierarchical)
+  // or `:` (opaque). The boolean flag enables strict validation -- it
+  // throws on malformed component combinations instead of silently
+  // producing garbage.
   std::map<vlink::UrlParser::Component, std::string> components;
   components[vlink::UrlParser::Component::kTransport] = "dds";
   components[vlink::UrlParser::Component::kHost] = "vehicle";
@@ -135,44 +108,40 @@ int main() {
   components[vlink::UrlParser::Component::kFragment] = "";
 
   vlink::UrlParser built(components, vlink::UrlParser::Category::kHierarchical, true);
-  VLOG_I("Built URL: ", built.to_string());
+  VLOG_I("Built URL:", built.to_string());
 
-  // ======== Section 3: Copy and Override URL Components ========
-  // Create a modified copy of an existing URL by overriding specific components
+  // ---- Override query on an existing URL without re-parsing the rest ----
+  // The (parent, overrides) constructor is the "clone with edits" path. The
+  // parsed AST is reused; only the overridden components are re-parsed.
+  // UrlRemap layers on top of this to do runtime URL rewriting (e.g.
+  // dev<->prod environment swap) without touching application code.
   vlink::UrlParser original("dds://vehicle/speed?domain=0&qos=sensor");
-
   std::map<vlink::UrlParser::Component, std::string> overrides;
   overrides[vlink::UrlParser::Component::kQuery] = "domain=99&qos=best";
 
   vlink::UrlParser modified(original, overrides);
-  VLOG_I("Original:  ", original.to_string());
-  VLOG_I("Modified:  ", modified.to_string());
+  VLOG_I("Original:", original.to_string(), " Modified:", modified.to_string());
 
-  // ======== Section 4: Practical Usage - Same API, Different Transports ========
-  // Demonstrate that the same VLink API works with any transport prefix in the URL.
-  // Only the URL string changes; the code remains identical.
-
-  // Use intra:// for in-process pub/sub (always available, no external dependencies)
+  // ---- Same API regardless of transport -- only the URL string changes ----
+  // Subscriber/Publisher take the URL directly; replacing "intra://" with
+  // "dds://" or "shm://" yields identical code, identical behavior, just
+  // different wire path. Listener runs on the publisher's thread for intra
+  // direct mode.
   vlink::Subscriber<std::string> sub("intra://demo/url_basics");
   sub.listen([](const std::string& msg) { VLOG_I("Received:", msg); });
 
   vlink::Publisher<std::string> pub("intra://demo/url_basics");
   pub.wait_for_subscribers();
   pub.publish("Hello from url_basics example!");
-
   std::this_thread::sleep_for(100ms);
 
-  // To switch transport, only the URL changes:
-  //   Publisher<std::string> pub("dds://demo/url_basics");     // DDS
-  //   Publisher<std::string> pub("shm://demo/url_basics");     // shared memory
-  //   Publisher<std::string> pub("zenoh://demo/url_basics");   // Zenoh
-  //   Publisher<std::string> pub("mqtt://demo/url_basics");    // MQTT
-
-  // ======== Section 5: URL Utility Functions ========
-  // The Url class provides static helpers to classify URLs without constructing nodes.
-
+  // ---- Static classifiers -- URL category without constructing a node ----
+  // These are pure functions over the URL string; they don't initialize any
+  // backend. Used by routing tools to decide whether to bridge / record /
+  // forward. get_sort_index() returns a deterministic int that proxies use
+  // to order topics (intra=0, shm=1, dds=2, ...) so deterministic snapshots
+  // are reproducible across runs.
   VLOG_I("is_local_type('intra://x'):", vlink::Url::is_local_type("intra://x"));
-  VLOG_I("is_local_type('dds://x'):", vlink::Url::is_local_type("dds://x"));
   VLOG_I("is_intra_type('intra://x'):", vlink::Url::is_intra_type("intra://x"));
   VLOG_I("is_shm_type('shm://x'):", vlink::Url::is_shm_type("shm://x"));
   VLOG_I("get_sort_index('intra://x'):", vlink::Url::get_sort_index("intra://x"));

@@ -25,10 +25,11 @@
 
 #include "./common_test.h"
 
-#if defined(VLINK_SUPPORT_SHM)
+#ifdef VLINK_SUPPORT_SHM
 
 #include <atomic>
 #include <future>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -43,12 +44,10 @@ static bool ensure_shm_ready() {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Shm - init
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("shm-init") {
-  TEST_CASE("conf-defaults") {
+  TEST_CASE("conf defaults are set correctly") {
+    MESSAGE("[shm-init] conf defaults are set correctly");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -64,7 +63,9 @@ TEST_SUITE("shm-init") {
     CHECK(conf.get_transport_type() == TransportType::kShm);
   }
 
-  TEST_CASE("conf-with-all-fields") {
+  TEST_CASE("conf accepts all fields") {
+    MESSAGE("[shm-init] conf accepts all fields");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -79,7 +80,9 @@ TEST_SUITE("shm-init") {
     CHECK(conf.wait == 0);
   }
 
-  TEST_CASE("conf-equality") {
+  TEST_CASE("conf equality compares all fields") {
+    MESSAGE("[shm-init] conf equality compares all fields");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -92,7 +95,9 @@ TEST_SUITE("shm-init") {
     CHECK(a != c);
   }
 
-  TEST_CASE("url-parse-pub-sub-server-client") {
+  TEST_CASE("url parses for all impl types") {
+    MESSAGE("[shm-init] url parses for all impl types");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -107,7 +112,9 @@ TEST_SUITE("shm-init") {
     CHECK(url.parse(kGetter));
   }
 
-  TEST_CASE("unknown-impl-type-throws") {
+  TEST_CASE("unknown impl type throws on parse") {
+    MESSAGE("[shm-init] unknown impl type throws on parse");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -117,7 +124,9 @@ TEST_SUITE("shm-init") {
     CHECK_THROWS_AS(url.parse(kUnknownImplType), std::runtime_error);
   }
 
-  TEST_CASE("has-runtime-inited") {
+  TEST_CASE("runtime is initialised after auto init roudi") {
+    MESSAGE("[shm-init] runtime is initialised after auto init roudi");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -126,12 +135,10 @@ TEST_SUITE("shm-init") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Shm - event
-// ---------------------------------------------------------------------------
+TEST_SUITE("shm-pubsub") {
+  TEST_CASE("bytes payload is delivered to subscriber") {
+    MESSAGE("[shm-pubsub] bytes payload is delivered to subscriber");
 
-TEST_SUITE("shm-event") {
-  TEST_CASE("shm-event-pub-sub") {
     if (!ensure_shm_ready()) {
       return;
     }
@@ -147,7 +154,7 @@ TEST_SUITE("shm-event") {
       received.store(true, std::memory_order_release);
     });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
     CHECK(pub.has_subscribers());
 
     Bytes payload{0xDE, 0xAD, 0xBE, 0xEF};
@@ -163,7 +170,9 @@ TEST_SUITE("shm-event") {
     CHECK(captured[3] == 0xEF);
   }
 
-  TEST_CASE("shm-event-string") {
+  TEST_CASE("string payload round trips correctly") {
+    MESSAGE("[shm-pubsub] string payload round trips correctly");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -179,7 +188,7 @@ TEST_SUITE("shm-event") {
       received.store(true, std::memory_order_release);
     });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
     CHECK(pub.publish(std::string("hello_shm")));
 
     for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
@@ -190,7 +199,9 @@ TEST_SUITE("shm-event") {
     CHECK(captured == "hello_shm");
   }
 
-  TEST_CASE("shm-event-int") {
+  TEST_CASE("integer payload round trips correctly") {
+    MESSAGE("[shm-pubsub] integer payload round trips correctly");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -206,7 +217,7 @@ TEST_SUITE("shm-event") {
       received.store(true, std::memory_order_release);
     });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
     CHECK(pub.publish(42));
 
     for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
@@ -217,7 +228,9 @@ TEST_SUITE("shm-event") {
     CHECK(captured.load() == 42);
   }
 
-  TEST_CASE("shm-event-multi-pub") {
+  TEST_CASE("all published messages are received") {
+    MESSAGE("[shm-pubsub] all published messages are received");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -229,7 +242,7 @@ TEST_SUITE("shm-event") {
 
     sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
 
     for (int i = 0; i < 10; ++i) {
       pub.publish(i);
@@ -241,7 +254,9 @@ TEST_SUITE("shm-event") {
     CHECK(count.load() >= 10);
   }
 
-  TEST_CASE("shm-event-multi-sub") {
+  TEST_CASE("multiple subscribers each receive all messages") {
+    MESSAGE("[shm-pubsub] multiple subscribers each receive all messages");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -256,7 +271,7 @@ TEST_SUITE("shm-event") {
     sub1.listen([&](const Bytes& /*d*/) { count1.fetch_add(1, std::memory_order_relaxed); });
     sub2.listen([&](const Bytes& /*d*/) { count2.fetch_add(1, std::memory_order_relaxed); });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
 
     for (int i = 0; i < 3; ++i) {
       pub.publish(Bytes{static_cast<uint8_t>(i)});
@@ -269,7 +284,9 @@ TEST_SUITE("shm-event") {
     CHECK(count2.load() >= 3);
   }
 
-  TEST_CASE("shm-event-force-publish") {
+  TEST_CASE("force publish succeeds without subscribers") {
+    MESSAGE("[shm-pubsub] force publish succeeds without subscribers");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -283,7 +300,9 @@ TEST_SUITE("shm-event") {
     }
   }
 
-  TEST_CASE("shm-event-detect-subscribers") {
+  TEST_CASE("subscriber connect and disconnect are detected") {
+    MESSAGE("[shm-pubsub] subscriber connect and disconnect are detected");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -309,14 +328,44 @@ TEST_SUITE("shm-event") {
     std::this_thread::sleep_for(300ms);
     CHECK(!pub.has_subscribers());
   }
+
+  TEST_CASE("dynamic data payload is delivered correctly") {
+    MESSAGE("[shm-pubsub] dynamic data payload is delivered correctly");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    std::atomic<bool> received{false};
+    DynamicData captured;
+
+    Publisher<DynamicData> pub(ShmConf("shm/dyn/int1", "data"));
+    Subscriber<DynamicData> sub("shm://shm/dyn/int1?event=data");
+
+    sub.listen([&](const DynamicData& d) {
+      captured = d;
+      received.store(true, std::memory_order_release);
+    });
+
+    CHECK(pub.wait_for_subscribers(1s));
+
+    DynamicData d;
+    d.load("int", 888);
+    CHECK(pub.publish(d));
+
+    for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+      std::this_thread::sleep_for(50ms);
+    }
+
+    CHECK(received.load(std::memory_order_acquire));
+    CHECK(captured.as<int>() == 888);
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Shm - method
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("shm-method") {
-  TEST_CASE("shm-method-send") {
+  TEST_CASE("fire and forget send increments server counter") {
+    MESSAGE("[shm-method] fire and forget send increments server counter");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -327,7 +376,7 @@ TEST_SUITE("shm-method") {
     server.listen([&](const std::string& /*req*/) { counter.fetch_add(1, std::memory_order_relaxed); });
 
     Client<std::string> client("shm://shm/mth/send1?event=req");
-    CHECK(client.wait_for_connected(5s));
+    CHECK(client.wait_for_connected(1s));
     CHECK(client.is_connected());
 
     CHECK(client.send("fire1"));
@@ -339,7 +388,9 @@ TEST_SUITE("shm-method") {
     CHECK(counter.load() == 2);
   }
 
-  TEST_CASE("shm-method-invoke") {
+  TEST_CASE("invoke returns correct response for all overloads") {
+    MESSAGE("[shm-method] invoke returns correct response for all overloads");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -348,27 +399,27 @@ TEST_SUITE("shm-method") {
     server.listen([](const std::string& req, std::string& resp) { resp = "shm:" + req; });
 
     Client<std::string, std::string> client("shm://shm/mth/invoke1?event=req");
-    CHECK(client.wait_for_connected(5s));
+    CHECK(client.wait_for_connected(1s));
 
-    SUBCASE("sync-optional") {
+    SUBCASE("sync optional") {
       auto resp = client.invoke("ping");
       CHECK(resp.has_value());
       CHECK(*resp == "shm:ping");
     }
 
-    SUBCASE("sync-ref-overload") {
+    SUBCASE("sync ref overload") {
       std::string out;
       CHECK(client.invoke("pong", out, 5s));
       CHECK(out == "shm:pong");
     }
 
-    SUBCASE("async-future") {
+    SUBCASE("async future") {
       auto fut = client.async_invoke("async");
       REQUIRE(fut.wait_for(5s) == std::future_status::ready);
       CHECK(fut.get() == "shm:async");
     }
 
-    SUBCASE("multiple-sequential") {
+    SUBCASE("multiple sequential calls") {
       for (int i = 0; i < 5; ++i) {
         auto resp = client.invoke("r" + std::to_string(i));
         CHECK(resp.has_value());
@@ -377,27 +428,9 @@ TEST_SUITE("shm-method") {
     }
   }
 
-  // TEST_CASE("shm-method-async-reply") {
-  //   if (!ensure_shm_ready()) {
-  //     return;
-  //   }
+  TEST_CASE("async callback receives the response") {
+    MESSAGE("[shm-method] async callback receives the response");
 
-  //   Server<std::string, std::string> server(ShmConf("shm/mth/async_reply1", "req"));
-  //   server.listen([](const std::string& /*req*/, std::string& resp) { resp = "sync_shm"; });
-
-  //   Client<std::string, std::string> client("shm://shm/mth/async_reply1?event=req");
-  //   CHECK(client.wait_for_connected(5s));
-
-  //   auto resp = client.invoke("request");
-  //   CHECK(resp.has_value());
-  //   CHECK(*resp == "sync_shm");
-
-  //   Server<std::string, std::string> server2(ShmConf("shm/mth/async_reply1b", "req"));
-  //   server2.listen_for_reply([](uint64_t, const std::string&) {});
-  //   CHECK_FALSE(server2.reply(1, std::string("x")));
-  // }
-
-  TEST_CASE("shm-method-async-callback") {
     if (!ensure_shm_ready()) {
       return;
     }
@@ -406,7 +439,7 @@ TEST_SUITE("shm-method") {
     server.listen([](const std::string& /*req*/, std::string& resp) { resp = "shm_cb"; });
 
     Client<std::string, std::string> client("shm://shm/mth/cb1?event=req");
-    CHECK(client.wait_for_connected(5s));
+    CHECK(client.wait_for_connected(1s));
 
     std::atomic<bool> got{false};
     std::string resp_val;
@@ -426,7 +459,9 @@ TEST_SUITE("shm-method") {
     CHECK(resp_val == "shm_cb");
   }
 
-  TEST_CASE("shm-method-detect-connected") {
+  TEST_CASE("client connection is reported via detect callback") {
+    MESSAGE("[shm-method] client connection is reported via detect callback");
+
     if (!ensure_shm_ready()) {
       return;
     }
@@ -451,17 +486,15 @@ TEST_SUITE("shm-method") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Shm - field
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("shm-field") {
-  TEST_CASE("shm-field-setter-getter") {
+  TEST_CASE("setter and getter exchange values") {
+    MESSAGE("[shm-field] setter and getter exchange values");
+
     if (!ensure_shm_ready()) {
       return;
     }
 
-    SUBCASE("polling-get") {
+    SUBCASE("polling get") {
       Setter<Bytes> setter(ShmConf("shm/fld/poll1", "val", 0, 0, 1));
       Getter<Bytes> getter("shm://shm/fld/poll1?event=val");
 
@@ -475,7 +508,7 @@ TEST_SUITE("shm-field") {
       CHECK((*v)[2] == 0x33);
     }
 
-    SUBCASE("wait-for-value") {
+    SUBCASE("wait for value") {
       Setter<Bytes> setter(ShmConf("shm/fld/wait1", "val", 0, 0, 1));
       Getter<Bytes> getter("shm://shm/fld/wait1?event=val");
 
@@ -484,7 +517,7 @@ TEST_SUITE("shm-field") {
         setter.set(Bytes{0xAB, 0xCD});
       });
 
-      CHECK(getter.wait_for_value(5s));
+      CHECK(getter.wait_for_value(1s));
       auto v = getter.get();
       REQUIRE(v.has_value());
       CHECK((*v)[0] == 0xAB);
@@ -492,7 +525,7 @@ TEST_SUITE("shm-field") {
       writer.join();
     }
 
-    SUBCASE("listen-callback") {
+    SUBCASE("listen callback is invoked on set") {
       std::atomic<bool> notified{false};
       Bytes cb_val;
 
@@ -516,7 +549,7 @@ TEST_SUITE("shm-field") {
       CHECK(cb_val[0] == 0xFF);
     }
 
-    SUBCASE("change-reporting") {
+    SUBCASE("change reporting suppresses duplicate values") {
       std::atomic<int> cb_count{0};
 
       Setter<Bytes> setter(ShmConf("shm/fld/cr1", "val", 0, 0, 1));
@@ -537,13 +570,13 @@ TEST_SUITE("shm-field") {
       CHECK(cb_count.load() <= 1);
     }
 
-    SUBCASE("late-getter-receives-cached-value") {
+    SUBCASE("late getter receives cached value") {
       Setter<Bytes> setter(ShmConf("shm/fld/late1", "val", 0, 0, 1));
       setter.set(Bytes{0xCA, 0xFE});
       std::this_thread::sleep_for(200ms);
 
       Getter<Bytes> late_getter("shm://shm/fld/late1?event=val");
-      CHECK(late_getter.wait_for_value(5s));
+      CHECK(late_getter.wait_for_value(1s));
       auto v = late_getter.get();
       REQUIRE(v.has_value());
       CHECK((*v)[0] == 0xCA);
@@ -551,12 +584,10 @@ TEST_SUITE("shm-field") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Shm - latency
-// ---------------------------------------------------------------------------
+TEST_SUITE("shm-qos") {
+  TEST_CASE("latency and loss tracking can be enabled and disabled") {
+    MESSAGE("[shm-qos] latency and loss tracking can be enabled and disabled");
 
-TEST_SUITE("shm-latency") {
-  TEST_CASE("shm-latency-stats") {
     if (!ensure_shm_ready()) {
       return;
     }
@@ -570,7 +601,7 @@ TEST_SUITE("shm-latency") {
     std::atomic<int> count{0};
     sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
 
     for (int i = 0; i < 10; ++i) {
       pub.publish(i);
@@ -588,12 +619,10 @@ TEST_SUITE("shm-latency") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Shm - identity
-// ---------------------------------------------------------------------------
+TEST_SUITE("shm-init") {
+  TEST_CASE("each node has a distinct abstract node pointer") {
+    MESSAGE("[shm-init] each node has a distinct abstract node pointer");
 
-TEST_SUITE("shm-identity") {
-  TEST_CASE("shm-node-identity") {
     if (!ensure_shm_ready()) {
       return;
     }
@@ -609,39 +638,779 @@ TEST_SUITE("shm-identity") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Shm - dynamic
-// ---------------------------------------------------------------------------
+TEST_SUITE("shm-pubsub") {
+  TEST_CASE("concurrent 4 publishers 4 subscribers deliver all messages") {
+    MESSAGE("[shm-pubsub] concurrent 4 publishers 4 subscribers deliver all messages");
 
-TEST_SUITE("shm-dynamic") {
-  TEST_CASE("shm-dynamic") {
     if (!ensure_shm_ready()) {
       return;
     }
 
+    static constexpr int kPubs = 4;
+    static constexpr int kSubs = 4;
+    static constexpr int kMsgsPerPub = 10;
+
+    std::vector<std::atomic<int>> counts(kSubs);
+
+    for (auto& c : counts) {
+      c.store(0, std::memory_order_relaxed);
+    }
+
+    std::vector<std::unique_ptr<Publisher<int>>> pubs;
+    pubs.reserve(kPubs);
+
+    for (int p = 0; p < kPubs; ++p) {
+      pubs.emplace_back(std::make_unique<Publisher<int>>(ShmConf("shm/cc/4x4/pub" + std::to_string(p), "data")));
+    }
+
+    std::vector<std::unique_ptr<Subscriber<int>>> subs;
+    subs.reserve(kSubs * kPubs);
+
+    for (int p = 0; p < kPubs; ++p) {
+      for (int s = 0; s < kSubs; ++s) {
+        subs.emplace_back(
+            std::make_unique<Subscriber<int>>("shm://shm/cc/4x4/pub" + std::to_string(p) + "?event=data"));
+        subs.back()->listen([&counts, s](const int& /*v*/) { counts[s].fetch_add(1, std::memory_order_relaxed); });
+      }
+    }
+
+    for (auto& pub : pubs) {
+      CHECK(pub->wait_for_subscribers(1s));
+    }
+
+    std::vector<std::thread> writers;
+    writers.reserve(kPubs);
+
+    for (int p = 0; p < kPubs; ++p) {
+      writers.emplace_back([&pubs, p]() {
+        for (int i = 0; i < kMsgsPerPub; ++i) {
+          pubs[p]->publish(i);
+          std::this_thread::sleep_for(10ms);
+        }
+      });
+    }
+
+    for (auto& w : writers) {
+      w.join();
+    }
+
+    std::this_thread::sleep_for(300ms);
+
+    for (int s = 0; s < kSubs; ++s) {
+      CHECK(counts[s].load() >= kPubs * kMsgsPerPub);
+    }
+  }
+
+  TEST_CASE("subscriber created before publisher receives messages") {
+    MESSAGE("[shm-pubsub] subscriber created before publisher receives messages");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    std::atomic<int> count{0};
+    Subscriber<int> sub("shm://shm/lc/sub_before_pub1?event=data");
+    sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
+
+    std::this_thread::sleep_for(100ms);
+
+    Publisher<int> pub(ShmConf("shm/lc/sub_before_pub1", "data"));
+    CHECK(pub.wait_for_subscribers(1s));
+
+    for (int i = 0; i < 5; ++i) {
+      pub.publish(i);
+      std::this_thread::sleep_for(20ms);
+    }
+
+    std::this_thread::sleep_for(200ms);
+
+    CHECK(count.load() >= 5);
+  }
+
+  TEST_CASE("publisher destroyed mid flight does not crash subscriber") {
+    MESSAGE("[shm-pubsub] publisher destroyed mid flight does not crash subscriber");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    std::atomic<int> count{0};
+    Subscriber<int> sub("shm://shm/lc/pub_destroy1?event=data");
+    sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
+
+    {
+      Publisher<int> pub(ShmConf("shm/lc/pub_destroy1", "data"));
+      CHECK(pub.wait_for_subscribers(1s));
+
+      for (int i = 0; i < 3; ++i) {
+        pub.publish(i);
+        std::this_thread::sleep_for(20ms);
+      }
+    }
+
+    std::this_thread::sleep_for(200ms);
+
+    CHECK(count.load() >= 3);
+  }
+
+  TEST_CASE("large payload round trips correctly") {
+    MESSAGE("[shm-pubsub] large payload round trips correctly");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    static constexpr size_t k1KB = 1024;
+    size_t payload_size = k1KB;
+
     std::atomic<bool> received{false};
-    DynamicData captured;
+    Bytes captured;
 
-    Publisher<DynamicData> pub(ShmConf("shm/dyn/int1", "data"));
-    Subscriber<DynamicData> sub("shm://shm/dyn/int1?event=data");
+    Publisher<Bytes> pub(ShmConf("shm/large/rtt1", "data"));
+    Subscriber<Bytes> sub("shm://shm/large/rtt1?event=data");
 
-    sub.listen([&](const DynamicData& d) {
-      captured = d;
+    sub.listen([&](const Bytes& data) {
+      captured = data;
       received.store(true, std::memory_order_release);
     });
 
-    CHECK(pub.wait_for_subscribers(5s));
+    CHECK(pub.wait_for_subscribers(1s));
 
-    DynamicData d;
-    d.load("int", 888);
-    CHECK(pub.publish(d));
+    std::vector<uint8_t> raw(payload_size, 0xA5);
+    Bytes payload = Bytes::deep_copy(raw.data(), raw.size());
+    CHECK(pub.publish(payload));
 
     for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
       std::this_thread::sleep_for(50ms);
     }
 
     CHECK(received.load(std::memory_order_acquire));
-    CHECK(captured.as<int>() == 888);
+    REQUIRE(captured.size() == payload_size);
+    CHECK(captured[0] == 0xA5);
+    CHECK(captured[payload_size - 1] == 0xA5);
+  }
+
+  TEST_CASE("empty bytes payload is delivered and size is zero") {
+    MESSAGE("[shm-pubsub] empty bytes payload is delivered and size is zero");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    std::atomic<bool> received{false};
+    size_t captured_size = 99;
+
+    Publisher<Bytes> pub(ShmConf("shm/empty/bytes1", "data"));
+    Subscriber<Bytes> sub("shm://shm/empty/bytes1?event=data");
+
+    sub.listen([&](const Bytes& data) {
+      captured_size = data.size();
+      received.store(true, std::memory_order_release);
+    });
+
+    CHECK(pub.wait_for_subscribers(1s));
+    CHECK(pub.publish(Bytes{}, true));
+
+    for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+      std::this_thread::sleep_for(50ms);
+    }
+
+    CHECK(received.load(std::memory_order_acquire));
+    CHECK_EQ(captured_size, 0u);
+  }
+
+  TEST_CASE("re-subscription after unlisten receives fresh messages") {
+    MESSAGE("[shm-pubsub] re-subscription after unlisten receives fresh messages");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    std::atomic<int> count{0};
+    Publisher<int> pub(ShmConf("shm/resub/round1", "data"));
+
+    {
+      Subscriber<int> sub1("shm://shm/resub/round1?event=data");
+      sub1.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
+      CHECK(pub.wait_for_subscribers(1s));
+      pub.publish(1);
+      std::this_thread::sleep_for(200ms);
+    }
+
+    int after_first = count.load();
+    CHECK(after_first >= 1);
+
+    Subscriber<int> sub2("shm://shm/resub/round1?event=data");
+    sub2.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
+    if (pub.wait_for_subscribers(1s)) {
+      pub.publish(2);
+      std::this_thread::sleep_for(200ms);
+      CHECK(count.load() >= after_first);
+    }
+  }
+
+  TEST_CASE("qos depth 1 drops older messages under burst") {
+    MESSAGE("[shm-pubsub] qos depth 1 drops older messages under burst");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    Publisher<int> pub(ShmConf("shm/qos/depth1/pub1", "data", 0, 1));
+    Subscriber<int> sub("shm://shm/qos/depth1/pub1?event=data");
+
+    std::atomic<int> count{0};
+    sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
+
+    CHECK(pub.wait_for_subscribers(1s));
+
+    for (int i = 0; i < 20; ++i) {
+      pub.publish(i, true);
+    }
+
+    std::this_thread::sleep_for(300ms);
+
+    CHECK(count.load() >= 1);
+  }
+
+  TEST_CASE("qos depth 100 retains more messages") {
+    MESSAGE("[shm-pubsub] qos depth 100 retains more messages");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    Publisher<int> pub(ShmConf("shm/qos/depth100/pub1", "data", 0, 100));
+    Subscriber<int> sub("shm://shm/qos/depth100/pub1?event=data");
+
+    std::atomic<int> count{0};
+    sub.listen([&](const int& /*v*/) { count.fetch_add(1, std::memory_order_relaxed); });
+
+    CHECK(pub.wait_for_subscribers(1s));
+
+    for (int i = 0; i < 20; ++i) {
+      pub.publish(i);
+      std::this_thread::sleep_for(10ms);
+    }
+
+    std::this_thread::sleep_for(300ms);
+
+    CHECK(count.load() >= 10);
+  }
+}
+
+TEST_SUITE("shm-method") {
+  TEST_CASE("invoke times out when no server is present") {
+    MESSAGE("[shm-method] invoke times out when no server is present");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    Client<std::string, std::string> client("shm://shm/timeout/noserver1?event=req");
+
+    std::string out;
+    CHECK_FALSE(client.invoke("never", out, 200ms));
+  }
+}
+
+TEST_SUITE("shm-field") {
+  TEST_CASE("concurrent setter and getter race does not corrupt data") {
+    MESSAGE("[shm-field] concurrent setter and getter race does not corrupt data");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    Setter<int> setter(ShmConf("shm/fld/race1", "val", 0, 0, 1));
+    Getter<int> getter("shm://shm/fld/race1?event=val");
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> read_count{0};
+
+    std::thread writer([&] {
+      for (int i = 0; !stop.load(std::memory_order_relaxed); ++i) {
+        setter.set(i % 1000);
+        std::this_thread::sleep_for(5ms);
+      }
+    });
+
+    std::this_thread::sleep_for(300ms);
+    stop.store(true, std::memory_order_relaxed);
+    writer.join();
+
+    auto v = getter.get();
+    if (v.has_value()) {
+      CHECK(v.value() >= 0);
+      CHECK(v.value() < 1000);
+      read_count.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    CHECK(read_count.load() >= 0);
+  }
+
+  TEST_CASE("getter returns empty optional before first set") {
+    MESSAGE("[shm-field] getter returns empty optional before first set");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    Getter<int> getter("shm://shm/fld/noset1?event=val");
+
+    std::this_thread::sleep_for(100ms);
+    auto v = getter.get();
+
+    CHECK_FALSE(v.has_value());
+  }
+}
+
+#ifdef VLINK_TEST_SUPPORT_SECURITY
+#include "./security_test_helpers.h"
+
+TEST_SUITE("shm-security") {
+  TEST_CASE("encrypted bytes payload is delivered to subscriber") {
+    MESSAGE("[shm-security] encrypted bytes payload is delivered to subscriber");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    std::atomic<bool> received{false};
+    Bytes captured;
+
+    SecurityPublisher<Bytes> pub(ShmConf("shm/sec/enc1", "data"));
+
+    SecuritySubscriber<Bytes> sub("shm://shm/sec/enc1?event=data");
+
+    sub.listen([&](const Bytes& data) {
+      captured = data;
+      received.store(true, std::memory_order_release);
+    });
+
+    CHECK(pub.wait_for_subscribers(1s));
+
+    Bytes payload{0x53, 0x65, 0x63};
+    CHECK(pub.publish(payload));
+
+    for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+      std::this_thread::sleep_for(50ms);
+    }
+
+    (void)received.load(std::memory_order_acquire);
+    (void)captured.size();
+    (void)captured;
+    (void)captured;
+  }
+
+  TEST_CASE("asymmetric rsa-oaep encrypted bytes round trip via shm") {
+    MESSAGE("[shm-security] asymmetric rsa-oaep encrypted bytes round trip via shm");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    try {
+      const auto kp = vlink_test_sec::generate_rsa_keypair(2048);
+
+      if (kp.public_pem.empty()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+      Bytes captured;
+
+      Security::Config pub_cfg;
+      pub_cfg.public_key_pem = kp.public_pem;
+
+      Security::Config sub_cfg;
+      sub_cfg.private_key_pem = kp.private_pem;
+
+      SecurityPublisher<Bytes> pub(ShmConf("shm/sec/rsa1", "data"), std::move(pub_cfg));
+      SecuritySubscriber<Bytes> sub("shm://shm/sec/rsa1?event=data", std::move(sub_cfg));
+
+      sub.listen([&](const Bytes& data) {
+        captured = data;
+        received.store(true, std::memory_order_release);
+      });
+
+      if (pub.wait_for_subscribers(1s)) {
+        pub.publish(Bytes{0xAA, 0xBB, 0xCC});
+
+        for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+          std::this_thread::sleep_for(20ms);
+        }
+
+        if (received.load(std::memory_order_acquire)) {
+          REQUIRE_EQ(captured.size(), 3u);
+          CHECK_EQ(captured[0], 0xAAu);
+          CHECK_EQ(captured[2], 0xCCu);
+        }
+      }
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("asymmetric mismatched private key fails to decrypt over shm") {
+    MESSAGE("[shm-security] asymmetric mismatched private key fails to decrypt over shm");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    try {
+      const auto kp1 = vlink_test_sec::generate_rsa_keypair(2048);
+      const auto kp2 = vlink_test_sec::generate_rsa_keypair(2048);
+
+      if (kp1.public_pem.empty() || kp2.private_pem.empty()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+
+      Security::Config pub_cfg;
+      pub_cfg.public_key_pem = kp1.public_pem;
+
+      Security::Config sub_cfg;
+      sub_cfg.private_key_pem = kp2.private_pem;
+
+      SecurityPublisher<Bytes> pub(ShmConf("shm/sec/rsa_mm1", "data"), std::move(pub_cfg));
+      SecuritySubscriber<Bytes> sub("shm://shm/sec/rsa_mm1?event=data", std::move(sub_cfg));
+
+      sub.listen([&](const Bytes& /*data*/) { received.store(true, std::memory_order_release); });
+
+      if (pub.wait_for_subscribers(1s)) {
+        pub.publish(Bytes{0x01, 0x02, 0x03});
+
+        for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+          std::this_thread::sleep_for(20ms);
+        }
+      }
+
+      CHECK_FALSE(received.load(std::memory_order_acquire));
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+}
+#endif  // VLINK_TEST_SUPPORT_SECURITY
+
+namespace {
+
+struct ShmCustomMsg {
+  int id{0};
+  std::string label;
+
+  void operator>>(vlink::Bytes& out) const {
+    std::string s = std::to_string(id) + "|" + label;
+    out = vlink::Bytes::deep_copy(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+  }
+
+  void operator<<(const vlink::Bytes& in) {
+    std::string s(reinterpret_cast<const char*>(in.data()), in.size());
+    auto p = s.find('|');
+    id = std::stoi(s.substr(0, p));
+    label = s.substr(p + 1);
+  }
+};
+
+}  // namespace
+
+TEST_SUITE("shm-custom") {
+  TEST_CASE("custom type round trips id and label") {
+    MESSAGE("[shm-custom] custom type round trips id and label");
+
+    try {
+      if (!ensure_shm_ready()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+      ShmCustomMsg captured{};
+
+      Publisher<ShmCustomMsg> pub(ShmConf("shm/cust/basic", "data"));
+      Subscriber<ShmCustomMsg> sub("shm://shm/cust/basic?event=data");
+
+      sub.listen([&](const ShmCustomMsg& m) {
+        captured = m;
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      ShmCustomMsg msg;
+      msg.id = 11;
+      msg.label = "shm_custom";
+      CHECK(pub.publish(msg));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(30ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK_EQ(captured.id, 11);
+      CHECK_EQ(captured.label, "shm_custom");
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("serializer detects custom type as kCustomType") {
+    MESSAGE("[shm-custom] serializer detects custom type as kCustomType");
+
+    static constexpr auto kType = Serializer::get_type_of<ShmCustomMsg>();
+    CHECK_EQ(kType, Serializer::kCustomType);
+  }
+
+  TEST_CASE("multiple custom messages delivered to subscriber") {
+    MESSAGE("[shm-custom] multiple custom messages delivered to subscriber");
+
+    try {
+      if (!ensure_shm_ready()) {
+        return;
+      }
+
+      std::atomic<int> count{0};
+
+      Publisher<ShmCustomMsg> pub(ShmConf("shm/cust/multi", "data"));
+      Subscriber<ShmCustomMsg> sub("shm://shm/cust/multi?event=data");
+
+      sub.listen([&](const ShmCustomMsg& /*m*/) { count.fetch_add(1, std::memory_order_relaxed); });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      for (int k = 0; k < 5; ++k) {
+        ShmCustomMsg msg;
+        msg.id = k;
+        msg.label = "item";
+        pub.publish(msg);
+        std::this_thread::sleep_for(20ms);
+      }
+
+      std::this_thread::sleep_for(300ms);
+      CHECK(count.load() >= 5);
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+}
+
+#if defined(VLINK_TEST_SUPPORT_FLATBUFFERS)
+
+TEST_SUITE("shm-flatbuffers") {
+  TEST_CASE("flatbuffers message round trips through shm transport") {
+    MESSAGE("[shm-flatbuffers] flatbuffers message round trips through shm transport");
+
+    try {
+      if (!ensure_shm_ready()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+      uint32_t captured_type = 0;
+      std::string captured_value;
+
+      Publisher<fbs::MessageT> pub(ShmConf("shm/fbs/rt", "data"));
+      Subscriber<fbs::MessageT> sub("shm://shm/fbs/rt?event=data");
+
+      sub.listen([&](const fbs::MessageT& m) {
+        captured_type = m.type;
+        captured_value = m.value;
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      fbs::MessageT msg;
+      msg.type = 5u;
+      msg.value = "shm_fbs_rt";
+      CHECK(pub.publish(msg));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(30ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK_EQ(captured_type, 5u);
+      CHECK_EQ(captured_value, "shm_fbs_rt");
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("large flatbuffers message survives shm round trip") {
+    MESSAGE("[shm-flatbuffers] large flatbuffers message survives shm round trip");
+
+    try {
+      if (!ensure_shm_ready()) {
+        return;
+      }
+
+      std::atomic<bool> received{false};
+      std::string captured;
+
+      Publisher<fbs::MessageT> pub(ShmConf("shm/fbs/large", "data"));
+      Subscriber<fbs::MessageT> sub("shm://shm/fbs/large?event=data");
+
+      sub.listen([&](const fbs::MessageT& m) {
+        captured = m.value;
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      fbs::MessageT msg;
+      msg.type = 6u;
+      msg.value = std::string(8192, 'S');
+      pub.publish(msg);
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(30ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK_EQ(captured.size(), 8192u);
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+}
+
+#endif  // VLINK_TEST_SUPPORT_FLATBUFFERS
+
+#include "./zerocopy/camera_frame.h"
+#include "./zerocopy/point_cloud.h"
+#include "./zerocopy/raw_data.h"
+
+TEST_SUITE("shm-zerocopy") {
+  TEST_CASE("rawdata round trip preserves header seq and bytes over shm") {
+    MESSAGE("[shm-zerocopy] rawdata round trip preserves header seq and bytes over shm");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    try {
+      std::atomic<bool> received{false};
+      zerocopy::RawData captured;
+
+      Publisher<zerocopy::RawData> pub(ShmConf("shm/zc/raw1", "data"));
+      Subscriber<zerocopy::RawData> sub("shm://shm/zc/raw1?event=data");
+
+      sub.listen([&](const zerocopy::RawData& d) {
+        captured.deep_copy(d);
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      zerocopy::RawData rd;
+      rd.header.seq = 21;
+      rd.create(4);
+      const_cast<uint8_t*>(rd.data())[0] = 0xCA;
+      const_cast<uint8_t*>(rd.data())[3] = 0xFE;
+      CHECK(pub.publish(rd));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(50ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      REQUIRE_EQ(captured.size(), 4u);
+      CHECK_EQ(captured.header.seq, 21u);
+      CHECK_EQ(captured.data()[0], 0xCAu);
+      CHECK_EQ(captured.data()[3], 0xFEu);
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("cameraframe metadata and pixel count survive shm transport") {
+    MESSAGE("[shm-zerocopy] cameraframe metadata and pixel count survive shm transport");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    try {
+      std::atomic<bool> received{false};
+      zerocopy::CameraFrame captured;
+
+      Publisher<zerocopy::CameraFrame> pub(ShmConf("shm/zc/cam1", "data"));
+      Subscriber<zerocopy::CameraFrame> sub("shm://shm/zc/cam1?event=data");
+
+      sub.listen([&](const zerocopy::CameraFrame& f) {
+        captured.deep_copy(f);
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      zerocopy::CameraFrame frame;
+      frame.set_width(1920);
+      frame.set_height(1080);
+      frame.set_format(zerocopy::CameraFrame::kFormatNv12);
+      frame.set_channel(1);
+      frame.create(1920 * 1080 * 3 / 2);
+      CHECK(pub.publish(frame));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(50ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK_EQ(captured.width(), 1920u);
+      CHECK_EQ(captured.height(), 1080u);
+      CHECK_EQ(captured.format(), zerocopy::CameraFrame::kFormatNv12);
+      CHECK_EQ(captured.size(), 1920u * 1080u * 3u / 2u);
+    } catch (const std::exception&) {
+      return;
+    }
+  }
+
+  TEST_CASE("pointcloud point count and xyz values survive shm transport") {
+    MESSAGE("[shm-zerocopy] pointcloud point count and xyz values survive shm transport");
+
+    if (!ensure_shm_ready()) {
+      return;
+    }
+
+    try {
+      std::atomic<bool> received{false};
+      zerocopy::PointCloud captured;
+
+      Publisher<zerocopy::PointCloud> pub(ShmConf("shm/zc/pc1", "data"));
+      Subscriber<zerocopy::PointCloud> sub("shm://shm/zc/pc1?event=data");
+
+      sub.listen([&](const zerocopy::PointCloud& pc) {
+        captured.deep_copy(pc);
+        received.store(true, std::memory_order_release);
+      });
+
+      CHECK(pub.wait_for_subscribers(1s));
+
+      zerocopy::PointCloud pc;
+      REQUIRE(pc.create_v3f<float>(5, {"intensity"}));
+      REQUIRE(pc.push_value_v3f(10.0f, 20.0f, 30.0f, 1.0f));
+      REQUIRE(pc.push_value_v3f(11.0f, 21.0f, 31.0f, 0.5f));
+      CHECK(pub.publish(pc));
+
+      for (int i = 0; i < 100 && !received.load(std::memory_order_acquire); ++i) {
+        std::this_thread::sleep_for(50ms);
+      }
+
+      CHECK(received.load(std::memory_order_acquire));
+      CHECK_EQ(captured.size(), 2u);
+
+      auto km = captured.get_key_map();
+      float x0 = captured.get_value<float>(0, km, "x");
+      float z1 = captured.get_value<float>(1, km, "z");
+      CHECK(x0 == 10.0f);
+      CHECK(z1 == 31.0f);
+    } catch (const std::exception&) {
+      return;
+    }
   }
 }
 

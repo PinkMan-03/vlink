@@ -29,9 +29,24 @@
 #include <cstddef>
 #include <cstdint>
 
+// ---------------------------------------------------------------------------
+// frame_producer.h
+//
+// Helper for the camera_frame example: builds a synthetic CameraFrame from
+// a width/height/format config and a sequence counter. The pixel-size math
+// per format mirrors the layouts used by ROS sensor_msgs/Image and ffmpeg's
+// AV_PIX_FMT_* set so the produced frames are interchangeable with those
+// ecosystems:
+//   * kFormatNv12 / kFormatNv21 -- 4:2:0 planar YUV (Y + interleaved UV),
+//                                  total = width*height*3/2.
+//   * kFormatRgb888Packed / Bgr -- 24-bit packed, total = width*height*3.
+//   * kFormatJpeg / kFormatH264 / kFormatH265 -- compressed, the byte
+//     budget is approximated as width*height (an upper bound for the demo).
+//   * default fallback assumes 16 bpp (YUYV, RGB565, depth16 etc.).
+// ---------------------------------------------------------------------------
+
 namespace frame_producer {
 
-// Camera frame configuration (POD -- no default member initializers).
 struct FrameConfig {
   uint32_t width;
   uint32_t height;
@@ -41,8 +56,6 @@ struct FrameConfig {
   uint8_t channel;
 };
 
-// Create a CameraFrame from a configuration and fill it with test pattern data.
-// The pattern cycles through 0..255 to simulate raw pixel data.
 inline vlink::zerocopy::CameraFrame create_test_frame(const FrameConfig& cfg, uint32_t seq) {
   vlink::zerocopy::CameraFrame frame;
   frame.set_width(cfg.width);
@@ -53,7 +66,6 @@ inline vlink::zerocopy::CameraFrame create_test_frame(const FrameConfig& cfg, ui
   frame.set_channel(cfg.channel);
   frame.header.seq = seq;
 
-  // Calculate buffer size based on format
   size_t pixel_size = 0;
   switch (cfg.format) {
     case vlink::zerocopy::CameraFrame::kFormatNv12:
@@ -67,45 +79,20 @@ inline vlink::zerocopy::CameraFrame create_test_frame(const FrameConfig& cfg, ui
     case vlink::zerocopy::CameraFrame::kFormatJpeg:
     case vlink::zerocopy::CameraFrame::kFormatH264:
     case vlink::zerocopy::CameraFrame::kFormatH265:
-      pixel_size = cfg.width * cfg.height;  // Compressed, approximate
+      pixel_size = cfg.width * cfg.height;
       break;
     default:
-      pixel_size = cfg.width * cfg.height * 2;  // Default YUV422-like
+      pixel_size = cfg.width * cfg.height * 2;
       break;
   }
 
   frame.create(pixel_size);
 
-  // Fill with a test pattern
   for (size_t i = 0; i < pixel_size; ++i) {
     const_cast<uint8_t*>(frame.data())[i] = static_cast<uint8_t>((seq + i) & 0xFF);
   }
 
   return frame;
-}
-
-// Create a standard 1080p NV12 frame configuration.
-inline FrameConfig make_1080p_nv12_config() {
-  FrameConfig cfg;
-  cfg.width = 1920;
-  cfg.height = 1080;
-  cfg.format = vlink::zerocopy::CameraFrame::kFormatNv12;
-  cfg.stream = vlink::zerocopy::CameraFrame::kStreamI;
-  cfg.freq = 30;
-  cfg.channel = 0;
-  return cfg;
-}
-
-// Create a standard 720p RGB frame configuration.
-inline FrameConfig make_720p_rgb_config() {
-  FrameConfig cfg;
-  cfg.width = 1280;
-  cfg.height = 720;
-  cfg.format = vlink::zerocopy::CameraFrame::kFormatRgb888Packed;
-  cfg.stream = vlink::zerocopy::CameraFrame::kStreamI;
-  cfg.freq = 30;
-  cfg.channel = 0;
-  return cfg;
 }
 
 }  // namespace frame_producer

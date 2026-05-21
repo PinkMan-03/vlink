@@ -23,9 +23,10 @@
 
 #pragma once
 
-/// POD brightness configuration for the field_advanced example.
-/// No default initializers -- required for VLink POD serialization (kStandardType).
+// Cached "field" value for field_advanced. POD, "Standard" serializer.
+// Used to demonstrate set_change_reporting(true) -- duplicate consecutive
+// values are suppressed by the Getter and never reach listen() callbacks.
 struct BrightnessConfig {
-  int level;       // Brightness level from 0 to 100
-  bool auto_mode;  // Whether auto-brightness is enabled
+  int level;
+  bool auto_mode;
 };

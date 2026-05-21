@@ -12,9 +12,9 @@ VLink 的零拷贝能力分布在两个正交的层次：
    Publisher 直接向共享内存池借出的缓冲区写数据，Subscriber 通过指针收到同一块内存。
    其他后端（`intra`、`dds`、`ddsc` 等）不支持 loan，`is_support_loan()` 返回 `false`。
 2. **容器层零拷贝（zerocopy 结构体）**：`vlink::zerocopy` 命名空间下的负载容器
-   （`RawData`、`CameraFrame`、`PointCloud`、`ProxyData`）支持"借用"语义——
-   反序列化时内部指针直接指向 `Bytes` 缓冲区，不复制负载数据。`Header` 是 POD 元数据结构，
-   不包含负载指针，也不提供借用反序列化语义。
+   （`RawData`、`CameraFrame`、`PointCloud`、`OccupancyGrid`、`Tensor`、`ObjectArray`、
+   `AudioFrame`、`ProxyData`）支持"借用"语义——反序列化时内部指针直接指向 `Bytes` 缓冲区，
+   不复制负载数据。`Header` 是 POD 元数据结构，不包含负载指针，也不提供借用反序列化语义。
 
 两个层次可独立或组合使用：同一个 `CameraFrame` 可以通过 `shm://` 做双层零拷贝，
 也可以通过 `dds://` 做单层（仅容器反序列化借用）。
@@ -32,6 +32,10 @@ VLink 的零拷贝能力分布在两个正交的层次：
 | 进程间激光雷达点云传输  | `PointCloud` + `shm://` 后端                |
 | 网络传输相机帧          | `CameraFrame` + `dds://` / `ddsc://` 后端   |
 | 自定义二进制数据        | `RawData` + 任意后端                        |
+| 2D 占据 / 代价地图      | `OccupancyGrid` + `shm://` / `dds://` 后端  |
+| 神经网络张量输入输出    | `Tensor` + `shm://` / `dds://` 后端         |
+| 3D 检测 / 跟踪目标列表  | `ObjectArray` + 任意后端                    |
+| 音频帧（PCM / 编码）    | `AudioFrame` + 任意后端                     |
 | 代理路由消息            | `ProxyData`（proxy 层内部使用）             |
 
 ---
@@ -40,10 +44,10 @@ VLink 的零拷贝能力分布在两个正交的层次：
 
 头文件：`include/vlink/zerocopy/header.h`
 
-`Header` 是 40 字节 POD，嵌入在 `RawData`、`CameraFrame`、`PointCloud` 中作为
-公有成员 `header`。`ProxyData` 不包含 `Header`（它有自己的控制字段）。
-结构体声明为 `VLINK_EXPORT_AND_ALIGNED(8)`，64 位平台通过 `static_assert` 校验
-`sizeof(Header) == 40`。
+`Header` 是 40 字节 POD，嵌入在 `RawData`、`CameraFrame`、`PointCloud`、`OccupancyGrid`、
+`Tensor`、`ObjectArray`、`AudioFrame` 中作为公有成员 `header`。`ProxyData` 不包含 `Header`
+（它有自己的控制字段）。结构体声明为 `VLINK_EXPORT_AND_ALIGNED(8)`，64 位平台通过
+`static_assert` 校验 `sizeof(Header) == 40`。
 
 ### 10.2.1 内存布局与字段
 
@@ -335,11 +339,10 @@ struct Vector3d final {
 | `resize(size)`                              | 重置点数（清空数据，保留 Schema）            |
 | `push_value_v3f(x, y, z, extras...)`        | 追加一个 v3f 格式的点                        |
 | `push_value_v3d(x, y, z, extras...)`        | 追加一个 v3d 格式的点                        |
-| `set_value(index, T... args)`               | 按顺序写入第 index 个点的所有字段（变参模板）|
+| `set_value(index, T... args)` / `set_value_v3f` / `set_value_v3d` | 覆写第 index 个点的字段（要求 `index_ == size_ * pack_size_`，通常先 `resize()`）|
 | `get_value<T>(index, key_map, key)`         | 按字段名读取第 index 个点的某字段（`key_map` 为可变引用，`key` 需 NUL 结尾） |
 | `get_value_v3f(index)`                      | 读取第 index 个点的 XYZ 坐标（返回 Vector3f）|
 | `get_value_v3d(index)`                      | 读取第 index 个点的 XYZ 坐标（返回 Vector3d）|
-| `set_value(index, T... args)` / `set_value_v3f` / `set_value_v3d` | 覆写第 index 个点的字段（要求 `index_ == size_ * pack_size_`，通常先 `resize()`）|
 | `fill_packed_data(src, _size)`              | 从外部 packed 缓冲区按行整体拷贝             |
 | `get_key_map(key_list*=nullptr)`            | 返回 名称->字节偏移 的映射                   |
 | `size()`                                    | 返回当前点数                                 |
@@ -367,7 +370,517 @@ struct Vector3d final {
 
 ---
 
-## 10.6 ProxyData 类
+## 10.6 OccupancyGrid 类
+
+头文件：`include/vlink/zerocopy/occupancy_grid.h`
+
+`OccupancyGrid` 是 2D 占据 / 代价地图容器，按行主序存储 `width × height` 个同质单元格，
+每个单元格根据 `cell_type()` 占用 1 / 2 / 4 字节。64 位平台 `sizeof(OccupancyGrid) == 152`
+（已通过 `static_assert` 校验）。结构体内嵌世界坐标→栅格的变换参数、数值范围、默认值、
+占据 / 空闲阈值、地图 ID 等元数据，无需外部协议即可在不同进程 / 主机间互通。
+
+### 10.6.1 适用场景
+
+| 场景                            | 示例                                                    |
+| ------------------------------- | ------------------------------------------------------- |
+| ROS `nav_msgs/OccupancyGrid` 等价 | `kCellInt8`，`-1 / 0..100`，常用于全局地图 / 代价地图 |
+| 多分辨率 / 高动态范围代价图     | `kCellUint8` 或 `kCellUint16`，灰度成本图               |
+| 概率 / 对数几率 / SDF 地图       | `kCellFloat32`，浮点存储                                |
+| 多层地图栈                       | 通过 `origin_z` 把不同高度的 2D 平面叠加在 3D 空间内     |
+
+### 10.6.2 单元格类型（CellType）
+
+| 枚举值          | 数值 | C++ 类型   | 字节数 | 典型用途                              |
+| --------------- | ---- | ---------- | ------ | ------------------------------------- |
+| `kCellUnknown`  | 0    | —          | 0      | 未初始化                              |
+| `kCellInt8`     | 1    | `int8_t`   | 1      | ROS 风格 `-1 / 0..100` 占据值         |
+| `kCellUint8`    | 2    | `uint8_t`  | 1      | 0..255 代价图 / 灰度图                 |
+| `kCellUint16`   | 3    | `uint16_t` | 2      | 高分辨率代价图                         |
+| `kCellFloat32`  | 4    | `float`    | 4      | 对数几率 / 概率 / 有符号距离场（SDF）  |
+
+静态辅助 `OccupancyGrid::cell_size_of(type)` 可在编译外查表得到上述字节数。
+
+### 10.6.3 坐标约定
+
+`(origin_x, origin_y, origin_z)` 位于第 0 行 / 第 0 列单元格的左下角，地图绕该原点
+旋转 `origin_yaw` 弧度（REP-103 约定）。任意单元格 `(col, row)` 的世界坐标可由
+分辨率与 yaw 旋转推得。
+
+### 10.6.4 核心方法
+
+| 方法 / 字段                       | 说明                                                    |
+| --------------------------------- | ------------------------------------------------------- |
+| `header`                          | 嵌入的 `Header`（序列号 / 时间戳）                     |
+| `set_width(w)` / `width()`        | 列数                                                    |
+| `set_height(h)` / `height()`      | 行数                                                    |
+| `set_resolution(r)` / `resolution()` | 米 / 单元格                                          |
+| `set_origin_x/y/z/yaw(...)`       | 世界坐标系下的原点 / 旋转                              |
+| `set_value_min/max(...)`          | 数值范围（可用于可视化归一化）                          |
+| `set_default_value(v)`            | 未知 / 默认单元格的取值                                 |
+| `set_occupied_threshold(t)` / `set_free_threshold(t)` | 占据 / 空闲判定阈值                |
+| `set_cell_type(t)` / `cell_type()` / `cell_size()`    | 单元格类型与字节数                 |
+| `set_valid_cell_count(n)` / `valid_cell_count()`      | 非默认单元格计数（生产者可选填）   |
+| `set_map_id(sv)` / `map_id()`     | 16 字节地图标识（NUL 结尾）                            |
+| `set_channel(c)` / `channel()`    | 传感器 / 生产者通道号                                   |
+| `set_freq(f)` / `freq()`          | 发布频率（Hz）                                          |
+| `set_update_time_ns(t)` / `update_time_ns()` | 地图状态时间戳（独立于 `header.time_pub`）   |
+| `create(size)`                    | 分配 `size` 字节的拥有缓冲区（通常为 `width*height*cell_size()`） |
+| `shallow_copy(ptr, size)` / `deep_copy(ptr, size)` / `fill_data(ptr, size)` | 借用 / 深拷贝 / 别名             |
+| `shallow_copy(other)` / `deep_copy(other)` / `move_copy(other)` | 与同类对象的借用 / 深拷贝 / 转移所有权     |
+| `operator>>(bytes)` / `operator<<(bytes)` / `check_valid(bytes)` | 序列化 / 零拷贝反序列化 / 格式校验        |
+| `get_serialized_size()`           | 序列化总字节数（magic + 152 + W*H*cell_size + magic）  |
+| `is_valid()` / `is_owner()`       | 缓冲区非空检查 / 所有权检查                              |
+| `data()` / `size()`               | 单元格数据指针与字节数                                  |
+| `get_reserved()`                  | 32 位用户预留字段引用（不被 `clear()` 重置、不参与拷贝）|
+| `clear()`                         | 释放并归零（不含 `reserved`）                           |
+
+### 10.6.5 线缆格式
+
+```
+[ magic_begin (4) | OccupancyGrid 结构体 (152) | 单元格数据 (W*H*cell_size) | magic_end (4) ]
+```
+
+魔数 `0x98B7F17A` / `0x98B7F17F`。
+
+### 10.6.6 使用示例
+
+```cpp
+#include <vlink/zerocopy/occupancy_grid.h>
+
+vlink::zerocopy::OccupancyGrid og;
+og.header.seq      = 1;
+og.header.time_pub = vlink::MessageLoop::get_current_nano_time();
+og.set_map_id("global");
+og.set_width(400);
+og.set_height(400);
+og.set_resolution(0.05f);                // 5 cm/cell
+og.set_origin_x(-10.0f);
+og.set_origin_y(-10.0f);
+og.set_origin_yaw(0.0f);
+og.set_cell_type(vlink::zerocopy::OccupancyGrid::kCellInt8);
+og.set_default_value(-1);
+og.set_occupied_threshold(0.65f);
+og.set_free_threshold(0.20f);
+
+const size_t cells = static_cast<size_t>(og.width()) * og.height() * og.cell_size();
+og.create(cells);
+std::memset(const_cast<uint8_t*>(og.data()), 0, cells);  // 全部置 0（空闲）
+
+vlink::Bytes wire;
+og >> wire;                                // 序列化
+
+vlink::zerocopy::OccupancyGrid og2;
+og2 << wire;                               // 零拷贝反序列化，data 指向 wire 内部
+```
+
+### 10.6.7 注意事项
+
+- 32 位架构在编译期发出告警，不在支持矩阵内。
+- `operator<<` 之后，`data()` 指向 `Bytes` 内部缓冲；`Bytes` 必须比该 `OccupancyGrid`
+  存活更久。
+- `valid_cell_count()` 为生产者可选 hint；当为 0 时消费者应视为「未提供」，而不是
+  「地图全空」。
+
+---
+
+## 10.7 Tensor 类
+
+头文件：`include/vlink/zerocopy/tensor.h`
+
+`Tensor` 是 N 维张量容器，专为神经网络输入 / 输出、感知特征图、语言模型隐藏态、
+扩散模型潜变量等场景设计。结构体最多支持 8 维（`kMaxRank == 8`），同时存放形状
+`shape` 和按元素的步长 `strides`，使非连续视图（如 NCHW 切片）能够无损往返。
+64 位平台 `sizeof(Tensor) == 248`（已通过 `static_assert` 校验）。
+
+### 10.7.1 元素类型（DataType）
+
+| 枚举值          | 数值 | C++ 类型      | 字节数 |
+| --------------- | ---- | ------------- | ------ |
+| `kDataUnknown`  | 0    | —             | 0      |
+| `kBool`         | 1    | `bool`        | 1      |
+| `kInt8`         | 2    | `int8_t`      | 1      |
+| `kUint8`        | 3    | `uint8_t`     | 1      |
+| `kInt16`        | 4    | `int16_t`     | 2      |
+| `kUint16`       | 5    | `uint16_t`    | 2      |
+| `kInt32`        | 6    | `int32_t`     | 4      |
+| `kUint32`       | 7    | `uint32_t`    | 4      |
+| `kInt64`        | 8    | `int64_t`     | 8      |
+| `kUint64`       | 9    | `uint64_t`    | 8      |
+| `kFloat16`      | 10   | half（自定义）| 2      |
+| `kBfloat16`     | 11   | bfloat16      | 2      |
+| `kFloat32`      | 12   | `float`       | 4      |
+| `kFloat64`      | 13   | `double`      | 8      |
+
+静态辅助 `Tensor::element_size_of(dtype)` 可查表得到上述字节数。
+调用 `set_dtype(dtype)` 时会自动缓存 `element_size()`。
+
+### 10.7.2 设备提示（Device）
+
+| 枚举值        | 数值 | 说明                       |
+| ------------- | ---- | -------------------------- |
+| `kDeviceCpu`  | 0    | 主机 / CPU 内存            |
+| `kDeviceGpu`  | 1    | 集成或独立 GPU 显存        |
+| `kDeviceNpu`  | 2    | 神经处理单元（车规 NPU 等）|
+| `kDeviceDsp`  | 3    | 数字信号处理器             |
+
+### 10.7.3 形状与步长
+
+`set_shape(shape, rank)` 会按行主序（最后一维变化最快）自动计算 `strides` 与
+`num_elements`，并把 `batch_size` 缓存为 `shape[0]`。`rank` 会被截断到 `kMaxRank`。
+若需手工设置非连续视图，可在此后调用 `set_stride_at(dim, value)` 单独覆写。
+
+```cpp
+uint32_t shape[] = {1, 3, 224, 224};  // NCHW
+t.set_shape(shape, 4);                // 自动填充 strides 与 num_elements
+```
+
+> **线缆数据自校验**：`operator<<` 从 `Bytes` 反序列化时会对两个字段做强制
+> 一致性修正：
+> - `rank` 被钳制到 `[0, kMaxRank]`，防止越界读 `shape_[]` / `strides_[]`；
+> - `element_size` 总是从 `dtype` 重新派生，使 `num_elements * element_size`
+>   始终与有效 dtype 匹配，规避生产端缺陷或恶意输入造成的状态不一致。
+>
+> 但 `shape` / `strides` / `num_elements` 不会再次校验，使用者仍需保证生产端
+> 写入的语义正确。
+
+### 10.7.4 核心方法
+
+| 方法 / 字段                                            | 说明                                            |
+| ------------------------------------------------------ | ----------------------------------------------- |
+| `header`                                               | 嵌入的 `Header`                                  |
+| `set_name(sv)` / `name()`                              | 张量名称（最长 31 字节）                        |
+| `set_model_id(sv)` / `model_id()`                      | 来源模型标识（最长 31 字节）                    |
+| `set_layout(sv)` / `layout()`                          | 维度布局标签（最长 15 字节，如 `"NCHW"`）       |
+| `set_shape(shape, rank)` / `shape()` / `shape_at(d)`   | 形状向量（自动重新计算 `strides` 与 `num_elements`） |
+| `set_shape_at(d, v)` / `set_stride_at(d, v)`           | 单维度覆写（不会重新计算 `num_elements`）       |
+| `strides()` / `stride_at(d)`                           | 按元素的步长向量                                |
+| `set_dtype(t)` / `dtype()` / `element_size()`          | 元素类型 + 缓存的元素字节数                     |
+| `rank()`                                               | 实际维度数（1..`kMaxRank`）                     |
+| `num_elements()`                                       | 累计元素数（形状各维度的乘积）                  |
+| `set_device(d)` / `device()`                           | 数据所在设备提示                                |
+| `set_batch_size(n)` / `batch_size()`                   | 缓存的批大小（默认取 `shape[0]`）               |
+| `set_quant_scale(s)` / `quant_scale()`                 | INT8 量化 scale（未量化置 0）                   |
+| `set_quant_zero_point(z)` / `quant_zero_point()`       | INT8 量化 zero point                            |
+| `set_channel(c)` / `channel()` / `set_freq(f)` / `freq()` | 通道号 / 频率                                |
+| `set_update_time_ns(t)` / `update_time_ns()`           | 张量状态时间戳                                  |
+| `create(size)`                                         | 分配 `num_elements * element_size` 字节         |
+| `shallow_copy(ptr, size)` / `deep_copy(ptr, size)` / `fill_data(ptr, size)` | 借用 / 深拷贝 / 别名         |
+| `shallow_copy(other)` / `deep_copy(other)` / `move_copy(other)` | 与同类对象的借用 / 深拷贝 / 转移所有权 |
+| `operator>>(bytes)` / `operator<<(bytes)` / `check_valid(bytes)` | 序列化 / 零拷贝反序列化 / 格式校验      |
+| `get_serialized_size()`                                | 序列化总字节数（magic + 248 + N*element_size + magic） |
+| `is_valid()` / `is_owner()`                            | 缓冲区非空检查 / 所有权检查                     |
+| `data()` / `size()`                                    | 张量数据指针与字节数                             |
+| `get_reserved()`                                       | 32 位用户预留字段引用                           |
+| `clear()`                                              | 释放并归零                                       |
+
+### 10.7.5 线缆格式
+
+```
+[ magic_begin (4) | Tensor 结构体 (248) | 元素数据 (num_elements * element_size) | magic_end (4) ]
+```
+
+魔数 `0x98B7F19A` / `0x98B7F19F`。
+
+### 10.7.6 使用示例
+
+```cpp
+#include <vlink/zerocopy/tensor.h>
+
+vlink::zerocopy::Tensor t;
+t.header.seq      = 1;
+t.header.time_pub = vlink::MessageLoop::get_current_nano_time();
+t.set_name("image");
+t.set_model_id("detector_v3");
+t.set_layout("NCHW");
+t.set_dtype(vlink::zerocopy::Tensor::kFloat32);
+t.set_device(vlink::zerocopy::Tensor::kDeviceGpu);
+
+uint32_t shape[] = {1, 3, 224, 224};
+t.set_shape(shape, 4);                                  // 自动填 strides + num_elements
+
+t.create(t.num_elements() * t.element_size());          // 1*3*224*224*4 字节
+std::memset(const_cast<uint8_t*>(t.data()), 0, t.size());
+
+vlink::Bytes wire;
+t >> wire;
+
+vlink::zerocopy::Tensor t2;
+t2 << wire;                                             // 零拷贝反序列化
+```
+
+### 10.7.7 注意事项
+
+- 32 位架构在编译期发出告警。
+- 量化张量请同时设置 `quant_scale` 与 `quant_zero_point`；浮点张量保持 0 即可。
+- `set_shape_at` / `set_stride_at` 不会重算 `num_elements`，需要整体一致时请改用
+  `set_shape`。
+- `operator<<` 之后 `data()` 借用 `Bytes` 内部缓冲；`Bytes` 必须更长寿。
+
+---
+
+## 10.8 ObjectArray 类
+
+头文件：`include/vlink/zerocopy/object_array.h`
+
+`ObjectArray` 是 3D 目标检测 / 跟踪 / 融合结果的变长数组容器，每个 `Object` 记录
+一个障碍物的姿态、尺寸、运动学、分类、跟踪 ID 与位置协方差。64 位平台容器
+`sizeof(ObjectArray) == 112`，单个 `sizeof(Object) == 144`（均通过 `static_assert`
+校验）。
+
+> **`Object` 故意采用 `alignas(4)`（不是 8）**：线缆 payload 起始偏移为
+> `sizeof(magic_begin) + sizeof(ObjectArray) == 4 + 112 == 116`，相对 `Bytes::data()`
+> 的 8 字节对齐基址处于 `+4 mod 8` 位置——只有 4 字节对齐。若 `Object` 要求 8 字节
+> 对齐，则通过 `objects(i)` 返回的指针在严格对齐架构（ARM、AArch64）上解引用会触发
+> SIGBUS。由于 `Object` 所有字段最宽 4 字节（`uint32_t` / `float`），4 字节对齐已经
+>充分；测试 `object_array_test.cc` 通过 `static_assert(alignof(Object) == 4)` 锁定
+> 这一不变量。
+
+### 10.8.1 Object 结构（公共 POD，144 字节）
+
+`Object` 字段全部公开（无尾下划线，风格与 `Header` / `Vector3f` 一致），可直接读写：
+
+| 字段                       | 类型              | 单位 / 范围                                    |
+| -------------------------- | ----------------- | ---------------------------------------------- |
+| `label[32]`                | `char[32]`        | NUL 结尾的类别名（如 `"car"`、`"pedestrian"`） |
+| `position[3]`              | `float[3]`        | 世界坐标系下中心位置（米）                     |
+| `yaw`                      | `float`           | 偏航角（弧度，REP-103）                        |
+| `size[3]`                  | `float[3]`        | 包围盒长 / 宽 / 高（米）                       |
+| `yaw_rate`                 | `float`           | 偏航角速度（弧度 / 秒）                        |
+| `velocity[3]`              | `float[3]`        | 线速度（米 / 秒）                              |
+| `score`                    | `float`           | 检测置信度 ∈ [0, 1]                            |
+| `acceleration[3]`          | `float[3]`        | 加速度（米 / 秒²）                              |
+| `existence_probability`    | `float`           | 存在概率 ∈ [0, 1]                              |
+| `position_covariance[6]`   | `float[6]`        | 上三角：xx, xy, xz, yy, yz, zz                 |
+| `class_id`                 | `uint32_t`        | 类别数字标识                                    |
+| `track_id`                 | `uint32_t`        | 跟踪 ID（0 表示未关联的纯检测）                 |
+| `age`                      | `uint32_t`        | 跟踪存活帧数                                    |
+| `num_observations`         | `uint32_t`        | 累计观测次数                                    |
+| `motion_state`             | `MotionState`     | 运动状态                                        |
+| `source_type`              | `SourceType`      | 来源传感器                                      |
+| `subtype_id`               | `uint16_t`        | 细粒度子类型（如 sedan vs. SUV）                |
+| `reserved32`               | `uint32_t`        | 保留位，置 0                                    |
+
+### 10.8.2 MotionState
+
+| 枚举值              | 数值 | 说明                          |
+| ------------------- | ---- | ----------------------------- |
+| `kMotionUnknown`    | 0    | 未知                           |
+| `kMotionStationary` | 1    | 静止（固定障碍物）             |
+| `kMotionMoving`     | 2    | 正在运动                       |
+| `kMotionStopped`    | 3    | 临时停止（红灯前等）           |
+| `kMotionParked`     | 4    | 长期停放车辆                   |
+
+### 10.8.3 SourceType
+
+| 枚举值              | 数值 | 说明                |
+| ------------------- | ---- | ------------------- |
+| `kSourceUnknown`    | 0    | 未知                 |
+| `kSourceLidar`      | 1    | 纯 LiDAR 检测       |
+| `kSourceCamera`     | 2    | 纯相机检测           |
+| `kSourceRadar`      | 3    | 纯雷达检测           |
+| `kSourceFusion`     | 4    | 多传感器融合         |
+| `kSourceUltrasonic` | 5    | 超声波传感器         |
+
+### 10.8.4 核心方法
+
+| 方法 / 字段                              | 说明                                                |
+| ---------------------------------------- | --------------------------------------------------- |
+| `header`                                 | 嵌入的 `Header`                                      |
+| `set_source_id(sv)` / `source_id()`      | 生产模块标识（最长 15 字节）                        |
+| `set_channel(c)` / `channel()`           | 通道号                                               |
+| `set_freq(f)` / `freq()`                 | 发布频率                                             |
+| `set_update_time_ns(t)` / `update_time_ns()` | 状态时间戳                                       |
+| `create(count)`                          | 预分配 `count` 个 Object 槽位，`count_` 置 0         |
+| `push_value(obj)`                        | 追加一个 Object，超出容量返回 `false`               |
+| `set_value(idx, obj)` / `get_value(idx, obj)` / `get_value(idx)` | 写 / 读 第 `idx` 个 Object   |
+| `resize(count)`                          | 不重新分配，仅修改逻辑数量（不可超过容量）           |
+| `count()` / `capacity()` / `pack_size()` | 当前 Object 数 / 字节容量 / 单 Object 字节大小       |
+| `objects(idx=0)`                         | 只读 `Object*`（指向第 `idx` 项；越界返回 `nullptr`）|
+| `data()`                                 | 只读裸缓冲区指针                                     |
+| `shallow_copy(other)` / `deep_copy(other)` / `move_copy(other)` | 借用 / 深拷贝 / 转移所有权    |
+| `operator>>(bytes)` / `operator<<(bytes)` / `check_valid(bytes)` | 序列化 / 零拷贝反序列化 / 格式校验 |
+| `get_serialized_size()`                  | 序列化总字节数（magic + 112 + count*144 + magic）   |
+| `is_valid()` / `is_owner()`              | 缓冲区非空检查 / 所有权检查                          |
+| `get_reserved()`                         | 32 位用户预留字段引用                                |
+| `clear()`                                | 释放并归零                                           |
+
+### 10.8.5 线缆格式
+
+```
+[ magic_begin (4) | ObjectArray 结构体 (112) | Object[0..count) (count * 144) | magic_end (4) ]
+```
+
+魔数 `0x98B7F18A` / `0x98B7F18F`。
+
+### 10.8.6 使用示例
+
+```cpp
+#include <vlink/zerocopy/object_array.h>
+
+vlink::zerocopy::ObjectArray arr;
+arr.header.seq      = 1;
+arr.header.time_pub = vlink::MessageLoop::get_current_nano_time();
+arr.set_source_id("fusion_v2");
+arr.set_channel(0);
+
+arr.create(256);                                  // 预留 256 个槽位
+
+vlink::zerocopy::ObjectArray::Object obj;
+std::strncpy(obj.label, "car", sizeof(obj.label) - 1);
+obj.position[0] = 12.0f;
+obj.position[1] = 0.3f;
+obj.position[2] = 0.0f;
+obj.size[0] = 4.5f;
+obj.size[1] = 1.8f;
+obj.size[2] = 1.6f;
+obj.yaw         = 0.1f;
+obj.velocity[0] = 8.5f;
+obj.score       = 0.92f;
+obj.class_id    = 1;
+obj.track_id    = 42;
+obj.motion_state = vlink::zerocopy::ObjectArray::kMotionMoving;
+obj.source_type  = vlink::zerocopy::ObjectArray::kSourceFusion;
+arr.push_value(obj);
+
+vlink::Bytes wire;
+arr >> wire;
+
+vlink::zerocopy::ObjectArray arr2;
+arr2 << wire;
+for (uint32_t i = 0; i < arr2.count(); ++i) {
+    const auto* o = arr2.objects(i);
+    // 使用 o->label / o->position / ...
+}
+```
+
+### 10.8.7 注意事项
+
+- 32 位架构在编译期发出告警。
+- `push_value` 会在 `count_ >= capacity_/pack_size_` 时失败；超量需要在
+  `create()` 时一次性预留足够。
+- `Object` 是公开 POD，可直接赋值字段；与 `Header` / `Vector3f` 的访问风格一致。
+- `operator<<` 后 `objects(i)` / `data()` 借用 `Bytes` 内部缓冲。
+
+---
+
+## 10.9 AudioFrame 类
+
+头文件：`include/vlink/zerocopy/audio_frame.h`
+
+`AudioFrame` 用于在 VLink 上传输一段音频帧（原始 PCM 或编码后的码流），适用于
+麦克风采集、语音合成（TTS）输出、车机语音指令、车载娱乐音频流等场景。64 位平台
+`sizeof(AudioFrame) == 128`（已通过 `static_assert` 校验）。
+
+### 10.9.1 采样 / 编码格式（Format）
+
+| 枚举值            | 数值 | 说明                                         |
+| ----------------- | ---- | -------------------------------------------- |
+| `kFormatUnknown`  | 0    | 未知 / 未初始化                              |
+| `kFormatPcmS16`   | 1    | 有符号 16 位线性 PCM                          |
+| `kFormatPcmS24`   | 2    | 有符号 24 位线性 PCM（每样本 3 字节打包）     |
+| `kFormatPcmS32`   | 3    | 有符号 32 位线性 PCM                          |
+| `kFormatPcmF32`   | 4    | IEEE-754 单精度浮点 PCM                       |
+| `kFormatPcmU8`    | 5    | 无符号 8 位线性 PCM                           |
+| `kFormatOpus`     | 100  | Opus 编码帧                                   |
+| `kFormatAac`      | 101  | AAC 编码帧                                    |
+| `kFormatMp3`      | 102  | MP3 编码帧                                    |
+| `kFormatFlac`     | 103  | FLAC 编码帧                                   |
+
+### 10.9.2 通道布局（Layout）
+
+| 枚举值              | 数值 | 说明                                  |
+| ------------------- | ---- | ------------------------------------- |
+| `kLayoutUnknown`    | 0    | 未知                                  |
+| `kLayoutInterleaved`| 1    | 跨通道交错（`L,R,L,R,...`）            |
+| `kLayoutPlanar`     | 2    | 各通道独立平面存储                    |
+
+### 10.9.3 核心方法
+
+| 方法 / 字段                              | 说明                                                 |
+| ---------------------------------------- | ---------------------------------------------------- |
+| `header`                                 | 嵌入的 `Header`                                       |
+| `set_sample_rate(r)` / `sample_rate()`   | 采样率（Hz）                                          |
+| `set_num_samples(n)` / `num_samples()`   | 每通道样本数                                          |
+| `set_num_channels(c)` / `num_channels()` | 通道数（1 = mono，2 = stereo，...）                   |
+| `set_bit_depth(b)` / `bit_depth()`       | 每样本位深（16 / 24 / 32 等）                          |
+| `set_bitrate(b)` / `bitrate()`           | 压缩码率（bps，未压缩可置 0）                          |
+| `set_format(f)` / `format()`             | 采样 / 编码格式                                       |
+| `set_layout(l)` / `layout()`             | 通道排布方式                                          |
+| `set_codec(sv)` / `codec()`              | codec 名（最长 15 字节，如 `"PCM"`、`"OPUS"`）        |
+| `set_language(sv)` / `language()`        | 语言标签（最长 7 字节，如 `"en"`、`"zh"`，供 STT 使用）|
+| `set_duration_ns(t)` / `duration_ns()`   | 帧时长（纳秒）                                        |
+| `set_channel(c)` / `channel()` / `set_freq(f)` / `freq()` | 通道号 / 发布频率                |
+| `set_update_time_ns(t)` / `update_time_ns()` | 采集时间戳                                       |
+| `create(size)`                           | 分配 `size` 字节的音频缓冲区                          |
+| `shallow_copy(ptr, size)` / `deep_copy(ptr, size)` / `fill_data(ptr, size)` | 借用 / 深拷贝 / 别名      |
+| `shallow_copy(other)` / `deep_copy(other)` / `move_copy(other)` | 与同类对象的借用 / 深拷贝 / 转移所有权 |
+| `operator>>(bytes)` / `operator<<(bytes)` / `check_valid(bytes)` | 序列化 / 零拷贝反序列化 / 格式校验  |
+| `get_serialized_size()`                  | 序列化总字节数（magic + 128 + N + magic）             |
+| `is_valid()` / `is_owner()`              | 缓冲区非空检查 / 所有权检查                            |
+| `data()` / `size()`                      | 音频数据指针与字节数                                  |
+| `get_reserved()`                         | 32 位用户预留字段引用                                  |
+| `clear()`                                | 释放并归零                                            |
+
+### 10.9.4 缓冲区大小计算
+
+```cpp
+// 交错 PCM S16，单声道 / 立体声 / 多声道：
+size_t pcm_s16_size = num_samples * num_channels * sizeof(int16_t);
+
+// 交错 PCM F32：
+size_t pcm_f32_size = num_samples * num_channels * sizeof(float);
+
+// Opus / AAC / MP3 / FLAC：动态大小，由编码器决定，通常等于编码输出长度
+```
+
+### 10.9.5 线缆格式
+
+```
+[ magic_begin (4) | AudioFrame 结构体 (128) | 音频数据 (N) | magic_end (4) ]
+```
+
+魔数 `0x98B7F1AA` / `0x98B7F1AF`。
+
+### 10.9.6 使用示例
+
+```cpp
+#include <vlink/zerocopy/audio_frame.h>
+
+vlink::zerocopy::AudioFrame frame;
+frame.header.seq      = 1;
+frame.header.time_pub = vlink::MessageLoop::get_current_nano_time();
+frame.set_channel(0);
+frame.set_sample_rate(48000);
+frame.set_num_channels(2);
+frame.set_num_samples(960);                // 20 ms @ 48 kHz
+frame.set_bit_depth(16);
+frame.set_format(vlink::zerocopy::AudioFrame::kFormatPcmS16);
+frame.set_layout(vlink::zerocopy::AudioFrame::kLayoutInterleaved);
+frame.set_codec("PCM");
+frame.set_language("zh");
+frame.set_duration_ns(20'000'000);          // 20 ms
+
+const size_t payload = frame.num_samples() * frame.num_channels() * sizeof(int16_t);
+frame.create(payload);
+std::memset(const_cast<uint8_t*>(frame.data()), 0, payload);
+
+vlink::Bytes wire;
+frame >> wire;
+
+vlink::zerocopy::AudioFrame rx;
+rx << wire;                                  // 零拷贝反序列化
+```
+
+### 10.9.7 注意事项
+
+- 32 位架构在编译期发出告警。
+- 压缩格式（Opus / AAC / MP3 / FLAC）时 `bit_depth` 与 `layout` 通常无意义，但仍可
+  填入解码后的目标参数供消费者参考。
+- `operator<<` 后 `data()` 借用 `Bytes` 内部缓冲。
+
+---
+
+## 10.10 ProxyData 类
 
 头文件：`include/vlink/zerocopy/proxy_data.h`
 
@@ -375,7 +888,7 @@ struct Vector3d final {
 （URL、序列化类型、`schema` family、源主机名）和控制字段（控制 ID、模式、时间戳、序列号）打包
 为单次内存分配。在 64 位平台上结构体固定为 **80 字节**。
 
-### 10.6.1 内部布局
+### 10.10.1 内部布局
 
 ```
 [尾部缓冲区] = [ raw 数据 | url 字符串 | ser_type 字符串 | hostname 字符串 ]
@@ -384,7 +897,7 @@ struct Vector3d final {
 每个区域的位置和长度以 `uint32_t` 字段存储在结构体内，反序列化后通过
 `std::string_view` 零拷贝访问，不额外分配。
 
-### 10.6.2 核心方法
+### 10.10.2 核心方法
 
 | 方法                                           | 说明                              |
 | ---------------------------------------------- | --------------------------------- |
@@ -410,9 +923,9 @@ struct Vector3d final {
 
 ---
 
-## 10.7 与普通 Bytes 传输的区别
+## 10.11 与普通 Bytes 传输的区别
 
-### 10.7.1 数据流对比
+### 10.11.1 数据流对比
 
 ```
 CameraFrame 传输（shm 后端 + loan）：
@@ -424,24 +937,24 @@ CameraFrame 传输（dds 后端）：
   operator<< 借用 Bytes 内部指针 -> 用户回调
 ```
 
-### 10.7.2 关键区别汇总
+### 10.11.2 关键区别汇总
 
-| 比较维度           | `Bytes` 传输                 | `CameraFrame` / `PointCloud`  |
-| ------------------ | ---------------------------- | ----------------------------- |
-| 元数据             | 无                           | 宽/高/格式/时间戳/序列号等    |
-| 反序列化内存拷贝   | 有（`Bytes` 深拷贝）         | 无（借用指针）                |
-| shm 零拷贝支持     | 是                           | 是                            |
-| 格式验证           | 无                           | 魔数校验                      |
-| 跨语言互操作       | 需协议约定                   | 内置 Schema（PointCloud）     |
-| 适用场景           | 通用，小消息                 | 传感器大负载数据              |
+| 比较维度           | `Bytes` 传输                 | zerocopy 容器（CameraFrame / PointCloud / OccupancyGrid / Tensor / ObjectArray / AudioFrame 等） |
+| ------------------ | ---------------------------- | --------------------------------------------------------------------------------------------- |
+| 元数据             | 无                           | 宽/高/格式/时间戳/序列号 / 形状 / 通道数 / 类别 ...                                          |
+| 反序列化内存拷贝   | 有（`Bytes` 深拷贝）         | 无（借用指针）                                                                                |
+| shm 零拷贝支持     | 是                           | 是                                                                                            |
+| 格式验证           | 无                           | 魔数校验                                                                                      |
+| 跨语言互操作       | 需协议约定                   | 内置 Schema（`PointCloud` / `Tensor` 等）                                                     |
+| 适用场景           | 通用，小消息                 | 传感器 / 模型 / 地图 / 检测 / 音频等领域专用大负载数据                                       |
 
 ---
 
-## 10.8 shm/shm2/zenoh 后端的 loan 机制
+## 10.12 shm/shm2/zenoh 后端的 loan 机制
 
 ![SHM 零拷贝流程](images/shm-zerocopy-flow.png)
 
-### 10.8.1 loan 的前置条件
+### 10.12.1 loan 的前置条件
 
 `Node::is_support_loan()` 在 `shm://`（Iceoryx）和 `shm2://`（Iceoryx2）下无条件返回 `true`；
 `zenoh://` 仅当 SHM 显式启用（`?shm=1` / `zenoh.shm=1` / `VLINK_ZENOH_SHM=1`）、
@@ -451,7 +964,7 @@ CameraFrame 传输（dds 后端）：
 其他后端（`intra`、`dds`、`ddsc`、`ddsr`、`ddst`、`someip`、`fdbus`、`qnx`、`mqtt`）的
 `is_support_loan()` 始终返回 `false`，此时 `loan()` 返回空 `Bytes`。
 
-### 10.8.2 发布端使用 loan
+### 10.12.2 发布端使用 loan
 
 ```cpp
 vlink::Publisher<vlink::Bytes> pub("shm://camera/raw");
@@ -469,7 +982,7 @@ if (pub.is_support_loan()) {
 若 `publish()` 未被调用，调用方必须显式 `pub.return_loan(buf)`，否则共享内存池会
 耗尽。
 
-### 10.8.3 手动 unloan（接收端）
+### 10.12.3 手动 unloan（接收端）
 
 默认情况下 `Subscriber` 回调返回后自动归还 loan。若要在回调外继续持有数据指针，
 启用手动 unloan 模式：
@@ -487,9 +1000,9 @@ sub.listen([&](const vlink::Bytes& msg) {
 
 ---
 
-## 10.9 内存所有权与生命周期管理
+## 10.13 内存所有权与生命周期管理
 
-### 10.9.1 所有权规则
+### 10.13.1 所有权规则
 
 所有 zerocopy 容器遵循统一所有权模型，通过 `is_owner()` 区分：
 
@@ -506,7 +1019,7 @@ sub.listen([&](const vlink::Bytes& msg) {
 `shallow_copy(uint8_t*, size_t)` 返回 `false` 当 `data == nullptr`、
 `size == 0` 或新指针与当前 `data_` 完全相同。
 
-### 10.9.2 生命周期注意事项
+### 10.13.2 生命周期注意事项
 
 **规则 1：借用模式下，源对象必须比容器生命周期更长**
 
@@ -567,9 +1080,9 @@ sub.listen([&](const vlink::Bytes& msg) {
 
 ---
 
-## 10.10 完整使用示例
+## 10.14 完整使用示例
 
-### 10.10.1 示例 1：相机帧传输（shm 后端零拷贝）
+### 10.14.1 示例 1：相机帧传输（shm 后端零拷贝）
 
 ```cpp
 #include <vlink/publisher.h>
@@ -652,7 +1165,7 @@ int main() {
 }
 ```
 
-### 10.10.2 示例 2：点云传输（float XYZ + intensity）
+### 10.14.2 示例 2：点云传输（float XYZ + intensity）
 
 ```cpp
 #include <vlink/publisher.h>
@@ -737,7 +1250,7 @@ void lidar_subscriber() {
 }
 ```
 
-### 10.10.3 示例 3：RawData 跨进程传输
+### 10.14.3 示例 3：RawData 跨进程传输
 
 ```cpp
 #include <vlink/publisher.h>
@@ -800,7 +1313,7 @@ int main_subscriber() {
 }
 ```
 
-### 10.10.4 示例 4：序列化与反序列化（网络传输场景）
+### 10.14.4 示例 4：序列化与反序列化（网络传输场景）
 
 ```cpp
 #include <vlink/zerocopy/camera_frame.h>
@@ -843,7 +1356,7 @@ int main() {
 }
 ```
 
-### 10.10.5 示例 5：H.264 视频流传输
+### 10.14.5 示例 5：H.264 视频流传输
 
 ```cpp
 #include <vlink/publisher.h>

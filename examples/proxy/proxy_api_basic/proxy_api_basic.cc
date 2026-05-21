@@ -21,140 +21,113 @@
  * limitations under the License.
  */
 
-// ProxyAPI Basic Example
-// Demonstrates ProxyAPI Config, roles, callbacks, and send_control.
+// =============================================================================
+// File: proxy_api_basic.cc
+//
+// Client-side demo of vlink::ProxyAPI. A ProxyAPI talks (over DDS) to one or
+// more vlink::ProxyServer instances on the same domain_id and asks them to
+// stream topic metadata + raw payloads. It is the building block for
+// visualisers, recorders, dashboards, and CLI tools.
+//
+// Two roles are defined:
+//   kController -- may send Control requests; ProxyServer accepts at most one
+//                  controller at a time (token-based handshake) so two
+//                  controllers do not fight over OperationMode.
+//   kListener   -- read-only; receives info/data the controller has unlocked
+//                  but cannot change the mode.
+//
+// The 8 OperationModes encode "what does the server expose to this client":
+//   kIdle           -- nothing
+//   kObserveTopic   -- info for a subset of topics
+//   kObserveAll     -- info for every topic the server sees
+//   kSubscribeTopic -- data + info for a subset
+//   kSubscribeAll   -- data + info for every topic (firehose)
+//   kPublishTopic   -- ProxyServer relays publishes coming from this client
+//   kProxyTopic     -- bidirectional relay (sub a remote, re-pub locally)
+//   kControl        -- pure command channel (no data)
+// =============================================================================
 
 #include <vlink/base/logger.h>
 #include <vlink/external/proxy_api.h>
 
-#include <iostream>
+#include <chrono>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
 int main() {
-  // ======== Section 1: ProxyAPI Configuration ========
-  {
-    std::cout << "\n[1] ProxyAPI Configuration" << std::endl;
+  // Section: build the Config. Every field is a stable public knob:
+  //   role          -- Controller vs Listener (see file header)
+  //   dds_impl      -- backing DDS provider id: "dds" / "ddsc" / "ddsr" / ...
+  //   domain_id     -- DDS domain; must match the ProxyServer's domain
+  //   reliable      -- DDS reliability QoS for the control channel
+  //   match_version -- if true, refuse to connect to a server whose vlink
+  //                    version differs (defensive against ABI drift).
+  vlink::ProxyAPI::Config cfg;
+  cfg.role = vlink::ProxyAPI::kController;
+  cfg.dds_impl = "dds";
+  cfg.domain_id = 0;
+  cfg.reliable = false;
+  cfg.match_version = true;
 
-    vlink::ProxyAPI::Config cfg;
-    cfg.role = vlink::ProxyAPI::kController;  // kController or kListener
-    cfg.dds_impl = "dds";                     // DDS implementation to use
-    cfg.domain_id = 0;                        // DDS domain ID
-    cfg.reliable = false;                     // BestEffort for data channel
-    cfg.match_version = true;                 // Require matching VLink version
+  VLOG_I("role=", cfg.role == vlink::ProxyAPI::kController ? "Controller" : "Listener");
+  VLOG_I("dds_impl=", cfg.dds_impl, " domain_id=", cfg.domain_id);
 
-    std::cout << "  role:          " << (cfg.role == vlink::ProxyAPI::kController ? "Controller" : "Listener")
-              << std::endl;
-    std::cout << "  dds_impl:      " << cfg.dds_impl << std::endl;
-    std::cout << "  domain_id:     " << cfg.domain_id << std::endl;
-    std::cout << "  reliable:      " << std::boolalpha << cfg.reliable << std::endl;
-    std::cout << "  match_version: " << std::boolalpha << cfg.match_version << std::endl;
-  }
+  vlink::ProxyAPI api(cfg);
 
-  // ======== Section 2: Roles ========
-  {
-    std::cout << "\n[2] Roles" << std::endl;
-    std::cout << "  kController: Can send Control messages (observe, record, play)" << std::endl;
-    std::cout << "  kListener:   Passive observer only, send_control is rejected" << std::endl;
-  }
+  // Section: connect callback. Fires when the underlying transport
+  // discovers / loses a ProxyServer. Thread: ProxyAPI internal event loop;
+  // do NOT block here.
+  api.register_connect_callback([](bool connected) { VLOG_I("[ProxyAPI] connection: ", connected ? "up" : "down"); });
 
-  // ======== Section 3: Operation Modes ========
-  {
-    std::cout << "\n[3] Operation Modes" << std::endl;
-    std::cout << "  +---------------------+-------+-------------------------------------------+" << std::endl;
-    std::cout << "  | Mode                | Value | Description                               |" << std::endl;
-    std::cout << "  +---------------------+-------+-------------------------------------------+" << std::endl;
-    std::cout << "  | kOffline            |   0   | Disconnected                              |" << std::endl;
-    std::cout << "  | kObserveOne         |   1   | Observe a single topic                    |" << std::endl;
-    std::cout << "  | kObserveAll         |   2   | Observe all discovered topics              |" << std::endl;
-    std::cout << "  | kRecord             |   3   | Record matching topics                    |" << std::endl;
-    std::cout << "  | kPlay               |   4   | Replay recorded data                      |" << std::endl;
-    std::cout << "  | kEdit               |   5   | Inject data through server                |" << std::endl;
-    std::cout << "  | kAuto               |   6   | Auto-observe specified topics              |" << std::endl;
-    std::cout << "  | kAutoAndObserveAll  |   7   | Auto + observe all                        |" << std::endl;
-    std::cout << "  +---------------------+-------+-------------------------------------------+" << std::endl;
-  }
+  // Error callback. Fires on protocol errors (version mismatch, token
+  // rejection, heartbeat timeout). Thread: ProxyAPI internal event loop.
+  api.register_error_callback(
+      [](vlink::ProxyAPI::Error error) { VLOG_I("[ProxyAPI] error code: ", static_cast<int>(error)); });
 
-  // ======== Section 4: Usage Pattern ========
-  // Demonstrates the real ProxyAPI creation and callback registration.
-  // Note: Without a running ProxyServer, connect_callback will report disconnected.
-  {
-    std::cout << "\n[4] Usage Pattern (requires running ProxyServer)" << std::endl;
+  // Info callback: invoked roughly at 1Hz with the latest topic catalogue
+  // (URL, frequency, schema, etc.). Thread: ProxyAPI internal event loop.
+  api.register_info_callback([](const std::vector<vlink::ProxyAPI::Info>& info_list) {
+    VLOG_I("[ProxyAPI] info for ", info_list.size(), " topics");
+    for (const auto& info : info_list) {
+      VLOG_I("  topic: ", info.url, " freq=", info.freq, " Hz");
+    }
+  });
 
-    vlink::ProxyAPI::Config cfg;
-    cfg.role = vlink::ProxyAPI::kController;
-    cfg.dds_impl = "dds";
-    cfg.domain_id = 0;
-    cfg.reliable = false;
-    cfg.match_version = true;
+  // Data callback: invoked for every payload routed through the server.
+  // Thread: ProxyAPI internal event loop. Heavy work belongs on another
+  // thread to avoid stalling the receive pipeline.
+  api.register_data_callback(
+      [](const vlink::ProxyAPI::Data& data) { VLOG_I("[ProxyAPI] data from: ", data.url, " size=", data.raw.size()); });
 
-    vlink::ProxyAPI api(cfg);
+  // Section: start the worker thread. After this point the callbacks above
+  // may be invoked at any time.
+  api.async_run();
 
-    // Register callbacks
-    api.register_connect_callback(
-        [](bool connected) { VLOG_I("[ProxyAPI] Connection state:", connected ? "connected" : "disconnected"); });
+  // Section: ask the server to enter "stream me all topic info" mode. The
+  // token handshake happens transparently inside send_control: ProxyAPI
+  // presents its session token, the server validates it is still the active
+  // controller, and only then changes mode. Returns false if the server
+  // rejected (e.g., another controller is already active).
+  vlink::ProxyAPI::Control ctrl;
+  ctrl.mode = vlink::ProxyAPI::kObserveAll;
+  VLOG_I("send_control(kObserveAll) returned: ", api.send_control(ctrl));
 
-    api.register_error_callback(
-        [](vlink::ProxyAPI::Error error) { VLOG_I("[ProxyAPI] Error code:", static_cast<int>(error)); });
+  // Section: introspection getters. current_mode reflects the last value
+  // acknowledged by the server (NOT the value we requested). is_connected
+  // is driven by the 1Hz heartbeat exchange. is_support_shm / is_enable_filter
+  // surface server-side capability flags published in the info stream.
+  VLOG_I("current_mode=", static_cast<int>(api.get_current_mode()), " connected=", api.is_connected(),
+         " shm=", api.is_support_shm(), " filter=", api.is_enable_filter());
 
-    api.register_info_callback([](const std::vector<vlink::ProxyAPI::Info>& info_list) {
-      VLOG_I("[ProxyAPI] Received info for", info_list.size(), "topics");
-      for (const auto& info : info_list) {
-        VLOG_I("  Topic:", info.url, " ser:", info.ser, " freq:", info.freq, " Hz");
-      }
-    });
+  // Give the event loop a moment to receive at least one info/data callback
+  // before tearing down.
+  std::this_thread::sleep_for(500ms);
 
-    api.register_data_callback([](const vlink::ProxyAPI::Data& data) {
-      VLOG_I("[ProxyAPI] Data from:", data.url, " size:", data.raw.size(), " bytes");
-    });
-
-    // Start the API event loop
-    api.async_run();
-
-    // Build and send a control message to observe all topics
-    vlink::ProxyAPI::Control ctrl;
-    ctrl.mode = vlink::ProxyAPI::kObserveAll;
-    bool sent = api.send_control(ctrl);
-    VLOG_I("[ProxyAPI] send_control(kObserveAll) returned:", sent);
-
-    // Query current state
-    VLOG_I("[ProxyAPI] Current mode:", static_cast<int>(api.get_current_mode()));
-    VLOG_I("[ProxyAPI] is_connected:", api.is_connected());
-    VLOG_I("[ProxyAPI] SHM support:", api.is_support_shm());
-    VLOG_I("[ProxyAPI] Filter support:", api.is_enable_filter());
-
-    // Wait briefly to allow any server response
-    std::this_thread::sleep_for(500ms);
-
-    // Shutdown
-    api.quit();
-    api.wait_for_quit();
-    VLOG_I("[ProxyAPI] Event loop stopped");
-  }
-
-  // ======== Section 5: Error Codes ========
-  {
-    std::cout << "[5] Error Codes" << std::endl;
-    std::cout << "  kNoError(0)            No error" << std::endl;
-    std::cout << "  kModeError(1)          Unsupported mode" << std::endl;
-    std::cout << "  kControlError(2)       Control ID mismatch" << std::endl;
-    std::cout << "  kReliableCompError(3)  Reliable setting mismatch" << std::endl;
-    std::cout << "  kTcpCompError(4)       TCP setting mismatch" << std::endl;
-    std::cout << "  kDirectCompError(5)    Direct setting mismatch" << std::endl;
-    std::cout << "  kMultiProxyError(7)    Multiple proxy servers or identity mismatch" << std::endl;
-    std::cout << "  kVersionCompError(8)   Version mismatch" << std::endl;
-    std::cout << "  kTokenError(9)         Handshake refused/empty token or same-identity token mismatch" << std::endl;
-    std::cout << "  kUnknownError(10)      Unknown or unclassified error" << std::endl;
-  }
-
-  // ======== Section 6: Note ========
-  {
-    std::cout << "\n[6] Note" << std::endl;
-    std::cout << "  ProxyAPI requires a running ProxyServer daemon." << std::endl;
-    std::cout << "  Without a server, connect_callback reports disconnected." << std::endl;
-    std::cout << "  See proxy_server_basic for how to create the server." << std::endl;
-  }
+  // Section: graceful shutdown. quit() flags the loop, wait_for_quit joins.
+  // Callbacks will not fire after wait_for_quit returns.
+  api.quit();
+  api.wait_for_quit();
 
   VLOG_I("ProxyAPI basic example complete.");
   return 0;

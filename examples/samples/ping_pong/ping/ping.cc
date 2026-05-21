@@ -21,30 +21,31 @@
  * limitations under the License.
  */
 
-// VLink message loop and utility library
+// Ping side of a latency benchmark.
+//
+// Demonstrates a half-duplex round-trip timing harness using two raw-Bytes
+// pub/sub topics (ping and pong). The transport backend is URL-driven via
+// ping_pong_common.h so the same code measures DDS, shared memory, fdbus, qnx
+// or SOME/IP. Payload size is configurable (CLI arg). Typical engineering
+// scenario: characterising end-to-end latency of a candidate transport for a
+// given message size before committing it to a production data flow.
+
+#include <vlink/base/logger.h>
 #include <vlink/base/message_loop.h>
 #include <vlink/base/utils.h>
-// VLink core communication API (Publisher, Subscriber, etc.)
-#include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
 #include <charconv>
 #include <string>
 
-// Common configuration header providing helper functions for selecting transport URLs based on environment variables
 #include "../ping_pong_common.h"
 
-using namespace vlink;                 // NOLINT(build/namespaces, google-build-using-namespace)
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-// Periodic send interval (milliseconds): send a ping every 1 second
 static constexpr uint32_t kTestInterval = 1000U;
 
 int main(int argc, char* argv[]) {
-  // Default payload size is 1024 bytes; can be overridden via command-line argument
   uint64_t test_size = 1024;
-
-  // Parse command-line arguments: optionally specify the payload size
 
   if (argc == 2) {
     std::string str(argv[1]);
@@ -55,8 +56,7 @@ int main(int argc, char* argv[]) {
       return 1;
     }
   } else if (argc != 1) {
-    VLOG_I("Usage:");
-    VLOG_I(" sample_ping [payload_size]");
+    VLOG_I("Usage: sample_ping [payload_size]");
     return 1;
   }
 
@@ -65,53 +65,55 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // Create a message loop to drive timers and process callbacks
-  MessageLoop message_loop;
+  // MessageLoop hosts the periodic re-send timer. Ctrl+C -> quit() unwinds
+  // pub/sub destructors cleanly instead of killing the process mid-publish.
+  vlink::MessageLoop message_loop;
+  vlink::Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
 
-  // Register system signal handler (Ctrl+C) to quit the message loop on signal reception
-  Utils::register_terminate_signal([&message_loop](int) { message_loop.quit(); });
+  // Outbound: raw Bytes payload (no serialization overhead).
+  vlink::Publisher<vlink::Bytes> pub(Common::get_ping_url());
+  // Inbound: echoed Bytes from the pong process.
+  vlink::Subscriber<vlink::Bytes> sub(Common::get_pong_url());
 
-  // Create a Publisher that sends raw byte data using the Bytes type
-  // The URL is determined by the PING_TRANSPORT environment variable (defaults to dds://ping)
-  Publisher<Bytes> pub(Common::get_ping_url());
-
-  // Create a Subscriber to receive reply messages from the pong endpoint
-  Subscriber<Bytes> sub(Common::get_pong_url());
-
-  // Record the send timestamp for computing round-trip latency
+  // start_stamp is written from the timer thread (publisher side) and read from
+  // the subscriber's callback thread; an atomic time_point gives us a
+  // lock-free, tear-free hand-off across those two threads. steady_clock is
+  // chosen because it is monotonic -- system_clock can jump backwards on NTP
+  // sync and would produce spurious negative deltas.
   std::atomic<std::chrono::steady_clock::time_point> start_stamp = std::chrono::steady_clock::now();
 
-  // Register a receive callback: compute round-trip latency when a pong reply arrives
-  sub.listen([&start_stamp](const Bytes&) {
+  // Subscriber callback: fires on the transport worker thread when pong echoes
+  // back. The half-RTT (one-way delay) approximation requires the network and
+  // host to be roughly symmetric.
+  sub.listen([&start_stamp](const vlink::Bytes&) {
     auto duration =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start_stamp.load());
-    // Divide round-trip latency by 2 to get one-way latency
+    // Round-trip / 2 = one-way (ms).
     double delay = duration.count() / 2000.0;
     CLOG_D("Delay(ms) = %.3lf.", delay);
   });
 
-  // Create a Bytes payload of the specified size (contents uninitialized)
-  Bytes data = Bytes::create(test_size);
+  // Pre-allocate the payload once. Bytes::create reserves the exact size up
+  // front so per-iteration allocation does not pollute the latency measurement
+  // with allocator noise.
+  vlink::Bytes data = vlink::Bytes::create(test_size);
 
-  // Send function: record timestamp and publish data
   auto send_func = [&pub, &data, &start_stamp]() {
     start_stamp = std::chrono::steady_clock::now();
-
     pub.publish(data);
   };
 
-  // Send the first ping immediately
+  // Kick off the first round immediately so we don't wait one interval.
   send_func();
 
-  // Create a timer to periodically send ping messages
-  Timer timer;
-  timer.attach(&message_loop);             // Bind to the message loop
-  timer.set_interval(kTestInterval);       // Set interval to 1 second
-  timer.set_loop_count(Timer::kInfinite);  // Repeat indefinitely
-  timer.start(send_func);                  // Start the timer
+  // Periodic re-send every kTestInterval ms; the timer fires on the MessageLoop
+  // thread. Set to kInfinite -- the loop is stopped only by the signal handler.
+  vlink::Timer timer;
+  timer.attach(&message_loop);
+  timer.set_interval(kTestInterval);
+  timer.set_loop_count(vlink::Timer::kInfinite);
+  timer.start(send_func);
 
-  // Block and run the message loop until quit() is called
   message_loop.run();
-
   return 0;
 }

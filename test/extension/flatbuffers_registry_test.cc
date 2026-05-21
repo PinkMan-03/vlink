@@ -32,95 +32,61 @@
 #include <string>
 #include <vector>
 
-//
 #include "../common_test.h"
 
 #ifdef VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: FlatbuffersRegistry - singleton lifecycle
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-FlatbuffersRegistry - singleton") {
-  TEST_CASE("get() returns the same instance on repeat calls") {
+TEST_SUITE("extension-FlatbuffersRegistry") {
+  TEST_CASE("get returns the same singleton instance on repeated calls") {
     FlatbuffersRegistry& a = FlatbuffersRegistry::get();
     FlatbuffersRegistry& b = FlatbuffersRegistry::get();
-    CHECK(&a == &b);
+    CHECK_EQ(&a, &b);
   }
 
-  TEST_CASE("get_all_schemas returns a vector (possibly empty, never throws)") {
-    auto schemas = FlatbuffersRegistry::get().get_all_schemas();
+  TEST_CASE("get_all_schemas returns a vector without throwing") {
+    std::vector<SchemaData> schemas = FlatbuffersRegistry::get().get_all_schemas();
     (void)schemas;
-    CHECK(true);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: FlatbuffersRegistry - register_schema input validation
-// ---------------------------------------------------------------------------
-//
-// The registry validates inputs before parsing. Any of: empty name,
-// null pointer, zero size, or invalid BFBS bytes must return false and leave
-// the registry in a consistent state.
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-FlatbuffersRegistry - register_schema validation") {
-  TEST_CASE("empty name is rejected") {
+  TEST_CASE("register_schema rejects empty name") {
     static const uint8_t kData[]{'d', 'a', 't', 'a'};
-    bool ok = FlatbuffersRegistry::register_schema("", kData, sizeof(kData));
-    CHECK_FALSE(ok);
+    CHECK_FALSE(FlatbuffersRegistry::register_schema("", kData, sizeof(kData)));
   }
 
-  TEST_CASE("nullptr data is rejected") {
-    bool ok = FlatbuffersRegistry::register_schema("schema.Test", nullptr, 0U);
-    CHECK_FALSE(ok);
+  TEST_CASE("register_schema rejects null pointer") {
+    CHECK_FALSE(FlatbuffersRegistry::register_schema("schema.Test", nullptr, 0u));
   }
 
-  TEST_CASE("zero-size buffer is rejected") {
+  TEST_CASE("register_schema rejects zero-size buffer") {
     static const uint8_t kBuf[]{0};
-    bool ok = FlatbuffersRegistry::register_schema("schema.Test", kBuf, 0U);
-    CHECK_FALSE(ok);
+    CHECK_FALSE(FlatbuffersRegistry::register_schema("schema.Test", kBuf, 0u));
   }
 
-  TEST_CASE("garbage bytes that do not parse as BFBS are rejected") {
+  TEST_CASE("register_schema rejects bytes that fail bfbs verification") {
     static const uint8_t kGarbage[]{0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
-    bool ok = FlatbuffersRegistry::register_schema("schema.GarbageOnly", kGarbage, sizeof(kGarbage));
-    CHECK_FALSE(ok);
+    CHECK_FALSE(FlatbuffersRegistry::register_schema("schema.Garbage", kGarbage, sizeof(kGarbage)));
   }
 
-  TEST_CASE("template overload forwards through to validation path") {
-    struct EmptyBinarySchema {
-      [[nodiscard]] static const uint8_t* data() {
-        static const uint8_t kBuf[]{0};
+  TEST_CASE("register_schema template overload forwards to validation path") {
+    struct TinySchema {
+      static const uint8_t* data() {
+        static const uint8_t kBuf[]{0x00};
         return kBuf;
       }
 
-      [[nodiscard]] static size_t size() { return 1U; }
+      static size_t size() { return 1u; }
     };
 
-    bool ok = FlatbuffersRegistry::register_schema<EmptyBinarySchema>("schema.TemplateGarbage");
-    CHECK_FALSE(ok);
+    CHECK_FALSE(FlatbuffersRegistry::register_schema<TinySchema>("schema.TinyTemplate"));
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: FlatbuffersRegistry - search_schema for unknown names
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("extension-FlatbuffersRegistry - search_schema") {
-  TEST_CASE("unknown name returns an empty SchemaData") {
-    auto schema = FlatbuffersRegistry::get().search_schema("definitely_not_registered.Type_xyz");
-    CHECK(schema.name.empty());
-    CHECK(schema.encoding.empty());
-    CHECK(schema.schema_type == SchemaType::kUnknown);
-    CHECK(schema.data.empty());
+  TEST_CASE("search_schema returns empty SchemaData for unregistered name") {
+    SchemaData result = FlatbuffersRegistry::get().search_schema("definitely_not_registered.Type_xyz");
+    CHECK(result.name.empty());
+    CHECK(result.encoding.empty());
+    CHECK_EQ(result.schema_type, SchemaType::kUnknown);
+    CHECK(result.data.empty());
   }
-}
-
-#else
-
-TEST_SUITE("extension-FlatbuffersRegistry - flatbuffers unavailable") {
-  TEST_CASE("VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS is undefined and header compiles") { CHECK(true); }
 }
 
 #endif  // VLINK_HAS_SCHEMA_PLUGIN_FLATBUFFERS

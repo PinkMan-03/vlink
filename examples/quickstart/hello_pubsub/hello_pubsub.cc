@@ -21,119 +21,79 @@
  * limitations under the License.
  */
 
-/**
- * @file hello_pubsub.cc
- * @brief VLink Event Model quickstart -- Timer-driven sensor Publisher + Subscriber.
- *
- * This example composes three VLink building blocks:
- *   1. SensorPublisher  -- a reusable component (sensor_publisher.h) that
- *      wraps a Publisher<SensorReading> and a Timer to stream temperature
- *      data at a fixed interval.
- *   2. Subscriber<SensorReading> -- receives and prints each reading.
- *   3. MessageLoop -- drives both the Timer and the Subscriber callback
- *      on a single background thread, ensuring serialised execution.
- *
- * Signal handling (SIGINT / SIGTERM) is used for graceful shutdown.
- *
- * Transport URL:  "intra://sensor/temperature"
- *   Change to "dds://sensor/temperature" or "shm://sensor/temperature"
- *   to switch transport without modifying any other code.
- */
-
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
 #include <atomic>
-#include <string>
 #include <thread>
-
-#include "./sensor_publisher.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
-/// Topic URL -- change the transport to switch transport layer.
-/// Examples: "intra://...", "dds://...", "shm://...", "zenoh://..."
-static const char kTopicUrl[] = "intra://sensor/temperature";  // NOLINT(runtime/string)
+// Plain trivially-copyable POD: dispatched through vlink's "Standard" serializer
+// (raw memcpy), no schema registration required.
+struct SensorReading {
+  int sequence;
+  float temperature;
+};
 
-/// Publish interval in milliseconds.
-static constexpr int kPublishIntervalMs = 500;
-
-/// Maximum number of messages before auto-shutdown (0 = unlimited).
-static constexpr int kMaxMessages = 10;
-
+// hello_pubsub: minimal Event-model (pub/sub) walkthrough.
+//
+// Demonstrates:
+//   - vlink::Publisher<T> / vlink::Subscriber<T> on the "intra://" backend
+//     (intra-process, lockless single-binary delivery -- the cheapest scheme).
+//   - vlink::MessageLoop driven asynchronously (async_run) so that subscriber
+//     callbacks run on a worker thread while main() continues publishing.
+//   - The "attach before listen" rule and wait_for_subscribers handshake.
+//
+// Typical scenarios: in-process telemetry fan-out, sensor stub for unit tests,
+// fastest possible smoke test of the Event API.
 int main() {
-  // ---------------------------------------------------------------
-  // Step 1: Initialise logger and register signal handler
-  // ---------------------------------------------------------------
-  VLOG_I("=== VLink Hello PubSub (Sensor Streaming) ===");
+  static constexpr char kUrl[] = "intra://hello/pubsub";
+  static constexpr int kMessageCount = 5;
 
-  std::atomic<bool> running{true};
-  vlink::Utils::register_terminate_signal([&running](int sig) {
-    VLOG_I("Signal ", sig, " received, shutting down...");
-    running = false;
-  });
-
-  // ---------------------------------------------------------------
-  // Step 2: Create a MessageLoop
-  //
-  // Both the Timer (inside SensorPublisher) and the Subscriber
-  // callback will run on this loop thread, keeping everything
-  // serialised and lock-free.
-  // ---------------------------------------------------------------
+  // A MessageLoop is the thread context that delivers subscriber callbacks.
+  // async_run() spawns a dedicated worker thread and returns immediately, so
+  // main() can keep publishing while the loop drains its queue in parallel.
+  // (Use run() instead if you want main() itself to *be* the loop thread.)
   vlink::MessageLoop loop;
-  loop.set_name("main_loop");
   loop.async_run();
 
-  // ---------------------------------------------------------------
-  // Step 3: Create a Subscriber and register a receive callback
-  //
-  // The Subscriber listens on the same URL as the SensorPublisher.
-  // attach(&loop) dispatches the callback on the loop thread.
-  // ---------------------------------------------------------------
-  vlink::Subscriber<example::SensorReading> sub(kTopicUrl);
+  // Construct the subscriber, then attach to a loop BEFORE listen().
+  // attach() binds delivery context; calling listen() before attach() would
+  // either fall back to an implicit thread or fail to activate.
+  vlink::Subscriber<SensorReading> sub(kUrl);
   sub.attach(&loop);
 
-  std::atomic<int> received_count{0};
-  sub.listen([&received_count, &running](const example::SensorReading& reading) {
-    VLOG_I("[Subscriber] sensor_id=", reading.sensor_id, " seq=#", reading.sequence, " temp=", reading.temperature,
-           " ts=", reading.timestamp_ms);
-    int count = received_count.fetch_add(1) + 1;
-
-    if (kMaxMessages > 0 && count >= kMaxMessages) {
-      running = false;
-    }
+  // Shared counter between the loop thread (writer) and main (reader at end).
+  // Atomic is required because the callback runs on the loop worker thread.
+  std::atomic<int> received{0};
+  // Lambda invoked on the loop thread once per delivered sample.
+  sub.listen([&received](const SensorReading& msg) {
+    VLOG_I("[sub] seq=", msg.sequence, " temp=", msg.temperature);
+    received.fetch_add(1);
   });
 
-  VLOG_I("[Subscriber] Listening on ", kTopicUrl);
+  vlink::Publisher<SensorReading> pub(kUrl);
+  // Block until at least one matched subscriber is discovered. Without this
+  // handshake the very first publish() may race ahead of subscriber setup and
+  // be silently dropped on lossy transports.
+  pub.wait_for_subscribers();
 
-  // ---------------------------------------------------------------
-  // Step 4: Create a SensorPublisher (reusable component)
-  //
-  // SensorPublisher encapsulates Publisher<SensorReading> + Timer.
-  // It publishes a simulated temperature reading every
-  // kPublishIntervalMs milliseconds on the loop thread.
-  // ---------------------------------------------------------------
-  example::SensorPublisher sensor(/*sensor_id=*/1, kTopicUrl, &loop, kPublishIntervalMs);
-  sensor.start();
-
-  VLOG_I("[Publisher]  Publishing on ", kTopicUrl, " every ", kPublishIntervalMs, "ms");
-
-  // ---------------------------------------------------------------
-  // Step 5: Main loop -- wait until kMaxMessages received or signal
-  // ---------------------------------------------------------------
-  while (running) {
-    std::this_thread::sleep_for(100ms);
+  for (int i = 1; i <= kMessageCount; ++i) {
+    SensorReading msg{i, 22.5F + static_cast<float>(i) * 0.3F};
+    pub.publish(msg);
+    VLOG_I("[pub] seq=", msg.sequence, " temp=", msg.temperature);
+    std::this_thread::sleep_for(50ms);
   }
 
-  // ---------------------------------------------------------------
-  // Step 6: Clean shutdown
-  // ---------------------------------------------------------------
-  sensor.stop();
-  loop.wait_for_idle(1000);
+  // Drain in-flight callbacks: wait until the loop queue has been idle for the
+  // given budget (ms). Required because publish() returns immediately while
+  // listen() callbacks are still queued on the loop thread.
+  loop.wait_for_idle(500);
+  VLOG_I("published=", kMessageCount, " received=", received.load());
 
-  VLOG_I("Published: ", sensor.published_count(), "  Received: ", received_count.load());
-  VLOG_I("=== Example complete ===");
-
+  // Orderly shutdown: quit() signals the loop to stop accepting work, then
+  // wait_for_quit() joins the worker thread before destructors run.
   loop.quit();
   loop.wait_for_quit();
 

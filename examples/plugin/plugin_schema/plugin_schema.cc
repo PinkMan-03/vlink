@@ -21,20 +21,29 @@
  * limitations under the License.
  */
 
-/// @file plugin_schema.cc
-/// @brief Conceptual demonstration of the SchemaPluginInterface and SchemaPluginManager API.
-///
-/// This example shows how VLink's schema-plugin system works:
-///
-///   1. SchemaPluginInterface -- abstract interface for descriptor lookup,
-///      schema serialisation, and dynamic message creation.
-///
-///   2. SchemaPluginManager -- process-global singleton that loads and holds
-///      the schema plugin, accessed via SchemaPluginManager::get().
-///
-/// The actual plugin .so requires a protobuf dependency, so this demo loads
-/// the plugin only when the .so is available.  When it is not, the program
-/// prints a clear explanation of the API without crashing.
+// =============================================================================
+// File: plugin_schema.cc
+//
+// Demonstrates SchemaPluginInterface: a vlink-defined plugin contract that
+// lets a third-party .so supply protobuf / flatbuffers descriptors and
+// serialized schema bytes WITHOUT the host having to link protobuf or
+// flatbuffers itself.
+//
+// Why type-erasure: vlink_core must remain free of a hard dependency on
+// protobuf / flatbuffers (some downstream users do not want either). To
+// achieve that, SchemaPluginInterface returns "const void*" for protobuf
+// Descriptor* and Message*, plus an opaque parser handle for flatbuffers.
+// Callers that own those headers cast back to the real type; callers that
+// do not still get the binary schema bytes via search_schema().
+//
+// Two access paths are demonstrated:
+//   1. demo_direct_load(): construct a vlink::Plugin and load a single
+//      schema .so manually.
+//   2. demo_manager(): use vlink::SchemaPluginManager singleton, which is
+//      auto-populated by vlink core when VLINK_SCHEMA_PLUGIN env var is set.
+//      Other vlink components (BagWriter, BagReader, ProxyServer, etc.) use
+//      this manager internally to discover schemas.
+// =============================================================================
 
 #include <vlink/base/logger.h>
 #include <vlink/base/plugin.h>
@@ -44,131 +53,109 @@
 #include <cstdlib>
 #include <string>
 
-/// Helper: attempt to load a SchemaPluginInterface .so and exercise its API.
+// Demo 1: explicit Plugin::load. Useful when an app wants to manage the
+// schema plugin's lifetime itself rather than via the singleton.
 static void demo_direct_load() {
-  VLOG_I("=== Direct Plugin::load<SchemaPluginInterface> demo ===");
+  VLOG_I("=== Direct Plugin::load<SchemaPluginInterface> ===");
 
   vlink::Plugin plugin;
   plugin.set_log_level(vlink::Logger::kInfo);
 
-  // The plugin .so name is typically set by the build system or environment.
-  // Common names depend on the actual shared library target name.
+  // Allow override via env so this demo works with any schema .so the
+  // user has built.
   const char* env_name = std::getenv("VLINK_SCHEMA_PLUGIN");
   std::string lib_name = env_name ? env_name : "vlink_schema_plugin";
 
-  VLOG_I("Attempting to load SchemaPluginInterface from: ", lib_name);
-  VLOG_I("SchemaPluginInterface plugin_id: ", std::string(vlink::SchemaPluginInterface::get_plugin_id()));
+  VLOG_I("Attempting to load: ", lib_name);
+  VLOG_I("plugin_id: ", std::string(vlink::SchemaPluginInterface::get_plugin_id()));
 
+  // load<SchemaPluginInterface>: dlopen + dlsym + version check against
+  // VLINK_PLUGIN_DECLARE(..., 1, 0) in the plugin's .cc.
   auto schema_plugin = plugin.load<vlink::SchemaPluginInterface>(lib_name, 1, 0);
 
   if (!schema_plugin) {
     VLOG_W("Schema plugin not available (protobuf dependency required).");
-    VLOG_I("Set VLINK_SCHEMA_PLUGIN=<path_to_so> to enable this demo.");
-    VLOG_I("Skipping direct-load demo.");
+    VLOG_I("Set VLINK_SCHEMA_PLUGIN=<so_path> to enable this demo.");
     return;
   }
 
-  // --- VersionInfo ---
-  vlink::SchemaPluginInterface::VersionInfo ver = schema_plugin->get_version_info();
-  VLOG_I("  version_info.name:      ", ver.name);
-  VLOG_I("  version_info.version:   ", ver.version);
-  VLOG_I("  version_info.timestamp: ", ver.timestamp);
-  VLOG_I("  version_info.tag:       ", ver.tag);
-  VLOG_I("  version_info.commit_id: ", ver.commit_id);
+  // Section: identify the plugin -- name / version / git commit. Useful when
+  // multiple schema plugins coexist in the build.
+  auto ver = schema_plugin->get_version_info();
+  VLOG_I("plugin: ", ver.name, " v", ver.version, " commit=", ver.commit_id);
 
-  // --- Descriptor lookup ---
-  std::string type_name = "example.SensorData";
-  VLOG_I("  search_protobuf_descriptor(\"", type_name, "\")...");
-  vlink::SchemaPluginInterface::ProtobufDescriptorPtr desc = schema_plugin->search_protobuf_descriptor(type_name);
+  const std::string type_name = "example.SensorData";
 
-  if (desc) {
-    VLOG_I("    found descriptor at ", desc);
-  } else {
-    VLOG_I("    descriptor not found (type not registered in this plugin)");
-  }
+  // search_protobuf_descriptor returns a void* that callers with protobuf
+  // headers may cast to google::protobuf::Descriptor*. Returning void* keeps
+  // SchemaPluginInterface independent of protobuf's public API.
+  auto* desc = schema_plugin->search_protobuf_descriptor(type_name);
+  VLOG_I("search_protobuf_descriptor(\"", type_name, "\"): ", desc ? "found" : "not found");
 
-  // --- Schema serialisation ---
-  VLOG_I("  search_schema(\"", type_name, "\", kProtobuf)...");
-  vlink::SchemaData schema = schema_plugin->search_schema(type_name, vlink::SchemaType::kProtobuf);
+  // search_schema returns the SERIALIZED schema bytes (FileDescriptorSet for
+  // protobuf, BFBS for flatbuffers, etc.) plus an encoding tag. Anyone can
+  // consume this without linking protobuf -- it is just bytes.
+  auto schema = schema_plugin->search_schema(type_name, vlink::SchemaType::kProtobuf);
 
   if (!schema.data.empty()) {
-    VLOG_I("    schema.name: ", schema.name);
-    VLOG_I("    schema.encoding: ", schema.encoding);
-    VLOG_I("    schema.schema_type: ", static_cast<int>(schema.schema_type));
-    VLOG_I("    schema.data size: ", schema.data.size(), " bytes");
+    VLOG_I("schema: ", schema.name, " encoding=", schema.encoding, " ", schema.data.size(), " bytes");
   } else {
-    VLOG_I("    schema not found for this type");
+    VLOG_I("schema: not found");
   }
 
-  // --- Dynamic message creation ---
-  VLOG_I("  create_protobuf_message(\"", type_name, "\")...");
-  vlink::SchemaPluginInterface::ProtobufMessagePtr msg = schema_plugin->create_protobuf_message(type_name);
+  // Same type-erasure trick for Message factories.
+  auto* msg = schema_plugin->create_protobuf_message(type_name);
+  VLOG_I("create_protobuf_message: ", msg ? "ok" : "not found");
 
-  if (msg) {
-    VLOG_I("    created message prototype at ", msg);
-  } else {
-    VLOG_I("    message creation failed (type not registered)");
-  }
-
+  // Flatbuffers binary schema (BFBS) lookup; opaque pointer same idea.
   auto* fbs_schema = schema_plugin->search_flatbuffers_schema("example.SensorFrame");
-  VLOG_I("  search_flatbuffers_schema(\"example.SensorFrame\"): ", fbs_schema ? "found" : "not found");
+  VLOG_I("search_flatbuffers_schema: ", fbs_schema ? "found" : "not found");
 
-  auto* fbs_parser = schema_plugin->create_flatbuffers_parser("example.SensorFrame");
-  VLOG_I("  create_flatbuffers_parser(\"example.SensorFrame\"): ", fbs_parser ? "ready" : "not found");
-
+  // Manual teardown: drop the handle, then clear() removes the registry
+  // entry. Same .so / dlclose contract as plugin_basic.
   schema_plugin.reset();
   plugin.clear();
 }
 
-/// Helper: demonstrate the SchemaPluginManager singleton API.
+// Demo 2: singleton manager. vlink core uses this internally so that any
+// component (BagWriter, BagReader, web visualisation) can look up schemas
+// without each owning its own Plugin instance.
 static void demo_manager() {
-  VLOG_I("=== SchemaPluginManager singleton demo ===");
+  VLOG_I("=== SchemaPluginManager singleton ===");
 
-  // SchemaPluginManager::get() loads the plugin on first call.
-  // It reads VLINK_SCHEMA_PLUGIN env var, or accepts an explicit path.
   vlink::SchemaPluginManager& mgr = vlink::SchemaPluginManager::get();
 
   if (!mgr.is_valid()) {
-    VLOG_W("SchemaPluginManager: no plugin loaded.");
-    VLOG_I("Set VLINK_SCHEMA_PLUGIN environment variable to the .so path.");
-    VLOG_I("Skipping manager demo.");
+    VLOG_W("No plugin loaded (set VLINK_SCHEMA_PLUGIN).");
     return;
   }
 
-  std::shared_ptr<vlink::SchemaPluginInterface> iface = mgr.get_interface();
+  // get_interface returns the SchemaPluginInterface* the manager loaded at
+  // startup based on VLINK_SCHEMA_PLUGIN.
+  auto iface = mgr.get_interface();
 
   if (!iface) {
-    VLOG_E("SchemaPluginManager::get_interface() returned nullptr.");
+    VLOG_E("get_interface() returned nullptr");
     return;
   }
 
-  vlink::SchemaPluginInterface::VersionInfo ver = iface->get_version_info();
-  VLOG_I("  Manager loaded plugin: ", ver.name, " v", ver.version);
+  auto ver = iface->get_version_info();
+  VLOG_I("Manager plugin: ", ver.name, " v", ver.version);
 
-  // Demonstrate schema lookup through the manager.
-  std::string type_name = "example.SensorData";
-  vlink::SchemaData schema = iface->search_schema(type_name, vlink::SchemaType::kProtobuf);
-  VLOG_I("  search_schema(\"", type_name, "\", kProtobuf",
-         "\"): ", schema.data.empty() ? "not found" : "found (" + std::to_string(schema.data.size()) + " bytes)");
+  // Same search_schema API as before, just routed through the singleton.
+  auto schema = iface->search_schema("example.SensorData", vlink::SchemaType::kProtobuf);
+  VLOG_I("search_schema: ", schema.data.empty() ? "not found" : std::to_string(schema.data.size()) + " bytes");
 }
 
 int main() {
-  VLOG_I("=== SchemaPluginInterface conceptual demo ===");
-  VLOG_I("");
-  VLOG_I("SchemaPluginInterface provides six capabilities:");
-  VLOG_I("  1. search_protobuf_descriptor(name) -- lookup a Protobuf Descriptor by type name");
-  VLOG_I("  2. search_schema(name, schema_type) -- return protobuf/flatbuffers schema payloads");
-  VLOG_I("  3. get_all_schemas(schema_type)     -- enumerate cached/imported schema payloads");
-  VLOG_I("  4. create_protobuf_message(name)    -- create a dynamic Protobuf Message prototype");
-  VLOG_I("  5. search_flatbuffers_schema(name)  -- lookup a BFBS reflection schema");
-  VLOG_I("  6. create_flatbuffers_parser(name)  -- create a runtime FlatBuffers parser");
-  VLOG_I("");
+  // File-level intro to the SchemaPluginInterface surface.
+  VLOG_I("SchemaPluginInterface capabilities:");
+  VLOG_I("  search_protobuf_descriptor / search_schema / get_all_schemas");
+  VLOG_I("  create_protobuf_message / search_flatbuffers_schema / create_flatbuffers_parser");
 
   demo_direct_load();
-  VLOG_I("");
   demo_manager();
 
-  VLOG_I("");
   VLOG_I("Schema plugin example complete.");
   return 0;
 }

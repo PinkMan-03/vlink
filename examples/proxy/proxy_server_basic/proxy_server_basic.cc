@@ -21,113 +21,89 @@
  * limitations under the License.
  */
 
-// ProxyServer Basic Example
-// Demonstrates ProxyServer creation, configuration, and lifecycle.
+// =============================================================================
+// File: proxy_server_basic.cc
+//
+// Server-side demo of vlink::ProxyServer. ProxyServer is the in-process
+// daemon that discovers every vlink Publisher/Subscriber/Server/Client/
+// Setter/Getter on the configured DDS domain, exposes a control + info +
+// data channel to external ProxyAPI clients, and (optionally) hosts a list
+// of runnable plugins inside its own thread.
+//
+// Hard rule: AT MOST ONE ProxyServer instance per process. Two would compete
+// for the same DDS topic names and corrupt the control protocol. The class
+// enforces this with an internal singleton guard.
+//
+// Lifetime:
+//   construct(cfg)   -- wires up DDS endpoints, plugin list, internal loop
+//   async_run()      -- spawns the worker thread; heartbeat (1Hz) + ProxyAPI
+//                       handshake start running immediately
+//   quit(drain=true) -- ask the loop to stop; "true" lets the heartbeat
+//                       flush a final "going away" packet so connected
+//                       ProxyAPI clients get a clean disconnect
+//   wait_for_quit()  -- join the worker thread
+// =============================================================================
 
 #include <vlink/base/logger.h>
 #include <vlink/external/proxy_server.h>
 
 #include <chrono>
-#include <iostream>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
 int main() {
-  // ======== Section 1: ProxyServer Configuration ========
-  {
-    std::cout << "\n[1] ProxyServer Configuration" << std::endl;
+  // Section: build the minimal server config.
+  //   dds_impl  -- which DDS provider to use ("dds", "ddsc", "ddsr", "ddst").
+  //   domain_id -- DDS domain shared with the ProxyAPI clients we want to
+  //                serve.
+  //   reliable  -- DDS reliability on the data relay; off for low-latency.
+  //   async     -- whether the internal MessageLoop runs on its own thread
+  //                (true) or on the caller's (false; for embedding).
+  //   use_iox   -- enable iceoryx shared-memory transport for the relay.
+  vlink::ProxyServer::Config cfg;
+  cfg.dds_impl = "dds";
+  cfg.domain_id = 0;
+  cfg.reliable = false;
+  cfg.async = true;
+  cfg.use_iox = false;
 
-    vlink::ProxyServer::Config cfg;
-    cfg.dds_impl = "dds";  // DDS implementation
-    cfg.domain_id = 0;     // DDS domain
-    cfg.reliable = false;  // BestEffort for data channel
-    cfg.async = true;      // Async event processing
-    cfg.use_iox = false;   // Do not start embedded RouDi
+  VLOG_I("ProxyServer config: dds_impl=", cfg.dds_impl, " domain_id=", cfg.domain_id, " reliable=", cfg.reliable,
+         " async=", cfg.async);
 
-    std::cout << "  dds_impl:  " << cfg.dds_impl << std::endl;
-    std::cout << "  domain_id: " << cfg.domain_id << std::endl;
-    std::cout << "  reliable:  " << std::boolalpha << cfg.reliable << std::endl;
-    std::cout << "  async:     " << std::boolalpha << cfg.async << std::endl;
-    std::cout << "  use_iox:   " << std::boolalpha << cfg.use_iox << std::endl;
+  // Section: construct + start. Construction registers the singleton; a
+  // second ProxyServer here would terminate the process.
+  vlink::ProxyServer server(cfg);
+  server.async_run();
+  VLOG_I("ProxyServer event loop started -- heartbeat + discovery active");
+
+  // Let the server publish a few heartbeats so ProxyAPI clients in the same
+  // domain have a chance to discover and connect.
+  std::this_thread::sleep_for(500ms);
+
+  // Section: shutdown. quit(true) drains the outbound queue so the last
+  // heartbeat / "bye" packet reaches the wire before the thread exits.
+  server.quit(true);
+  server.wait_for_quit();
+  VLOG_I("ProxyServer event loop stopped");
+
+  // Section: illustrate the runnable_list field. ProxyServer can also host
+  // a set of RunablePluginInterface plugins automatically: it
+  // dlopen+create+async_run+on_init each plugin during construction and
+  // tears them down (on_deinit, quit, wait_for_quit, dlclose) at shutdown,
+  // so the user does not have to manage plugin lifetime by hand. The names
+  // listed here would be searched in default_search_path with the version
+  // major/minor required by runnable_version_*.
+  vlink::ProxyServer::Config plugin_cfg;
+  plugin_cfg.dds_impl = "dds";
+  plugin_cfg.runnable_list = {"my_analysis_plugin", "my_recorder_plugin"};
+  plugin_cfg.runnable_version_major = 1;
+  plugin_cfg.runnable_version_minor = 0;
+
+  VLOG_I("Example runnable_list size: ", plugin_cfg.runnable_list.size());
+  for (const auto& name : plugin_cfg.runnable_list) {
+    VLOG_I("  plugin: ", name, " v", plugin_cfg.runnable_version_major, ".", plugin_cfg.runnable_version_minor);
   }
-
-  // ======== Section 2: Usage Pattern ========
-  // Creates a real ProxyServer, starts its event loop briefly, then shuts down.
-  {
-    std::cout << "\n[2] Usage Pattern" << std::endl;
-
-    vlink::ProxyServer::Config cfg;
-    cfg.dds_impl = "dds";
-    cfg.domain_id = 0;
-    cfg.reliable = false;
-    cfg.async = true;
-
-    // ProxyServer is a singleton per process
-    vlink::ProxyServer server(cfg);
-    VLOG_I("[ProxyServer] Constructed with dds_impl=", cfg.dds_impl, " domain_id=", cfg.domain_id);
-
-    // Start the event loop (runs DiscoveryViewer, heartbeat timer, etc.)
-    server.async_run();
-    VLOG_I("[ProxyServer] Event loop started -- heartbeat and discovery are active");
-
-    // Allow the server to run briefly so heartbeat and discovery can tick
-    std::this_thread::sleep_for(500ms);
-    VLOG_I("[ProxyServer] Server ran for 500ms");
-
-    // Shutdown
-    server.quit(true);  // true = force immediate quit
-    server.wait_for_quit();
-    VLOG_I("[ProxyServer] Event loop stopped");
-  }
-
-  // ======== Section 3: Communication Architecture ========
-  {
-    std::cout << "[3] Communication Architecture" << std::endl;
-    VLOG_I("[Architecture] ProxyAPI (kController) communicates with ProxyServer via secure DDS channels:");
-    VLOG_I("  HandshakeCli <--> [DDS secure] <--> HandshakeSrv (server issues token)");
-    VLOG_I("  ControlPub   --> [DDS secure] --> ControlSub    (API sends token-stamped controls)");
-    VLOG_I("  TimeSub      <-- [DDS secure] <-- TimePub        (server sends 1-second heartbeat + identity/token)");
-    VLOG_I("  InfoSub      <-- [DDS secure] <-- InfoPub        (server sends per-topic statistics to API)");
-    VLOG_I("  DataSub   <-- [DDS/SHM] <-- DataPub   (server relays raw message data to API)");
-  }
-
-  // ======== Section 4: Singleton Constraint ========
-  {
-    std::cout << "[4] Singleton Constraint" << std::endl;
-    VLOG_I("[Singleton] Only ONE ProxyServer may exist per process.");
-    VLOG_I("[Singleton] A second construction attempt logs a fatal message and returns without initialising.");
-  }
-
-  // ======== Section 5: Runnable Plugins ========
-  {
-    std::cout << "\n[5] Runnable Plugins" << std::endl;
-    VLOG_I("[Plugins] ProxyServer can load RunablePluginInterface plugins via Config::runnable_list.");
-    VLOG_I("[Plugins] Each plugin gets its own MessageLoop thread managed by the server.");
-    VLOG_I("[Plugins] Lifecycle: constructor -> async_run() -> on_init() -> ... -> on_deinit() -> quit()");
-
-    // Demonstrate building a Config with runnable_list entries
-    vlink::ProxyServer::Config plugin_cfg;
-    plugin_cfg.dds_impl = "dds";
-    plugin_cfg.runnable_list = {"my_analysis_plugin", "my_recorder_plugin"};
-    plugin_cfg.runnable_version_major = 1;
-    plugin_cfg.runnable_version_minor = 0;
-
-    VLOG_I("[Plugins] Example config has", plugin_cfg.runnable_list.size(), "plugins:");
-    for (const auto& name : plugin_cfg.runnable_list) {
-      VLOG_I("  plugin:", name, " version:", plugin_cfg.runnable_version_major, ".", plugin_cfg.runnable_version_minor);
-    }
-  }
-
-  // ======== Section 6: Environment Variables ========
-  {
-    std::cout << "[6] Environment Variables" << std::endl;
-    VLOG_I("[Env] VLINK_INTRA_BIND -- when set, the server subscribes to intra:// topics");
-    VLOG_I("[Env] in addition to DDS/SHM topics, enabling in-process observation.");
-  }
-
-  std::cout << "\n[Note] The ProxyServer in Section 2 was started and stopped successfully." << std::endl;
-  std::cout << "Run with a DDS backend: ./example_proxy_server_basic" << std::endl;
 
   VLOG_I("ProxyServer basic example complete.");
   return 0;

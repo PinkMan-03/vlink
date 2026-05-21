@@ -48,9 +48,13 @@
 #include <vlink/extension/message_convert_plugin.h>
 #include <vlink/extension/schema_plugin_interface.h>
 #include <vlink/extension/schema_plugin_manager.h>
+#include <vlink/zerocopy/audio_frame.h>
 #include <vlink/zerocopy/camera_frame.h>
+#include <vlink/zerocopy/object_array.h>
+#include <vlink/zerocopy/occupancy_grid.h>
 #include <vlink/zerocopy/point_cloud.h>
 #include <vlink/zerocopy/raw_data.h>
+#include <vlink/zerocopy/tensor.h>
 
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -136,6 +140,14 @@ class FoxgloveConverter final {
   static FoxgloveMessage point_cloud_fbs(const Bytes& raw);
 
   static FoxgloveMessage raw_data_to_log(const Bytes& raw);
+
+  static FoxgloveMessage occupancy_grid_fbs(const Bytes& raw);
+
+  static FoxgloveMessage tensor_fbs(const Bytes& raw);
+
+  static FoxgloveMessage object_array_fbs(const Bytes& raw);
+
+  static FoxgloveMessage audio_frame_fbs(const Bytes& raw);
 
   static FoxgloveMessage string_to_log(const Bytes& raw);
 

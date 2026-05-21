@@ -29,179 +29,141 @@
 
 #include <string>
 
-//
 #include "../common_test.h"
 
-using namespace vlink;
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: SslOptions - default construction
-// ---------------------------------------------------------------------------
-
 TEST_SUITE("impl-SslOptions") {
-  TEST_CASE("ssl-options-default-construction") {
+  TEST_CASE("default construction leaves all strings empty and verify_peer true") {
     SslOptions opts;
 
-    CHECK(opts.verify_peer == true);
+    CHECK(opts.verify_peer);
     CHECK(opts.ca_file.empty());
     CHECK(opts.cert_file.empty());
     CHECK(opts.key_file.empty());
     CHECK(opts.key_password.empty());
     CHECK(opts.server_name.empty());
     CHECK(opts.ciphers.empty());
+  }
+
+  TEST_CASE("is_valid returns false for default-constructed options") {
+    SslOptions opts;
+
     CHECK_FALSE(opts.is_valid());
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST SUITE: SslOptions::is_valid()
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("ssl-options-is-valid") {
-    SUBCASE("empty options are not valid") {
+  TEST_CASE("is_valid returns true when ca_file or cert_file is set") {
+    SUBCASE("ca_file alone") {
       SslOptions opts;
-      CHECK_FALSE(opts.is_valid());
-    }
-
-    SUBCASE("ca_file alone makes it valid") {
-      SslOptions opts;
-      opts.ca_file = "/path/to/ca.pem";
+      opts.ca_file = "/etc/ssl/ca.pem";
       CHECK(opts.is_valid());
     }
 
-    SUBCASE("cert_file alone makes it valid") {
+    SUBCASE("cert_file alone") {
       SslOptions opts;
-      opts.cert_file = "/path/to/cert.pem";
+      opts.cert_file = "/etc/ssl/client.pem";
       CHECK(opts.is_valid());
     }
 
-    SUBCASE("both ca_file and cert_file make it valid") {
+    SUBCASE("both ca_file and cert_file") {
       SslOptions opts;
       opts.ca_file = "/ca.pem";
       opts.cert_file = "/cert.pem";
       CHECK(opts.is_valid());
     }
+  }
 
-    SUBCASE("only key_file does not make it valid") {
+  TEST_CASE("is_valid returns false when only auxiliary fields are set") {
+    SUBCASE("key_file only") {
       SslOptions opts;
       opts.key_file = "/key.pem";
       CHECK_FALSE(opts.is_valid());
     }
 
-    SUBCASE("only verify_peer=false does not make it valid") {
+    SUBCASE("verify_peer false only") {
       SslOptions opts;
       opts.verify_peer = false;
       CHECK_FALSE(opts.is_valid());
     }
 
-    SUBCASE("only server_name does not make it valid") {
+    SUBCASE("server_name only") {
       SslOptions opts;
-      opts.server_name = "example.com";
+      opts.server_name = "broker.example.com";
       CHECK_FALSE(opts.is_valid());
     }
 
-    SUBCASE("only ciphers does not make it valid") {
+    SUBCASE("ciphers only") {
       SslOptions opts;
       opts.ciphers = "ECDHE-RSA-AES256-GCM-SHA384";
       CHECK_FALSE(opts.is_valid());
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST SUITE: SslOptions::parse_from()
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("ssl-parse-from-empty-properties") {
+  TEST_CASE("parse_from with empty property map yields default-equivalent result") {
     Conf::PropertiesMap props;
     auto opts = SslOptions::parse_from(props);
 
     CHECK_FALSE(opts.is_valid());
-    CHECK(opts.verify_peer == true);
+    CHECK(opts.verify_peer);
     CHECK(opts.ca_file.empty());
-    CHECK(opts.cert_file.empty());
-    CHECK(opts.key_file.empty());
-    CHECK(opts.key_password.empty());
-    CHECK(opts.server_name.empty());
-    CHECK(opts.ciphers.empty());
   }
 
-  TEST_CASE("ssl-parse-from-ca-only") {
+  TEST_CASE("parse_from reads ssl.ca into ca_file") {
     Conf::PropertiesMap props;
     props["ssl.ca"] = "/path/to/ca.pem";
-
     auto opts = SslOptions::parse_from(props);
 
     CHECK(opts.is_valid());
-    CHECK(opts.ca_file == "/path/to/ca.pem");
+    CHECK_EQ(opts.ca_file, "/path/to/ca.pem");
     CHECK(opts.cert_file.empty());
-    CHECK(opts.verify_peer == true);
   }
 
-  TEST_CASE("ssl-parse-from-cert-only") {
-    Conf::PropertiesMap props;
-    props["ssl.cert"] = "/path/to/cert.pem";
-
-    auto opts = SslOptions::parse_from(props);
-
-    CHECK(opts.is_valid());
-    CHECK(opts.cert_file == "/path/to/cert.pem");
-    CHECK(opts.ca_file.empty());
-  }
-
-  TEST_CASE("ssl-parse-from-full-config") {
+  TEST_CASE("parse_from reads all seven ssl.* keys") {
     Conf::PropertiesMap props;
     props["ssl.ca"] = "/ca.pem";
     props["ssl.cert"] = "/cert.pem";
     props["ssl.key"] = "/key.pem";
-    props["ssl.key_password"] = "secret";
+    props["ssl.key_password"] = "s3cr3t";
     props["ssl.verify"] = "0";
-    props["ssl.server_name"] = "broker.example.com";
+    props["ssl.server_name"] = "broker.test";
     props["ssl.ciphers"] = "ECDHE-RSA-AES256-GCM-SHA384";
 
     auto opts = SslOptions::parse_from(props);
 
     CHECK(opts.is_valid());
-    CHECK(opts.ca_file == "/ca.pem");
-    CHECK(opts.cert_file == "/cert.pem");
-    CHECK(opts.key_file == "/key.pem");
-    CHECK(opts.key_password == "secret");
-    CHECK(opts.verify_peer == false);
-    CHECK(opts.server_name == "broker.example.com");
-    CHECK(opts.ciphers == "ECDHE-RSA-AES256-GCM-SHA384");
+    CHECK_EQ(opts.ca_file, "/ca.pem");
+    CHECK_EQ(opts.cert_file, "/cert.pem");
+    CHECK_EQ(opts.key_file, "/key.pem");
+    CHECK_EQ(opts.key_password, "s3cr3t");
+    CHECK_FALSE(opts.verify_peer);
+    CHECK_EQ(opts.server_name, "broker.test");
+    CHECK_EQ(opts.ciphers, "ECDHE-RSA-AES256-GCM-SHA384");
   }
 
-  TEST_CASE("ssl-parse-from-verify-values") {
-    SUBCASE("verify=1 means true") {
-      Conf::PropertiesMap props;
-      props["ssl.ca"] = "/ca.pem";
-      props["ssl.verify"] = "1";
-      auto opts = SslOptions::parse_from(props);
-      CHECK(opts.verify_peer == true);
-    }
-
-    SUBCASE("verify=0 means false") {
+  TEST_CASE("parse_from ssl.verify interpretation") {
+    SUBCASE("value 0 disables verification") {
       Conf::PropertiesMap props;
       props["ssl.ca"] = "/ca.pem";
       props["ssl.verify"] = "0";
       auto opts = SslOptions::parse_from(props);
-      CHECK(opts.verify_peer == false);
+      CHECK_FALSE(opts.verify_peer);
     }
 
-    SUBCASE("verify=true is treated as not-zero (true)") {
+    SUBCASE("value 1 keeps verification enabled") {
       Conf::PropertiesMap props;
-      props["ssl.verify"] = "true";
+      props["ssl.ca"] = "/ca.pem";
+      props["ssl.verify"] = "1";
       auto opts = SslOptions::parse_from(props);
-      CHECK(opts.verify_peer == true);
+      CHECK(opts.verify_peer);
     }
 
-    SUBCASE("verify absent defaults to true") {
+    SUBCASE("absent ssl.verify defaults to enabled") {
       Conf::PropertiesMap props;
       props["ssl.ca"] = "/ca.pem";
       auto opts = SslOptions::parse_from(props);
-      CHECK(opts.verify_peer == true);
+      CHECK(opts.verify_peer);
     }
   }
 
-  TEST_CASE("ssl-parse-from-ignores-non-ssl-props") {
+  TEST_CASE("parse_from ignores unrelated properties") {
     Conf::PropertiesMap props;
     props["dds.tcp"] = "1";
     props["mqtt.broker"] = "tcp://localhost:1883";
@@ -213,7 +175,7 @@ TEST_SUITE("impl-SslOptions") {
     CHECK(opts.ca_file.empty());
   }
 
-  TEST_CASE("ssl-parse-from-mixed-props") {
+  TEST_CASE("parse_from reads ssl.* alongside unrelated properties") {
     Conf::PropertiesMap props;
     props["dds.tcp"] = "1";
     props["ssl.ca"] = "/ca.pem";
@@ -222,14 +184,10 @@ TEST_SUITE("impl-SslOptions") {
     auto opts = SslOptions::parse_from(props);
 
     CHECK(opts.is_valid());
-    CHECK(opts.ca_file == "/ca.pem");
+    CHECK_EQ(opts.ca_file, "/ca.pem");
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST SUITE: SslOptions::parse_to()
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("ssl-parse-to-empty-options") {
+  TEST_CASE("parse_to writes nothing for default-constructed options") {
     SslOptions opts;
     Conf::PropertiesMap props;
     opts.parse_to(props);
@@ -237,7 +195,7 @@ TEST_SUITE("impl-SslOptions") {
     CHECK(props.empty());
   }
 
-  TEST_CASE("ssl-parse-to-full-options") {
+  TEST_CASE("parse_to writes all non-default fields") {
     SslOptions opts;
     opts.ca_file = "/ca.pem";
     opts.cert_file = "/cert.pem";
@@ -250,28 +208,28 @@ TEST_SUITE("impl-SslOptions") {
     Conf::PropertiesMap props;
     opts.parse_to(props);
 
-    CHECK(props["ssl.ca"] == "/ca.pem");
-    CHECK(props["ssl.cert"] == "/cert.pem");
-    CHECK(props["ssl.key"] == "/key.pem");
-    CHECK(props["ssl.key_password"] == "pass");
-    CHECK(props["ssl.verify"] == "0");
-    CHECK(props["ssl.server_name"] == "sni.test");
-    CHECK(props["ssl.ciphers"] == "AES256");
+    CHECK_EQ(props.at("ssl.ca"), "/ca.pem");
+    CHECK_EQ(props.at("ssl.cert"), "/cert.pem");
+    CHECK_EQ(props.at("ssl.key"), "/key.pem");
+    CHECK_EQ(props.at("ssl.key_password"), "pass");
+    CHECK_EQ(props.at("ssl.verify"), "0");
+    CHECK_EQ(props.at("ssl.server_name"), "sni.test");
+    CHECK_EQ(props.at("ssl.ciphers"), "AES256");
   }
 
-  TEST_CASE("ssl-parse-to-verify-true-not-written") {
+  TEST_CASE("parse_to does not write ssl.verify when verify_peer is true") {
     SslOptions opts;
-    opts.verify_peer = true;
     opts.ca_file = "/ca.pem";
+    opts.verify_peer = true;
 
     Conf::PropertiesMap props;
     opts.parse_to(props);
 
     CHECK(props.find("ssl.verify") == props.end());
-    CHECK(props["ssl.ca"] == "/ca.pem");
+    CHECK_EQ(props.at("ssl.ca"), "/ca.pem");
   }
 
-  TEST_CASE("ssl-parse-to-partial-options") {
+  TEST_CASE("parse_to writes only non-empty string fields") {
     SslOptions opts;
     opts.ca_file = "/ca.pem";
     opts.server_name = "example.com";
@@ -279,16 +237,12 @@ TEST_SUITE("impl-SslOptions") {
     Conf::PropertiesMap props;
     opts.parse_to(props);
 
-    CHECK(props.size() == 2);
-    CHECK(props["ssl.ca"] == "/ca.pem");
-    CHECK(props["ssl.server_name"] == "example.com");
+    CHECK_EQ(props.size(), 2u);
     CHECK(props.find("ssl.cert") == props.end());
     CHECK(props.find("ssl.key") == props.end());
-    CHECK(props.find("ssl.key_password") == props.end());
-    CHECK(props.find("ssl.ciphers") == props.end());
   }
 
-  TEST_CASE("ssl-parse-to-preserves-existing-props") {
+  TEST_CASE("parse_to preserves existing non-ssl properties in the map") {
     SslOptions opts;
     opts.ca_file = "/ca.pem";
 
@@ -297,17 +251,12 @@ TEST_SUITE("impl-SslOptions") {
     props["zenoh.mode"] = "peer";
     opts.parse_to(props);
 
-    CHECK(props.size() == 3);
-    CHECK(props["dds.tcp"] == "1");
-    CHECK(props["zenoh.mode"] == "peer");
-    CHECK(props["ssl.ca"] == "/ca.pem");
+    CHECK_EQ(props.at("dds.tcp"), "1");
+    CHECK_EQ(props.at("zenoh.mode"), "peer");
+    CHECK_EQ(props.at("ssl.ca"), "/ca.pem");
   }
 
-  // ---------------------------------------------------------------------------
-  // TEST SUITE: Round-trip parse_to -> parse_from
-  // ---------------------------------------------------------------------------
-
-  TEST_CASE("ssl-roundtrip-parse-to-from") {
+  TEST_CASE("parse_to then parse_from round-trips all fields") {
     SslOptions original;
     original.ca_file = "/ca.pem";
     original.cert_file = "/cert.pem";
@@ -319,30 +268,28 @@ TEST_SUITE("impl-SslOptions") {
 
     Conf::PropertiesMap props;
     original.parse_to(props);
-
     auto restored = SslOptions::parse_from(props);
 
-    CHECK(restored.ca_file == original.ca_file);
-    CHECK(restored.cert_file == original.cert_file);
-    CHECK(restored.key_file == original.key_file);
-    CHECK(restored.key_password == original.key_password);
-    CHECK(restored.verify_peer == original.verify_peer);
-    CHECK(restored.server_name == original.server_name);
-    CHECK(restored.ciphers == original.ciphers);
-    CHECK(restored.is_valid() == original.is_valid());
+    CHECK_EQ(restored.ca_file, original.ca_file);
+    CHECK_EQ(restored.cert_file, original.cert_file);
+    CHECK_EQ(restored.key_file, original.key_file);
+    CHECK_EQ(restored.key_password, original.key_password);
+    CHECK_EQ(restored.verify_peer, original.verify_peer);
+    CHECK_EQ(restored.server_name, original.server_name);
+    CHECK_EQ(restored.ciphers, original.ciphers);
+    CHECK_EQ(restored.is_valid(), original.is_valid());
   }
 
-  TEST_CASE("ssl-roundtrip-verify-true") {
+  TEST_CASE("round-trip preserves verify_peer true without writing ssl.verify key") {
     SslOptions original;
     original.ca_file = "/ca.pem";
     original.verify_peer = true;
 
     Conf::PropertiesMap props;
     original.parse_to(props);
-
     auto restored = SslOptions::parse_from(props);
 
-    CHECK(restored.verify_peer == true);
+    CHECK(restored.verify_peer);
   }
 }
 

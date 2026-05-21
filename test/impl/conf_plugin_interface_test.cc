@@ -30,14 +30,7 @@
 #include <memory>
 #include <type_traits>
 
-//
 #include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helper concrete subclasses representing two fictional transports.  We use
-// reserved enumerator values from TransportType (kIntra / kZenoh) so that
-// the contract testing is deterministic without inventing new values.
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -79,55 +72,56 @@ class FakeZenohPlugin final : public ConfPluginInterface {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ConfPluginInterface - traits
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-ConfPluginInterface - traits") {
+TEST_SUITE("impl-ConfPluginInterface") {
   TEST_CASE("interface is abstract") { CHECK(std::is_abstract_v<ConfPluginInterface>); }
 
   TEST_CASE("interface is not copy-constructible") { CHECK_FALSE(std::is_copy_constructible_v<ConfPluginInterface>); }
 
   TEST_CASE("interface is not copy-assignable") { CHECK_FALSE(std::is_copy_assignable_v<ConfPluginInterface>); }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: ConfPluginInterface - subclass behaviour
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-ConfPluginInterface - subclass behaviour") {
-  TEST_CASE("get_transport_type returns the subclass value") {
+  TEST_CASE("get_transport_type returns the value declared by the subclass") {
     FakeIntraPlugin intra;
     FakeZenohPlugin zenoh;
-    CHECK(intra.get_transport_type() == TransportType::kIntra);
-    CHECK(zenoh.get_transport_type() == TransportType::kZenoh);
+    CHECK_EQ(intra.get_transport_type(), TransportType::kIntra);
+    CHECK_EQ(zenoh.get_transport_type(), TransportType::kZenoh);
   }
 
-  TEST_CASE("create returns a fresh independent Conf each call") {
+  TEST_CASE("create returns a fresh independent Conf on each call") {
     FakeIntraPlugin plugin;
     auto a = plugin.create();
     auto b = plugin.create();
     REQUIRE(a != nullptr);
     REQUIRE(b != nullptr);
     CHECK(a.get() != b.get());
-    CHECK(a->get_transport_type() == TransportType::kIntra);
-    CHECK(b->get_transport_type() == TransportType::kIntra);
+    CHECK_EQ(a->get_transport_type(), TransportType::kIntra);
+    CHECK_EQ(b->get_transport_type(), TransportType::kIntra);
   }
 
-  TEST_CASE("created Conf is valid for our stub") {
+  TEST_CASE("created Conf is valid and carries the correct transport type") {
     FakeZenohPlugin plugin;
     auto conf = plugin.create();
     REQUIRE(conf != nullptr);
     CHECK(conf->is_valid());
-    CHECK(conf->get_transport_type() == TransportType::kZenoh);
+    CHECK_EQ(conf->get_transport_type(), TransportType::kZenoh);
   }
 
-  TEST_CASE("virtual dispatch via base pointer") {
+  TEST_CASE("virtual dispatch via base pointer routes to concrete implementation") {
     FakeZenohPlugin concrete;
     ConfPluginInterface* base = &concrete;
     auto conf = base->create();
     REQUIRE(conf != nullptr);
-    CHECK(conf->get_transport_type() == TransportType::kZenoh);
+    CHECK_EQ(conf->get_transport_type(), TransportType::kZenoh);
+    CHECK_EQ(base->get_transport_type(), TransportType::kZenoh);
+  }
+
+  TEST_CASE("two distinct plugin types produce Conf objects of different transport") {
+    FakeIntraPlugin intra_plugin;
+    FakeZenohPlugin zenoh_plugin;
+    auto intra_conf = intra_plugin.create();
+    auto zenoh_conf = zenoh_plugin.create();
+    REQUIRE(intra_conf != nullptr);
+    REQUIRE(zenoh_conf != nullptr);
+    CHECK(intra_conf->get_transport_type() != zenoh_conf->get_transport_type());
   }
 }
 

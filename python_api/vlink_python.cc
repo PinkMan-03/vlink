@@ -65,6 +65,15 @@
 #include <vlink/extension/status_detail.h>
 #include <vlink/extension/url_remap.h>
 #include <vlink/vlink.h>
+#include <vlink/zerocopy/audio_frame.h>
+#include <vlink/zerocopy/camera_frame.h>
+#include <vlink/zerocopy/header.h>
+#include <vlink/zerocopy/object_array.h>
+#include <vlink/zerocopy/occupancy_grid.h>
+#include <vlink/zerocopy/point_cloud.h>
+#include <vlink/zerocopy/proxy_data.h>
+#include <vlink/zerocopy/raw_data.h>
+#include <vlink/zerocopy/tensor.h>
 
 #include <algorithm>
 #include <cstring>
@@ -1065,6 +1074,722 @@ NB_MODULE(_vlink_nanobind, m) {
         }
 
         return repr + ")";
+      });
+
+  //=========================================================================
+  // Zero-copy data types
+  //=========================================================================
+
+  nb::class_<vlink::zerocopy::Header>(m, "ZeroCopyHeader", "Common timestamp and sequencing metadata header (40 bytes)")
+      .def(nb::init<>())
+      .def_prop_rw(
+          "frame_id", [](const vlink::zerocopy::Header& self) { return std::string(self.frame_id); },
+          [](vlink::zerocopy::Header& self, const std::string& s) {
+            constexpr size_t kMax = sizeof(vlink::zerocopy::Header::frame_id) - 1;
+            const size_t n = std::min(s.size(), kMax);
+            std::memcpy(self.frame_id, s.data(), n);
+            self.frame_id[n] = '\0';
+          })
+      .def_rw("seq", &vlink::zerocopy::Header::seq)
+      .def_rw("reserved", &vlink::zerocopy::Header::reserved)
+      .def_rw("time_meas", &vlink::zerocopy::Header::time_meas)
+      .def_rw("time_pub", &vlink::zerocopy::Header::time_pub)
+      .def("__repr__", [](const vlink::zerocopy::Header& self) {
+        return std::string("ZeroCopyHeader(frame_id='") + self.frame_id + "', seq=" + std::to_string(self.seq) + ")";
+      });
+
+  nb::class_<vlink::zerocopy::RawData>(m, "RawData", "Generic zero-copy raw-byte data container (64 bytes)")
+      .def(nb::init<>())
+      .def_rw("header", &vlink::zerocopy::RawData::header)
+      .def("create", &vlink::zerocopy::RawData::create, "size"_a)
+      .def("clear", &vlink::zerocopy::RawData::clear)
+      .def("size", &vlink::zerocopy::RawData::size)
+      .def("is_valid", &vlink::zerocopy::RawData::is_valid)
+      .def("is_owner", &vlink::zerocopy::RawData::is_owner)
+      .def("get_serialized_size", &vlink::zerocopy::RawData::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::RawData::check_valid, "bytes"_a)
+      .def("reserved_buf", [](vlink::zerocopy::RawData& self) -> uint16_t { return self.reserved_buf(); })
+      .def(
+          "set_reserved_buf", [](vlink::zerocopy::RawData& self, uint16_t v) { self.reserved_buf() = v; }, "value"_a)
+      .def("data", [](const vlink::zerocopy::RawData& self) { return nb::bytes(self.data(), self.size()); })
+      .def(
+          "fill_data",
+          [](vlink::zerocopy::RawData& self, nb::handle data) {
+            PythonBufferView view(data);
+            return self.fill_data(const_cast<uint8_t*>(view.data()), view.size());
+          },
+          "data"_a)
+      .def("to_bytes",
+           [](const vlink::zerocopy::RawData& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::RawData& self, const vlink::Bytes& b) { return self << b; }, "bytes"_a,
+          nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::RawData& self) {
+        return std::string("RawData(size=") + std::to_string(self.size()) + ")";
+      });
+
+  nb::class_<vlink::zerocopy::CameraFrame> camera_frame_cls(m, "CameraFrame",
+                                                            "Zero-copy camera image frame (80 bytes)");
+  nb::enum_<vlink::zerocopy::CameraFrame::Format>(camera_frame_cls, "Format")
+      .value("Unknown", vlink::zerocopy::CameraFrame::kFormatUnknown)
+      .value("Yuv420", vlink::zerocopy::CameraFrame::kFormatYuv420)
+      .value("Yuv422", vlink::zerocopy::CameraFrame::kFormatYuv422)
+      .value("Yuv444", vlink::zerocopy::CameraFrame::kFormatYuv444)
+      .value("Nv12", vlink::zerocopy::CameraFrame::kFormatNv12)
+      .value("Nv21", vlink::zerocopy::CameraFrame::kFormatNv21)
+      .value("Yuyv", vlink::zerocopy::CameraFrame::kFormatYuyv)
+      .value("Yvyu", vlink::zerocopy::CameraFrame::kFormatYvyu)
+      .value("Uyvy", vlink::zerocopy::CameraFrame::kFormatUyvy)
+      .value("Vyuy", vlink::zerocopy::CameraFrame::kFormatVyuy)
+      .value("Bgr888Packed", vlink::zerocopy::CameraFrame::kFormatBgr888Packed)
+      .value("Rgb888Packed", vlink::zerocopy::CameraFrame::kFormatRgb888Packed)
+      .value("Rgb888Planar", vlink::zerocopy::CameraFrame::kFormatRgb888Planar)
+      .value("Jpeg", vlink::zerocopy::CameraFrame::kFormatJpeg)
+      .value("H264", vlink::zerocopy::CameraFrame::kFormatH264)
+      .value("H265", vlink::zerocopy::CameraFrame::kFormatH265);
+  nb::enum_<vlink::zerocopy::CameraFrame::Stream>(camera_frame_cls, "Stream")
+      .value("Unknown", vlink::zerocopy::CameraFrame::kStreamUnknown)
+      .value("I", vlink::zerocopy::CameraFrame::kStreamI)
+      .value("P", vlink::zerocopy::CameraFrame::kStreamP)
+      .value("B", vlink::zerocopy::CameraFrame::kStreamB);
+  camera_frame_cls.def(nb::init<>())
+      .def_rw("header", &vlink::zerocopy::CameraFrame::header)
+      .def("create", &vlink::zerocopy::CameraFrame::create, "size"_a)
+      .def("clear", &vlink::zerocopy::CameraFrame::clear)
+      .def("size", &vlink::zerocopy::CameraFrame::size)
+      .def("is_valid", &vlink::zerocopy::CameraFrame::is_valid)
+      .def("is_owner", &vlink::zerocopy::CameraFrame::is_owner)
+      .def("get_serialized_size", &vlink::zerocopy::CameraFrame::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::CameraFrame::check_valid, "bytes"_a)
+      .def("channel", &vlink::zerocopy::CameraFrame::channel)
+      .def("width", &vlink::zerocopy::CameraFrame::width)
+      .def("height", &vlink::zerocopy::CameraFrame::height)
+      .def("freq", &vlink::zerocopy::CameraFrame::freq)
+      .def("format", &vlink::zerocopy::CameraFrame::format)
+      .def("stream", &vlink::zerocopy::CameraFrame::stream)
+      .def("set_channel", &vlink::zerocopy::CameraFrame::set_channel, "channel"_a)
+      .def("set_width", &vlink::zerocopy::CameraFrame::set_width, "width"_a)
+      .def("set_height", &vlink::zerocopy::CameraFrame::set_height, "height"_a)
+      .def("set_freq", &vlink::zerocopy::CameraFrame::set_freq, "freq"_a)
+      .def("set_format", &vlink::zerocopy::CameraFrame::set_format, "format"_a)
+      .def("set_stream", &vlink::zerocopy::CameraFrame::set_stream, "stream"_a)
+      .def_prop_rw(
+          "reserved", [](vlink::zerocopy::CameraFrame& self) { return self.get_reserved(); },
+          [](vlink::zerocopy::CameraFrame& self, uint32_t v) { self.get_reserved() = v; })
+      .def("data", [](const vlink::zerocopy::CameraFrame& self) { return nb::bytes(self.data(), self.size()); })
+      .def(
+          "fill_data",
+          [](vlink::zerocopy::CameraFrame& self, nb::handle data) {
+            PythonBufferView view(data);
+            return self.fill_data(const_cast<uint8_t*>(view.data()), view.size());
+          },
+          "data"_a)
+      .def("to_bytes",
+           [](const vlink::zerocopy::CameraFrame& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::CameraFrame& self, const vlink::Bytes& b) { return self << b; }, "bytes"_a,
+          nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::CameraFrame& self) {
+        return std::string("CameraFrame(") + std::to_string(self.width()) + "x" + std::to_string(self.height()) +
+               ", size=" + std::to_string(self.size()) + ")";
+      });
+
+  nb::class_<vlink::zerocopy::PointCloud> point_cloud_cls(m, "PointCloud",
+                                                          "Schema-aware zero-copy 3-D point cloud (256 bytes)");
+  nb::enum_<vlink::zerocopy::PointCloud::Type>(point_cloud_cls, "Type")
+      .value("Unknown", vlink::zerocopy::PointCloud::kUnknownType)
+      .value("Bool", vlink::zerocopy::PointCloud::kBoolType)
+      .value("Int8", vlink::zerocopy::PointCloud::kInt8Type)
+      .value("Uint8", vlink::zerocopy::PointCloud::kUint8Type)
+      .value("Int16", vlink::zerocopy::PointCloud::kInt16Type)
+      .value("Uint16", vlink::zerocopy::PointCloud::kUint16Type)
+      .value("Int32", vlink::zerocopy::PointCloud::kInt32Type)
+      .value("Uint32", vlink::zerocopy::PointCloud::kUint32Type)
+      .value("Int64", vlink::zerocopy::PointCloud::kInt64Type)
+      .value("Uint64", vlink::zerocopy::PointCloud::kUint64Type)
+      .value("Float", vlink::zerocopy::PointCloud::kFloatType)
+      .value("Double", vlink::zerocopy::PointCloud::kDoubleType);
+  nb::class_<vlink::zerocopy::PointCloud::Key>(point_cloud_cls, "Key")
+      .def(nb::init<>())
+      .def_rw("name", &vlink::zerocopy::PointCloud::Key::name)
+      .def_rw("type", &vlink::zerocopy::PointCloud::Key::type)
+      .def_rw("size", &vlink::zerocopy::PointCloud::Key::size);
+  nb::class_<vlink::zerocopy::PointCloud::Vector3f>(point_cloud_cls, "Vector3f")
+      .def(nb::init<>())
+      .def(nb::init<float, float, float>(), "x"_a, "y"_a, "z"_a)
+      .def_rw("x", &vlink::zerocopy::PointCloud::Vector3f::x)
+      .def_rw("y", &vlink::zerocopy::PointCloud::Vector3f::y)
+      .def_rw("z", &vlink::zerocopy::PointCloud::Vector3f::z)
+      .def("__repr__", [](const vlink::zerocopy::PointCloud::Vector3f& v) {
+        return std::string("Vector3f(") + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " +
+               std::to_string(v.z) + ")";
+      });
+  nb::class_<vlink::zerocopy::PointCloud::Vector3d>(point_cloud_cls, "Vector3d")
+      .def(nb::init<>())
+      .def(nb::init<double, double, double>(), "x"_a, "y"_a, "z"_a)
+      .def_rw("x", &vlink::zerocopy::PointCloud::Vector3d::x)
+      .def_rw("y", &vlink::zerocopy::PointCloud::Vector3d::y)
+      .def_rw("z", &vlink::zerocopy::PointCloud::Vector3d::z)
+      .def("__repr__", [](const vlink::zerocopy::PointCloud::Vector3d& v) {
+        return std::string("Vector3d(") + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " +
+               std::to_string(v.z) + ")";
+      });
+  point_cloud_cls.def(nb::init<>())
+      .def_rw("header", &vlink::zerocopy::PointCloud::header)
+      .def(
+          "create",
+          [](vlink::zerocopy::PointCloud& self, size_t size, uint64_t size_num, uint64_t type_num,
+             const std::string& key_str) { return self.create(size, size_num, type_num, key_str); },
+          "size"_a, "size_num"_a, "type_num"_a, "key_str"_a)
+      .def(
+          "fill_packed_data",
+          [](vlink::zerocopy::PointCloud& self, nb::handle data, size_t count) {
+            PythonBufferView view(data);
+            return self.fill_packed_data(view.data(), count);
+          },
+          "data"_a, "count"_a)
+      .def(
+          "get_value_v3f",
+          [](const vlink::zerocopy::PointCloud& self, size_t loop_index) { return self.get_value_v3f(loop_index); },
+          "loop_index"_a)
+      .def(
+          "get_value_v3d",
+          [](const vlink::zerocopy::PointCloud& self, size_t loop_index) { return self.get_value_v3d(loop_index); },
+          "loop_index"_a)
+      .def(
+          "push_value_v3f",
+          [](vlink::zerocopy::PointCloud& self, float x, float y, float z) { return self.push_value_v3f(x, y, z); },
+          "x"_a, "y"_a, "z"_a)
+      .def(
+          "push_value_v3d",
+          [](vlink::zerocopy::PointCloud& self, double x, double y, double z) { return self.push_value_v3d(x, y, z); },
+          "x"_a, "y"_a, "z"_a)
+      .def(
+          "set_value_v3f",
+          [](vlink::zerocopy::PointCloud& self, size_t loop_index, float x, float y, float z) {
+            return self.set_value_v3f(loop_index, x, y, z);
+          },
+          "loop_index"_a, "x"_a, "y"_a, "z"_a)
+      .def(
+          "set_value_v3d",
+          [](vlink::zerocopy::PointCloud& self, size_t loop_index, double x, double y, double z) {
+            return self.set_value_v3d(loop_index, x, y, z);
+          },
+          "loop_index"_a, "x"_a, "y"_a, "z"_a)
+      .def("resize", &vlink::zerocopy::PointCloud::resize, "size"_a)
+      .def("clear", &vlink::zerocopy::PointCloud::clear, "force"_a = false)
+      .def("size", &vlink::zerocopy::PointCloud::size)
+      .def("pack_size", &vlink::zerocopy::PointCloud::pack_size)
+      .def("get_reserved_size", &vlink::zerocopy::PointCloud::get_reserved_size)
+      .def("is_owner", &vlink::zerocopy::PointCloud::is_owner)
+      .def("is_valid", &vlink::zerocopy::PointCloud::is_valid)
+      .def("get_serialized_size", &vlink::zerocopy::PointCloud::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::PointCloud::check_valid, "bytes"_a)
+      .def("get_protocol_size_num", &vlink::zerocopy::PointCloud::get_protocol_size_num)
+      .def("get_protocol_type_num", &vlink::zerocopy::PointCloud::get_protocol_type_num)
+      .def("get_protocol_size_str", &vlink::zerocopy::PointCloud::get_protocol_size_str)
+      .def("get_protocol_name_str", &vlink::zerocopy::PointCloud::get_protocol_name_str)
+      .def("get_protocol_type_str", &vlink::zerocopy::PointCloud::get_protocol_type_str)
+      .def("data",
+           [](const vlink::zerocopy::PointCloud& self) {
+             return nb::bytes(self.get_internal_data(), self.size() * self.pack_size());
+           })
+      .def("to_bytes",
+           [](const vlink::zerocopy::PointCloud& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::PointCloud& self, const vlink::Bytes& b) { return self << b; }, "bytes"_a,
+          nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::PointCloud& self) {
+        return std::string("PointCloud(size=") + std::to_string(self.size()) +
+               ", pack_size=" + std::to_string(self.pack_size()) + ")";
+      });
+
+  nb::class_<vlink::zerocopy::ProxyData>(m, "ProxyData", "Proxy routing envelope (80 bytes)")
+      .def(nb::init<>())
+      .def(
+          "create",
+          [](vlink::zerocopy::ProxyData& self, const vlink::Bytes& raw, const std::string& url, const std::string& ser,
+             uint32_t schema, const std::string& hostname) { self.create(raw, url, ser, schema, hostname); },
+          "raw"_a, "url"_a, "ser"_a, "schema"_a = static_cast<uint32_t>(0), "hostname"_a = std::string{})
+      .def("clear", &vlink::zerocopy::ProxyData::clear)
+      .def("size", &vlink::zerocopy::ProxyData::size)
+      .def("is_valid", &vlink::zerocopy::ProxyData::is_valid)
+      .def("is_owner", &vlink::zerocopy::ProxyData::is_owner)
+      .def("get_serialized_size", &vlink::zerocopy::ProxyData::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::ProxyData::check_valid, "bytes"_a)
+      .def("control_id", &vlink::zerocopy::ProxyData::control_id)
+      .def("mode", &vlink::zerocopy::ProxyData::mode)
+      .def("timestamp", &vlink::zerocopy::ProxyData::timestamp)
+      .def("seq", &vlink::zerocopy::ProxyData::seq)
+      .def("schema", &vlink::zerocopy::ProxyData::schema)
+      .def("raw", &vlink::zerocopy::ProxyData::raw)
+      .def("url", [](const vlink::zerocopy::ProxyData& self) { return std::string(self.url()); })
+      .def("ser", [](const vlink::zerocopy::ProxyData& self) { return std::string(self.ser()); })
+      .def("hostname", [](const vlink::zerocopy::ProxyData& self) { return std::string(self.hostname()); })
+      .def("set_control_id", &vlink::zerocopy::ProxyData::set_control_id, "control_id"_a)
+      .def("set_mode", &vlink::zerocopy::ProxyData::set_mode, "mode"_a)
+      .def("set_timestamp", &vlink::zerocopy::ProxyData::set_timestamp, "timestamp"_a)
+      .def("set_seq", &vlink::zerocopy::ProxyData::set_seq, "seq"_a)
+      .def("set_schema", &vlink::zerocopy::ProxyData::set_schema, "schema"_a)
+      .def("to_bytes",
+           [](const vlink::zerocopy::ProxyData& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::ProxyData& self, const vlink::Bytes& b) { return self << b; }, "bytes"_a,
+          nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::ProxyData& self) {
+        return std::string("ProxyData(url='") + std::string(self.url()) + "', size=" + std::to_string(self.size()) +
+               ")";
+      });
+
+  nb::class_<vlink::zerocopy::OccupancyGrid> occupancy_grid_cls(m, "OccupancyGrid",
+                                                                "Zero-copy 2-D occupancy grid map (152 bytes)");
+  nb::enum_<vlink::zerocopy::OccupancyGrid::CellType>(occupancy_grid_cls, "CellType")
+      .value("Unknown", vlink::zerocopy::OccupancyGrid::kCellUnknown)
+      .value("Int8", vlink::zerocopy::OccupancyGrid::kCellInt8)
+      .value("Uint8", vlink::zerocopy::OccupancyGrid::kCellUint8)
+      .value("Uint16", vlink::zerocopy::OccupancyGrid::kCellUint16)
+      .value("Float32", vlink::zerocopy::OccupancyGrid::kCellFloat32);
+  occupancy_grid_cls.def(nb::init<>())
+      .def_rw("header", &vlink::zerocopy::OccupancyGrid::header)
+      .def("create", &vlink::zerocopy::OccupancyGrid::create, "size"_a)
+      .def("clear", &vlink::zerocopy::OccupancyGrid::clear)
+      .def("size", &vlink::zerocopy::OccupancyGrid::size)
+      .def("is_valid", &vlink::zerocopy::OccupancyGrid::is_valid)
+      .def("is_owner", &vlink::zerocopy::OccupancyGrid::is_owner)
+      .def("get_serialized_size", &vlink::zerocopy::OccupancyGrid::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::OccupancyGrid::check_valid, "bytes"_a)
+      .def_static("cell_size_of", &vlink::zerocopy::OccupancyGrid::cell_size_of, "type"_a)
+      .def("update_time_ns", &vlink::zerocopy::OccupancyGrid::update_time_ns)
+      .def("map_id", [](const vlink::zerocopy::OccupancyGrid& self) { return std::string(self.map_id()); })
+      .def("channel", &vlink::zerocopy::OccupancyGrid::channel)
+      .def("freq", &vlink::zerocopy::OccupancyGrid::freq)
+      .def("width", &vlink::zerocopy::OccupancyGrid::width)
+      .def("height", &vlink::zerocopy::OccupancyGrid::height)
+      .def("valid_cell_count", &vlink::zerocopy::OccupancyGrid::valid_cell_count)
+      .def("resolution", &vlink::zerocopy::OccupancyGrid::resolution)
+      .def("origin_x", &vlink::zerocopy::OccupancyGrid::origin_x)
+      .def("origin_y", &vlink::zerocopy::OccupancyGrid::origin_y)
+      .def("origin_z", &vlink::zerocopy::OccupancyGrid::origin_z)
+      .def("origin_yaw", &vlink::zerocopy::OccupancyGrid::origin_yaw)
+      .def("value_min", &vlink::zerocopy::OccupancyGrid::value_min)
+      .def("value_max", &vlink::zerocopy::OccupancyGrid::value_max)
+      .def("default_value", &vlink::zerocopy::OccupancyGrid::default_value)
+      .def("occupied_threshold", &vlink::zerocopy::OccupancyGrid::occupied_threshold)
+      .def("free_threshold", &vlink::zerocopy::OccupancyGrid::free_threshold)
+      .def("cell_type", &vlink::zerocopy::OccupancyGrid::cell_type)
+      .def("cell_size", &vlink::zerocopy::OccupancyGrid::cell_size)
+      .def("set_update_time_ns", &vlink::zerocopy::OccupancyGrid::set_update_time_ns, "update_time_ns"_a)
+      .def(
+          "set_map_id", [](vlink::zerocopy::OccupancyGrid& self, const std::string& s) { self.set_map_id(s); },
+          "map_id"_a)
+      .def("set_channel", &vlink::zerocopy::OccupancyGrid::set_channel, "channel"_a)
+      .def("set_freq", &vlink::zerocopy::OccupancyGrid::set_freq, "freq"_a)
+      .def("set_width", &vlink::zerocopy::OccupancyGrid::set_width, "width"_a)
+      .def("set_height", &vlink::zerocopy::OccupancyGrid::set_height, "height"_a)
+      .def("set_valid_cell_count", &vlink::zerocopy::OccupancyGrid::set_valid_cell_count, "valid_cell_count"_a)
+      .def("set_resolution", &vlink::zerocopy::OccupancyGrid::set_resolution, "resolution"_a)
+      .def("set_origin_x", &vlink::zerocopy::OccupancyGrid::set_origin_x, "origin_x"_a)
+      .def("set_origin_y", &vlink::zerocopy::OccupancyGrid::set_origin_y, "origin_y"_a)
+      .def("set_origin_z", &vlink::zerocopy::OccupancyGrid::set_origin_z, "origin_z"_a)
+      .def("set_origin_yaw", &vlink::zerocopy::OccupancyGrid::set_origin_yaw, "origin_yaw"_a)
+      .def("set_value_min", &vlink::zerocopy::OccupancyGrid::set_value_min, "value_min"_a)
+      .def("set_value_max", &vlink::zerocopy::OccupancyGrid::set_value_max, "value_max"_a)
+      .def("set_default_value", &vlink::zerocopy::OccupancyGrid::set_default_value, "default_value"_a)
+      .def("set_occupied_threshold", &vlink::zerocopy::OccupancyGrid::set_occupied_threshold, "occupied_threshold"_a)
+      .def("set_free_threshold", &vlink::zerocopy::OccupancyGrid::set_free_threshold, "free_threshold"_a)
+      .def("set_cell_type", &vlink::zerocopy::OccupancyGrid::set_cell_type, "cell_type"_a)
+      .def_prop_rw(
+          "reserved", [](vlink::zerocopy::OccupancyGrid& self) { return self.get_reserved(); },
+          [](vlink::zerocopy::OccupancyGrid& self, uint32_t v) { self.get_reserved() = v; })
+      .def("data", [](const vlink::zerocopy::OccupancyGrid& self) { return nb::bytes(self.data(), self.size()); })
+      .def(
+          "fill_data",
+          [](vlink::zerocopy::OccupancyGrid& self, nb::handle data) {
+            PythonBufferView view(data);
+            return self.fill_data(const_cast<uint8_t*>(view.data()), view.size());
+          },
+          "data"_a)
+      .def("to_bytes",
+           [](const vlink::zerocopy::OccupancyGrid& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::OccupancyGrid& self, const vlink::Bytes& b) { return self << b; },
+          "bytes"_a, nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::OccupancyGrid& self) {
+        return std::string("OccupancyGrid(") + std::to_string(self.width()) + "x" + std::to_string(self.height()) +
+               ", size=" + std::to_string(self.size()) + ")";
+      });
+
+  nb::class_<vlink::zerocopy::Tensor> tensor_cls(m, "Tensor", "Zero-copy N-D tensor (248 bytes)");
+  nb::enum_<vlink::zerocopy::Tensor::DataType>(tensor_cls, "DataType")
+      .value("Unknown", vlink::zerocopy::Tensor::kDataUnknown)
+      .value("Bool", vlink::zerocopy::Tensor::kBool)
+      .value("Int8", vlink::zerocopy::Tensor::kInt8)
+      .value("Uint8", vlink::zerocopy::Tensor::kUint8)
+      .value("Int16", vlink::zerocopy::Tensor::kInt16)
+      .value("Uint16", vlink::zerocopy::Tensor::kUint16)
+      .value("Int32", vlink::zerocopy::Tensor::kInt32)
+      .value("Uint32", vlink::zerocopy::Tensor::kUint32)
+      .value("Int64", vlink::zerocopy::Tensor::kInt64)
+      .value("Uint64", vlink::zerocopy::Tensor::kUint64)
+      .value("Float16", vlink::zerocopy::Tensor::kFloat16)
+      .value("Bfloat16", vlink::zerocopy::Tensor::kBfloat16)
+      .value("Float32", vlink::zerocopy::Tensor::kFloat32)
+      .value("Float64", vlink::zerocopy::Tensor::kFloat64);
+  nb::enum_<vlink::zerocopy::Tensor::Device>(tensor_cls, "Device")
+      .value("Cpu", vlink::zerocopy::Tensor::kDeviceCpu)
+      .value("Gpu", vlink::zerocopy::Tensor::kDeviceGpu)
+      .value("Npu", vlink::zerocopy::Tensor::kDeviceNpu)
+      .value("Dsp", vlink::zerocopy::Tensor::kDeviceDsp);
+  tensor_cls.attr("kMaxRank") = vlink::zerocopy::Tensor::kMaxRank;
+  tensor_cls.def(nb::init<>())
+      .def_rw("header", &vlink::zerocopy::Tensor::header)
+      .def("create", &vlink::zerocopy::Tensor::create, "size"_a)
+      .def("clear", &vlink::zerocopy::Tensor::clear)
+      .def("size", &vlink::zerocopy::Tensor::size)
+      .def("is_valid", &vlink::zerocopy::Tensor::is_valid)
+      .def("is_owner", &vlink::zerocopy::Tensor::is_owner)
+      .def("get_serialized_size", &vlink::zerocopy::Tensor::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::Tensor::check_valid, "bytes"_a)
+      .def_static("element_size_of", &vlink::zerocopy::Tensor::element_size_of, "dtype"_a)
+      .def("update_time_ns", &vlink::zerocopy::Tensor::update_time_ns)
+      .def("num_elements", &vlink::zerocopy::Tensor::num_elements)
+      .def("name", [](const vlink::zerocopy::Tensor& self) { return std::string(self.name()); })
+      .def("model_id", [](const vlink::zerocopy::Tensor& self) { return std::string(self.model_id()); })
+      .def("layout", [](const vlink::zerocopy::Tensor& self) { return std::string(self.layout()); })
+      .def("shape",
+           [](const vlink::zerocopy::Tensor& self) {
+             return std::vector<uint32_t>(self.shape(), self.shape() + self.rank());
+           })
+      .def("shape_at", &vlink::zerocopy::Tensor::shape_at, "dim"_a)
+      .def("strides",
+           [](const vlink::zerocopy::Tensor& self) {
+             return std::vector<uint32_t>(self.strides(), self.strides() + self.rank());
+           })
+      .def("stride_at", &vlink::zerocopy::Tensor::stride_at, "dim"_a)
+      .def("channel", &vlink::zerocopy::Tensor::channel)
+      .def("freq", &vlink::zerocopy::Tensor::freq)
+      .def("batch_size", &vlink::zerocopy::Tensor::batch_size)
+      .def("quant_scale", &vlink::zerocopy::Tensor::quant_scale)
+      .def("quant_zero_point", &vlink::zerocopy::Tensor::quant_zero_point)
+      .def("dtype", &vlink::zerocopy::Tensor::dtype)
+      .def("rank", &vlink::zerocopy::Tensor::rank)
+      .def("device", &vlink::zerocopy::Tensor::device)
+      .def("element_size", &vlink::zerocopy::Tensor::element_size)
+      .def("set_update_time_ns", &vlink::zerocopy::Tensor::set_update_time_ns, "update_time_ns"_a)
+      .def(
+          "set_name", [](vlink::zerocopy::Tensor& self, const std::string& s) { self.set_name(s); }, "name"_a)
+      .def(
+          "set_model_id", [](vlink::zerocopy::Tensor& self, const std::string& s) { self.set_model_id(s); },
+          "model_id"_a)
+      .def(
+          "set_layout", [](vlink::zerocopy::Tensor& self, const std::string& s) { self.set_layout(s); }, "layout"_a)
+      .def(
+          "set_shape",
+          [](vlink::zerocopy::Tensor& self, const std::vector<uint32_t>& v) {
+            self.set_shape(v.data(), static_cast<uint8_t>(v.size()));
+          },
+          "shape"_a)
+      .def("set_shape_at", &vlink::zerocopy::Tensor::set_shape_at, "dim"_a, "value"_a)
+      .def("set_stride_at", &vlink::zerocopy::Tensor::set_stride_at, "dim"_a, "value"_a)
+      .def("set_channel", &vlink::zerocopy::Tensor::set_channel, "channel"_a)
+      .def("set_freq", &vlink::zerocopy::Tensor::set_freq, "freq"_a)
+      .def("set_batch_size", &vlink::zerocopy::Tensor::set_batch_size, "batch_size"_a)
+      .def("set_quant_scale", &vlink::zerocopy::Tensor::set_quant_scale, "quant_scale"_a)
+      .def("set_quant_zero_point", &vlink::zerocopy::Tensor::set_quant_zero_point, "quant_zero_point"_a)
+      .def("set_dtype", &vlink::zerocopy::Tensor::set_dtype, "dtype"_a)
+      .def("set_device", &vlink::zerocopy::Tensor::set_device, "device"_a)
+      .def_prop_rw(
+          "reserved", [](vlink::zerocopy::Tensor& self) { return self.get_reserved(); },
+          [](vlink::zerocopy::Tensor& self, uint32_t v) { self.get_reserved() = v; })
+      .def("data", [](const vlink::zerocopy::Tensor& self) { return nb::bytes(self.data(), self.size()); })
+      .def(
+          "fill_data",
+          [](vlink::zerocopy::Tensor& self, nb::handle data) {
+            PythonBufferView view(data);
+            return self.fill_data(const_cast<uint8_t*>(view.data()), view.size());
+          },
+          "data"_a)
+      .def("to_bytes",
+           [](const vlink::zerocopy::Tensor& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::Tensor& self, const vlink::Bytes& b) { return self << b; }, "bytes"_a,
+          nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::Tensor& self) {
+        return std::string("Tensor(rank=") + std::to_string(self.rank()) +
+               ", num_elements=" + std::to_string(self.num_elements()) + ")";
+      });
+
+  nb::class_<vlink::zerocopy::ObjectArray> object_array_cls(
+      m, "ObjectArray", "Zero-copy variable-length array of 3-D detection / tracking objects (112 bytes)");
+  nb::enum_<vlink::zerocopy::ObjectArray::MotionState>(object_array_cls, "MotionState")
+      .value("Unknown", vlink::zerocopy::ObjectArray::kMotionUnknown)
+      .value("Stationary", vlink::zerocopy::ObjectArray::kMotionStationary)
+      .value("Moving", vlink::zerocopy::ObjectArray::kMotionMoving)
+      .value("Stopped", vlink::zerocopy::ObjectArray::kMotionStopped)
+      .value("Parked", vlink::zerocopy::ObjectArray::kMotionParked);
+  nb::enum_<vlink::zerocopy::ObjectArray::SourceType>(object_array_cls, "SourceType")
+      .value("Unknown", vlink::zerocopy::ObjectArray::kSourceUnknown)
+      .value("Lidar", vlink::zerocopy::ObjectArray::kSourceLidar)
+      .value("Camera", vlink::zerocopy::ObjectArray::kSourceCamera)
+      .value("Radar", vlink::zerocopy::ObjectArray::kSourceRadar)
+      .value("Fusion", vlink::zerocopy::ObjectArray::kSourceFusion)
+      .value("Ultrasonic", vlink::zerocopy::ObjectArray::kSourceUltrasonic);
+  nb::class_<vlink::zerocopy::ObjectArray::Object>(object_array_cls, "Object")
+      .def(nb::init<>())
+      .def_prop_rw(
+          "label", [](const vlink::zerocopy::ObjectArray::Object& self) { return std::string(self.label); },
+          [](vlink::zerocopy::ObjectArray::Object& self, const std::string& s) {
+            constexpr size_t kMax = sizeof(vlink::zerocopy::ObjectArray::Object::label) - 1;
+            const size_t n = std::min(s.size(), kMax);
+            std::memcpy(self.label, s.data(), n);
+            self.label[n] = '\0';
+          })
+      .def_prop_rw(
+          "position",
+          [](const vlink::zerocopy::ObjectArray::Object& self) {
+            return std::vector<float>(self.position, self.position + 3);
+          },
+          [](vlink::zerocopy::ObjectArray::Object& self, const std::vector<float>& v) {
+            const size_t n = std::min<size_t>(v.size(), 3);
+            for (size_t i = 0; i < n; ++i) {
+              self.position[i] = v[i];
+            }
+            for (size_t i = n; i < 3; ++i) {
+              self.position[i] = 0.0F;
+            }
+          })
+      .def_rw("yaw", &vlink::zerocopy::ObjectArray::Object::yaw)
+      .def_prop_rw(
+          "size",
+          [](const vlink::zerocopy::ObjectArray::Object& self) { return std::vector<float>(self.size, self.size + 3); },
+          [](vlink::zerocopy::ObjectArray::Object& self, const std::vector<float>& v) {
+            const size_t n = std::min<size_t>(v.size(), 3);
+            for (size_t i = 0; i < n; ++i) {
+              self.size[i] = v[i];
+            }
+            for (size_t i = n; i < 3; ++i) {
+              self.size[i] = 0.0F;
+            }
+          })
+      .def_rw("yaw_rate", &vlink::zerocopy::ObjectArray::Object::yaw_rate)
+      .def_prop_rw(
+          "velocity",
+          [](const vlink::zerocopy::ObjectArray::Object& self) {
+            return std::vector<float>(self.velocity, self.velocity + 3);
+          },
+          [](vlink::zerocopy::ObjectArray::Object& self, const std::vector<float>& v) {
+            const size_t n = std::min<size_t>(v.size(), 3);
+            for (size_t i = 0; i < n; ++i) {
+              self.velocity[i] = v[i];
+            }
+            for (size_t i = n; i < 3; ++i) {
+              self.velocity[i] = 0.0F;
+            }
+          })
+      .def_rw("score", &vlink::zerocopy::ObjectArray::Object::score)
+      .def_prop_rw(
+          "acceleration",
+          [](const vlink::zerocopy::ObjectArray::Object& self) {
+            return std::vector<float>(self.acceleration, self.acceleration + 3);
+          },
+          [](vlink::zerocopy::ObjectArray::Object& self, const std::vector<float>& v) {
+            const size_t n = std::min<size_t>(v.size(), 3);
+            for (size_t i = 0; i < n; ++i) {
+              self.acceleration[i] = v[i];
+            }
+            for (size_t i = n; i < 3; ++i) {
+              self.acceleration[i] = 0.0F;
+            }
+          })
+      .def_rw("existence_probability", &vlink::zerocopy::ObjectArray::Object::existence_probability)
+      .def_prop_rw(
+          "position_covariance",
+          [](const vlink::zerocopy::ObjectArray::Object& self) {
+            return std::vector<float>(self.position_covariance, self.position_covariance + 6);
+          },
+          [](vlink::zerocopy::ObjectArray::Object& self, const std::vector<float>& v) {
+            const size_t n = std::min<size_t>(v.size(), 6);
+            for (size_t i = 0; i < n; ++i) {
+              self.position_covariance[i] = v[i];
+            }
+            for (size_t i = n; i < 6; ++i) {
+              self.position_covariance[i] = 0.0F;
+            }
+          })
+      .def_rw("class_id", &vlink::zerocopy::ObjectArray::Object::class_id)
+      .def_rw("track_id", &vlink::zerocopy::ObjectArray::Object::track_id)
+      .def_rw("age", &vlink::zerocopy::ObjectArray::Object::age)
+      .def_rw("num_observations", &vlink::zerocopy::ObjectArray::Object::num_observations)
+      .def_rw("motion_state", &vlink::zerocopy::ObjectArray::Object::motion_state)
+      .def_rw("source_type", &vlink::zerocopy::ObjectArray::Object::source_type)
+      .def_rw("subtype_id", &vlink::zerocopy::ObjectArray::Object::subtype_id)
+      .def_rw("reserved32", &vlink::zerocopy::ObjectArray::Object::reserved32)
+      .def("__repr__", [](const vlink::zerocopy::ObjectArray::Object& self) {
+        return std::string("Object(label='") + self.label + "', class_id=" + std::to_string(self.class_id) +
+               ", track_id=" + std::to_string(self.track_id) + ")";
+      });
+  object_array_cls.def(nb::init<>())
+      .def_rw("header", &vlink::zerocopy::ObjectArray::header)
+      .def("create", &vlink::zerocopy::ObjectArray::create, "count"_a)
+      .def("clear", &vlink::zerocopy::ObjectArray::clear)
+      .def("push_value", &vlink::zerocopy::ObjectArray::push_value, "object"_a)
+      .def("set_value", &vlink::zerocopy::ObjectArray::set_value, "index"_a, "object"_a)
+      .def(
+          "get_value", [](const vlink::zerocopy::ObjectArray& self, uint32_t index) { return self.get_value(index); },
+          "index"_a)
+      .def("resize", &vlink::zerocopy::ObjectArray::resize, "count"_a)
+      .def("count", &vlink::zerocopy::ObjectArray::count)
+      .def("pack_size", &vlink::zerocopy::ObjectArray::pack_size)
+      .def("capacity", &vlink::zerocopy::ObjectArray::capacity)
+      .def("is_valid", &vlink::zerocopy::ObjectArray::is_valid)
+      .def("is_owner", &vlink::zerocopy::ObjectArray::is_owner)
+      .def("get_serialized_size", &vlink::zerocopy::ObjectArray::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::ObjectArray::check_valid, "bytes"_a)
+      .def("update_time_ns", &vlink::zerocopy::ObjectArray::update_time_ns)
+      .def("source_id", [](const vlink::zerocopy::ObjectArray& self) { return std::string(self.source_id()); })
+      .def("channel", &vlink::zerocopy::ObjectArray::channel)
+      .def("freq", &vlink::zerocopy::ObjectArray::freq)
+      .def("set_update_time_ns", &vlink::zerocopy::ObjectArray::set_update_time_ns, "update_time_ns"_a)
+      .def(
+          "set_source_id", [](vlink::zerocopy::ObjectArray& self, const std::string& s) { self.set_source_id(s); },
+          "source_id"_a)
+      .def("set_channel", &vlink::zerocopy::ObjectArray::set_channel, "channel"_a)
+      .def("set_freq", &vlink::zerocopy::ObjectArray::set_freq, "freq"_a)
+      .def(
+          "objects",
+          [](const vlink::zerocopy::ObjectArray& self,
+             uint32_t index) -> std::optional<vlink::zerocopy::ObjectArray::Object> {
+            auto* p = self.objects(index);
+
+            if (!p) {
+              return std::nullopt;
+            }
+
+            return *p;
+          },
+          "index"_a = static_cast<uint32_t>(0))
+      .def_prop_rw(
+          "reserved", [](vlink::zerocopy::ObjectArray& self) { return self.get_reserved(); },
+          [](vlink::zerocopy::ObjectArray& self, uint32_t v) { self.get_reserved() = v; })
+      .def("data",
+           [](const vlink::zerocopy::ObjectArray& self) {
+             return nb::bytes(self.data(), self.count() * self.pack_size());
+           })
+      .def("to_bytes",
+           [](const vlink::zerocopy::ObjectArray& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::ObjectArray& self, const vlink::Bytes& b) { return self << b; }, "bytes"_a,
+          nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::ObjectArray& self) {
+        return std::string("ObjectArray(count=") + std::to_string(self.count()) +
+               ", capacity=" + std::to_string(self.capacity()) + ")";
+      });
+
+  nb::class_<vlink::zerocopy::AudioFrame> audio_frame_cls(m, "AudioFrame", "Zero-copy audio frame (128 bytes)");
+  nb::enum_<vlink::zerocopy::AudioFrame::Format>(audio_frame_cls, "Format")
+      .value("Unknown", vlink::zerocopy::AudioFrame::kFormatUnknown)
+      .value("PcmS16", vlink::zerocopy::AudioFrame::kFormatPcmS16)
+      .value("PcmS24", vlink::zerocopy::AudioFrame::kFormatPcmS24)
+      .value("PcmS32", vlink::zerocopy::AudioFrame::kFormatPcmS32)
+      .value("PcmF32", vlink::zerocopy::AudioFrame::kFormatPcmF32)
+      .value("PcmU8", vlink::zerocopy::AudioFrame::kFormatPcmU8)
+      .value("Opus", vlink::zerocopy::AudioFrame::kFormatOpus)
+      .value("Aac", vlink::zerocopy::AudioFrame::kFormatAac)
+      .value("Mp3", vlink::zerocopy::AudioFrame::kFormatMp3)
+      .value("Flac", vlink::zerocopy::AudioFrame::kFormatFlac);
+  nb::enum_<vlink::zerocopy::AudioFrame::Layout>(audio_frame_cls, "Layout")
+      .value("Unknown", vlink::zerocopy::AudioFrame::kLayoutUnknown)
+      .value("Interleaved", vlink::zerocopy::AudioFrame::kLayoutInterleaved)
+      .value("Planar", vlink::zerocopy::AudioFrame::kLayoutPlanar);
+  audio_frame_cls.def(nb::init<>())
+      .def_rw("header", &vlink::zerocopy::AudioFrame::header)
+      .def("create", &vlink::zerocopy::AudioFrame::create, "size"_a)
+      .def("clear", &vlink::zerocopy::AudioFrame::clear)
+      .def("size", &vlink::zerocopy::AudioFrame::size)
+      .def("is_valid", &vlink::zerocopy::AudioFrame::is_valid)
+      .def("is_owner", &vlink::zerocopy::AudioFrame::is_owner)
+      .def("get_serialized_size", &vlink::zerocopy::AudioFrame::get_serialized_size)
+      .def_static("check_valid", &vlink::zerocopy::AudioFrame::check_valid, "bytes"_a)
+      .def("update_time_ns", &vlink::zerocopy::AudioFrame::update_time_ns)
+      .def("duration_ns", &vlink::zerocopy::AudioFrame::duration_ns)
+      .def("codec", [](const vlink::zerocopy::AudioFrame& self) { return std::string(self.codec()); })
+      .def("language", [](const vlink::zerocopy::AudioFrame& self) { return std::string(self.language()); })
+      .def("channel", &vlink::zerocopy::AudioFrame::channel)
+      .def("freq", &vlink::zerocopy::AudioFrame::freq)
+      .def("sample_rate", &vlink::zerocopy::AudioFrame::sample_rate)
+      .def("num_samples", &vlink::zerocopy::AudioFrame::num_samples)
+      .def("bitrate", &vlink::zerocopy::AudioFrame::bitrate)
+      .def("num_channels", &vlink::zerocopy::AudioFrame::num_channels)
+      .def("bit_depth", &vlink::zerocopy::AudioFrame::bit_depth)
+      .def("format", &vlink::zerocopy::AudioFrame::format)
+      .def("layout", &vlink::zerocopy::AudioFrame::layout)
+      .def("set_update_time_ns", &vlink::zerocopy::AudioFrame::set_update_time_ns, "update_time_ns"_a)
+      .def("set_duration_ns", &vlink::zerocopy::AudioFrame::set_duration_ns, "duration_ns"_a)
+      .def(
+          "set_codec", [](vlink::zerocopy::AudioFrame& self, const std::string& s) { self.set_codec(s); }, "codec"_a)
+      .def(
+          "set_language", [](vlink::zerocopy::AudioFrame& self, const std::string& s) { self.set_language(s); },
+          "language"_a)
+      .def("set_channel", &vlink::zerocopy::AudioFrame::set_channel, "channel"_a)
+      .def("set_freq", &vlink::zerocopy::AudioFrame::set_freq, "freq"_a)
+      .def("set_sample_rate", &vlink::zerocopy::AudioFrame::set_sample_rate, "sample_rate"_a)
+      .def("set_num_samples", &vlink::zerocopy::AudioFrame::set_num_samples, "num_samples"_a)
+      .def("set_bitrate", &vlink::zerocopy::AudioFrame::set_bitrate, "bitrate"_a)
+      .def("set_num_channels", &vlink::zerocopy::AudioFrame::set_num_channels, "num_channels"_a)
+      .def("set_bit_depth", &vlink::zerocopy::AudioFrame::set_bit_depth, "bit_depth"_a)
+      .def("set_format", &vlink::zerocopy::AudioFrame::set_format, "format"_a)
+      .def("set_layout", &vlink::zerocopy::AudioFrame::set_layout, "layout"_a)
+      .def_prop_rw(
+          "reserved", [](vlink::zerocopy::AudioFrame& self) { return self.get_reserved(); },
+          [](vlink::zerocopy::AudioFrame& self, uint32_t v) { self.get_reserved() = v; })
+      .def("data", [](const vlink::zerocopy::AudioFrame& self) { return nb::bytes(self.data(), self.size()); })
+      .def(
+          "fill_data",
+          [](vlink::zerocopy::AudioFrame& self, nb::handle data) {
+            PythonBufferView view(data);
+            return self.fill_data(const_cast<uint8_t*>(view.data()), view.size());
+          },
+          "data"_a)
+      .def("to_bytes",
+           [](const vlink::zerocopy::AudioFrame& self) {
+             vlink::Bytes b;
+             self >> b;
+             return b;
+           })
+      .def(
+          "from_bytes", [](vlink::zerocopy::AudioFrame& self, const vlink::Bytes& b) { return self << b; }, "bytes"_a,
+          nb::keep_alive<1, 2>())
+      .def("__repr__", [](const vlink::zerocopy::AudioFrame& self) {
+        return std::string("AudioFrame(sample_rate=") + std::to_string(self.sample_rate()) +
+               ", num_channels=" + std::to_string(self.num_channels()) + ", size=" + std::to_string(self.size()) + ")";
       });
 
   nb::class_<vlink::Version>(m, "Version", "Semantic versioning")
@@ -2271,6 +2996,12 @@ NB_MODULE(_vlink_nanobind, m) {
   nb::class_<vlink::Security>(m, "Security", "Authenticated message-level encryption (AEAD)")
       .def(nb::new_([](vlink::Security::Config cfg) { return new vlink::Security(std::move(cfg)); }),
            "cfg"_a = vlink::Security::Config{})
+      .def_static("from_private_key_path", &vlink::Security::from_private_key_path, "private_key_path"_a,
+                  "Create a SecurityConfig by reading a private-key PEM file.")
+      .def_static("from_public_key_path", &vlink::Security::from_public_key_path, "public_key_path"_a,
+                  "Create a SecurityConfig by reading a public-key PEM file.")
+      .def_static("from_key_paths", &vlink::Security::from_key_paths, "public_key_path"_a, "private_key_path"_a,
+                  "Create a SecurityConfig by reading public- and private-key PEM files.")
       .def(
           "encrypt",
           [](vlink::Security& self, nb::handle data) -> nb::object {

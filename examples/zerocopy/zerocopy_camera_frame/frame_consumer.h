@@ -24,47 +24,62 @@
 #ifndef EXAMPLES_ZEROCOPY_ZEROCOPY_CAMERA_FRAME_FRAME_CONSUMER_H_
 #define EXAMPLES_ZEROCOPY_ZEROCOPY_CAMERA_FRAME_FRAME_CONSUMER_H_
 
+#include <vlink/base/logger.h>
 #include <vlink/zerocopy/camera_frame.h>
 
-#include <iostream>
+#include <cstdint>
+
+// ---------------------------------------------------------------------------
+// frame_consumer.h
+//
+// Inline helpers used by consumer.cc to inspect / validate / sanity-check
+// CameraFrame instances received over the wire. Kept header-only so the
+// example stays a single translation unit per binary.
+// ---------------------------------------------------------------------------
 
 namespace frame_consumer {
 
-// Print a summary of the received CameraFrame metadata.
+// Dump the descriptive header. `is_owner` is the giveaway: in shm:// zero-
+// copy mode it will be false on the subscriber side because the buffer
+// still belongs to the producer's pool slot.
 inline void print_frame_info(const vlink::zerocopy::CameraFrame& frame) {
-  std::cout << "  [Frame] seq=" << frame.header.seq << " " << frame.width() << "x" << frame.height()
-            << " format=" << static_cast<int>(frame.format()) << " stream=" << static_cast<int>(frame.stream())
-            << " size=" << frame.size() << " bytes" << " is_owner=" << std::boolalpha << frame.is_owner() << std::endl;
+  VLOG_I("  [Frame] seq=", frame.header.seq, " ", frame.width(), "x", frame.height(),
+         " format=", static_cast<int>(frame.format()), " stream=", static_cast<int>(frame.stream()),
+         " size=", frame.size(), " is_owner=", frame.is_owner());
 }
 
-// Validate basic CameraFrame integrity.
-// Returns true if the frame has valid dimensions and data.
+// Cheap structural validation -- guards against truncated transmissions
+// and miswired publishers. Real consumers would add format-specific checks
+// (e.g. JPEG SOI marker, NAL unit start codes).
 inline bool validate_frame(const vlink::zerocopy::CameraFrame& frame) {
   if (!frame.is_valid()) {
-    std::cout << "  [Consumer] Frame is invalid" << std::endl;
+    VLOG_W("  [Consumer] Frame is invalid");
     return false;
   }
 
   if (frame.width() == 0 || frame.height() == 0) {
-    std::cout << "  [Consumer] Frame has zero dimensions" << std::endl;
+    VLOG_W("  [Consumer] Frame has zero dimensions");
     return false;
   }
 
   if (frame.size() == 0) {
-    std::cout << "  [Consumer] Frame has no pixel data" << std::endl;
+    VLOG_W("  [Consumer] Frame has no pixel data");
     return false;
   }
 
   return true;
 }
 
-// Compute a simple checksum of the frame data (for verification).
+// Naive additive checksum -- enough to detect missed/swapped frames during
+// the demo, not a real integrity guard. Production code would use CRC32 or
+// the existing AEAD path.
 inline uint32_t compute_checksum(const vlink::zerocopy::CameraFrame& frame) {
   uint32_t sum = 0;
   const uint8_t* data = frame.data();
   for (size_t i = 0; i < frame.size(); ++i) {
     sum += data[i];
   }
+
   return sum;
 }
 

@@ -23,115 +23,146 @@
 
 // NOLINTBEGIN
 
+#ifdef VLINK_SUPPORT_SOMEIP
+
+#include "./modules/someip_conf.h"
+
 #include <doctest/doctest.h>
 
 #include <set>
 #include <string>
 
-#ifdef VLINK_SUPPORT_SOMEIP
-
 #include "../common_test.h"
 
-TEST_SUITE("modules-SomeipConf - RPC construction") {
-  TEST_CASE("construct RPC config with service/instance/method") {
+TEST_SUITE("modules-SomeipConf") {
+  TEST_CASE("rpc constructor stores service instance and method") {
     SomeipConf conf(0x1234, 0x5678, 0x0001);
-    CHECK(conf.service == 0x1234);
-    CHECK(conf.instance == 0x5678);
-    CHECK(conf.method == 0x0001);
+
+    CHECK_EQ(conf.service, 0x1234);
+    CHECK_EQ(conf.instance, 0x5678);
+    CHECK_EQ(conf.method, 0x0001);
     CHECK(conf.groups.empty());
-    CHECK(conf.event == 0);
-    CHECK(conf.field == false);
+    CHECK_EQ(conf.event, 0);
+    CHECK_EQ(conf.field, false);
   }
 
-  TEST_CASE("RPC config method is set") {
-    SomeipConf conf(0x0100, 0x0200, 0x0010);
-    CHECK(conf.method == 0x0010);
-  }
-}
-
-TEST_SUITE("modules-SomeipConf - event/field construction") {
-  TEST_CASE("construct event config with groups and event") {
+  TEST_CASE("event constructor stores service instance groups and event") {
     SomeipConf::Groups groups = {0x0001, 0x0002};
     SomeipConf conf(0x1234, 0x5678, groups, 0x0010, false);
 
-    CHECK(conf.service == 0x1234);
-    CHECK(conf.instance == 0x5678);
-    CHECK(conf.groups == groups);
-    CHECK(conf.event == 0x0010);
-    CHECK(conf.field == false);
-    CHECK(conf.method == 0);
+    CHECK_EQ(conf.service, 0x1234);
+    CHECK_EQ(conf.instance, 0x5678);
+    CHECK_EQ(conf.groups, groups);
+    CHECK_EQ(conf.event, 0x0010);
+    CHECK_EQ(conf.field, false);
+    CHECK_EQ(conf.method, 0);
   }
 
-  TEST_CASE("construct field config with field=true") {
+  TEST_CASE("field constructor stores field flag as true") {
     SomeipConf::Groups groups = {0x0001};
     SomeipConf conf(0x1234, 0x5678, groups, 0x0020, true);
 
-    CHECK(conf.field == true);
-    CHECK(conf.event == 0x0020);
+    CHECK_EQ(conf.field, true);
+    CHECK_EQ(conf.event, 0x0020);
   }
 
-  TEST_CASE("groups can contain multiple IDs") {
+  TEST_CASE("groups set stores all provided group ids") {
     SomeipConf::Groups groups = {0x0001, 0x0002, 0x0003};
     SomeipConf conf(0x1, 0x1, groups, 0x01);
-    CHECK(conf.groups.size() == 3);
-    CHECK(conf.groups.count(0x0001) == 1);
-    CHECK(conf.groups.count(0x0002) == 1);
-    CHECK(conf.groups.count(0x0003) == 1);
-  }
-}
 
-TEST_SUITE("modules-SomeipConf - equality operators") {
-  TEST_CASE("equal RPC configs compare equal") {
+    CHECK_EQ(conf.groups.size(), 3u);
+    CHECK_EQ(conf.groups.count(0x0001), 1u);
+    CHECK_EQ(conf.groups.count(0x0002), 1u);
+    CHECK_EQ(conf.groups.count(0x0003), 1u);
+  }
+
+  TEST_CASE("single group is stored correctly") {
+    SomeipConf::Groups groups = {0x0005};
+    SomeipConf conf(0x1, 0x1, groups, 0x02);
+
+    CHECK_EQ(conf.groups.size(), 1u);
+    CHECK_EQ(conf.groups.count(0x0005), 1u);
+  }
+
+  TEST_CASE("operator== holds for equal rpc configs") {
     SomeipConf a(0x1234, 0x5678, 0x0001);
     SomeipConf b(0x1234, 0x5678, 0x0001);
+
     CHECK(a == b);
-    CHECK(!(a != b));
+    CHECK_FALSE(a != b);
   }
 
-  TEST_CASE("different service compares not equal") {
-    SomeipConf a(0x0001, 0x0002, 0x0003);
-    SomeipConf b(0x0002, 0x0002, 0x0003);
-    CHECK(a != b);
-  }
-
-  TEST_CASE("different instance compares not equal") {
-    SomeipConf a(0x0001, 0x0001, 0x0003);
-    SomeipConf b(0x0001, 0x0002, 0x0003);
-    CHECK(a != b);
-  }
-
-  TEST_CASE("different method compares not equal") {
-    SomeipConf a(0x0001, 0x0002, 0x0003);
-    SomeipConf b(0x0001, 0x0002, 0x0004);
-    CHECK(a != b);
-  }
-
-  TEST_CASE("equal event configs compare equal") {
+  TEST_CASE("operator== holds for equal event configs") {
     SomeipConf::Groups g = {0x0001};
+
     SomeipConf a(0x1234, 0x5678, g, 0x0010, false);
     SomeipConf b(0x1234, 0x5678, g, 0x0010, false);
+
     CHECK(a == b);
   }
 
-  TEST_CASE("different field flag compares not equal") {
-    SomeipConf::Groups g = {0x0001};
-    SomeipConf a(0x1234, 0x5678, g, 0x0010, false);
-    SomeipConf b(0x1234, 0x5678, g, 0x0010, true);
+  TEST_CASE("operator!= detects differing service") {
+    SomeipConf a(0x0001, 0x0002, 0x0003);
+    SomeipConf b(0x0002, 0x0002, 0x0003);
+
+    CHECK(a != b);
+    CHECK_FALSE(a == b);
+  }
+
+  TEST_CASE("operator!= detects differing instance") {
+    SomeipConf a(0x0001, 0x0001, 0x0003);
+    SomeipConf b(0x0001, 0x0002, 0x0003);
+
     CHECK(a != b);
   }
-}
 
-TEST_SUITE("modules-SomeipConf - transport type") {
+  TEST_CASE("operator!= detects differing method") {
+    SomeipConf a(0x0001, 0x0002, 0x0003);
+    SomeipConf b(0x0001, 0x0002, 0x0004);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing field flag") {
+    SomeipConf::Groups g = {0x0001};
+
+    SomeipConf a(0x1234, 0x5678, g, 0x0010, false);
+    SomeipConf b(0x1234, 0x5678, g, 0x0010, true);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing event id") {
+    SomeipConf::Groups g = {0x0001};
+
+    SomeipConf a(0x1, 0x1, g, 0x0010, false);
+    SomeipConf b(0x1, 0x1, g, 0x0020, false);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("operator!= detects differing groups") {
+    SomeipConf::Groups g1 = {0x0001};
+    SomeipConf::Groups g2 = {0x0002};
+
+    SomeipConf a(0x1, 0x1, g1, 0x01, false);
+    SomeipConf b(0x1, 0x1, g2, 0x01, false);
+
+    CHECK(a != b);
+  }
+
+  TEST_CASE("self equality for rpc config") {
+    SomeipConf a(0x1234, 0x5678, 0x0001);
+
+    CHECK(a == a);
+    CHECK_FALSE(a != a);
+  }
+
   TEST_CASE("get_transport_type returns kSomeip") {
     SomeipConf conf(0x0001, 0x0001, 0x0001);
+
     CHECK(conf.get_transport_type() == TransportType::kSomeip);
   }
-}
-
-#else
-
-TEST_SUITE("modules-SomeipConf - not supported") {
-  TEST_CASE("VLINK_SUPPORT_SOMEIP not defined - skip") { CHECK(true); }
 }
 
 #endif  // VLINK_SUPPORT_SOMEIP

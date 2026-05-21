@@ -25,303 +25,239 @@
 
 #include "./base/fast_stream.h"
 
-#include <iostream>
-
-//
-
 #include <doctest/doctest.h>
 
 #include <iomanip>
-#include <sstream>
 #include <string>
 #include <string_view>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
 TEST_SUITE("base-FastStream") {
-  // -------------------------------------------------------------------------
-  TEST_CASE("default constructed stream is empty") {
-    FastStream stream;
+  TEST_CASE("default construction yields empty buffer") {
+    FastStream s;
 
-    CHECK(stream.size() == 0u);
-    CHECK(stream.capacity() >= 0u);
+    CHECK_EQ(s.size(), 0u);
+    CHECK(s.capacity() >= 256u);
+    CHECK(s.take_view().empty());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("write string literal via operator<<") {
-    FastStream stream;
-    stream << "hello";
+  TEST_CASE("operator<< accumulates string literals") {
+    FastStream s;
+    s << "hello" << " " << "world";
 
-    CHECK(stream.size() == 5u);
+    CHECK_EQ(s.take_view(), "hello world");
+    CHECK_EQ(s.size(), 11u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("write integer via operator<<") {
-    FastStream stream;
-    stream << 42;
+  TEST_CASE("operator<< formats integers") {
+    FastStream s;
+    s << 42 << " " << -7;
 
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "42");
+    CHECK_EQ(s.take_view(), "42 -7");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("write multiple values via operator<<") {
-    FastStream stream;
-    stream << "x=" << 10 << " y=" << 20;
+  TEST_CASE("operator<< formats floating point via stream locale") {
+    FastStream s;
+    s << 3.14;
 
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "x=10 y=20");
+    CHECK_FALSE(s.take_view().empty());
+    CHECK(s.take_view().find("3.14") != std::string_view::npos);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("take_view returns current buffer content") {
-    FastStream stream;
-    stream << "vlink";
+  TEST_CASE("operator<< respects std::hex manipulator") {
+    FastStream s;
+    s << std::hex << 255;
 
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "vlink");
+    CHECK_EQ(s.take_view(), "ff");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("take_view does not reset the stream size") {
-    FastStream stream;
-    stream << "before";
-    (void)stream.take_view();  // returns view but does NOT reset
+  TEST_CASE("operator<< respects std::boolalpha") {
+    FastStream s;
+    s << std::boolalpha << true << "/" << false;
 
-    // size() is still non-zero because take_view() doesn't reset
-    CHECK(stream.size() == 6u);
+    CHECK_EQ(s.take_view(), "true/false");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("after reset followed by new write, take_view shows new content") {
-    FastStream stream;
-    stream << "first";
-    stream.reset();
+  TEST_CASE("operator<< respects std::setw and std::setfill") {
+    FastStream s;
+    s << std::setw(5) << std::setfill('0') << 42;
 
-    stream << "second";
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "second");
+    CHECK_EQ(s.take_view(), "00042");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("reset clears the buffer") {
-    FastStream stream;
-    stream << "content";
+  TEST_CASE("bool without boolalpha formats as 1 and 0") {
+    FastStream s;
+    s << true << "/" << false;
 
-    CHECK(stream.size() > 0u);
-
-    stream.reset();
-
-    CHECK(stream.size() == 0u);
+    CHECK_EQ(s.take_view(), "1/0");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("after reset stream accepts new content") {
-    FastStream stream;
-    stream << "old";
-    stream.reset();
-    stream << "new";
+  TEST_CASE("take_view returns buffer content without resetting") {
+    FastStream s;
+    s << "vlink";
 
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "new");
+    std::string_view v1 = s.take_view();
+    std::string_view v2 = s.take_view();
+
+    CHECK_EQ(v1, "vlink");
+    CHECK_EQ(v2, "vlink");
+    CHECK_EQ(s.size(), 5u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("append_to copies buffer to external string") {
-    FastStream stream;
-    stream << "appended";
+  TEST_CASE("take_view on empty stream returns empty view") {
+    FastStream s;
 
+    CHECK(s.take_view().empty());
+  }
+
+  TEST_CASE("reset clears size and retains capacity") {
+    FastStream s;
+    s << "some content";
+    size_t cap = s.capacity();
+
+    s.reset();
+
+    CHECK_EQ(s.size(), 0u);
+    CHECK_EQ(s.capacity(), cap);
+    CHECK(s.take_view().empty());
+  }
+
+  TEST_CASE("reset allows writing fresh content") {
+    FastStream s;
+    s << "first";
+    s.reset();
+    s << "second";
+
+    CHECK_EQ(s.take_view(), "second");
+  }
+
+  TEST_CASE("append_to adds buffer content to external string") {
+    FastStream s;
+    s << "appended";
     std::string target = "prefix-";
-    stream.append_to(target);
 
-    CHECK(target == "prefix-appended");
-    // Buffer not reset after append_to
-    CHECK(stream.size() == 8u);
+    s.append_to(target);
+
+    CHECK_EQ(target, "prefix-appended");
+    CHECK_EQ(s.size(), 8u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("append_to multiple times accumulates in target") {
-    FastStream stream;
-    stream << "part1";
+  TEST_CASE("append_to on empty stream leaves target unchanged") {
+    FastStream s;
+    std::string target = "base";
 
+    s.append_to(target);
+
+    CHECK_EQ(target, "base");
+  }
+
+  TEST_CASE("append_to can be called multiple times to accumulate") {
+    FastStream s;
     std::string result;
-    stream.append_to(result);
-    stream.reset();
 
-    stream << "part2";
-    stream.append_to(result);
+    s << "part1";
+    s.append_to(result);
+    s.reset();
 
-    CHECK(result == "part1part2");
+    s << "part2";
+    s.append_to(result);
+
+    CHECK_EQ(result, "part1part2");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("write_raw appends raw bytes") {
-    FastStream stream;
-    const char* data = "raw";
-    stream.write_raw(data, 3u);
+  TEST_CASE("write_raw appends raw bytes bypassing ostream formatting") {
+    FastStream s;
+    s.write_raw("rawbytes", 8);
 
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "raw");
+    CHECK_EQ(s.take_view(), "rawbytes");
+    CHECK_EQ(s.size(), 8u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("write_raw zero length does not change size") {
-    FastStream stream;
-    stream << "before";
-    size_t sz_before = stream.size();
+  TEST_CASE("write_raw with zero length is a no-op") {
+    FastStream s;
+    s << "before";
+    size_t sz = s.size();
 
-    stream.write_raw("ignored", 0u);
+    s.write_raw("ignored", 0);
 
-    CHECK(stream.size() == sz_before);
+    CHECK_EQ(s.size(), sz);
+    CHECK_EQ(s.take_view(), "before");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("write_raw chained with operator<<") {
-    FastStream stream;
-    stream.write_raw("A", 1u);
-    stream << "B";
-    stream.write_raw("C", 1u);
+  TEST_CASE("write_raw can be interleaved with operator<<") {
+    FastStream s;
+    s << "A";
+    s.write_raw("B", 1);
+    s << "C";
 
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "ABC");
+    CHECK_EQ(s.take_view(), "ABC");
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("capacity returns at least default 256 bytes after construction") {
-    FastStream stream;
-    CHECK(stream.capacity() >= 256u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("buffer grows beyond initial capacity") {
-    FastStream stream;
-
-    // Write more than 256 bytes
-    std::string big(300, 'X');
-    stream << big;
-
-    CHECK(stream.size() == 300u);
-    CHECK(stream.capacity() >= 300u);
-
-    std::string_view sv = stream.take_view();
-    CHECK(sv.size() == 300u);
-    CHECK(sv.front() == 'X');
-    CHECK(sv.back() == 'X');
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("shrink_to_fit after reset reduces capacity") {
-    FastStream stream;
-    std::string big(8000, 'Y');
-    stream << big;
-
-    CHECK(stream.capacity() >= 8000u);
-
-    stream.reset();
-    stream.shrink_to_fit();
-
-    // After shrink the capacity may still be >= 8192 due to kMaxExpandSize
-    // growth strategy, but should not grow further. Just verify no crash.
-    CHECK(stream.size() == 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stream supports std::endl and std::flush") {
-    FastStream stream;
-    stream << "line" << std::endl;
-
-    CHECK(stream.size() >= 5u);  // "line\n"
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stream supports std::hex manipulator") {
-    FastStream stream;
-    stream << std::hex << 255;
-
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "ff");
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stream supports std::setw and std::setfill") {
-    FastStream stream;
-    stream << std::setw(5) << std::setfill('0') << 42;
-
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "00042");
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stream supports bool as 1/0 by default") {
-    FastStream stream;
-    stream << true << "/" << false;
-
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "1/0");
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stream supports std::boolalpha") {
-    FastStream stream;
-    stream << std::boolalpha << true << "/" << false;
-
-    std::string_view sv = stream.take_view();
-    CHECK(sv == "true/false");
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stream supports floating point output") {
-    FastStream stream;
-    stream << 3.14;
-
-    std::string_view sv = stream.take_view();
-    CHECK(!sv.empty());
-    CHECK(sv.find("3.14") != std::string_view::npos);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stream error state cleared after reset") {
-    FastStream stream;
-    // Force badbit by writing when the stream is fine (just test reset clears)
-    stream << "data";
-    stream.reset();
-
-    // After reset, stream should be in good state
-    stream << "new data";
-    CHECK(stream.size() == 8u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("size matches actual written content length") {
-    FastStream stream;
+  TEST_CASE("size matches length of written content") {
+    FastStream s;
     std::string content = "measure me";
-    stream << content;
+    s << content;
 
-    CHECK(stream.size() == content.size());
+    CHECK_EQ(s.size(), content.size());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("empty take_view returns empty string_view") {
-    FastStream stream;
-    std::string_view sv = stream.take_view();
+  TEST_CASE("capacity is at least 256 after construction") {
+    FastStream s;
 
-    CHECK(sv.empty());
+    CHECK(s.capacity() >= 256u);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("consecutive resets and writes behave correctly") {
-    FastStream stream;
+  TEST_CASE("buffer grows beyond 256 for large content") {
+    FastStream s;
+    std::string large(1000, 'X');
+    s << large;
+
+    CHECK_EQ(s.size(), 1000u);
+    CHECK(s.capacity() >= 1000u);
+
+    std::string_view sv = s.take_view();
+    CHECK_EQ(sv.size(), 1000u);
+    CHECK_EQ(sv.front(), 'X');
+    CHECK_EQ(sv.back(), 'X');
+  }
+
+  TEST_CASE("shrink_to_fit does not corrupt stream") {
+    FastStream s;
+    std::string large(8000, 'Y');
+    s << large;
+
+    s.reset();
+    s.shrink_to_fit();
+
+    CHECK_EQ(s.size(), 0u);
+
+    s << "ok";
+    CHECK_EQ(s.take_view(), "ok");
+  }
+
+  TEST_CASE("consecutive resets and writes are correct") {
+    FastStream s;
 
     for (int i = 0; i < 5; ++i) {
-      stream << "iteration-" << i;
-      std::string_view sv = stream.take_view();
-      CHECK(!sv.empty());
-      stream.reset();
+      s << "iter" << i;
+      CHECK_FALSE(s.take_view().empty());
+      s.reset();
     }
 
-    CHECK(stream.size() == 0u);
+    CHECK_EQ(s.size(), 0u);
+  }
+
+  TEST_CASE("stream supports std::endl") {
+    FastStream s;
+    s << "line" << std::endl;
+
+    CHECK(s.size() >= 5u);
+  }
+
+  TEST_CASE("stream is not copyable") {
+    CHECK_FALSE(std::is_copy_constructible_v<FastStream>);
+    CHECK_FALSE(std::is_copy_assignable_v<FastStream>);
   }
 }
 

@@ -27,35 +27,27 @@
 
 #include <doctest/doctest.h>
 
-#include "./base/bytes.h"
-#include "./impl/types.h"
-
-//
 #include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helpers: concrete subclass to test SubscriberImpl
-// ---------------------------------------------------------------------------
 
 namespace {
 
-class TestSubscriberImpl : public SubscriberImpl {
+class TestSubscriber : public SubscriberImpl {
  public:
-  TestSubscriberImpl() = default;
-  ~TestSubscriberImpl() override = default;
+  TestSubscriber() = default;
+  ~TestSubscriber() override = default;
 
   void init() override {}
   void deinit() override {}
 
   using SubscriberImpl::listen;
 
-  bool listen(MsgCallback&& callback) override {
-    callback_ = std::move(callback);
+  bool listen(MsgCallback&& cb) override {
+    callback_ = std::move(cb);
     is_listened = true;
     return true;
   }
 
-  void fire_message(const Bytes& data) {
+  void fire(const Bytes& data) {
     if (callback_) {
       callback_(data);
     }
@@ -67,86 +59,189 @@ class TestSubscriberImpl : public SubscriberImpl {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: SubscriberImpl - construction
-// ---------------------------------------------------------------------------
+TEST_SUITE("impl-SubscriberImpl") {
+  TEST_CASE("constructor sets kSubscriber role") {
+    TestSubscriber sub;
 
-TEST_SUITE("impl-SubscriberImpl - construction") {
-  TEST_CASE("constructor sets kSubscriber impl_type") {
-    TestSubscriberImpl sub;
-    CHECK(sub.impl_type == kSubscriber);
+    CHECK_EQ(sub.impl_type, kSubscriber);
   }
 
   TEST_CASE("is_listened defaults to false") {
-    TestSubscriberImpl sub;
-    CHECK(sub.is_listened == false);
-  }
-}
+    TestSubscriber sub;
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: SubscriberImpl - listen
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-SubscriberImpl - listen") {
-  TEST_CASE("listen(MsgCallback) sets is_listened") {
-    TestSubscriberImpl sub;
-
-    bool received = false;
-    sub.listen([&](const Bytes&) { received = true; });
-
-    CHECK(sub.is_listened == true);
+    CHECK_FALSE(sub.is_listened);
   }
 
-  TEST_CASE("listen(MsgCallback) callback fires on message") {
-    TestSubscriberImpl sub;
+  TEST_CASE("listen sets is_listened and returns true") {
+    TestSubscriber sub;
 
-    Bytes received_data;
-    sub.listen([&](const Bytes& data) { received_data = data; });
+    bool ok = sub.listen([](const Bytes&) {});
+
+    CHECK(ok);
+    CHECK(sub.is_listened);
+  }
+
+  TEST_CASE("listen callback fires when message is delivered") {
+    TestSubscriber sub;
+    Bytes received;
+
+    sub.listen([&](const Bytes& data) { received = data; });
 
     Bytes msg = {1, 2, 3};
-    sub.fire_message(msg);
+    sub.fire(msg);
 
-    CHECK(received_data.size() == 3);
+    CHECK_EQ(received.size(), 3u);
   }
 
-  TEST_CASE("listen(IntraMsgCallback) returns false by default") {
-    TestSubscriberImpl sub;
+  TEST_CASE("listen(IntraMsgCallback) returns false in base implementation") {
+    TestSubscriber sub;
+    bool invoked = false;
+    NodeImpl::IntraMsgCallback cb = [&](const IntraData&) { invoked = true; };
 
-    bool called = false;
-    NodeImpl::IntraMsgCallback intra_cb = [&](const IntraData&) { called = true; };
-    bool result = sub.listen(std::move(intra_cb));
+    bool ok = sub.listen(std::move(cb));
 
-    CHECK(result == false);
-    CHECK(called == false);
+    CHECK_FALSE(ok);
+    CHECK_FALSE(invoked);
   }
-}
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: SubscriberImpl - latency and lost tracking
-// ---------------------------------------------------------------------------
+  TEST_CASE("set_latency_and_lost_enabled is a no-op in base implementation") {
+    TestSubscriber sub;
 
-TEST_SUITE("impl-SubscriberImpl - latency and lost") {
-  TEST_CASE("set_latency_and_lost_enabled is no-op") {
-    TestSubscriberImpl sub;
     sub.set_latency_and_lost_enabled(true);
-    CHECK(sub.is_latency_and_lost_enabled() == false);
+
+    CHECK_FALSE(sub.is_latency_and_lost_enabled());
   }
 
-  TEST_CASE("is_latency_and_lost_enabled returns false") {
-    TestSubscriberImpl sub;
-    CHECK(sub.is_latency_and_lost_enabled() == false);
+  TEST_CASE("is_latency_and_lost_enabled returns false by default") {
+    TestSubscriber sub;
+
+    CHECK_FALSE(sub.is_latency_and_lost_enabled());
   }
 
-  TEST_CASE("get_latency returns 0") {
-    TestSubscriberImpl sub;
-    CHECK(sub.get_latency() == 0);
+  TEST_CASE("get_latency returns 0 by default") {
+    TestSubscriber sub;
+
+    CHECK_EQ(sub.get_latency(), 0);
   }
 
-  TEST_CASE("get_lost returns zeroed SampleLostInfo") {
-    TestSubscriberImpl sub;
+  TEST_CASE("get_lost returns zero-initialised SampleLostInfo by default") {
+    TestSubscriber sub;
     auto info = sub.get_lost();
-    CHECK(info.total == 0);
-    CHECK(info.lost == 0);
+
+    CHECK_EQ(info.total, 0u);
+    CHECK_EQ(info.lost, 0u);
+  }
+
+  TEST_CASE("multiple messages delivered in order") {
+    TestSubscriber sub;
+    int calls = 0;
+
+    sub.listen([&](const Bytes&) { ++calls; });
+
+    Bytes msg;
+    sub.fire(msg);
+    sub.fire(msg);
+    sub.fire(msg);
+
+    CHECK_EQ(calls, 3);
+  }
+
+  TEST_CASE("listen callback receives payload bytes with correct size") {
+    TestSubscriber sub;
+    size_t received_size = 0;
+
+    sub.listen([&](const Bytes& data) { received_size = data.size(); });
+
+    Bytes msg = Bytes::create(128);
+    sub.fire(msg);
+
+    CHECK_EQ(received_size, 128u);
+  }
+
+  TEST_CASE("listen callback receives empty bytes without crash") {
+    TestSubscriber sub;
+    bool called = false;
+    size_t received_size = 99;
+
+    sub.listen([&](const Bytes& data) {
+      called = true;
+      received_size = data.size();
+    });
+
+    Bytes empty;
+    sub.fire(empty);
+
+    CHECK(called);
+    CHECK_EQ(received_size, 0u);
+  }
+
+  TEST_CASE("fire without listen does not crash") {
+    TestSubscriber sub;
+    Bytes msg = {1, 2, 3};
+
+    CHECK_NOTHROW(sub.fire(msg));
+  }
+
+  TEST_CASE("constructor sets kSubscriber not other roles") {
+    TestSubscriber sub;
+
+    CHECK_NE(sub.impl_type, kPublisher);
+    CHECK_NE(sub.impl_type, kServer);
+    CHECK_NE(sub.impl_type, kClient);
+    CHECK_EQ(sub.impl_type, kSubscriber);
+  }
+
+  TEST_CASE("set_property and get_property round trip on subscriber") {
+    TestSubscriber sub;
+
+    sub.set_property("qos.depth", "10");
+    CHECK_EQ(sub.get_property("qos.depth"), "10");
+  }
+
+  TEST_CASE("get_property returns empty for unknown key") {
+    TestSubscriber sub;
+
+    CHECK(sub.get_property("no.such.key").empty());
+  }
+
+  TEST_CASE("interrupt and reset_interrupted work on subscriber") {
+    TestSubscriber sub;
+
+    CHECK_FALSE(sub.is_interrupted());
+
+    sub.interrupt();
+    CHECK(sub.is_interrupted());
+
+    sub.reset_interrupted();
+    CHECK_FALSE(sub.is_interrupted());
+  }
+
+  TEST_CASE("listen called twice overwrites first callback") {
+    TestSubscriber sub;
+    int first_count = 0;
+    int second_count = 0;
+
+    sub.listen([&](const Bytes&) { ++first_count; });
+    sub.listen([&](const Bytes&) { ++second_count; });
+
+    Bytes msg;
+    sub.fire(msg);
+
+    CHECK_EQ(first_count, 0);
+    CHECK_EQ(second_count, 1);
+  }
+
+  TEST_CASE("large payload fires callback once with correct size") {
+    static constexpr size_t kSize = 65536u;
+    TestSubscriber sub;
+    size_t received_size = 0;
+
+    sub.listen([&](const Bytes& data) { received_size = data.size(); });
+
+    Bytes msg = Bytes::create(kSize);
+    sub.fire(msg);
+
+    CHECK_EQ(received_size, kSize);
   }
 }
 

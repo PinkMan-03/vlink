@@ -29,9 +29,13 @@
 #include <vlink/base/utils.h>
 #include <vlink/extension/discovery_viewer.h>
 #include <vlink/version.h>
+#include <vlink/zerocopy/audio_frame.h>
 #include <vlink/zerocopy/camera_frame.h>
+#include <vlink/zerocopy/object_array.h>
+#include <vlink/zerocopy/occupancy_grid.h>
 #include <vlink/zerocopy/point_cloud.h>
 #include <vlink/zerocopy/raw_data.h>
+#include <vlink/zerocopy/tensor.h>
 
 #include <QClipboard>
 #include <QDateTime>
@@ -4344,6 +4348,10 @@ void MainWindow::clear_all_property_item(class QTreeWidget* widget) {
   raw_item_map_.clear();
   camera_item_map_.clear();
   pcl_item_map_.clear();
+  occupancy_item_map_.clear();
+  tensor_item_map_.clear();
+  object_array_item_map_.clear();
+  audio_item_map_.clear();
 }
 
 void MainWindow::clear_all_process_item() {
@@ -4511,6 +4519,61 @@ void MainWindow::check_new_version() {
   network_manager_->get(request);
 }
 
+static QTreeWidgetItem* ensure_property_item(std::unordered_map<std::string, QTreeWidgetItem*>& map, QTreeWidget* tree,
+                                             QTreeWidgetItem* parent, const std::string& key, const QString& type_label,
+                                             const QString& field_name) {
+  auto it = map.find(key);
+  if (it != map.end()) {
+    return it->second;
+  }
+
+  auto* item = new QTreeWidgetItem();
+  map[key] = item;
+
+  if (parent != nullptr) {
+    parent->addChild(item);
+  } else {
+    tree->addTopLevelItem(item);
+  }
+
+  item->setText(0, "---");
+  item->setText(1, type_label);
+  item->setText(2, field_name);
+
+  item->setData(0, Qt::ToolTipRole, item->text(0));
+  item->setData(1, Qt::ToolTipRole, item->text(1));
+  item->setData(2, Qt::ToolTipRole, item->text(2));
+
+  return item;
+}
+
+template <typename ValueT>
+static void set_property_number(QTreeWidgetItem* item, ValueT value, bool hex, AnalyzeDialog* analyze_dialog,
+                                QTreeWidget* tree) {
+  if (hex) {
+    // Use the source value's own type so signed inputs format as e.g. "-0x1"
+    // rather than the giant unsigned promotion produced by casting to uint64_t.
+    item->setText(3, "0x" + QString::number(value, 16));
+  } else {
+    item->setText(3, QString::number(value));
+  }
+
+  item->setHidden(false);
+  item->setData(3, Qt::ToolTipRole, item->text(3));
+  item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+  if (analyze_dialog->is_number_type() && tree->currentItem() == item) {
+    analyze_dialog->add_number(value);
+  }
+}
+
+static void set_property_text(QTreeWidgetItem* item, const QString& value) {
+  item->setText(3, value);
+  item->setHidden(false);
+  item->setData(3, Qt::ToolTipRole, item->text(3));
+  item->setData(1, Qt::UserRole, AnalyzeDialog::kStringType);
+}
+
 void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
   ui->treeWidget_property->setUpdatesEnabled(false);
 
@@ -4520,7 +4583,11 @@ void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
     }
 
     vlink::zerocopy::RawData raw;
-    raw << bytes;
+
+    if (!(raw << bytes)) {
+      return;
+    }
+
     QTreeWidgetItem* header_root_item = raw_item_map_["header"];
     if (!header_root_item) {
       header_root_item = new QTreeWidgetItem();
@@ -4628,7 +4695,9 @@ void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
       data_item->setData(2, Qt::ToolTipRole, data_item->text(2));
     }
 
-    header_frame_id_item->setText(3, raw.header.frame_id);
+    header_frame_id_item->setText(
+        3, QString::fromLatin1(raw.header.frame_id,
+                               static_cast<int>(::strnlen(raw.header.frame_id, sizeof(raw.header.frame_id)))));
 
     if (ui->checkBox_hex->isChecked()) {
       header_seq_item->setText(3, "0x" + QString::number(raw.header.seq, 16));
@@ -4697,7 +4766,11 @@ void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
     }
 
     vlink::zerocopy::CameraFrame frame;
-    frame << bytes;
+
+    if (!(frame << bytes)) {
+      return;
+    }
+
     QTreeWidgetItem* header_root_item = camera_item_map_["header"];
     if (!header_root_item) {
       header_root_item = new QTreeWidgetItem();
@@ -4895,7 +4968,9 @@ void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
       data_item->setData(2, Qt::ToolTipRole, data_item->text(2));
     }
 
-    header_frame_id_item->setText(3, frame.header.frame_id);
+    header_frame_id_item->setText(
+        3, QString::fromLatin1(frame.header.frame_id,
+                               static_cast<int>(::strnlen(frame.header.frame_id, sizeof(frame.header.frame_id)))));
 
     if (ui->checkBox_hex->isChecked()) {
       header_seq_item->setText(3, "0x" + QString::number(frame.header.seq, 16));
@@ -5022,7 +5097,11 @@ void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
     }
 
     vlink::zerocopy::PointCloud pcl;
-    pcl << bytes;
+
+    if (!(pcl << bytes)) {
+      return;
+    }
+
     QTreeWidgetItem* header_root_item = pcl_item_map_["header"];
     if (!header_root_item) {
       header_root_item = new QTreeWidgetItem();
@@ -5195,7 +5274,9 @@ void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
     header_root_item->setHidden(false);
     protocol_root_item->setHidden(false);
 
-    header_frame_id_item->setText(3, pcl.header.frame_id);
+    header_frame_id_item->setText(
+        3, QString::fromLatin1(pcl.header.frame_id,
+                               static_cast<int>(::strnlen(pcl.header.frame_id, sizeof(pcl.header.frame_id)))));
 
     if (ui->checkBox_hex->isChecked()) {
       header_seq_item->setText(3, "0x" + QString::number(pcl.header.seq, 16));
@@ -5576,6 +5657,490 @@ void MainWindow::update_zero_copy_item_property(const vlink::Bytes& bytes) {
         }
       }
     }
+  } else if (current_ser_.find("OccupancyGrid") != std::string::npos) {
+    for (const auto& [name, item] : occupancy_item_map_) {
+      item->setHidden(true);
+    }
+
+    vlink::zerocopy::OccupancyGrid grid;
+
+    if (!(grid << bytes)) {
+      return;
+    }
+
+    QTreeWidget* tree = ui->treeWidget_property;
+
+    QTreeWidgetItem* header_root_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "header", "Header", "header");
+    header_root_item->setExpanded(true);
+
+    QTreeWidgetItem* header_frame_id_item =
+        ensure_property_item(occupancy_item_map_, tree, header_root_item, "header.frame_id", "string", "frame_id");
+    QTreeWidgetItem* header_seq_item =
+        ensure_property_item(occupancy_item_map_, tree, header_root_item, "header.seq", "uint32", "seq");
+    QTreeWidgetItem* header_time_meas_item =
+        ensure_property_item(occupancy_item_map_, tree, header_root_item, "header.time_meas", "uint64", "time_meas");
+    QTreeWidgetItem* header_time_pub_item =
+        ensure_property_item(occupancy_item_map_, tree, header_root_item, "header.time_pub", "uint64", "time_pub");
+
+    QTreeWidgetItem* width_item = ensure_property_item(occupancy_item_map_, tree, nullptr, "width", "uint32", "width");
+    QTreeWidgetItem* height_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "height", "uint32", "height");
+    QTreeWidgetItem* resolution_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "resolution", "float", "resolution");
+
+    QTreeWidgetItem* origin_x_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "origin_x", "float", "origin_x");
+    QTreeWidgetItem* origin_y_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "origin_y", "float", "origin_y");
+    QTreeWidgetItem* origin_z_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "origin_z", "float", "origin_z");
+    QTreeWidgetItem* origin_yaw_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "origin_yaw", "float", "origin_yaw");
+
+    QTreeWidgetItem* cell_type_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "cell_type", "CellType", "cell_type");
+
+    QTreeWidgetItem* value_min_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "value_min", "float", "value_min");
+    QTreeWidgetItem* value_max_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "value_max", "float", "value_max");
+    QTreeWidgetItem* default_value_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "default_value", "int32", "default_value");
+
+    QTreeWidgetItem* occupied_threshold_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "occupied_threshold", "float", "occupied_threshold");
+    QTreeWidgetItem* free_threshold_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "free_threshold", "float", "free_threshold");
+
+    QTreeWidgetItem* map_id_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "map_id", "string", "map_id");
+    QTreeWidgetItem* channel_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "channel", "uint32", "channel");
+    QTreeWidgetItem* freq_item = ensure_property_item(occupancy_item_map_, tree, nullptr, "freq", "uint32", "freq");
+    QTreeWidgetItem* update_time_ns_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "update_time_ns", "uint64", "update_time_ns");
+
+    QTreeWidgetItem* valid_cell_count_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "valid_cell_count", "uint32", "valid_cell_count");
+    QTreeWidgetItem* size_item = ensure_property_item(occupancy_item_map_, tree, nullptr, "size", "uint64", "size");
+    QTreeWidgetItem* is_owner_item =
+        ensure_property_item(occupancy_item_map_, tree, nullptr, "is_owner", "bool", "is_owner");
+
+    header_root_item->setHidden(false);
+
+    set_property_text(header_frame_id_item, QString::fromLatin1(grid.header.frame_id_view().data(),
+                                                                static_cast<int>(grid.header.frame_id_view().size())));
+
+    const bool hex = ui->checkBox_hex->isChecked();
+    set_property_number(header_seq_item, grid.header.seq, hex, analyze_dialog_, tree);
+    set_property_number(header_time_meas_item, grid.header.time_meas, hex, analyze_dialog_, tree);
+    set_property_number(header_time_pub_item, grid.header.time_pub, hex, analyze_dialog_, tree);
+
+    if (ui->checkBox_time->isChecked()) {
+      header_time_meas_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(grid.header.time_meas)));
+      header_time_pub_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(grid.header.time_pub)));
+    }
+
+    set_property_number(width_item, grid.width(), hex, analyze_dialog_, tree);
+    set_property_number(height_item, grid.height(), hex, analyze_dialog_, tree);
+
+    resolution_item->setText(3, QString::number(grid.resolution(), 'g', 8));
+    resolution_item->setHidden(false);
+    resolution_item->setData(3, Qt::ToolTipRole, resolution_item->text(3));
+    resolution_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    origin_x_item->setText(3, QString::number(grid.origin_x(), 'g', 8));
+    origin_x_item->setHidden(false);
+    origin_x_item->setData(3, Qt::ToolTipRole, origin_x_item->text(3));
+    origin_x_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    origin_y_item->setText(3, QString::number(grid.origin_y(), 'g', 8));
+    origin_y_item->setHidden(false);
+    origin_y_item->setData(3, Qt::ToolTipRole, origin_y_item->text(3));
+    origin_y_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    origin_z_item->setText(3, QString::number(grid.origin_z(), 'g', 8));
+    origin_z_item->setHidden(false);
+    origin_z_item->setData(3, Qt::ToolTipRole, origin_z_item->text(3));
+    origin_z_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    origin_yaw_item->setText(3, QString::number(grid.origin_yaw(), 'g', 8));
+    origin_yaw_item->setHidden(false);
+    origin_yaw_item->setData(3, Qt::ToolTipRole, origin_yaw_item->text(3));
+    origin_yaw_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    if (ui->checkBox_enum->isChecked()) {
+      cell_type_item->setText(3, QString::fromStdString(std::string(vlink::NameDetector::get_enum(grid.cell_type()))));
+    } else {
+      cell_type_item->setText(3, QString::number(grid.cell_type()));
+    }
+
+    cell_type_item->setHidden(false);
+    cell_type_item->setData(3, Qt::ToolTipRole, cell_type_item->text(3));
+
+    value_min_item->setText(3, QString::number(grid.value_min(), 'g', 8));
+    value_min_item->setHidden(false);
+    value_min_item->setData(3, Qt::ToolTipRole, value_min_item->text(3));
+    value_min_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    value_max_item->setText(3, QString::number(grid.value_max(), 'g', 8));
+    value_max_item->setHidden(false);
+    value_max_item->setData(3, Qt::ToolTipRole, value_max_item->text(3));
+    value_max_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    set_property_number(default_value_item, grid.default_value(), hex, analyze_dialog_, tree);
+
+    occupied_threshold_item->setText(3, QString::number(grid.occupied_threshold(), 'g', 8));
+    occupied_threshold_item->setHidden(false);
+    occupied_threshold_item->setData(3, Qt::ToolTipRole, occupied_threshold_item->text(3));
+    occupied_threshold_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    free_threshold_item->setText(3, QString::number(grid.free_threshold(), 'g', 8));
+    free_threshold_item->setHidden(false);
+    free_threshold_item->setData(3, Qt::ToolTipRole, free_threshold_item->text(3));
+    free_threshold_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    set_property_text(map_id_item, QString::fromUtf8(grid.map_id().data(), static_cast<int>(grid.map_id().size())));
+    set_property_number(channel_item, grid.channel(), hex, analyze_dialog_, tree);
+    set_property_number(freq_item, grid.freq(), hex, analyze_dialog_, tree);
+    set_property_number(update_time_ns_item, grid.update_time_ns(), hex, analyze_dialog_, tree);
+    set_property_number(valid_cell_count_item, grid.valid_cell_count(), hex, analyze_dialog_, tree);
+    set_property_number(size_item, grid.size(), hex, analyze_dialog_, tree);
+
+    is_owner_item->setText(3, grid.is_owner() ? "true" : "false");
+    is_owner_item->setHidden(false);
+    is_owner_item->setData(3, Qt::ToolTipRole, is_owner_item->text(3));
+
+  } else if (current_ser_.find("Tensor") != std::string::npos) {
+    for (const auto& [name, item] : tensor_item_map_) {
+      item->setHidden(true);
+    }
+
+    vlink::zerocopy::Tensor t;
+
+    if (!(t << bytes)) {
+      return;
+    }
+
+    QTreeWidget* tree = ui->treeWidget_property;
+
+    QTreeWidgetItem* header_root_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "header", "Header", "header");
+    header_root_item->setExpanded(true);
+
+    QTreeWidgetItem* header_frame_id_item =
+        ensure_property_item(tensor_item_map_, tree, header_root_item, "header.frame_id", "string", "frame_id");
+    QTreeWidgetItem* header_seq_item =
+        ensure_property_item(tensor_item_map_, tree, header_root_item, "header.seq", "uint32", "seq");
+    QTreeWidgetItem* header_time_meas_item =
+        ensure_property_item(tensor_item_map_, tree, header_root_item, "header.time_meas", "uint64", "time_meas");
+    QTreeWidgetItem* header_time_pub_item =
+        ensure_property_item(tensor_item_map_, tree, header_root_item, "header.time_pub", "uint64", "time_pub");
+
+    QTreeWidgetItem* name_item = ensure_property_item(tensor_item_map_, tree, nullptr, "name", "string", "name");
+    QTreeWidgetItem* model_id_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "model_id", "string", "model_id");
+    QTreeWidgetItem* layout_item = ensure_property_item(tensor_item_map_, tree, nullptr, "layout", "string", "layout");
+
+    QTreeWidgetItem* dtype_item = ensure_property_item(tensor_item_map_, tree, nullptr, "dtype", "DataType", "dtype");
+    QTreeWidgetItem* rank_item = ensure_property_item(tensor_item_map_, tree, nullptr, "rank", "uint8", "rank");
+    QTreeWidgetItem* num_elements_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "num_elements", "uint64", "num_elements");
+    QTreeWidgetItem* element_size_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "element_size", "uint8", "element_size");
+    QTreeWidgetItem* shape_item = ensure_property_item(tensor_item_map_, tree, nullptr, "shape", "uint32[]", "shape");
+
+    QTreeWidgetItem* device_item = ensure_property_item(tensor_item_map_, tree, nullptr, "device", "Device", "device");
+    QTreeWidgetItem* batch_size_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "batch_size", "uint32", "batch_size");
+    QTreeWidgetItem* quant_scale_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "quant_scale", "float", "quant_scale");
+    QTreeWidgetItem* quant_zero_point_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "quant_zero_point", "int32", "quant_zero_point");
+
+    QTreeWidgetItem* channel_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "channel", "uint32", "channel");
+    QTreeWidgetItem* freq_item = ensure_property_item(tensor_item_map_, tree, nullptr, "freq", "uint32", "freq");
+    QTreeWidgetItem* update_time_ns_item =
+        ensure_property_item(tensor_item_map_, tree, nullptr, "update_time_ns", "uint64", "update_time_ns");
+    QTreeWidgetItem* size_item = ensure_property_item(tensor_item_map_, tree, nullptr, "size", "uint64", "size");
+
+    header_root_item->setHidden(false);
+
+    set_property_text(header_frame_id_item, QString::fromLatin1(t.header.frame_id_view().data(),
+                                                                static_cast<int>(t.header.frame_id_view().size())));
+
+    const bool hex = ui->checkBox_hex->isChecked();
+    set_property_number(header_seq_item, t.header.seq, hex, analyze_dialog_, tree);
+    set_property_number(header_time_meas_item, t.header.time_meas, hex, analyze_dialog_, tree);
+    set_property_number(header_time_pub_item, t.header.time_pub, hex, analyze_dialog_, tree);
+
+    if (ui->checkBox_time->isChecked()) {
+      header_time_meas_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(t.header.time_meas)));
+      header_time_pub_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(t.header.time_pub)));
+    }
+
+    set_property_text(name_item, QString::fromUtf8(t.name().data(), static_cast<int>(t.name().size())));
+    set_property_text(model_id_item, QString::fromUtf8(t.model_id().data(), static_cast<int>(t.model_id().size())));
+    set_property_text(layout_item, QString::fromUtf8(t.layout().data(), static_cast<int>(t.layout().size())));
+
+    if (ui->checkBox_enum->isChecked()) {
+      dtype_item->setText(3, QString::fromStdString(std::string(vlink::NameDetector::get_enum(t.dtype()))));
+      device_item->setText(3, QString::fromStdString(std::string(vlink::NameDetector::get_enum(t.device()))));
+    } else {
+      dtype_item->setText(3, QString::number(t.dtype()));
+      device_item->setText(3, QString::number(t.device()));
+    }
+
+    dtype_item->setHidden(false);
+    dtype_item->setData(3, Qt::ToolTipRole, dtype_item->text(3));
+    device_item->setHidden(false);
+    device_item->setData(3, Qt::ToolTipRole, device_item->text(3));
+
+    set_property_number(rank_item, t.rank(), hex, analyze_dialog_, tree);
+    set_property_number(num_elements_item, t.num_elements(), hex, analyze_dialog_, tree);
+    set_property_number(element_size_item, t.element_size(), hex, analyze_dialog_, tree);
+
+    QString shape_str = "[";
+    for (uint8_t i = 0; i < t.rank(); ++i) {
+      if (i > 0) {
+        shape_str += ", ";
+      }
+
+      shape_str += QString::number(t.shape_at(i));
+    }
+
+    shape_str += "]";
+    shape_item->setText(3, shape_str);
+    shape_item->setHidden(false);
+    shape_item->setData(3, Qt::ToolTipRole, shape_item->text(3));
+
+    set_property_number(batch_size_item, t.batch_size(), hex, analyze_dialog_, tree);
+
+    quant_scale_item->setText(3, QString::number(t.quant_scale(), 'g', 8));
+    quant_scale_item->setHidden(false);
+    quant_scale_item->setData(3, Qt::ToolTipRole, quant_scale_item->text(3));
+    quant_scale_item->setData(1, Qt::UserRole, AnalyzeDialog::kNumberType);
+
+    set_property_number(quant_zero_point_item, t.quant_zero_point(), hex, analyze_dialog_, tree);
+    set_property_number(channel_item, t.channel(), hex, analyze_dialog_, tree);
+    set_property_number(freq_item, t.freq(), hex, analyze_dialog_, tree);
+    set_property_number(update_time_ns_item, t.update_time_ns(), hex, analyze_dialog_, tree);
+    set_property_number(size_item, t.size(), hex, analyze_dialog_, tree);
+
+  } else if (current_ser_.find("ObjectArray") != std::string::npos) {
+    for (const auto& [name, item] : object_array_item_map_) {
+      item->setHidden(true);
+    }
+
+    vlink::zerocopy::ObjectArray arr;
+
+    if (!(arr << bytes)) {
+      return;
+    }
+
+    QTreeWidget* tree = ui->treeWidget_property;
+
+    QTreeWidgetItem* header_root_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "header", "Header", "header");
+    header_root_item->setExpanded(true);
+
+    QTreeWidgetItem* header_frame_id_item =
+        ensure_property_item(object_array_item_map_, tree, header_root_item, "header.frame_id", "string", "frame_id");
+    QTreeWidgetItem* header_seq_item =
+        ensure_property_item(object_array_item_map_, tree, header_root_item, "header.seq", "uint32", "seq");
+    QTreeWidgetItem* header_time_meas_item =
+        ensure_property_item(object_array_item_map_, tree, header_root_item, "header.time_meas", "uint64", "time_meas");
+    QTreeWidgetItem* header_time_pub_item =
+        ensure_property_item(object_array_item_map_, tree, header_root_item, "header.time_pub", "uint64", "time_pub");
+
+    QTreeWidgetItem* source_id_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "source_id", "string", "source_id");
+    QTreeWidgetItem* channel_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "channel", "uint32", "channel");
+    QTreeWidgetItem* freq_item = ensure_property_item(object_array_item_map_, tree, nullptr, "freq", "uint32", "freq");
+    QTreeWidgetItem* update_time_ns_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "update_time_ns", "uint64", "update_time_ns");
+    QTreeWidgetItem* count_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "count", "uint32", "count");
+    QTreeWidgetItem* pack_size_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "pack_size", "uint32", "pack_size");
+    QTreeWidgetItem* capacity_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "capacity", "uint64", "capacity");
+    QTreeWidgetItem* is_owner_item =
+        ensure_property_item(object_array_item_map_, tree, nullptr, "is_owner", "bool", "is_owner");
+
+    header_root_item->setHidden(false);
+
+    set_property_text(header_frame_id_item, QString::fromLatin1(arr.header.frame_id_view().data(),
+                                                                static_cast<int>(arr.header.frame_id_view().size())));
+
+    const bool hex = ui->checkBox_hex->isChecked();
+    set_property_number(header_seq_item, arr.header.seq, hex, analyze_dialog_, tree);
+    set_property_number(header_time_meas_item, arr.header.time_meas, hex, analyze_dialog_, tree);
+    set_property_number(header_time_pub_item, arr.header.time_pub, hex, analyze_dialog_, tree);
+
+    if (ui->checkBox_time->isChecked()) {
+      header_time_meas_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(arr.header.time_meas)));
+      header_time_pub_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(arr.header.time_pub)));
+    }
+
+    set_property_text(source_id_item,
+                      QString::fromUtf8(arr.source_id().data(), static_cast<int>(arr.source_id().size())));
+    set_property_number(channel_item, arr.channel(), hex, analyze_dialog_, tree);
+    set_property_number(freq_item, arr.freq(), hex, analyze_dialog_, tree);
+    set_property_number(update_time_ns_item, arr.update_time_ns(), hex, analyze_dialog_, tree);
+    set_property_number(count_item, arr.count(), hex, analyze_dialog_, tree);
+    set_property_number(pack_size_item, arr.pack_size(), hex, analyze_dialog_, tree);
+    set_property_number(capacity_item, arr.capacity(), hex, analyze_dialog_, tree);
+
+    is_owner_item->setText(3, arr.is_owner() ? "true" : "false");
+    is_owner_item->setHidden(false);
+    is_owner_item->setData(3, Qt::ToolTipRole, is_owner_item->text(3));
+
+    if (!ui->checkBox_array->isChecked()) {
+      static constexpr uint32_t kMaxObjectPreview{8};
+      const uint32_t shown = std::min(arr.count(), kMaxObjectPreview);
+
+      QTreeWidgetItem* data_item = ensure_property_item(object_array_item_map_, tree, nullptr, "data",
+                                                        "Object[" + QString::number(shown) + "]", "data");
+      data_item->setText(1, "Object[" + QString::number(shown) + "]");
+      data_item->setExpanded(true);
+      data_item->setHidden(false);
+
+      for (uint32_t i = 0; i < shown; ++i) {
+        const auto* obj = arr.objects(i);
+        if (obj == nullptr) {
+          continue;
+        }
+
+        const std::string mkey = std::string("[") + std::to_string(i) + "]";
+        const std::string key = std::string("data") + mkey;
+        QTreeWidgetItem* p_item =
+            ensure_property_item(object_array_item_map_, tree, data_item, key, QString::fromStdString(mkey), "");
+        p_item->setText(1, QString::fromStdString(mkey));
+        p_item->setExpanded(true);
+        p_item->setHidden(false);
+
+        QTreeWidgetItem* label_item =
+            ensure_property_item(object_array_item_map_, tree, p_item, key + ".label", "string", "label");
+        set_property_text(label_item,
+                          QString::fromLatin1(obj->label, static_cast<int>(::strnlen(obj->label, sizeof(obj->label)))));
+
+        QTreeWidgetItem* position_item =
+            ensure_property_item(object_array_item_map_, tree, p_item, key + ".position", "float[3]", "position");
+        position_item->setText(3, QString("(%1, %2, %3)")
+                                      .arg(QString::number(obj->position[0], 'g', 6))
+                                      .arg(QString::number(obj->position[1], 'g', 6))
+                                      .arg(QString::number(obj->position[2], 'g', 6)));
+        position_item->setHidden(false);
+        position_item->setData(3, Qt::ToolTipRole, position_item->text(3));
+
+        QTreeWidgetItem* class_id_item =
+            ensure_property_item(object_array_item_map_, tree, p_item, key + ".class_id", "uint32", "class_id");
+        set_property_number(class_id_item, obj->class_id, hex, analyze_dialog_, tree);
+
+        QTreeWidgetItem* track_id_item =
+            ensure_property_item(object_array_item_map_, tree, p_item, key + ".track_id", "uint32", "track_id");
+        set_property_number(track_id_item, obj->track_id, hex, analyze_dialog_, tree);
+      }
+    }
+
+  } else if (current_ser_.find("AudioFrame") != std::string::npos) {
+    for (const auto& [name, item] : audio_item_map_) {
+      item->setHidden(true);
+    }
+
+    vlink::zerocopy::AudioFrame af;
+
+    if (!(af << bytes)) {
+      return;
+    }
+
+    QTreeWidget* tree = ui->treeWidget_property;
+
+    QTreeWidgetItem* header_root_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "header", "Header", "header");
+    header_root_item->setExpanded(true);
+
+    QTreeWidgetItem* header_frame_id_item =
+        ensure_property_item(audio_item_map_, tree, header_root_item, "header.frame_id", "string", "frame_id");
+    QTreeWidgetItem* header_seq_item =
+        ensure_property_item(audio_item_map_, tree, header_root_item, "header.seq", "uint32", "seq");
+    QTreeWidgetItem* header_time_meas_item =
+        ensure_property_item(audio_item_map_, tree, header_root_item, "header.time_meas", "uint64", "time_meas");
+    QTreeWidgetItem* header_time_pub_item =
+        ensure_property_item(audio_item_map_, tree, header_root_item, "header.time_pub", "uint64", "time_pub");
+
+    QTreeWidgetItem* sample_rate_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "sample_rate", "uint32", "sample_rate");
+    QTreeWidgetItem* num_channels_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "num_channels", "uint16", "num_channels");
+    QTreeWidgetItem* num_samples_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "num_samples", "uint32", "num_samples");
+    QTreeWidgetItem* bit_depth_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "bit_depth", "uint16", "bit_depth");
+
+    QTreeWidgetItem* format_item = ensure_property_item(audio_item_map_, tree, nullptr, "format", "Format", "format");
+    QTreeWidgetItem* layout_item = ensure_property_item(audio_item_map_, tree, nullptr, "layout", "Layout", "layout");
+    QTreeWidgetItem* codec_item = ensure_property_item(audio_item_map_, tree, nullptr, "codec", "string", "codec");
+    QTreeWidgetItem* language_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "language", "string", "language");
+    QTreeWidgetItem* bitrate_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "bitrate", "uint32", "bitrate");
+    QTreeWidgetItem* duration_ns_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "duration_ns", "uint64", "duration_ns");
+
+    QTreeWidgetItem* channel_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "channel", "uint32", "channel");
+    QTreeWidgetItem* freq_item = ensure_property_item(audio_item_map_, tree, nullptr, "freq", "uint32", "freq");
+    QTreeWidgetItem* update_time_ns_item =
+        ensure_property_item(audio_item_map_, tree, nullptr, "update_time_ns", "uint64", "update_time_ns");
+    QTreeWidgetItem* size_item = ensure_property_item(audio_item_map_, tree, nullptr, "size", "uint64", "size");
+
+    header_root_item->setHidden(false);
+
+    set_property_text(header_frame_id_item, QString::fromLatin1(af.header.frame_id_view().data(),
+                                                                static_cast<int>(af.header.frame_id_view().size())));
+
+    const bool hex = ui->checkBox_hex->isChecked();
+    set_property_number(header_seq_item, af.header.seq, hex, analyze_dialog_, tree);
+    set_property_number(header_time_meas_item, af.header.time_meas, hex, analyze_dialog_, tree);
+    set_property_number(header_time_pub_item, af.header.time_pub, hex, analyze_dialog_, tree);
+
+    if (ui->checkBox_time->isChecked()) {
+      header_time_meas_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(af.header.time_meas)));
+      header_time_pub_item->setText(3, QString::fromStdString(vlink::Helpers::format_date(af.header.time_pub)));
+    }
+
+    set_property_number(sample_rate_item, af.sample_rate(), hex, analyze_dialog_, tree);
+    set_property_number(num_channels_item, af.num_channels(), hex, analyze_dialog_, tree);
+    set_property_number(num_samples_item, af.num_samples(), hex, analyze_dialog_, tree);
+    set_property_number(bit_depth_item, af.bit_depth(), hex, analyze_dialog_, tree);
+
+    if (ui->checkBox_enum->isChecked()) {
+      format_item->setText(3, QString::fromStdString(std::string(vlink::NameDetector::get_enum(af.format()))));
+      layout_item->setText(3, QString::fromStdString(std::string(vlink::NameDetector::get_enum(af.layout()))));
+    } else {
+      format_item->setText(3, QString::number(af.format()));
+      layout_item->setText(3, QString::number(af.layout()));
+    }
+
+    format_item->setHidden(false);
+    format_item->setData(3, Qt::ToolTipRole, format_item->text(3));
+    layout_item->setHidden(false);
+    layout_item->setData(3, Qt::ToolTipRole, layout_item->text(3));
+
+    set_property_text(codec_item, QString::fromUtf8(af.codec().data(), static_cast<int>(af.codec().size())));
+    set_property_text(language_item, QString::fromUtf8(af.language().data(), static_cast<int>(af.language().size())));
+
+    set_property_number(bitrate_item, af.bitrate(), hex, analyze_dialog_, tree);
+    set_property_number(duration_ns_item, af.duration_ns(), hex, analyze_dialog_, tree);
+    set_property_number(channel_item, af.channel(), hex, analyze_dialog_, tree);
+    set_property_number(freq_item, af.freq(), hex, analyze_dialog_, tree);
+    set_property_number(update_time_ns_item, af.update_time_ns(), hex, analyze_dialog_, tree);
+    set_property_number(size_item, af.size(), hex, analyze_dialog_, tree);
   }
 
   ui->treeWidget_property->setUpdatesEnabled(true);

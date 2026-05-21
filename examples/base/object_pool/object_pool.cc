@@ -21,149 +21,152 @@
  * limitations under the License.
  */
 
-// Example: ObjectPool - pre-allocated object reuse with RAII and reset policies
-
 #include <vlink/base/logger.h>
 #include <vlink/base/object_pool.h>
 
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 #include "pooled_buffer.h"
 
 using pooled_buffer::Buffer;
 
+// -----------------------------------------------------------------------------
+// ObjectPool example
+//
+// Module:   vlink/base/object_pool.h
+// Scenario: ObjectPool<T> recycles heap-constructed T instances behind a
+//           handful of APIs:
+//             get()        -> unique_ptr<T, PoolDeleter> (RAII return).
+//             get_shared() -> shared_ptr<T> (shared ownership, return on
+//                             last ref).
+//             borrow/give_back -> raw pointer round-trip (manual lifetime).
+//           Reset policies decide when the user-supplied reset callback
+//           fires: kPolicyRelease (default, on return), kPolicyAcquire
+//           (on hand-out), kPolicyBoth, kPolicyNone. The pool grows up to
+//           the configured max size; further get() throws when exhausted.
+// -----------------------------------------------------------------------------
 int main() {
-  // ---------------------------------------------------------------
-  // 1. Basic pool with RAII (get / unique_ptr).
-  // ---------------------------------------------------------------
+  // get() returns an RAII handle; once it goes out of scope the buffer is
+  // reset (per kPolicyRelease) and returned to the pool. The pool size
+  // dropped from 2 to 1 during use and bounced back to 2 after release.
   {
-    VLOG_I("=== Section 1: RAII get() ===");
+    VLOG_I("=== RAII get() ===");
     auto pool = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(4096); },  // factory
-                                                            2,                             // initial_size
-                                                            8,                             // max_size
-                                                            [](Buffer& b) { b.reset(); },  // reset callback
+                                                            2, 8, [](Buffer& b) { b.reset(); },
                                                             vlink::ObjectPool<Buffer>::kPolicyRelease);
-
-    MLOG_I("  Initial: pool_size={}, borrowed={}, total={}", pool->size(), pool->borrowed(), pool->total_created());
+    MLOG_I("  initial: pool={} borrowed={} total={}", pool->size(), pool->borrowed(), pool->total_created());
 
     {
       auto buf = pool->get();
       buf->used = 100;
-      MLOG_I("  Acquired buffer, used={}", buf->used);
-      MLOG_I("  During use: pool_size={}, borrowed={}", pool->size(), pool->borrowed());
+      MLOG_I("  during use: pool={} borrowed={}", pool->size(), pool->borrowed());
     }
 
-    MLOG_I("  After return: pool_size={}, borrowed={}", pool->size(), pool->borrowed());
+    MLOG_I("  after return: pool={} borrowed={}", pool->size(), pool->borrowed());
   }
 
-  // ---------------------------------------------------------------
-  // 2. Shared pointer mode (get_shared).
-  // ---------------------------------------------------------------
+  // get_shared(): shared_ptr ownership lets multiple holders extend the
+  // buffer's lifetime. The buffer goes back to the pool when the last
+  // shared_ptr drops, not when the first one does.
   {
-    VLOG_I("=== Section 2: get_shared() ===");
+    VLOG_I("=== get_shared() ===");
     auto pool = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(2048); }, 1, 4);
 
     {
       auto shared_buf = pool->get_shared();
       shared_buf->used = 50;
-
-      auto copy = shared_buf;  // NOLINT(performance-unnecessary-copy-initialization)
-      MLOG_I("  shared_ptr use_count: {}", copy.use_count());
+      auto copy = shared_buf;
+      MLOG_I("  use_count={}", copy.use_count());
     }
 
-    MLOG_I("  After shared release: pool_size={}", pool->size());
+    MLOG_I("  after release: pool={}", pool->size());
   }
 
-  // ---------------------------------------------------------------
-  // 3. Manual borrow / give_back.
-  // ---------------------------------------------------------------
+  // borrow / give_back: raw-pointer interface for cases where the consumer
+  // cannot use unique_ptr/shared_ptr (FFI boundary, intrusive structs). The
+  // caller is on the hook to call give_back exactly once -- forgetting it
+  // leaks the slot until the pool itself is destroyed.
   {
-    VLOG_I("=== Section 3: borrow / give_back ===");
+    VLOG_I("=== borrow / give_back ===");
     auto pool = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(512); }, 0, 4);
 
     Buffer* raw = pool->borrow();
     raw->used = 256;
-    MLOG_I("  Borrowed buffer, used={}", raw->used);
-    MLOG_I("  During borrow: borrowed={}", pool->borrowed());
+    MLOG_I("  during borrow: borrowed={}", pool->borrowed());
 
     pool->give_back(raw);
-    MLOG_I("  After give_back: pool_size={}, borrowed={}", pool->size(), pool->borrowed());
+    MLOG_I("  after give_back: pool={} borrowed={}", pool->size(), pool->borrowed());
   }
 
-  // ---------------------------------------------------------------
-  // 4. Reset policies.
-  // ---------------------------------------------------------------
+  // Reset policies decide when the user-provided reset callback fires.
+  // kPolicyAcquire wipes on hand-out (consumers always see a clean state).
+  // kPolicyBoth wipes on both ends (paranoid; useful for objects holding
+  // sensitive data). kPolicyNone disables the callback entirely.
   {
-    VLOG_I("=== Section 4: Reset policies ===");
+    VLOG_I("=== Reset policies ===");
 
     auto pool_acq = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(128); }, 1, 4,
                                                                 [](Buffer& b) { b.reset(); },
                                                                 vlink::ObjectPool<Buffer>::kPolicyAcquire);
-
-    auto buf = pool_acq->get();
-    MLOG_I("  kPolicyAcquire: buffer.used={} (reset on acquire)", buf->used);
+    auto a = pool_acq->get();
+    MLOG_I("  kPolicyAcquire: buf.used={}", a->used);
 
     auto pool_both = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(128); }, 1, 4,
                                                                  [](Buffer& b) { b.reset(); },
                                                                  vlink::ObjectPool<Buffer>::kPolicyBoth);
-
     {
-      auto buf2 = pool_both->get();
-      buf2->used = 42;
+      auto b = pool_both->get();
+      b->used = 42;
     }
-    MLOG_I("  kPolicyBoth: object reset on both acquire and release");
+
+    MLOG_I("  kPolicyBoth: object reset on acquire and release");
 
     auto pool_none = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(128); }, 1, 4,
                                                                  nullptr, vlink::ObjectPool<Buffer>::kPolicyNone);
-
-    MLOG_I("  kPolicyNone: no reset callback invoked");
+    MLOG_I("  kPolicyNone: no reset callback");
   }
 
-  // ---------------------------------------------------------------
-  // 5. Pool statistics.
-  // ---------------------------------------------------------------
+  // stats() is a cheap snapshot of the bookkeeping fields. Hold the
+  // handles in a vector to keep the borrowed counter at 5 across the dump.
   {
-    VLOG_I("=== Section 5: Pool statistics ===");
+    VLOG_I("=== Statistics ===");
     auto pool = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(256); }, 3, 10);
 
     auto stats = pool->stats();
-    MLOG_I("  pool_size: {}", stats.pool_size);
-    MLOG_I("  borrowed: {}", stats.borrowed);
-    MLOG_I("  total_created: {}", stats.total_created);
-    MLOG_I("  max_size: {}", stats.max_size);
+    MLOG_I("  pool={} borrowed={} total={} max={}", stats.pool_size, stats.borrowed, stats.total_created,
+           stats.max_size);
 
     std::vector<std::unique_ptr<Buffer, vlink::ObjectPool<Buffer>::PoolDeleter>> handles;
+    handles.reserve(5);
     for (int i = 0; i < 5; ++i) {
-      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       handles.emplace_back(pool->get());
     }
 
     stats = pool->stats();
-    MLOG_I("  After 5 borrows: pool_size={}, borrowed={}, total={}", stats.pool_size, stats.borrowed,
-           stats.total_created);
+    MLOG_I("  after 5 borrows: pool={} borrowed={} total={}", stats.pool_size, stats.borrowed, stats.total_created);
 
     handles.clear();
     stats = pool->stats();
-    MLOG_I("  After return all: pool_size={}, borrowed={}", stats.pool_size, stats.borrowed);
+    MLOG_I("  after return all: pool={} borrowed={}", stats.pool_size, stats.borrowed);
   }
 
-  // ---------------------------------------------------------------
-  // 6. Pool exhaustion.
-  // ---------------------------------------------------------------
+  // Exhaustion: with max=2 and 2 outstanding borrows, the third get()
+  // throws std::runtime_error. Callers should choose either:
+  //   - catch the throw and fall back, or
+  //   - configure a larger max from the start.
   {
-    VLOG_I("=== Section 6: Pool exhaustion ===");
+    VLOG_I("=== Pool exhaustion ===");
     auto pool = std::make_shared<vlink::ObjectPool<Buffer>>([]() { return std::make_unique<Buffer>(64); }, 0, 2);
 
     auto a = pool->get();
     auto b = pool->get();
-    MLOG_I("  Borrowed 2 of max 2");
+    MLOG_I("  borrowed 2/2");
 
     try {
       auto c = pool->get();
     } catch (const std::runtime_error& e) {
-      MLOG_I("  Pool exhausted: {}", e.what());
+      MLOG_I("  exhausted: {}", e.what());
     }
   }
 

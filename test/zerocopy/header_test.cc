@@ -27,175 +27,182 @@
 
 #include <doctest/doctest.h>
 
-//
+#include <cstring>
+#include <string>
+#include <type_traits>
+
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: zerocopy::Header
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-Header - default construction") {
-  TEST_CASE("default-constructed Header has expected default fields") {
+TEST_SUITE("zerocopy-Header") {
+  TEST_CASE("default construction initialises all fields to zero or known defaults") {
     zerocopy::Header h;
-    CHECK(h.seq == 0);
-    CHECK(std::string(h.frame_id) == "unknown");
-    CHECK(h.time_meas == 0);
-    CHECK(h.time_pub == 0);
-    CHECK(h.reserved == 0);
+
+    CHECK_EQ(h.seq, 0u);
+    CHECK_EQ(std::string(h.frame_id), "unknown");
+    CHECK_EQ(h.time_meas, 0u);
+    CHECK_EQ(h.time_pub, 0u);
+    CHECK_EQ(h.reserved, 0u);
   }
 
-  TEST_CASE("sizeof(Header) is 40 bytes") { CHECK(sizeof(zerocopy::Header) == 40U); }
-}
+  TEST_CASE("sizeof is exactly 40 bytes") { CHECK_EQ(sizeof(zerocopy::Header), 40u); }
 
-TEST_SUITE("zerocopy-Header - field assignment") {
-  TEST_CASE("fields can be assigned and read back") {
-    zerocopy::Header h;
-    h.seq = 42;
-    std::strncpy(h.frame_id, "cam_front", sizeof(h.frame_id) - 1);
-    h.frame_id[sizeof(h.frame_id) - 1] = '\0';
-    h.time_meas = 1000000ULL;
-    h.time_pub = 2000000ULL;
-    h.reserved = 0;
-
-    CHECK(h.seq == 42);
-    CHECK(std::string(h.frame_id) == "cam_front");
-    CHECK(h.time_meas == 1000000ULL);
-    CHECK(h.time_pub == 2000000ULL);
-    CHECK(h.reserved == 0);
+  TEST_CASE("is standard layout and trivially copyable") {
+    CHECK(std::is_standard_layout_v<zerocopy::Header>);
+    CHECK(std::is_trivially_copyable_v<zerocopy::Header>);
   }
 
-  TEST_CASE("seq max value") {
+  TEST_CASE("seq field round-trip including boundary values") {
     zerocopy::Header h;
-    h.seq = 0xFFFFFFFFU;
-    CHECK(h.seq == 0xFFFFFFFFU);
+
+    h.seq = 42u;
+    CHECK_EQ(h.seq, 42u);
+
+    h.seq = 0xFFFFFFFFu;
+    CHECK_EQ(h.seq, 0xFFFFFFFFu);
+
+    h.seq = 0u;
+    CHECK_EQ(h.seq, 0u);
   }
 
-  TEST_CASE("frame_id stores short string") {
+  TEST_CASE("frame_id stores short and max-length strings") {
     zerocopy::Header h;
-    std::strncpy(h.frame_id, "lidar_top", sizeof(h.frame_id) - 1);
-    h.frame_id[sizeof(h.frame_id) - 1] = '\0';
-    CHECK(std::string(h.frame_id) == "lidar_top");
+
+    SUBCASE("short string") {
+      std::strncpy(h.frame_id, "cam_front", sizeof(h.frame_id) - 1);
+      h.frame_id[sizeof(h.frame_id) - 1] = '\0';
+      CHECK_EQ(std::string(h.frame_id), "cam_front");
+    }
+
+    SUBCASE("15-char string fills buffer") {
+      std::strncpy(h.frame_id, "123456789012345", sizeof(h.frame_id) - 1);
+      h.frame_id[sizeof(h.frame_id) - 1] = '\0';
+      CHECK_EQ(std::string(h.frame_id), "123456789012345");
+    }
   }
 
-  TEST_CASE("frame_id stores max-length string") {
+  TEST_CASE("time_meas and time_pub accept max uint64 values") {
     zerocopy::Header h;
-    // 15 chars + null terminator fills all 16 bytes
-    std::strncpy(h.frame_id, "123456789012345", sizeof(h.frame_id) - 1);
-    h.frame_id[sizeof(h.frame_id) - 1] = '\0';
-    CHECK(std::string(h.frame_id) == "123456789012345");
-  }
 
-  TEST_CASE("time_meas max value") {
-    zerocopy::Header h;
     h.time_meas = 0xFFFFFFFFFFFFFFFFULL;
-    CHECK(h.time_meas == 0xFFFFFFFFFFFFFFFFULL);
-  }
+    CHECK_EQ(h.time_meas, 0xFFFFFFFFFFFFFFFFULL);
 
-  TEST_CASE("time_pub max value") {
-    zerocopy::Header h;
     h.time_pub = 0xFFFFFFFFFFFFFFFFULL;
-    CHECK(h.time_pub == 0xFFFFFFFFFFFFFFFFULL);
+    CHECK_EQ(h.time_pub, 0xFFFFFFFFFFFFFFFFULL);
   }
 
-  TEST_CASE("reserved can be used as a scratch field") {
+  TEST_CASE("reserved field is writable") {
     zerocopy::Header h;
-    h.reserved = 0xDEADBEEF;
-    CHECK(h.reserved == 0xDEADBEEF);
-  }
-}
 
-TEST_SUITE("zerocopy-Header - copy semantics") {
-  TEST_CASE("copy constructor creates independent copy") {
+    h.reserved = 0xDEADBEEFu;
+    CHECK_EQ(h.reserved, 0xDEADBEEFu);
+  }
+
+  TEST_CASE("all fields can hold max boundary values simultaneously") {
+    zerocopy::Header h;
+
+    h.seq = 0xFFFFFFFFu;
+    std::memset(h.frame_id, 0xFF, sizeof(h.frame_id));
+    h.time_meas = 0xFFFFFFFFFFFFFFFFULL;
+    h.time_pub = 0xFFFFFFFFFFFFFFFFULL;
+    h.reserved = 0xFFFFFFFFu;
+
+    CHECK_EQ(h.seq, 0xFFFFFFFFu);
+    CHECK_EQ(static_cast<uint8_t>(h.frame_id[0]), 0xFFu);
+    CHECK_EQ(h.time_meas, 0xFFFFFFFFFFFFFFFFULL);
+    CHECK_EQ(h.time_pub, 0xFFFFFFFFFFFFFFFFULL);
+    CHECK_EQ(h.reserved, 0xFFFFFFFFu);
+  }
+
+  TEST_CASE("copy constructor produces independent copy") {
     zerocopy::Header a;
-    a.seq = 10;
+
+    a.seq = 10u;
     std::strncpy(a.frame_id, "cam_rear", sizeof(a.frame_id) - 1);
     a.frame_id[sizeof(a.frame_id) - 1] = '\0';
-    a.time_meas = 300;
-    a.time_pub = 400;
+    a.time_meas = 300u;
+    a.time_pub = 400u;
+    a.reserved = 7u;
 
     zerocopy::Header b = a;
 
-    CHECK(b.seq == 10);
-    CHECK(std::string(b.frame_id) == "cam_rear");
-    CHECK(b.time_meas == 300);
-    CHECK(b.time_pub == 400);
+    CHECK_EQ(b.seq, 10u);
+    CHECK_EQ(std::string(b.frame_id), "cam_rear");
+    CHECK_EQ(b.time_meas, 300u);
+    CHECK_EQ(b.time_pub, 400u);
+    CHECK_EQ(b.reserved, 7u);
 
-    // Modifying copy must not affect original
-    b.seq = 99;
-    CHECK(a.seq == 10);
+    b.seq = 99u;
+    CHECK_EQ(a.seq, 10u);
   }
 
-  TEST_CASE("copy assignment works correctly") {
+  TEST_CASE("copy assignment produces independent copy") {
     zerocopy::Header a;
-    a.seq = 5;
-    a.time_pub = 12345ULL;
+
+    a.seq = 5u;
+    a.time_pub = 12345u;
 
     zerocopy::Header b;
     b = a;
 
-    CHECK(b.seq == 5);
-    CHECK(b.time_pub == 12345ULL);
+    CHECK_EQ(b.seq, 5u);
+    CHECK_EQ(b.time_pub, 12345u);
+
+    b.seq = 0u;
+    CHECK_EQ(a.seq, 5u);
   }
-}
 
-TEST_SUITE("zerocopy-Header - zero-init on construction") {
-  TEST_CASE("multiple default-constructed Headers have consistent fields") {
-    zerocopy::Header h1;
-    zerocopy::Header h2;
-
-    CHECK(h1.seq == h2.seq);
-    CHECK(std::string(h1.frame_id) == std::string(h2.frame_id));
-    CHECK(h1.time_meas == h2.time_meas);
-    CHECK(h1.time_pub == h2.time_pub);
-    CHECK(h1.reserved == h2.reserved);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: zerocopy::Header - additional edge cases
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("zerocopy-Header - edge cases") {
-  TEST_CASE("Header is standard layout") { CHECK(std::is_standard_layout_v<zerocopy::Header>); }
-
-  TEST_CASE("Header is trivially copyable") { CHECK(std::is_trivially_copyable_v<zerocopy::Header>); }
-
-  TEST_CASE("move constructor works correctly") {
+  TEST_CASE("move constructor copies all fields") {
     zerocopy::Header a;
-    a.seq = 100;
+
+    a.seq = 100u;
     std::strncpy(a.frame_id, "radar_0", sizeof(a.frame_id) - 1);
     a.frame_id[sizeof(a.frame_id) - 1] = '\0';
-    a.time_meas = 300;
-    a.time_pub = 400;
-    a.reserved = 500;
+    a.time_meas = 300u;
+    a.time_pub = 400u;
+    a.reserved = 500u;
 
     zerocopy::Header b = std::move(a);
-    CHECK(b.seq == 100);
-    CHECK(std::string(b.frame_id) == "radar_0");
-    CHECK(b.time_meas == 300);
-    CHECK(b.time_pub == 400);
-    CHECK(b.reserved == 500);
+
+    CHECK_EQ(b.seq, 100u);
+    CHECK_EQ(std::string(b.frame_id), "radar_0");
+    CHECK_EQ(b.time_meas, 300u);
+    CHECK_EQ(b.time_pub, 400u);
+    CHECK_EQ(b.reserved, 500u);
   }
 
-  TEST_CASE("move assignment works correctly") {
+  TEST_CASE("move assignment copies all fields") {
     zerocopy::Header a;
-    a.seq = 11;
-    a.time_meas = 22;
+
+    a.seq = 11u;
+    a.time_meas = 22u;
 
     zerocopy::Header b;
     b = std::move(a);
-    CHECK(b.seq == 11);
-    CHECK(b.time_meas == 22);
+
+    CHECK_EQ(b.seq, 11u);
+    CHECK_EQ(b.time_meas, 22u);
   }
 
-  TEST_CASE("Header binary layout is 40 bytes with memcpy round-trip") {
+  TEST_CASE("multiple default-constructed headers share identical initial state") {
+    zerocopy::Header h1;
+    zerocopy::Header h2;
+
+    CHECK_EQ(h1.seq, h2.seq);
+    CHECK_EQ(std::string(h1.frame_id), std::string(h2.frame_id));
+    CHECK_EQ(h1.time_meas, h2.time_meas);
+    CHECK_EQ(h1.time_pub, h2.time_pub);
+    CHECK_EQ(h1.reserved, h2.reserved);
+  }
+
+  TEST_CASE("binary memcpy round-trip preserves all fields") {
     zerocopy::Header h;
-    h.seq = 0xAABBCCDD;
+
+    h.seq = 0xAABBCCDDu;
     std::strncpy(h.frame_id, "test_frame", sizeof(h.frame_id) - 1);
     h.frame_id[sizeof(h.frame_id) - 1] = '\0';
     h.time_meas = 0x5566778899AABBCCULL;
     h.time_pub = 0xDDEEFF0011223344ULL;
-    h.reserved = 0;
+    h.reserved = 0u;
 
     uint8_t buf[40] = {};
     std::memcpy(buf, &h, sizeof(h));
@@ -203,46 +210,12 @@ TEST_SUITE("zerocopy-Header - edge cases") {
     zerocopy::Header h2;
     std::memcpy(&h2, buf, sizeof(h2));
 
-    CHECK(h2.seq == 0xAABBCCDD);
-    CHECK(std::string(h2.frame_id) == "test_frame");
-    CHECK(h2.time_meas == 0x5566778899AABBCCULL);
-    CHECK(h2.time_pub == 0xDDEEFF0011223344ULL);
-    CHECK(h2.reserved == 0);
+    CHECK_EQ(h2.seq, 0xAABBCCDDu);
+    CHECK_EQ(std::string(h2.frame_id), "test_frame");
+    CHECK_EQ(h2.time_meas, 0x5566778899AABBCCULL);
+    CHECK_EQ(h2.time_pub, 0xDDEEFF0011223344ULL);
+    CHECK_EQ(h2.reserved, 0u);
   }
-
-  TEST_CASE("all fields can hold boundary values simultaneously") {
-    zerocopy::Header h;
-    h.seq = 0xFFFFFFFFU;
-    std::memset(h.frame_id, 0xFF, sizeof(h.frame_id));
-    h.time_meas = 0xFFFFFFFFFFFFFFFFULL;
-    h.time_pub = 0xFFFFFFFFFFFFFFFFULL;
-    h.reserved = 0xFFFFFFFFU;
-
-    CHECK(h.seq == 0xFFFFFFFFU);
-    CHECK(static_cast<uint8_t>(h.frame_id[0]) == 0xFF);
-    CHECK(h.time_meas == 0xFFFFFFFFFFFFFFFFULL);
-    CHECK(h.time_pub == 0xFFFFFFFFFFFFFFFFULL);
-    CHECK(h.reserved == 0xFFFFFFFFU);
-  }
-
-  // TEST_CASE("Header can be zero-initialized via memset") {
-  //   zerocopy::Header h;
-  //   std::memset(&h, 0, sizeof(h));
-  //   CHECK(h.seq == 0);
-  //   CHECK(h.frame_id[0] == '\0');
-  //   CHECK(h.time_meas == 0);
-  //   CHECK(h.time_pub == 0);
-  //   CHECK(h.reserved == 0);
-  // }
-
-  // TEST_CASE("Header self-assignment is safe") {
-  //   zerocopy::Header h;
-  //   h.seq = 42;
-
-  //   h = h;  // NOLINT
-
-  //   CHECK(h.seq == 42);
-  // }
 }
 
 // NOLINTEND

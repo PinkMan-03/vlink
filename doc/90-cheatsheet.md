@@ -348,8 +348,11 @@ sub.listen([&](const Bytes& b){
 ```
 
 **数据容器**（`include/vlink/zerocopy/`）：
-- `RawData`（64 B）· `CameraFrame`（80 B）· `PointCloud`（256 B）· `ProxyData`（80 B）
-- 都内嵌 40 B `Header`：`frame_id[16] + seq[4] + reserved[4] + time_meas[8] + time_pub[8]`
+- `RawData`（64 B）· `CameraFrame`（80 B）· `PointCloud`（256 B）· `OccupancyGrid`（152 B）·
+  `Tensor`（248 B）· `ObjectArray`（112 B，单 `Object` 144 B，`alignas(4)`）· `AudioFrame`（128 B）·
+  `ProxyData`（80 B）
+- 除 `ProxyData` 外都内嵌 40 B `Header`：`frame_id[16] + seq[4] + reserved[4] + time_meas[8] + time_pub[8]`
+- `ObjectArray::Object` 显式 4 字节对齐（不是 8）：避免线缆 payload 偏移 116 处在严格对齐架构上 SIGBUS
 
 **Bytes 五种工厂方法**（源：`base/bytes.h:187-284` 工厂；内部模式 `enum Type` 见 `bytes.h:901-906`，仅含 `kCreate / kShallowCopy / kDeepCopy / kMove`，对外通过 `loaned` 标志区分 loan 形态）：
 | 工厂 | 拥有内存 | 典型用途 |

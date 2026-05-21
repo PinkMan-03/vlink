@@ -1,58 +1,158 @@
-# ProxyServer 基础示例
+# proxy_server_basic — ProxyServer 守护进程：discovery + 握手 + 心跳 + 转发
 
-![ProxyServer Overview](images/proxy-server-overview.png)
+`vlink::ProxyServer` 是 vlink Proxy 系统的服务端：跑在被观察的目标机器上，做 topic discovery、握手、心跳、消息转发、插件生命周期管理。本示例演示如何配置并启动 ProxyServer。
 
-## 1. 概述
+读完本示例你能掌握：
 
-本示例演示 VLink `ProxyServer` 守护进程的配置和生命周期管理。`ProxyServer` 是代理子系统的服务端，负责发现主题、广播心跳、转发数据和管理插件。
+- ProxyServer Config 各字段含义。
+- 服务端的核心能力（discovery / handshake / heartbeat / forwarding）。
+- wire 协议中 Time / Info / Data 三种通道的语义。
+- 单进程单实例约束。
 
-## 2. 核心功能
+## 背景与适用场景
 
-- 主题发现：通过 `DiscoveryViewer` 枚举所有活跃的发布者和订阅者
-- Token 握手：默认通过 `HandshakeSrv` 签发 128-bit token，校验所有入站 Control
-- 心跳广播：每秒发送包含 CPU/内存使用、版本号、主机名和 token 的 Time 消息
-- 统计信息：每秒发布每个主题的频率、速率、丢包、延迟
-- 数据转发：在观察/录制/回放模式下转发消息字节
-- 插件管理：加载和管理 `RunablePluginInterface` 插件
+适用：
 
-## 3. 配置
+- 把 vlink topics 暴露给外部观察工具（Foxglove、自家 Web GUI）。
+- 远程 bag 录制器。
+- 跨机器的调试辅助。
+
+不适合：
+
+- 同进程内的消息查看（直接订阅）。
+- 多 Server 拓扑（vlink Proxy 假定单实例单进程）。
+
+## 能力
+
+- **Topic discovery**：通过 `DiscoveryViewer` 探测当前进程的所有 vlink topics。
+- **Token 握手**：`HandshakeSrv` 接收 ProxyAPI 的握手请求并发放 128-bit token。
+- **1Hz 心跳**：周期广播 server 端 CPU / mem stats 和身份。
+- **per-topic Info**：每 topic 频率 / 速率 / 丢包 / 延迟。
+- **Data 转发**：observe / record / play 模式下转发消息。
+- **插件生命周期**：从 `Config::runnable_list` 加载 RunablePlugin，管理 init/run/deinit。
+
+## Config
 
 ```cpp
-ProxyServer::Config cfg;
+vlink::ProxyServer::Config cfg;
+cfg.dds_impl     = "dds";       // DDS 实现
+cfg.domain_id    = 0;
+cfg.security_key = "";          // 非空时与 ProxyAPI 必须一致
+cfg.reliable     = false;
+cfg.async        = true;
+cfg.use_iox      = false;       // 是否走 Iceoryx SHM
+```
+
+字段语义：
+
+- `async = true`：server 在后台线程跑；主程序可以做别的事。
+- `use_iox = true`：data 转发走 Iceoryx 共享内存（零拷贝），但要求 RouDi。
+- `reliable = true`：DDS reliable QoS；可靠但开销大。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `ProxyServer(const Config&)` | 构造 | 配置；不会立即启动 |
+| `ProxyServer::start` | `bool start()` | 启动 |
+| `ProxyServer::stop` | `void stop()` | 停止 |
+| `ProxyServer::is_running` | `bool` | 状态 |
+| 单实例约束 | – | 一个进程内只能构造一个；第二个会 fatal log |
+
+## Wire 协议
+
+```
+ProxyAPI (Controller)              ProxyServer
+   |  Handshake RPC      ───────►   token 发放
+   |  Control + token    ───────►
+   |  ◄── Time + token (1Hz heartbeat)
+   |  ◄── Info (per-topic stats)
+   |  ◄── Data (DDS 或 SHM)
+```
+
+## 代码导读
+
+### 1. 基础启动
+
+```cpp
+vlink::ProxyServer::Config cfg;
 cfg.dds_impl = "dds";
 cfg.domain_id = 0;
-cfg.security_key = "";  // 显式设置时必须与 ProxyAPI 一致
-cfg.reliable = false;
 cfg.async = true;
-cfg.use_iox = false;
+
+vlink::ProxyServer server(cfg);
+if (!server.start()) {
+  VLOG_E("failed to start ProxyServer");
+  return 1;
+}
+
+VLOG_I("server running, press Ctrl-C to quit");
+// ... 主程序做事 ...
+
+server.stop();
 ```
 
-## 4. 通信架构
+### 2. 配合 RunablePlugin
 
-```
-ProxyAPI (kController)
-     |--- Handshake RPC --> [DDS secure] --> ProxyServer
-     |<-- token         <-- [DDS secure] <-- |
-     |--- Control+token --> [DDS secure] --> |
-     |<-- Time+token    <-- [DDS secure] <-- |
-     |<-- Info    <-- [DDS secure] <-- |
-     |<-- Data    <-- [DDS/SHM] <-- |
+```cpp
+vlink::ProxyServer::Config cfg;
+cfg.runnable_list = {"monitor_plugin"};
+cfg.runnable_version_major = 1;
+cfg.runnable_version_minor = 0;
+vlink::ProxyServer server(cfg);
+server.start();
+// server 自动 load + init + run + 在 stop 时 deinit
 ```
 
-## 5. 编译与运行
+详见 `../proxy_runnable_plugin/`。
+
+### 3. 与 intra:// topics 互通
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_proxy_server_basic
+VLINK_INTRA_BIND=1 ./build/output/bin/example_proxy_server_basic
+```
+
+`VLINK_INTRA_BIND` 让 server 能观察 `intra://` 进程内 topics。
+
+## 运行
+
+```bash
 ./build/output/bin/example_proxy_server_basic
 ```
 
-需要链接 `vlink::proxy_server`。
+预期输出（节选）：
 
-## 6. 注意事项
+```
+ProxyServer started (dds_impl=dds domain=0)
+heartbeat sent (cpu=1.2% mem=...)
+discovered topic: dds://test/topic
+```
 
-- 每个进程只能有一个 ProxyServer（单例约束）
-- 需要 DDS 后端可用
-- ProxyAPI / ProxyServer 的 `security_key` 必须一致；默认握手开启时 Control 和 Time 都携带 token
-- `VLINK_INTRA_BIND` 环境变量启用 intra:// 主题观察
-- 插件通过 `Config::runnable_list` 配置
+按 Ctrl-C 优雅退出。
+
+## 常见陷阱
+
+1. **多个 server 在同进程**：第二次构造 fatal log + 不 init；架构上每进程一个。
+2. **security_key 单边设**：握手失败；要么都设、要么都不设。
+3. **没有 RouDi 时 use_iox=true**：start() 失败；ROUDI 必须先跑。
+4. **跨进程多 server**：网络中检测到多 server 时 ProxyAPI 会报 kMultiProxyError；按角色 / domain 划分清楚。
+5. **intra:// 默认不可见**：必须 `VLINK_INTRA_BIND=1`。
+
+## 设计要点
+
+- Server 内部用三对 DDS Publisher/Subscriber 做 Control / Data / Heartbeat 通道。
+- `HandshakeSrv` 是普通的 vlink Server<HandshakeReq, HandshakeResp>；token 加密后下发。
+- 单进程单实例靠静态 atomic 哨兵实现。
+
+## 配图
+
+![ProxyServer overview](./images/proxy-server-overview.png)
+
+图中展示 ProxyServer 的内部组件：DiscoveryViewer / HandshakeSrv / Heartbeat / 插件管理器。
+
+## 参考
+
+- `../proxy_api_basic/` — 客户端
+- `../proxy_runnable_plugin/` — Runnable 插件集成
+- `vlink/include/vlink/external/proxy_server.h` — ProxyServer 接口
+- 顶层 `doc/16-proxy.md` — Proxy 章节

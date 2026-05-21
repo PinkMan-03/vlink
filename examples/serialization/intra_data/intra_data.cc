@@ -21,22 +21,37 @@
  * limitations under the License.
  */
 
-// IntraData zero-serialisation example
-// Demonstrates VLINK_INTRA_DATA_DECLARE for zero-copy in-process messaging.
-
 #include <vlink/base/logger.h>
 #include <vlink/impl/intra_data.h>
 #include <vlink/vlink.h>
 
 #include <cstring>
-#include <iostream>
 #include <string>
-#include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
+// ---------------------------------------------------------------------------
+// intra_data.cc
+//
+// IntraData is VLink's zero-copy in-process message wrapper. When publisher
+// and subscriber both live in the same process and share the same loop (or
+// any pair of loops over intra://), the underlying shared_ptr is passed by
+// reference -- no serialization, no allocation per delivery, no memcpy.
+//
+// The VLINK_INTRA_DATA_DECLARE(T, Alias) macro generates two types:
+//   * AliasType  -- IntraDataType<T> subclass that holds a T value member.
+//                   Owns the Serializer routing tag and serialize helpers.
+//   * Alias      -- std::shared_ptr<AliasType> with a create() factory.
+//                   This is what user code passes around in publish/listen.
+//
+// The wrapped T can be any Serializer-supported type (POD, Custom, etc.).
+// When the topic crosses a process boundary (shm/dds), the framework falls
+// back to operator>>/<< on the inner T to produce a wire buffer; on intra
+// it bypasses that path entirely (`is_owner` semantics described below).
+// ---------------------------------------------------------------------------
+
 // MyStruct provides operator>>/<<, so it is detected as kCustomType.
-// IntraData wrappers may target any supported Serializer::Type.
+// IntraData wrappers may target any supported Serializer type.
 struct MyStruct {
   int32_t id;
   float temperature;
@@ -54,127 +69,96 @@ struct MyStruct {
   }
 };
 
-// Declare IntraData wrapper types:
-//   MyIntraType -- concrete IntraDataType subclass holding MyStruct value
-//   MyIntra     -- shared_ptr<MyIntraType> wrapper with create() factory
+// Macro expansion (conceptually):
+//   class MyIntraType : public vlink::IntraDataType<MyStruct> { ... };
+//   using MyIntra = std::shared_ptr<MyIntraType>;
+//   inline MyIntra MyIntra_create() { return std::make_shared<MyIntraType>(); }
+// In practice MyIntra exposes ::create() as a static factory.
+// MyIntraType -- concrete IntraDataType subclass holding MyStruct.
+// MyIntra     -- shared_ptr<MyIntraType> wrapper exposing create().
 VLINK_INTRA_DATA_DECLARE(MyStruct, MyIntra)
 
 int main() {
-  // ======== Section 1: Creating IntraData Instances ========
-  {
-    std::cout << "\n[1] Creating IntraData via MyIntra::create()" << std::endl;
+  // ---- Construction ----
+  // create() allocates one MyIntraType on the heap; the user fills its
+  // .value (the inner MyStruct) in place. No serialization runs yet --
+  // the wrapper just holds a typed shared_ptr to mutable storage.
+  auto data = MyIntra::create();
+  data->value.id = 42;
+  data->value.temperature = 36.6F;
+  std::strncpy(data->value.label, "sensor_A", sizeof(data->value.label) - 1);
+  VLOG_I("[Create] id=", data->value.id, " temp=", data->value.temperature, " label=", data->value.label);
+  VLOG_I("[Create] kValueType=", static_cast<int>(MyIntraType::kValueType),
+         " type=", MyIntraType::get_serialized_type());
 
-    // Factory method returns a shared_ptr-based handle
-    auto data = MyIntra::create();
+  // ---- Manual serialize / deserialize for cross-transport fallback ----
+  // operator>>(Bytes&) and operator<<(const Bytes&) delegate to the inner
+  // MyStruct's operators. This path activates automatically when the topic
+  // backend cannot share memory (e.g. dds:// across hosts). Return value
+  // indicates success so caller can detect malformed input.
+  auto original = MyIntra::create();
+  original->value.id = 100;
+  original->value.temperature = 25.0F;
+  std::strncpy(original->value.label, "motor_B", sizeof(original->value.label) - 1);
 
-    // Access the embedded value directly -- no serialisation
-    data->value.id = 42;
-    data->value.temperature = 36.6F;
-    std::strncpy(data->value.label, "sensor_A", sizeof(data->value.label) - 1);
+  vlink::Bytes wire;
+  bool ok = (*original) >> wire;
+  VLOG_I("[Serialize] ok=", ok, " size=", wire.size(), " expected=", original->get_serialized_size());
 
-    std::cout << "  id:          " << data->value.id << std::endl;
-    std::cout << "  temperature: " << data->value.temperature << std::endl;
-    std::cout << "  label:       " << data->value.label << std::endl;
+  auto restored = MyIntra::create();
+  ok = (*restored) << wire;
+  VLOG_I("[Deserialize] ok=", ok, " id=", restored->value.id, " temp=", restored->value.temperature,
+         " label=", restored->value.label);
 
-    // Check the compile-time type tag
-    std::cout << "  kValueType:  " << static_cast<int>(MyIntraType::kValueType) << std::endl;
-    std::cout << "  type string: " << MyIntraType::get_serialized_type() << std::endl;
-  }
+  // ---- Zero-copy pub/sub on intra:// ----
+  // The `#direct` fragment is the intra mode hint. With it, publish() hands
+  // the SAME shared_ptr to the subscriber: the subscriber's `typed` and the
+  // publisher's `frame` point at one heap object. The `is_owner` flag in
+  // IntraDataType is what flips between "I own this storage" (subscriber-
+  // side allocation when crossing a process boundary, post-deserialize) and
+  // "I am sharing the producer's storage" (intra direct mode). Mutating
+  // through a subscriber-side handle in direct mode would be visible to the
+  // publisher -- treat received samples as read-only.
+  int received_count = 0;
+  const std::string topic_url = "intra://example/intra_data/struct#direct";
 
-  // ======== Section 2: Serialisation / Deserialisation ========
-  // IntraData supports on-demand serialisation for cross-transport fallback.
-  {
-    std::cout << "\n[2] Manual Serialisation / Deserialisation" << std::endl;
+  vlink::Subscriber<MyIntra> sub(topic_url);
+  // Listener fires inline on the publisher's thread in intra `#direct` mode
+  // (no queueing). Mind the implications: heavy work in the callback blocks
+  // publish().
+  sub.listen([&](const MyIntra& typed) {
+    received_count++;
 
-    auto original = MyIntra::create();
-    original->value.id = 100;
-    original->value.temperature = 25.0F;
-    std::strncpy(original->value.label, "motor_B", sizeof(original->value.label) - 1);
-
-    // Serialise to Bytes
-    vlink::Bytes wire;
-    bool ok = (*original) >> wire;
-    std::cout << "  Serialize ok:     " << std::boolalpha << ok << std::endl;
-    std::cout << "  Serialized size:  " << wire.size() << " bytes" << std::endl;
-    std::cout << "  get_serialized_size: " << original->get_serialized_size() << " bytes" << std::endl;
-
-    // Deserialise from Bytes
-    auto restored = MyIntra::create();
-    ok = (*restored) << wire;
-    std::cout << "  Deserialize ok:   " << std::boolalpha << ok << std::endl;
-    std::cout << "  Restored id:      " << restored->value.id << std::endl;
-    std::cout << "  Restored temp:    " << restored->value.temperature << std::endl;
-    std::cout << "  Restored label:   " << restored->value.label << std::endl;
-  }
-
-  // ======== Section 3: Zero-Copy Publish / Subscribe on intra:// ========
-  // When both publisher and subscriber are in the same process, IntraData
-  // passes the shared_ptr directly -- no serialisation at all.
-  {
-    std::cout << "\n[3] Zero-Copy Pub/Sub on intra://" << std::endl;
-
-    int received_count = 0;
-    const std::string topic_url = "intra://example/intra_data/struct#direct";
-
-    vlink::Subscriber<MyIntra> sub(topic_url);
-    sub.listen([&](const MyIntra& typed) {
-      received_count++;
-
-      if (typed) {
-        std::cout << "  [Sub] #" << received_count << " id=" << typed->value.id << " temp=" << typed->value.temperature
-                  << " label=" << typed->value.label << std::endl;
-      }
-    });
-
-    vlink::Publisher<MyIntra> pub(topic_url);
-
-    pub.wait_for_subscribers();
-
-    // Publish several IntraData messages
-    for (int i = 1; i <= 5; ++i) {
-      auto data = MyIntra::create();
-      data->value.id = i;
-      data->value.temperature = 20.0F + static_cast<float>(i);
-      std::snprintf(data->value.label, sizeof(data->value.label), "reading_%d", i);
-      pub.publish(data);
+    if (typed) {
+      VLOG_I("[Sub] #", received_count, " id=", typed->value.id, " temp=", typed->value.temperature,
+             " label=", typed->value.label);
     }
+  });
 
-    std::cout << "  Total received: " << received_count << std::endl;
+  vlink::Publisher<MyIntra> pub(topic_url);
+  // Block until at least one subscriber has matched; without this, the loop
+  // below could fire publishes before the listener is wired in.
+  pub.wait_for_subscribers();
+
+  for (int i = 1; i <= 5; ++i) {
+    auto frame = MyIntra::create();
+    frame->value.id = i;
+    frame->value.temperature = 20.0F + static_cast<float>(i);
+    std::snprintf(frame->value.label, sizeof(frame->value.label), "reading_%d", i);
+    pub.publish(frame);
   }
 
-  // ======== Section 4: Shared Ownership ========
-  // IntraData is reference-counted. Publisher and subscriber can both hold
-  // a shared_ptr to the same underlying data without copying.
-  {
-    std::cout << "\n[4] Shared Ownership via shared_ptr" << std::endl;
+  VLOG_I("[Sub] total=", received_count);
 
-    auto data = MyIntra::create();
-    data->value.id = 999;
-
-    // Copy the handle (increments reference count, not data)
-    MyIntra alias = data;  // NOLINT(performance-unnecessary-copy-initialization)
-    std::cout << "  data use_count:  " << data.use_count() << std::endl;
-    std::cout << "  alias use_count: " << alias.use_count() << std::endl;
-    std::cout << "  Same object:     " << std::boolalpha << (data.get() == alias.get()) << std::endl;
-  }
-
-  // ======== Section 5: IntraData vs Regular Types ========
-  {
-    std::cout << "\n[5] IntraData vs Regular Types" << std::endl;
-    std::cout << "  +--------------------------+-----------------------------+" << std::endl;
-    std::cout << "  | Regular Type             | IntraData Type              |" << std::endl;
-    std::cout << "  +--------------------------+-----------------------------+" << std::endl;
-    std::cout << "  | serialize on publish     | zero-copy (shared_ptr)      |" << std::endl;
-    std::cout << "  | deserialize on receive   | direct pointer access       |" << std::endl;
-    std::cout << "  | Works on all transports  | Only intra:// transport     |" << std::endl;
-    std::cout << "  | Value semantics          | Reference semantics         |" << std::endl;
-    std::cout << "  +--------------------------+-----------------------------+" << std::endl;
-    std::cout << std::endl;
-    std::cout << "  Use IntraData when:" << std::endl;
-    std::cout << "    - Publisher and subscriber are in the same process" << std::endl;
-    std::cout << "    - Data is large (images, point clouds) and copies are expensive" << std::endl;
-    std::cout << "    - You need zero-copy performance on intra://" << std::endl;
-  }
+  // ---- Shared ownership semantics ----
+  // MyIntra is std::shared_ptr<MyIntraType>, so copy = atomic refcount++.
+  // Both handles point at one MyStruct; mutations through either are seen
+  // by the other. This is identical to how subscribers receive samples in
+  // direct mode -- understand it before mutating received messages.
+  auto shared = MyIntra::create();
+  shared->value.id = 999;
+  MyIntra alias = shared;  // NOLINT(performance-unnecessary-copy-initialization)
+  VLOG_I("[Share] use_count=", shared.use_count(), " same_object=", shared.get() == alias.get());
 
   VLOG_I("IntraData example complete.");
   return 0;

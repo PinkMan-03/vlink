@@ -1,133 +1,112 @@
-# pub_sub_fbs -- VLink DDS-C + FlatBuffers 发布订阅示例
+# pub_sub_fbs — DDS-C + FlatBuffers Pub/Sub
 
-## 1. 概述
+事件模型样例，展示 vlink 处理 FlatBuffers 的标准模式：发布端用 Object API（`UserT`），订阅端用零拷贝指针（`User*`）。两种类型的差异：
 
-本示例演示如何使用 VLink 的事件模型（`Publisher` / `Subscriber`）配合 FlatBuffers 序列化发送和接收一条较复杂的嵌套消息。
+- `UserT`（NativeTable / Object API）：可读可写的结构体；发布端填充字段后传给 publish，框架自动序列化。
+- `User*`（只读 table 指针）：直接指向 wire 缓冲，零拷贝读取；只在回调内有效。
 
-示例使用 `ddsc://` 传输协议，schema 直接复用目录内现成的 [fbs/helloworld.fbs](fbs/helloworld.fbs)。消息根类型是 `User`，内部包含：
+读完本示例你能掌握：
 
-- `Profile` / `Address`
-- `Order`
-- `Item`
-- `Vec2`
+- FlatBuffers 与 vlink 的标准集成。
+- `Publisher<UserT>` vs `Subscriber<User*>` 的语义差异。
+- `vlink_generate_cpp(FBS ...)` CMake 工具的作用。
+- 何时该用 FlatBuffers vs Protobuf。
 
-这个示例的重点不是传输原语种类，而是展示 FlatBuffers 在 VLink 里的典型发布订阅写法：
+## 文件结构
 
-- 发布端使用 `UserT`（Object API，可变对象）构造消息
-- 订阅端使用 `User*`（零拷贝只读指针）直接读取消息
-
-![FlatBuffers pub/sub flow](images/flatbuffers-pubsub-flow.png)
-
-## 2. 文件说明
-
-| 文件 | 说明 |
-|------|------|
-| `pub_sub_fbs.cc` | 主程序，演示 FlatBuffers 发布和订阅 |
-| `fbs/helloworld.fbs` | FlatBuffers schema，定义 `User`、`Profile`、`Order` 等结构 |
-| `CMakeLists.txt` | 构建配置，生成 FlatBuffers 代码并链接 `vlink::ddsc` |
-
-## 3. 演示内容
-
-### 3.1 `sub` 模式：常驻监听 FlatBuffers 指针
-
-订阅端直接监听 `const hw::User*`：
-
-```cpp
-Subscriber<hw::User*> sub("ddsc://samples/pub_sub_fbs/user");
-sub.listen([](const hw::User* user) {
-  VLOG_I(user->user_id());
-});
+```
+pub_sub_fbs/
+  pub_sub_fbs.cc         # main, 角色由 argv[1] 选择
+  fbs/helloworld.fbs     # User / Profile / Order / Item / Vec2 schema
 ```
 
-这种写法会走 FlatBuffers 指针类型（零拷贝）路径，适合高频或大消息读取场景。
-
-注意：`User*` 只在回调执行期间有效，不应在回调外长期保存。
-
-### 3.2 `pub` 模式：使用 `MessageLoop + Timer` 周期发布
-
-示例里 `make_user()` 会构造一条完整的用户消息，包括昵称、地址、地理位置、订单和商品列表：
-
-```cpp
-Publisher<hw::UserT> pub("ddsc://samples/pub_sub_fbs/user");
-
-Timer timer;
-timer.attach(&message_loop);
-timer.set_interval(500);
-timer.set_loop_count(Timer::kInfinite);
-```
-
-`UserT` 属于 FlatBuffers 的 Object API，适合在 C++ 里像普通对象一样填充字段，VLink 会在 `publish()` 时自动完成序列化。发布端通过 `MessageLoop + Timer` 每 500ms 发送一条数据，并持续运行直到 Ctrl+C。
-
-### 3.3 发布端启动后立即发送
-
-发布端不会等待订阅端上线。只要执行 `sample_pub_sub_fbs pub`，定时器就会立刻开始工作，按 500ms 周期持续发送消息。
-
-### 3.4 根据启动参数决定进程角色
-
-程序支持两种启动模式：
+## 运行
 
 ```bash
-sample_pub_sub_fbs sub
-sample_pub_sub_fbs pub
-```
-
-- `sub`：启动订阅进程，持续接收消息，直到 Ctrl+C
-- `pub`：启动发布进程，每 500ms 发送一条消息，直到 Ctrl+C
-
-### 3.5 每次发送的数据都会变化
-
-发布端内部维护递增序号 `seq`，每个周期都会基于这个序号重新构造一条新的 `UserT`：
-
-- `user_id`、`name`、`email` 会递增变化
-- `profile.nickname`、`profile.age`、`profile.home.street` 会变化
-- `order.order_id`、`order.status` 也会变化
-
-所以订阅端看到的不是重复包，而是一串持续变化的示例数据。
-
-## 4. FlatBuffers 类型约定
-
-| 类型 | 含义 | 典型用途 |
-|------|------|----------|
-| `hw::UserT` | Object API / NativeTable | 发送前构造、修改消息 |
-| `hw::User*` | 只读 Table 指针 | 回调中零拷贝读取消息 |
-
-其中 `hw` 是示例里对 `Helloworld::fbs` 命名空间的别名。
-
-## 5. 依赖
-
-- VLink 库（`vlink::ddsc` 组件）
-- FlatBuffers
-- CycloneDDS / DDS-C 运行环境
-
-## 6. 构建与运行
-
-```bash
-# 从仓库根目录
-cd /work/vlink
-
-cmake -S . -B build
-cmake --build build --target sample_pub_sub_fbs -j$(nproc)
-
-./build/output/bin/sample_pub_sub_fbs
-```
-
-推荐使用两个终端分别运行：
-
-```bash
-# 终端 1：启动订阅端
+# 终端 1
 ./build/output/bin/sample_pub_sub_fbs sub
 
-# 终端 2：启动发布端
+# 终端 2（每 500ms 发布一条消息）
 ./build/output/bin/sample_pub_sub_fbs pub
 ```
 
-正常运行时，你会看到：
+## 核心 API
 
-- `pub` 进程每 500ms 连续发布一条 `User` 消息
-- `sub` 进程收到每条消息后打印用户、地址和订单摘要
+```cpp
+// 订阅端：零拷贝指针
+Subscriber<hw::User*> sub("ddsc://samples/pub_sub_fbs/user");
+sub.listen([](const hw::User* user) {
+  VLOG_I(user->user_id());                       // 指针只在回调内有效
+});
 
-## 7. 可继续扩展的方向
+// 发布端：Object API（NativeTable）
+Publisher<hw::UserT> pub("ddsc://samples/pub_sub_fbs/user");
+hw::UserT u;
+u.user_id = 1;
+u.nickname = "alice";
+pub.publish(u);                                  // vlink 自动序列化
+```
 
-- 把 `ddsc://` 替换成 `dds://`，验证同一份 FlatBuffers schema 在不同传输后端上的用法
-- 把订阅端类型改成 `hw::UserT`，对比“零拷贝读取”和“解包到对象”的差异
-- 扩展 schema，添加更多订单字段，观察生成代码和使用方式
+`hw` 是 `Helloworld` 命名空间的别名（生成代码用 `helloworld.fbs` 的 namespace）。
+
+## 类型对照
+
+| 类型 | 形式 | 用途 |
+|------|------|------|
+| `hw::UserT` | NativeTable / Object API | 填充 / 修改要发送的值 |
+| `hw::User*` | 只读 table 指针 | 零拷贝订阅读取 |
+
+## 演示内容
+
+1. FlatBuffers 被 vlink 自动识别，**不需要**手动 `set_ser_type`。
+2. Publisher 立即开始发送，**不需要** `wait_for_subscribers`（FlatBuffers 路径下 DDS-C 提供的语义即可）。
+3. 序列号 `seq` 让 user_id / nickname / order 等字段每个周期都变化，订阅端看到的是消息流不是固定包。
+4. `User*` 指针只在回调内有效：要长期保留得复制到 `UserT`。
+
+## 何时选 FlatBuffers vs Protobuf
+
+| 维度 | FlatBuffers | Protobuf |
+|------|-------------|---------|
+| 解析速度 | 零拷贝，~0 | 需要 parse |
+| 编码速度 | 中等 | 中等 |
+| 文件大小 | 较小 | 较小 |
+| 跨语言支持 | 多语言 | 多语言 |
+| 工具链生态 | 较少 | 庞大 |
+| schema 演进 | 优秀 | 优秀 |
+| 大对象（视频、图） | 优秀（零拷贝读） | 一般 |
+
+vlink 同时支持，选其一按工程偏好。
+
+## 依赖
+
+- `vlink::ddsc`（CycloneDDS 后端）
+- FlatBuffers
+- `vlink_generate_cpp(FBS ${FBS_SRCS})` CMake helper：调用 `flatc` 生成 `helloworld.fbs.hpp`
+
+## 扩展练习
+
+- 把 `ddsc://` 换成 `dds://` 对比两种 DDS 后端。
+- 把订阅端改成 `Subscriber<hw::UserT>` 看 unpacked-object 形式（性能略低但拷贝出独立对象）。
+- 给 schema 加 Order 字段，观察生成代码 / 用法差异。
+
+## 常见陷阱
+
+1. **`User*` 指针出作用域使用**：UAF；要么 deepcopy 到 UserT，要么处理完就丢。
+2. **发布端用 `User*`**：行为按实现可能 error；发布端必须用 NativeTable `UserT`。
+3. **schema 不一致**：fbs 文件改了但没重新 generate，新旧字段不兼容。
+4. **没启 CycloneDDS**：vlink 编译时缺 `vlink::ddsc` 组件；改 URL 到 `dds://` 走 FastDDS。
+5. **大消息 fragmentation**：DDS 默认 MTU 限制；大对象需要调 fragment_size 或换 shm。
+
+## 配图
+
+![FlatBuffers pub/sub flow](./images/flatbuffers-pubsub-flow.png)
+
+图中展示 publisher 填 `UserT` → 序列化 → wire → subscriber 零拷贝 `User*` 读取的完整数据通路。
+
+## 参考
+
+- `../helloworld/` — Protobuf 对照
+- `../someip_flat/` — FlatBuffers + SOME/IP 后端
+- 顶层 `doc/06-serialization.md` — 序列化机制
+- `vlink/include/vlink/serializer.h` — Serializer 接口
+- FlatBuffers 官方文档 https://flatbuffers.dev/

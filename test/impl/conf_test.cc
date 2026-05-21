@@ -31,15 +31,7 @@
 #include <string>
 #include <type_traits>
 
-//
 #include "../common_test.h"
-
-// ---------------------------------------------------------------------------
-// Helper: a public subclass that exposes the protected default constructor.
-// The base class is intentionally protected-constructible so that only the
-// six Node template specialisations and Url can build it directly. For tests
-// we only need to verify the default behaviour of the public virtual API.
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -49,89 +41,86 @@ struct TrivialConf final : public Conf {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// TEST SUITE: Conf - default virtual behaviour
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Conf - default virtual behaviour") {
-  TEST_CASE("default is_valid is false") {
+TEST_SUITE("impl-Conf") {
+  TEST_CASE("default is_valid returns false") {
     TrivialConf conf;
     CHECK_FALSE(conf.is_valid());
   }
 
-  TEST_CASE("default get_transport_type is TransportType::kUnknown") {
+  TEST_CASE("default get_transport_type returns kUnknown") {
     TrivialConf conf;
-    CHECK(conf.get_transport_type() == TransportType::kUnknown);
+    CHECK_EQ(conf.get_transport_type(), TransportType::kUnknown);
   }
 
-  TEST_CASE("default get_impl_type is kUnknownImplType before parse()") {
+  TEST_CASE("default get_impl_type returns kUnknownImplType before parse") {
     TrivialConf conf;
-    CHECK(conf.get_impl_type() == kUnknownImplType);
+    CHECK_EQ(conf.get_impl_type(), kUnknownImplType);
   }
 
-  TEST_CASE("default hash_code is zero") {
+  TEST_CASE("hash_code initialises to zero") {
     TrivialConf conf;
-    CHECK(conf.hash_code == 0);
+    CHECK_EQ(conf.hash_code, 0u);
   }
 
-  TEST_CASE("hash_code is settable") {
+  TEST_CASE("hash_code is writable") {
     TrivialConf conf;
-    conf.hash_code = 0xCAFEBABE;
-    CHECK(conf.hash_code == 0xCAFEBABE);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Conf::parse - caches impl_type
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Conf - parse() caches impl_type") {
-  TEST_CASE("parse(kPublisher) returns true and updates get_impl_type") {
-    TrivialConf conf;
-    REQUIRE(conf.parse(kPublisher));
-    CHECK(conf.get_impl_type() == kPublisher);
+    conf.hash_code = 0xCAFEBABEu;
+    CHECK_EQ(conf.hash_code, 0xCAFEBABEu);
   }
 
-  TEST_CASE("parse(kSubscriber) updates the cached impl_type") {
-    TrivialConf conf;
-    REQUIRE(conf.parse(kSubscriber));
-    CHECK(conf.get_impl_type() == kSubscriber);
+  TEST_CASE("parse caches the requested impl_type") {
+    SUBCASE("kPublisher") {
+      TrivialConf conf;
+      REQUIRE(conf.parse(kPublisher));
+      CHECK_EQ(conf.get_impl_type(), kPublisher);
+    }
+    SUBCASE("kSubscriber") {
+      TrivialConf conf;
+      REQUIRE(conf.parse(kSubscriber));
+      CHECK_EQ(conf.get_impl_type(), kSubscriber);
+    }
+    SUBCASE("kSetter") {
+      TrivialConf conf;
+      REQUIRE(conf.parse(kSetter));
+      CHECK_EQ(conf.get_impl_type(), kSetter);
+    }
+    SUBCASE("kGetter") {
+      TrivialConf conf;
+      REQUIRE(conf.parse(kGetter));
+      CHECK_EQ(conf.get_impl_type(), kGetter);
+    }
+    SUBCASE("kServer") {
+      TrivialConf conf;
+      REQUIRE(conf.parse(kServer));
+      CHECK_EQ(conf.get_impl_type(), kServer);
+    }
+    SUBCASE("kClient") {
+      TrivialConf conf;
+      REQUIRE(conf.parse(kClient));
+      CHECK_EQ(conf.get_impl_type(), kClient);
+    }
   }
 
-  TEST_CASE("parse can be called more than once and the latest value wins") {
+  TEST_CASE("successive parse calls update the cached impl_type to the latest") {
     TrivialConf conf;
     REQUIRE(conf.parse(kPublisher));
     REQUIRE(conf.parse(kServer));
-    CHECK(conf.get_impl_type() == kServer);
+    CHECK_EQ(conf.get_impl_type(), kServer);
   }
 
-  TEST_CASE("parse accepts every concrete ImplType bit") {
-    TrivialConf conf;
-    CHECK(conf.parse(kPublisher));
-    CHECK(conf.parse(kSubscriber));
-    CHECK(conf.parse(kSetter));
-    CHECK(conf.parse(kGetter));
-    CHECK(conf.parse(kServer));
-    CHECK(conf.parse(kClient));
-  }
-}
-
-// ---------------------------------------------------------------------------
-// TEST SUITE: Conf - PropertiesMap alias
-// ---------------------------------------------------------------------------
-
-TEST_SUITE("impl-Conf - PropertiesMap alias") {
-  TEST_CASE("PropertiesMap is std::map<string,string>") {
+  TEST_CASE("PropertiesMap is std::map of string to string") {
     CHECK((std::is_same_v<Conf::PropertiesMap, std::map<std::string, std::string>>));
   }
 
-  TEST_CASE("PropertiesMap can hold key/value pairs") {
+  TEST_CASE("PropertiesMap holds arbitrary key value pairs") {
     Conf::PropertiesMap m;
     m["dds.ip"] = "127.0.0.1";
     m["zenoh.mode"] = "peer";
-    CHECK(m.at("dds.ip") == "127.0.0.1");
-    CHECK(m.at("zenoh.mode") == "peer");
+    CHECK_EQ(m.at("dds.ip"), "127.0.0.1");
+    CHECK_EQ(m.at("zenoh.mode"), "peer");
   }
+
+  TEST_CASE("Conf is copy-constructible as a value-type config") { CHECK(std::is_copy_constructible_v<TrivialConf>); }
 }
 
 // NOLINTEND

@@ -43,7 +43,7 @@ A minimalist API (3–5 lines to get communication going), zero-cost transport s
 | ------------------------------------------------ | -------------------------------------- |
 | [Transport Backends](doc/07-transport.md)        | 12 backends & URL format               |
 | [QoS](doc/08-qos.md)                             | Quality of Service configuration       |
-| [Zero-Copy](doc/10-zerocopy.md)                  | CameraFrame / PointCloud (large-payload essentials) |
+| [Zero-Copy](doc/10-zerocopy.md)                  | CameraFrame / PointCloud / OccupancyGrid / Tensor / ObjectArray / AudioFrame / RawData (large-payload essentials) |
 | [Base Library](doc/11-base-library.md)           | Logger / MessageLoop / Timer / ThreadPool / Concurrency / IPC / Profiler |
 | [Bag Recording](doc/12-bag-recording.md)         | Bag / MCAP file format & API           |
 | [CLI Tools](doc/13-cli-tools.md)                 | 9 command-line tools reference         |

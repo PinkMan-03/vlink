@@ -29,56 +29,32 @@
 
 #include <thread>
 
-//
 #include "../common_test.h"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// Busy-spin for approximately `ms` milliseconds so that both wall time
-// and CPU time advance by a measurable amount.
 static void busy_wait_ms(int ms) {
   auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+
   while (std::chrono::steady_clock::now() < end) {
-    // spin
   }
 }
 
-// ---------------------------------------------------------------------------
 TEST_SUITE("base-ElapsedTimer") {
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_sys_timestamp - default accuracy returns positive value") {
-    uint64_t ts = ElapsedTimer::get_sys_timestamp();
-    CHECK(ts > 0u);
+  TEST_CASE("get_sys_timestamp returns positive value for all accuracies") {
+    uint64_t ms = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMilli);
+    uint64_t us = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMicro);
+    uint64_t ns = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kNano);
+
+    CHECK(ms > 0U);
+    CHECK(us > 0U);
+    CHECK(ns > 0U);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_sys_timestamp - kMilli") {
-    uint64_t ts = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMilli);
-    CHECK(ts > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_sys_timestamp - kMicro") {
-    uint64_t ts = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMicro);
-    CHECK(ts > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_sys_timestamp - kNano") {
-    uint64_t ts = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kNano);
-    CHECK(ts > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_sys_timestamp - high_resolution=false still returns positive") {
+  TEST_CASE("get_sys_timestamp with high_resolution=false returns positive value") {
     uint64_t ts = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMilli, false);
-    CHECK(ts > 0u);
+    CHECK(ts > 0U);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_sys_timestamp - values increase over time") {
+  TEST_CASE("get_sys_timestamp is non-decreasing over time") {
     uint64_t t1 = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMilli);
     std::this_thread::sleep_for(5ms);
     uint64_t t2 = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMilli);
@@ -86,38 +62,22 @@ TEST_SUITE("base-ElapsedTimer") {
     CHECK(t2 >= t1);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_timestamp - default accuracy returns positive value") {
-    uint64_t ts = ElapsedTimer::get_cpu_timestamp();
-    CHECK(ts > 0u);
+  TEST_CASE("get_cpu_timestamp returns positive value for all accuracies") {
+    uint64_t ms = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMilli);
+    uint64_t us = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMicro);
+    uint64_t ns = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
+
+    CHECK(ms > 0U);
+    CHECK(us > 0U);
+    CHECK(ns > 0U);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_timestamp - kMilli") {
-    uint64_t ts = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMilli);
-    CHECK(ts > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_timestamp - kMicro") {
-    uint64_t ts = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMicro);
-    CHECK(ts > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_timestamp - kNano") {
-    uint64_t ts = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
-    CHECK(ts > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_timestamp - high_resolution=false still returns positive") {
+  TEST_CASE("get_cpu_timestamp with high_resolution=false returns positive value") {
     uint64_t ts = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMilli, false);
-    CHECK(ts > 0u);
+    CHECK(ts > 0U);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_timestamp - monotonically non-decreasing") {
+  TEST_CASE("get_cpu_timestamp is monotonically non-decreasing") {
     uint64_t t1 = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMicro);
     busy_wait_ms(5);
     uint64_t t2 = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMicro);
@@ -125,123 +85,104 @@ TEST_SUITE("base-ElapsedTimer") {
     CHECK(t2 >= t1);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_active_time - returns positive value") {
+  TEST_CASE("get_cpu_active_time returns positive value for all accuracies") {
     busy_wait_ms(5);
-    uint64_t t = ElapsedTimer::get_cpu_active_time();
-    CHECK(t > 0u);
+    uint64_t ms = ElapsedTimer::get_cpu_active_time(ElapsedTimer::kMilli);
+    uint64_t us = ElapsedTimer::get_cpu_active_time(ElapsedTimer::kMicro);
+    uint64_t ns = ElapsedTimer::get_cpu_active_time(ElapsedTimer::kNano);
+
+    CHECK(ms > 0U);
+    CHECK(us > 0U);
+    CHECK(ns > 0U);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_active_time - kMicro returns positive value") {
-    uint64_t t = ElapsedTimer::get_cpu_active_time(ElapsedTimer::kMicro);
-    CHECK(t > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("static get_cpu_active_time - kNano returns positive value") {
-    uint64_t t = ElapsedTimer::get_cpu_active_time(ElapsedTimer::kNano);
-    CHECK(t > 0u);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("accuracy units are ordered: nano > micro > milli") {
+  TEST_CASE("accuracy units are ordered: nano value > micro value > milli value") {
     uint64_t ms = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMilli);
     uint64_t us = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kMicro);
     uint64_t ns = ElapsedTimer::get_cpu_timestamp(ElapsedTimer::kNano);
 
-    // Higher-precision timestamps must be larger numbers for the same point in time
     CHECK(us >= ms);
     CHECK(ns >= us);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("default constructor - timer not active") {
+  TEST_CASE("default constructor yields inactive timer with kCpuTimestamp and kMilli") {
     ElapsedTimer t;
-
-    CHECK(!t.is_active());
-    CHECK(t.get() == -1);
-    CHECK(t.get_method() == ElapsedTimer::kCpuTimestamp);
-    CHECK(t.get_accuracy() == ElapsedTimer::kMilli);
+    CHECK_FALSE(t.is_active());
+    CHECK_EQ(t.get(), -1);
+    CHECK_EQ(t.get_method(), ElapsedTimer::kCpuTimestamp);
+    CHECK_EQ(t.get_accuracy(), ElapsedTimer::kMilli);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("constructor(Method) - correct method, default accuracy") {
+  TEST_CASE("constructor(Method) sets method and uses default kMilli accuracy") {
     ElapsedTimer t(ElapsedTimer::kCpuActiveTime);
-
-    CHECK(t.get_method() == ElapsedTimer::kCpuActiveTime);
-    CHECK(t.get_accuracy() == ElapsedTimer::kMilli);
-    CHECK(!t.is_active());
+    CHECK_EQ(t.get_method(), ElapsedTimer::kCpuActiveTime);
+    CHECK_EQ(t.get_accuracy(), ElapsedTimer::kMilli);
+    CHECK_FALSE(t.is_active());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("constructor(Accuracy) - correct accuracy, default method") {
+  TEST_CASE("constructor(Accuracy) sets accuracy and uses default kCpuTimestamp method") {
     ElapsedTimer t(ElapsedTimer::kMicro);
-
-    CHECK(t.get_method() == ElapsedTimer::kCpuTimestamp);
-    CHECK(t.get_accuracy() == ElapsedTimer::kMicro);
-    CHECK(!t.is_active());
+    CHECK_EQ(t.get_method(), ElapsedTimer::kCpuTimestamp);
+    CHECK_EQ(t.get_accuracy(), ElapsedTimer::kMicro);
+    CHECK_FALSE(t.is_active());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("constructor(Method, Accuracy) - both set correctly") {
+  TEST_CASE("constructor(Method, Accuracy) sets both fields") {
     ElapsedTimer t(ElapsedTimer::kCpuActiveTime, ElapsedTimer::kNano);
-
-    CHECK(t.get_method() == ElapsedTimer::kCpuActiveTime);
-    CHECK(t.get_accuracy() == ElapsedTimer::kNano);
-    CHECK(!t.is_active());
+    CHECK_EQ(t.get_method(), ElapsedTimer::kCpuActiveTime);
+    CHECK_EQ(t.get_accuracy(), ElapsedTimer::kNano);
+    CHECK_FALSE(t.is_active());
   }
 
-  // -------------------------------------------------------------------------
+  TEST_CASE("accuracy accessor matches constructor argument for all values") {
+    ElapsedTimer t_milli(ElapsedTimer::kMilli);
+    ElapsedTimer t_micro(ElapsedTimer::kMicro);
+    ElapsedTimer t_nano(ElapsedTimer::kNano);
+
+    CHECK_EQ(t_milli.get_accuracy(), ElapsedTimer::kMilli);
+    CHECK_EQ(t_micro.get_accuracy(), ElapsedTimer::kMicro);
+    CHECK_EQ(t_nano.get_accuracy(), ElapsedTimer::kNano);
+  }
+
   TEST_CASE("start makes timer active and get returns non-negative") {
     ElapsedTimer t;
-
     t.start();
 
     CHECK(t.is_active());
     CHECK(t.get() >= 0);
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("get before start returns -1") {
     ElapsedTimer t;
-
-    CHECK(t.get() == -1);
-    CHECK(!t.is_active());
+    CHECK_EQ(t.get(), -1);
+    CHECK_FALSE(t.is_active());
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("stop deactivates timer and get returns -1") {
+  TEST_CASE("stop deactivates timer and subsequent get returns -1") {
     ElapsedTimer t;
-
     t.start();
     CHECK(t.is_active());
 
     t.stop();
-
-    CHECK(!t.is_active());
-    CHECK(t.get() == -1);
+    CHECK_FALSE(t.is_active());
+    CHECK_EQ(t.get(), -1);
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("start is idempotent when already active") {
     ElapsedTimer t;
-
     t.start();
     int64_t first_read = t.get();
 
-    // Second start on already-active timer should be a no-op
     t.start();
 
     CHECK(t.is_active());
     CHECK(t.get() >= first_read);
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("elapsed time increases while timer is running") {
     ElapsedTimer t(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMilli);
-
     t.start();
+
     int64_t t1 = t.get();
     std::this_thread::sleep_for(10ms);
     int64_t t2 = t.get();
@@ -249,122 +190,141 @@ TEST_SUITE("base-ElapsedTimer") {
     CHECK(t2 >= t1);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("elapsed time is measurable after busy-wait (kMicro)") {
+  TEST_CASE("elapsed time in microseconds is measurable after busy-wait") {
     ElapsedTimer t(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMicro);
-
     t.start();
     busy_wait_ms(10);
     int64_t elapsed = t.get();
 
-    // At microsecond resolution, 10 ms of busy-wait should yield >= 1000 us
     CHECK(elapsed >= 0);
     CHECK(elapsed >= 1000);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("restart returns elapsed and resets start time") {
-    ElapsedTimer t(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMilli);
+  TEST_CASE("get while running returns at least 10 ms after sleep") {
+    ElapsedTimer t(ElapsedTimer::kMilli);
+    t.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
+    int64_t elapsed = t.get();
+    CHECK(elapsed >= 10);
+
+    t.stop();
+  }
+
+  TEST_CASE("stop then get returns -1") {
+    ElapsedTimer t(ElapsedTimer::kMilli);
+    t.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    t.stop();
+
+    CHECK_EQ(t.get(), -1);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK_EQ(t.get(), -1);
+  }
+
+  TEST_CASE("is_active transitions correctly across start and stop") {
+    ElapsedTimer t;
+    CHECK_FALSE(t.is_active());
+
+    t.start();
+    CHECK(t.is_active());
+
+    t.stop();
+    CHECK_FALSE(t.is_active());
+  }
+
+  TEST_CASE("kMicro accuracy returns at least 5000 us after 10 ms sleep") {
+    ElapsedTimer t(ElapsedTimer::kMicro);
+    t.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    int64_t us = t.get();
+    CHECK(us >= 5000);
+
+    t.stop();
+  }
+
+  TEST_CASE("restart returns elapsed time and resets the timer") {
+    ElapsedTimer t(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMilli);
     t.start();
     std::this_thread::sleep_for(10ms);
 
     int64_t elapsed = t.restart();
 
-    // restart returns the elapsed since start
     CHECK(elapsed >= 0);
-    // Timer is active again after restart
     CHECK(t.is_active());
-    // Fresh reading after restart starts from near 0
     CHECK(t.get() >= 0);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("restart without prior start returns negative (timer was stopped)") {
+  TEST_CASE("restart without prior start activates the timer") {
     ElapsedTimer t;
+    (void)t.restart();
 
-    // Timer never started; restart should set start_time to now and return
-    // the raw start_time_ which was -1 (negative)
-    int64_t val = t.restart();
-    (void)val;
-    // After restart the timer is active
     CHECK(t.is_active());
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("stop then start cycles work correctly") {
     ElapsedTimer t;
-
     t.start();
     busy_wait_ms(5);
     t.stop();
 
-    CHECK(!t.is_active());
-    CHECK(t.get() == -1);
+    CHECK_FALSE(t.is_active());
+    CHECK_EQ(t.get(), -1);
 
     t.start();
-
     CHECK(t.is_active());
     CHECK(t.get() >= 0);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("kCpuActiveTime method - start and get work") {
+  TEST_CASE("kCpuActiveTime method start and get work") {
     ElapsedTimer t(ElapsedTimer::kCpuActiveTime, ElapsedTimer::kMilli);
-
     t.start();
     CHECK(t.is_active());
 
     busy_wait_ms(10);
 
-    int64_t elapsed = t.get();
-    CHECK(elapsed >= 0);
+    CHECK(t.get() >= 0);
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("copy constructor preserves method, accuracy, and active state") {
     ElapsedTimer original(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMicro);
     original.start();
 
     ElapsedTimer copy(original);
-
-    CHECK(copy.get_method() == original.get_method());
-    CHECK(copy.get_accuracy() == original.get_accuracy());
-    CHECK(copy.is_active() == original.is_active());
+    CHECK_EQ(copy.get_method(), original.get_method());
+    CHECK_EQ(copy.get_accuracy(), original.get_accuracy());
+    CHECK_EQ(copy.is_active(), original.is_active());
   }
 
-  // -------------------------------------------------------------------------
   TEST_CASE("copy assignment preserves method and accuracy") {
     ElapsedTimer src(ElapsedTimer::kCpuActiveTime, ElapsedTimer::kNano);
     ElapsedTimer dst;
-
     dst = src;
 
-    CHECK(dst.get_method() == ElapsedTimer::kCpuActiveTime);
-    CHECK(dst.get_accuracy() == ElapsedTimer::kNano);
+    CHECK_EQ(dst.get_method(), ElapsedTimer::kCpuActiveTime);
+    CHECK_EQ(dst.get_accuracy(), ElapsedTimer::kNano);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("move constructor preserves state") {
+  TEST_CASE("move constructor preserves method, accuracy, and active state") {
     ElapsedTimer original(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMicro);
     original.start();
 
     bool was_active = original.is_active();
     ElapsedTimer moved(std::move(original));
 
-    CHECK(moved.get_method() == ElapsedTimer::kCpuTimestamp);
-    CHECK(moved.get_accuracy() == ElapsedTimer::kMicro);
-    CHECK(moved.is_active() == was_active);
+    CHECK_EQ(moved.get_method(), ElapsedTimer::kCpuTimestamp);
+    CHECK_EQ(moved.get_accuracy(), ElapsedTimer::kMicro);
+    CHECK_EQ(moved.is_active(), was_active);
   }
 
-  // -------------------------------------------------------------------------
-  TEST_CASE("kNano accuracy gives larger raw values than kMilli for same duration") {
+  TEST_CASE("kNano accuracy gives larger raw values than kMilli for same interval") {
     ElapsedTimer t_ms(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kMilli);
     ElapsedTimer t_ns(ElapsedTimer::kCpuTimestamp, ElapsedTimer::kNano);
 
     t_ms.start();
     t_ns.start();
-
     busy_wait_ms(5);
 
     int64_t elapsed_ms = t_ms.get();
@@ -372,83 +332,7 @@ TEST_SUITE("base-ElapsedTimer") {
 
     CHECK(elapsed_ms >= 0);
     CHECK(elapsed_ns >= 0);
-    // 1 ms corresponds to 1,000,000 ns; nanosecond value must dominate
     CHECK(elapsed_ns > elapsed_ms);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("get() while running returns non-negative milliseconds") {
-    ElapsedTimer t(ElapsedTimer::kMilli);
-    t.start();
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-
-    // get() while running should return elapsed wall-clock ms
-    int64_t elapsed = t.get();
-    CHECK(elapsed >= 10);
-
-    t.stop();
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("stop then get returns -1 (timer marked stopped)") {
-    ElapsedTimer t(ElapsedTimer::kMilli);
-    t.start();
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    t.stop();
-
-    // When stopped, get() returns -1 (sentinel for "not running")
-    int64_t after_stop = t.get();
-    CHECK(after_stop == -1);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    // Repeated call still returns -1
-    CHECK(t.get() == -1);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("is_active is true while running, false after stop") {
-    ElapsedTimer t;
-    CHECK(!t.is_active());
-
-    t.start();
-    CHECK(t.is_active());
-
-    t.stop();
-    CHECK(!t.is_active());
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("kMicro accuracy: get() while running returns positive microseconds") {
-    ElapsedTimer t(ElapsedTimer::kMicro);
-    t.start();
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-    // get() while running should return elapsed wall-clock microseconds
-    int64_t us = t.get();
-    CHECK(us >= 5000);  // At least 5 ms in microseconds
-
-    t.stop();
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("default constructor method is kCpuTimestamp") {
-    ElapsedTimer t;
-    CHECK(t.get_method() == ElapsedTimer::kCpuTimestamp);
-  }
-
-  // -------------------------------------------------------------------------
-  TEST_CASE("accuracy accessor matches constructor argument") {
-    ElapsedTimer t_milli(ElapsedTimer::kMilli);
-    ElapsedTimer t_micro(ElapsedTimer::kMicro);
-    ElapsedTimer t_nano(ElapsedTimer::kNano);
-
-    CHECK(t_milli.get_accuracy() == ElapsedTimer::kMilli);
-    CHECK(t_micro.get_accuracy() == ElapsedTimer::kMicro);
-    CHECK(t_nano.get_accuracy() == ElapsedTimer::kNano);
   }
 }
 

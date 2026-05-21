@@ -21,36 +21,29 @@
  * limitations under the License.
  */
 
-/**
- * @file consumer.cc
- * @brief CameraFrame Zero-Copy Consumer -- Receives and validates camera frames.
- *
- * Demonstrates:
- *   - Subscribing to CameraFrame messages
- *   - Validating received frame metadata
- *   - Zero-copy deserialization (is_owner=false after operator<<)
- *   - Shallow and deep copy patterns
- *
- * Usage:
- *   Terminal 1: ./example_camera_consumer
- *   Terminal 2: ./example_camera_producer
- */
-
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 #include <vlink/zerocopy/camera_frame.h>
 
 #include <atomic>
-#include <iostream>
 #include <thread>
 
 #include "frame_consumer.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
+// ---------------------------------------------------------------------------
+// consumer.cc (camera_frame example)
+//
+// Standalone CameraFrame subscriber. Start it first, then run producer.cc.
+// Pulls frames off the loop, runs structural validation + checksum, and
+// exits once 10 frames have arrived or after ~15s. The atomic counter
+// crosses thread boundaries (subscriber dispatch -> main poll loop).
+// ---------------------------------------------------------------------------
+
 int main() {
   VLOG_I("=== CameraFrame Consumer ===");
-  VLOG_I("Waiting for producer... Run example_camera_producer in another terminal.");
+  VLOG_I("Waiting for producer (run example_camera_producer in another terminal)");
 
   vlink::MessageLoop loop;
   loop.set_name("camera_loop");
@@ -60,24 +53,21 @@ int main() {
 
   vlink::Subscriber<vlink::zerocopy::CameraFrame> sub("dds://zerocopy/camera");
   sub.attach(&loop);
+  // Listener fires on `loop`'s thread. `frame` is a non-owning view (in
+  // shm:// it points at the producer's pool slot); treat as read-only.
   sub.listen([&received](const vlink::zerocopy::CameraFrame& frame) {
     received++;
-
-    // Validate the frame
 
     if (!frame_consumer::validate_frame(frame)) {
       return;
     }
 
-    // Print frame info
     frame_consumer::print_frame_info(frame);
-
-    // Compute a simple checksum for verification
-    uint32_t checksum = frame_consumer::compute_checksum(frame);
-    std::cout << "    checksum=" << checksum << std::endl;
+    VLOG_I("  checksum=", frame_consumer::compute_checksum(frame));
   });
 
-  // Wait for messages (timeout after 15 seconds)
+  // Bounded poll -- at most 150 * 100ms = 15s. Early exit once we've seen
+  // the expected 10 frames so CI doesn't waste time.
   for (int i = 0; i < 150; ++i) {
     std::this_thread::sleep_for(100ms);
 

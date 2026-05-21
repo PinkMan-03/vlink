@@ -1,98 +1,151 @@
-# 节点生命周期管理示例
+# lifecycle — vlink 节点生命周期：延迟初始化、init/deinit、interrupt
 
-## 1. 概述
+vlink 节点（Publisher / Subscriber / Server / Client / Setter / Getter）默认在构造时就完成底层 transport 的创建（`InitType::kWithInit`）。但工程上常需要**先构造对象、配置 property、再 init**。本示例覆盖这套延迟初始化的全部 API。
 
-本示例演示 VLink 节点的生命周期管理 API，包括延迟初始化（`kWithoutInit`）、手动 `init()` / `deinit()`、中断（`interrupt()`）和状态查询（`has_inited()`）。
+读完本示例你能掌握：
 
-![节点生命周期状态图](images/node-lifecycle.png)
+- `kWithInit` vs `kWithoutInit` 两种构造模式。
+- `init()` / `deinit()` 的手动控制。
+- `interrupt()` 的语义（与 `deinit()` 的关键区别）。
+- `has_inited()` 状态查询。
+- 推荐的"构造 → set_property → init → 使用 → deinit"流程。
 
-## 2. 核心概念
+## 背景与适用场景
 
-### 2.1 初始化模式
+适用：
 
-VLink 节点支持两种初始化模式：
+- 需要在 init 之前调 `set_property` 配置 QoS / SchemaType。
+- 需要"先把节点交给某模块持有、稍后启动"的所有权架构。
+- 测试 / 仿真：动态启停节点。
 
-| 模式 | 构造方式 | 行为 |
-|------|---------|------|
-| 自动初始化 | `Publisher<T>("url")` | 构造函数中立即创建传输后端 |
-| 延迟初始化 | `Publisher<T>("url", InitType::kWithoutInit)` | 构造后不创建传输，等待 `init()` |
+不适合：
 
-### 2.2 延迟初始化的意义
+- 简单脚本（直接默认构造即可）。
+- 节点配置完全不变的场景。
 
-延迟初始化允许在传输后端创建之前配置节点属性（QoS、序列化类型等）。这在某些传输协议（如 DDS）中非常重要，因为某些 QoS 参数只能在创建时设置。
+## Init 模式对比
 
-## 3. 关键 API 解析
+| 模式 | 构造 | 行为 |
+|------|------|------|
+| Auto | `Publisher<T>("url")` | 构造时立即创建 transport |
+| Deferred | `Publisher<T>("url", InitType::kWithoutInit)` | 不创建 transport；等 `init()` |
 
-### 3.1 kWithoutInit + init()
+延迟模式让你可以在 init 之前配置 QoS / ser_type / discovery 等只在 init 时被 transport 读取的字段。
+
+## 核心 API
+
+| API | 签名 | 说明 |
+|-----|------|------|
+| `Publisher<T>(url, InitType)` 等 | `InitType { kWithInit, kWithoutInit }` | 选择是否构造期自动 init |
+| `Node::init` | `virtual bool init()` | 创建底层 transport；幂等（多次调用安全） |
+| `Node::deinit` | `virtual bool deinit()` | 释放 transport；publish/listen 等返回 false |
+| `Node::has_inited` | `bool has_inited() const` | 状态查询 |
+| `Node::interrupt` | `virtual void interrupt()` | 唤醒所有 `wait_for_*` 阻塞调用 |
+
+## 代码导读
+
+### 1. 构造期自动 init（默认）
 
 ```cpp
-Publisher<std::string> pub("dds://topic", InitType::kWithoutInit);
-pub.set_property("qos.reliability.kind", "1");
-pub.set_property("qos.history.depth", "50");
-pub.init();  // 此时才创建传输后端
+vlink::Publisher<std::string> pub("dds://topic");   // 构造完即可 publish
+pub.publish("hello");
 ```
 
-### 3.2 has_inited()
+### 2. 延迟 init + property 配置
 
 ```cpp
-if (pub.has_inited()) {
-  pub.publish(data);  // 安全发布
+vlink::Publisher<std::string> pub("dds://topic", vlink::InitType::kWithoutInit);
+pub.set_property("qos.reliability.kind", "1");
+pub.set_property("qos.history.depth", "50");
+pub.set_ser_type("MyType", vlink::SchemaType::kRaw);
+
+bool ok = pub.init();      // 此时按上面配置创建 transport
+if (!ok) {
+  VLOG_E("init failed");
 }
 ```
 
-### 3.3 deinit()
+### 3. has_inited / 重新 init
 
 ```cpp
-pub.deinit();   // 释放传输资源
-// pub.publish() 返回 false
-pub.init();     // 可以重新初始化
+VLOG_I("inited: ", pub.has_inited());    // 1
+
+pub.deinit();
+VLOG_I("inited: ", pub.has_inited());    // 0
+
+pub.init();
+VLOG_I("inited: ", pub.has_inited());    // 1
 ```
 
-### 3.4 interrupt()
+`init()` 是幂等的：已 init 时再调返回 true、不重复创建 transport。
+
+### 4. interrupt 唤醒阻塞
 
 ```cpp
-pub.interrupt();  // 唤醒挂起的阻塞等待
+vlink::Subscriber<std::string> sub("dds://topic");
+std::thread bg([&sub]() {
+  // 阻塞等订阅消息
+  sub.wait_for_value(100s);
+});
+
+// 主线程做其它事
+std::this_thread::sleep_for(100ms);
+
+sub.interrupt();   // 立刻唤醒所有 wait_for_*
+bg.join();
 ```
 
-`interrupt()` 仅置位内部 `is_interrupted` 标志并唤醒条件变量，使
-`wait_for_subscribers()` / `wait_for_connected()` / `wait_for_value()` 等阻塞调用立即返回 `false`。
-它**不会**暂停消息投递、回调触发或释放传输资源——如需停止接收消息请使用 `deinit()`。
+`interrupt()` 只设 interrupted flag、唤醒 cv；**不会**停回调、不释放 transport。要真正停用必须 `deinit()`。
 
-## 4. 编译与运行
+### 5. 推荐流程
+
+```
+construct (kWithoutInit) -> set_property() -> init() -> listen() / publish() / ... -> deinit()
+```
+
+适用所有六种原语。
+
+## 运行
 
 ```bash
-cmake -B build -S . -DCMAKE_PREFIX_PATH=/path/to/vlink/install
-cmake --build build --target example_lifecycle
 ./build/output/bin/example_lifecycle
 ```
 
-## 5. 推荐生命周期模式
+预期输出（节选）：
 
 ```
-1. 创建 (kWithoutInit)     -- 分配节点对象
-2. 配置 (set_property等)   -- 设置 QoS、序列化类型
-3. 初始化 (init)           -- 创建传输后端和发现
-4. 注册回调 (listen)       -- 开始接收消息
-5. 运行                    -- 发布/接收消息
-6. 反初始化 (deinit)       -- 释放传输资源
-7. 析构                    -- 释放节点对象
+auto init: ok
+deferred init: configured, then init() = 1
+has_inited=1
+deinit: ok, has_inited=0
+re-init: ok, has_inited=1
+interrupt: wait_for_value returned early
 ```
 
-## 6. 适用于所有 6 种节点类型
+## 常见陷阱
 
-`kWithoutInit` 和 `init()` / `deinit()` 适用于所有 VLink 通信原语：
+1. **kWithoutInit 后忘记 init**：`publish` / `listen` 返回 false。
+2. **init 之后改 property**：大多数 property 在 init 期被 transport 读取，之后改不生效。
+3. **deinit 然后再 publish**：返回 false，不报错。
+4. **interrupt 与 deinit 混淆**：interrupt 仅唤醒；deinit 才释放。
+5. **多线程并发 init / deinit**：vlink 不保证线程安全；按一个 owner 串行调用。
 
-- `Publisher<T>` / `Subscriber<T>` （事件模型）
-- `Setter<T>` / `Getter<T>` （字段模型）
-- `Server<Req, Resp>` / `Client<Req, Resp>` （方法模型）
+## 设计要点
 
-## 7. 注意事项
+- Node<ImplT, SecT> 是模板基类；六种通信原语都继承它。
+- `init()` 在内部构造 `ImplT`（底层 transport 实现）；`deinit()` 析构。
+- `interrupt()` 设 atomic flag + notify_all；用于"主动取消等待"场景。
+- 不同的传输后端 init 开销不同：intra 几乎零开销；shm/dds 需要 discovery，可能数毫秒。
 
-- `deinit()` 后节点仍然存在，可以再次调用 `init()` 重新初始化
-- `interrupt()` 仅唤醒阻塞等待，不暂停回调，也不释放传输资源
-- 在未初始化的节点上调用 `publish()` 等操作会返回 `false`
-- `kWithoutInit` 适用于需要运行时配置的场景
+## 配图
 
-## 8. 相关文档
+![Node lifecycle](./images/node-lifecycle.png)
 
-详细原理参见 [doc/02-node-lifecycle.md](../../../doc/02-node-lifecycle.md)。
+图中展示节点状态机：constructed → inited → in-use → deinited → re-inited 等。
+
+## 参考
+
+- `../properties/` — init 前能配的 property
+- `../message_loop_binding/` — attach loop
+- 顶层 `doc/02-node-lifecycle.md` — 完整章节
+- `vlink/include/vlink/node.h` — Node 基类接口
