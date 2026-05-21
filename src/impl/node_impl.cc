@@ -289,11 +289,11 @@ bool NodeImpl::enable_security(Security::Config&& cfg) {
 
   if (impl_type == kClient) {
     needs_encrypt = true;
-    const auto* client_impl = dynamic_cast<const ClientImpl*>(this);
+    const auto* client_impl = static_cast<const ClientImpl*>(this);
     needs_decrypt = client_impl != nullptr && client_impl->is_resp_type;
   } else if (impl_type == kServer) {
     needs_decrypt = true;
-    const auto* server_impl = dynamic_cast<const ServerImpl*>(this);
+    const auto* server_impl = static_cast<const ServerImpl*>(this);
     needs_encrypt = server_impl != nullptr && server_impl->is_resp_type;
   }
 

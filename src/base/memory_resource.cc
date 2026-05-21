@@ -80,7 +80,7 @@ bool MemoryResource::do_is_equal(const std::pmr::memory_resource& other) const n
     return true;
   }
 
-  const auto* rhs = dynamic_cast<const MemoryResource*>(&other);
+  const auto* rhs = static_cast<const MemoryResource*>(&other);
 
   return rhs != nullptr && pool_ == rhs->pool_;
 }

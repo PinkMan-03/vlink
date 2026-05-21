@@ -33,7 +33,9 @@ namespace Status {
 
 template <typename T>
 static void write_if_type(std::ostream& ostream, const Base& status) noexcept {
-  if (const auto* target = dynamic_cast<const T*>(&status)) {
+  const auto* target = static_cast<const T*>(&status);
+
+  if VLIKELY (target) {
     ostream << *target;
     return;
   }
