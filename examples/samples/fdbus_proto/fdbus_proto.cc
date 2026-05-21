@@ -35,8 +35,8 @@
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
-#include <thread>
 #include <chrono>
+#include <thread>
 
 #if defined(__ANDROID__) && __has_include("fdbus_proto/fdbus_proto.pb.h")
 #include "fdbus_proto/fdbus_proto.pb.h"

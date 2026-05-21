@@ -1424,6 +1424,15 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_prop_rw(
           "reserved", [](vlink::zerocopy::OccupancyGrid& self) { return self.get_reserved(); },
           [](vlink::zerocopy::OccupancyGrid& self, uint32_t v) { self.get_reserved() = v; })
+      .def_prop_rw(
+          "reserved16", [](vlink::zerocopy::OccupancyGrid& self) { return self.get_reserved16(); },
+          [](vlink::zerocopy::OccupancyGrid& self, uint16_t v) { self.get_reserved16() = v; })
+      .def_prop_rw(
+          "reserved32", [](vlink::zerocopy::OccupancyGrid& self) { return self.get_reserved32(); },
+          [](vlink::zerocopy::OccupancyGrid& self, uint32_t v) { self.get_reserved32() = v; })
+      .def_prop_rw(
+          "reserved2", [](vlink::zerocopy::OccupancyGrid& self) { return self.get_reserved2(); },
+          [](vlink::zerocopy::OccupancyGrid& self, uint32_t v) { self.get_reserved2() = v; })
       .def("data", [](const vlink::zerocopy::OccupancyGrid& self) { return nb::bytes(self.data(), self.size()); })
       .def(
           "fill_data",
@@ -1529,6 +1538,15 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_prop_rw(
           "reserved", [](vlink::zerocopy::Tensor& self) { return self.get_reserved(); },
           [](vlink::zerocopy::Tensor& self, uint32_t v) { self.get_reserved() = v; })
+      .def_prop_rw(
+          "reserved8", [](vlink::zerocopy::Tensor& self) { return self.get_reserved8(); },
+          [](vlink::zerocopy::Tensor& self, uint8_t v) { self.get_reserved8() = v; })
+      .def_prop_rw(
+          "reserved16", [](vlink::zerocopy::Tensor& self) { return self.get_reserved16(); },
+          [](vlink::zerocopy::Tensor& self, uint16_t v) { self.get_reserved16() = v; })
+      .def_prop_rw(
+          "reserved32", [](vlink::zerocopy::Tensor& self) { return self.get_reserved32(); },
+          [](vlink::zerocopy::Tensor& self, uint32_t v) { self.get_reserved32() = v; })
       .def("data", [](const vlink::zerocopy::Tensor& self) { return nb::bytes(self.data(), self.size()); })
       .def(
           "fill_data",
@@ -1706,6 +1724,21 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_prop_rw(
           "reserved", [](vlink::zerocopy::ObjectArray& self) { return self.get_reserved(); },
           [](vlink::zerocopy::ObjectArray& self, uint32_t v) { self.get_reserved() = v; })
+      .def_prop_rw(
+          "reserved8", [](vlink::zerocopy::ObjectArray& self) { return self.get_reserved8(); },
+          [](vlink::zerocopy::ObjectArray& self, uint8_t v) { self.get_reserved8() = v; })
+      .def_prop_rw(
+          "reserved16", [](vlink::zerocopy::ObjectArray& self) { return self.get_reserved16(); },
+          [](vlink::zerocopy::ObjectArray& self, uint16_t v) { self.get_reserved16() = v; })
+      .def_prop_rw(
+          "reserved32", [](vlink::zerocopy::ObjectArray& self) { return self.get_reserved32(); },
+          [](vlink::zerocopy::ObjectArray& self, uint32_t v) { self.get_reserved32() = v; })
+      .def_prop_rw(
+          "reserved2", [](vlink::zerocopy::ObjectArray& self) { return self.get_reserved2(); },
+          [](vlink::zerocopy::ObjectArray& self, uint32_t v) { self.get_reserved2() = v; })
+      .def_prop_rw(
+          "reserved3", [](vlink::zerocopy::ObjectArray& self) { return self.get_reserved3(); },
+          [](vlink::zerocopy::ObjectArray& self, uint32_t v) { self.get_reserved3() = v; })
       .def("data",
            [](const vlink::zerocopy::ObjectArray& self) {
              const size_t payload_size = static_cast<size_t>(self.count()) * static_cast<size_t>(self.pack_size());
@@ -1782,6 +1815,12 @@ NB_MODULE(_vlink_nanobind, m) {
       .def_prop_rw(
           "reserved", [](vlink::zerocopy::AudioFrame& self) { return self.get_reserved(); },
           [](vlink::zerocopy::AudioFrame& self, uint32_t v) { self.get_reserved() = v; })
+      .def_prop_rw(
+          "reserved8", [](vlink::zerocopy::AudioFrame& self) { return self.get_reserved8(); },
+          [](vlink::zerocopy::AudioFrame& self, uint8_t v) { self.get_reserved8() = v; })
+      .def_prop_rw(
+          "reserved32", [](vlink::zerocopy::AudioFrame& self) { return self.get_reserved32(); },
+          [](vlink::zerocopy::AudioFrame& self, uint32_t v) { self.get_reserved32() = v; })
       .def("data", [](const vlink::zerocopy::AudioFrame& self) { return nb::bytes(self.data(), self.size()); })
       .def(
           "fill_data",

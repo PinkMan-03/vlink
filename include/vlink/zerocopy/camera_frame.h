@@ -259,7 +259,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * @details
    * Sets header, camera metadata, and data pointer to match @p target;
    * @c is_owner() becomes @c false.  Any previously owned buffer is freed
-   * first.  The reserved field is not copied.  The source backing buffer must
+   * first.  The reserved field is left unchanged.  The source backing buffer must
    * outlive this borrowed frame.
    *
    * @param target Source frame to borrow from.
@@ -272,7 +272,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    *
    * @details
    * If @c *this already owns a same-size buffer the data is copied in-place;
-   * otherwise a new buffer is allocated.  The reserved field is not copied.
+   * otherwise a new buffer is allocated.  The reserved field is left unchanged.
    *
    * @param target Source frame to copy.
    * @return        @c false if @p target == @c *this, otherwise @c true.
@@ -306,7 +306,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * @brief Releases owned resources and resets frame metadata and @c header.
    *
    * @details
-   * The reserved field returned by @c get_reserved() is left unchanged.
+   * The reserved field is left unchanged.
    */
   void clear() noexcept;
 
@@ -458,13 +458,13 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
   void set_stream(Stream stream) noexcept;
 
   /**
-   * @brief Gets the reserved field.
+   * @brief Returns a mutable reference to the 32-bit reserved field.
    *
    * @details
-   * This field is not reset by @c clear() and is not copied by the current
-   * copy/move helpers.
+   * The reserved field is left unchanged by @c clear() and the copy/move
+   * helpers, and is included in the binary wire format.
    *
-   * @return Reference to the reserved field.
+   * @return Mutable reference to the 32-bit reserved field.
    */
   uint32_t& get_reserved() noexcept { return reserved_; }
 

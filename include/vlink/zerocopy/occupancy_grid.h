@@ -231,7 +231,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) OccupancyGrid final {
    * @details
    * Sets header, grid metadata, and data pointer to match @p target;
    * @c is_owner() becomes @c false.  Any previously owned buffer is freed
-   * first.  The reserved field is not copied.  The source backing buffer must
+   * first.  Reserved fields are left unchanged.  The source backing buffer must
    * outlive this borrowed grid.
    *
    * @param target Source grid to borrow from.
@@ -244,7 +244,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) OccupancyGrid final {
    *
    * @details
    * If @c *this already owns a same-size buffer the data is copied in-place;
-   * otherwise a new buffer is allocated.  The reserved field is not copied.
+   * otherwise a new buffer is allocated.  Reserved fields are left unchanged.
    *
    * @param target Source grid to copy.
    * @return        @c false if @p target == @c *this, otherwise @c true.
@@ -277,6 +277,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) OccupancyGrid final {
 
   /**
    * @brief Releases owned resources and resets grid metadata and @c header.
+   *
+   * @details
+   * Reserved fields are left unchanged.
    */
   void clear() noexcept;
 
@@ -638,15 +641,37 @@ struct VLINK_EXPORT_AND_ALIGNED(8) OccupancyGrid final {
   [[nodiscard]] static uint8_t cell_size_of(CellType type) noexcept;
 
   /**
-   * @brief Gets the reserved field.
+   * @brief Returns a mutable reference to the primary 32-bit reserved field.
    *
    * @details
-   * This field is not reset by @c clear() and is not copied by the current
-   * copy/move helpers.
+   * Compatibility alias for @c get_reserved32().  Reserved fields are left
+   * unchanged by @c clear() and the copy/move helpers, and are included in the
+   * binary wire format.
    *
-   * @return Reference to the reserved field.
+   * @return Mutable reference to the primary 32-bit reserved field.
    */
   uint32_t& get_reserved() noexcept { return reserved32_; }
+
+  /**
+   * @brief Returns a mutable reference to the 16-bit reserved field.
+   *
+   * @return Mutable reference to the 16-bit reserved field.
+   */
+  uint16_t& get_reserved16() noexcept { return reserved16_; }
+
+  /**
+   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   *
+   * @return Mutable reference to the primary 32-bit reserved field.
+   */
+  uint32_t& get_reserved32() noexcept { return reserved32_; }
+
+  /**
+   * @brief Returns a mutable reference to the second 32-bit reserved field.
+   *
+   * @return Mutable reference to the second 32-bit reserved field.
+   */
+  uint32_t& get_reserved2() noexcept { return reserved2_; }
 
   Header header;  ///< Sequencing and timestamp metadata for this grid.
 

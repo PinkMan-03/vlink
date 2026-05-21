@@ -227,6 +227,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ObjectArray final {
 
   /**
    * @brief Borrows the record buffer from @p target without copying.
+   *
+   * @details
+   * Reserved fields are left unchanged.
    */
   bool shallow_copy(const ObjectArray& target) noexcept;
 
@@ -237,11 +240,15 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ObjectArray final {
    * If @c *this already owns a buffer whose capacity matches @c target's
    * @c count * @c pack_size, the data is copied in place; otherwise a new
    * buffer is allocated sized to the target's current logical content.
+   * Reserved fields are left unchanged.
    */
   bool deep_copy(const ObjectArray& target) noexcept;
 
   /**
    * @brief Transfers ownership from @p target.
+   *
+   * @details
+   * Reserved fields are left unchanged in both objects.
    */
   bool move_copy(ObjectArray& target) noexcept;
 
@@ -259,6 +266,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ObjectArray final {
 
   /**
    * @brief Releases owned resources and resets metadata and @c header.
+   *
+   * @details
+   * Reserved fields are left unchanged.
    */
   void clear() noexcept;
 
@@ -372,9 +382,51 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ObjectArray final {
   void set_freq(uint32_t freq) noexcept;
 
   /**
-   * @brief Gets the reserved field.
+   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   *
+   * @details
+   * Compatibility alias for @c get_reserved32().  Reserved fields are left
+   * unchanged by @c clear() and the copy/move helpers, and are included in the
+   * binary wire format.
+   *
+   * @return Mutable reference to the primary 32-bit reserved field.
    */
   uint32_t& get_reserved() noexcept { return reserved32_; }
+
+  /**
+   * @brief Returns a mutable reference to the 8-bit reserved field.
+   *
+   * @return Mutable reference to the 8-bit reserved field.
+   */
+  uint8_t& get_reserved8() noexcept { return reserved8_; }
+
+  /**
+   * @brief Returns a mutable reference to the 16-bit reserved field.
+   *
+   * @return Mutable reference to the 16-bit reserved field.
+   */
+  uint16_t& get_reserved16() noexcept { return reserved16_; }
+
+  /**
+   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   *
+   * @return Mutable reference to the primary 32-bit reserved field.
+   */
+  uint32_t& get_reserved32() noexcept { return reserved32_; }
+
+  /**
+   * @brief Returns a mutable reference to the second 32-bit reserved field.
+   *
+   * @return Mutable reference to the second 32-bit reserved field.
+   */
+  uint32_t& get_reserved2() noexcept { return reserved2_; }
+
+  /**
+   * @brief Returns a mutable reference to the third 32-bit reserved field.
+   *
+   * @return Mutable reference to the third 32-bit reserved field.
+   */
+  uint32_t& get_reserved3() noexcept { return reserved3_; }
 
   Header header;  ///< Sequencing and timestamp metadata for this array.
 

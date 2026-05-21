@@ -224,16 +224,25 @@ struct VLINK_EXPORT_AND_ALIGNED(8) Tensor final {
 
   /**
    * @brief Borrows the data buffer from @p target without copying.
+   *
+   * @details
+   * Reserved fields are left unchanged.
    */
   bool shallow_copy(const Tensor& target) noexcept;
 
   /**
    * @brief Deep-copies the data buffer from @p target.
+   *
+   * @details
+   * Reserved fields are left unchanged.
    */
   bool deep_copy(const Tensor& target) noexcept;
 
   /**
    * @brief Transfers ownership from @p target.
+   *
+   * @details
+   * Reserved fields are left unchanged in both objects.
    */
   bool move_copy(Tensor& target) noexcept;
 
@@ -248,6 +257,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) Tensor final {
 
   /**
    * @brief Releases owned resources and resets metadata and @c header.
+   *
+   * @details
+   * Reserved fields are left unchanged.
    */
   void clear() noexcept;
 
@@ -462,9 +474,37 @@ struct VLINK_EXPORT_AND_ALIGNED(8) Tensor final {
   [[nodiscard]] static uint8_t element_size_of(DataType dtype) noexcept;
 
   /**
-   * @brief Gets the reserved field.
+   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   *
+   * @details
+   * Compatibility alias for @c get_reserved32().  Reserved fields are left
+   * unchanged by @c clear() and the copy/move helpers, and are included in the
+   * binary wire format.
+   *
+   * @return Mutable reference to the primary 32-bit reserved field.
    */
   uint32_t& get_reserved() noexcept { return reserved32_; }
+
+  /**
+   * @brief Returns a mutable reference to the 8-bit reserved field.
+   *
+   * @return Mutable reference to the 8-bit reserved field.
+   */
+  uint8_t& get_reserved8() noexcept { return reserved8_; }
+
+  /**
+   * @brief Returns a mutable reference to the 16-bit reserved field.
+   *
+   * @return Mutable reference to the 16-bit reserved field.
+   */
+  uint16_t& get_reserved16() noexcept { return reserved16_; }
+
+  /**
+   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   *
+   * @return Mutable reference to the primary 32-bit reserved field.
+   */
+  uint32_t& get_reserved32() noexcept { return reserved32_; }
 
   Header header;  ///< Sequencing and timestamp metadata for this tensor.
 

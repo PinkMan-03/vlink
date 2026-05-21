@@ -34,8 +34,8 @@
 #include <vlink/vlink.h>
 
 #include <atomic>
-#include <thread>
 #include <chrono>
+#include <thread>
 
 #include "dds_idlPubSubTypes.h"
 
