@@ -137,6 +137,7 @@ cc_prebuilt_library_shared {
         "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
+        "libprotobuf-cpp-full",
     ],
     check_elf_files: false,
     strip: {
@@ -166,6 +167,7 @@ cc_prebuilt_library_shared {
         "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
+        "libprotobuf-cpp-full",
     ],
     check_elf_files: false,
     strip: {

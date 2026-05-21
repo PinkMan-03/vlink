@@ -226,9 +226,8 @@ cc_library_shared {
         "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
-        "libprotobuf-cpp-lite",
+        "libprotobuf-cpp-full",
     ],
-    proto: {type: "lite"},
 }
 
 // vlink-proxy
@@ -254,9 +253,8 @@ cc_binary {
         "libvlink-dds",
         "libvlink-ddsc",
         "libvlink-proxy_server",
-        "libprotobuf-cpp-lite",
+        "libprotobuf-cpp-full",
     ],
-    proto: {type: "lite"},
 }
 
 // vlink-info
@@ -492,7 +490,6 @@ cc_binary {
         "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
-        "libprotobuf-cpp-lite",
+        "libprotobuf-cpp-full",
     ],
-    proto: {type: "lite"},
 }
