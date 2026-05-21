@@ -287,6 +287,7 @@ bool NodeImpl::enable_security(Security::Config&& cfg) {
   bool needs_encrypt = (impl_type == kPublisher || impl_type == kSetter);
   bool needs_decrypt = (impl_type == kSubscriber || impl_type == kGetter);
 
+#if defined(NDEBUG) || defined(__ANDROID__)
   if (impl_type == kClient) {
     needs_encrypt = true;
     const auto* client_impl = static_cast<const ClientImpl*>(this);
@@ -296,6 +297,17 @@ bool NodeImpl::enable_security(Security::Config&& cfg) {
     const auto* server_impl = static_cast<const ServerImpl*>(this);
     needs_encrypt = server_impl != nullptr && server_impl->is_resp_type;
   }
+#else
+  if (impl_type == kClient) {
+    needs_encrypt = true;
+    const auto* client_impl = dynamic_cast<const ClientImpl*>(this);
+    needs_decrypt = client_impl != nullptr && client_impl->is_resp_type;
+  } else if (impl_type == kServer) {
+    needs_decrypt = true;
+    const auto* server_impl = dynamic_cast<const ServerImpl*>(this);
+    needs_encrypt = server_impl != nullptr && server_impl->is_resp_type;
+  }
+#endif
 
   if VUNLIKELY (needs_encrypt && !candidate->can_encrypt()) {
     VLOG_W("Security::Config cannot encrypt for this sender role.");

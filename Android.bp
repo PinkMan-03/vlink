@@ -246,6 +246,7 @@ cc_binary {
     ],
     shared_libs: [
         "libvlink",
+        "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
         "libvlink-proxy_server",
@@ -420,6 +421,7 @@ cc_binary {
     ],
     shared_libs: [
         "libvlink",
+        "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
     ],
@@ -447,6 +449,7 @@ cc_binary {
     ],
     shared_libs: [
         "libvlink",
+        "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
     ],
@@ -482,6 +485,7 @@ cc_binary {
         "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
+        "libcrypto",
         "libprotobuf-cpp-lite",
     ],
     proto: {type: "lite"},

@@ -262,7 +262,11 @@ inline std::shared_ptr<T> Base::as() const {
     throw Exception::RuntimeError("Target status is unknown");
   }
 
+#if defined(NDEBUG) || defined(__ANDROID__)
+  return std::static_pointer_cast<T>(const_cast<Base*>(this)->shared_from_this());
+#else
   return std::dynamic_pointer_cast<T>(const_cast<Base*>(this)->shared_from_this());
+#endif
 }
 
 }  // namespace Status

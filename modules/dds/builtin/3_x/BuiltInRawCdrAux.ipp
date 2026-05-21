@@ -36,8 +36,8 @@
 #ifdef VLINK_ENABLE_DDS_HACK
 #include "../thirdparty/access_private.h"
 
-ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, offset_);
-ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, end_);
+ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, offset_)
+ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, end_)
 #endif
 
 using namespace eprosima::fastcdr::exception;

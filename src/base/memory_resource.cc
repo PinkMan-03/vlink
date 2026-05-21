@@ -80,7 +80,11 @@ bool MemoryResource::do_is_equal(const std::pmr::memory_resource& other) const n
     return true;
   }
 
+#if defined(NDEBUG) || defined(__ANDROID__)
   const auto* rhs = static_cast<const MemoryResource*>(&other);
+#else
+  const auto* rhs = dynamic_cast<const MemoryResource*>(&other);
+#endif
 
   return rhs != nullptr && pool_ == rhs->pool_;
 }

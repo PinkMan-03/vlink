@@ -312,6 +312,54 @@ inline nb::dict status_to_dict(const vlink::Status::BasePtr& status) {
     }
   };
 
+#if defined(NDEBUG) || defined(__ANDROID__)
+  if (auto s = std::static_pointer_cast<vlink::Status::PublicationMatched>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["current_count"] = s->current_count;
+    d["current_count_change"] = s->current_count_change;
+    put_handle("last_subscription_handle", s->last_subscription_handle);
+  } else if (auto s = std::static_pointer_cast<vlink::Status::OfferedDeadlineMissed>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    put_handle("last_instance_handle", s->last_instance_handle);
+  } else if (auto s = std::static_pointer_cast<vlink::Status::OfferedIncompatibleQos>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["last_policy_id"] = s->last_policy_id;
+  } else if (auto s = std::static_pointer_cast<vlink::Status::LivelinessLost>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+  } else if (auto s = std::static_pointer_cast<vlink::Status::SubscriptionMatched>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["current_count"] = s->current_count;
+    d["current_count_change"] = s->current_count_change;
+    put_handle("last_publication_handle", s->last_publication_handle);
+  } else if (auto s = std::static_pointer_cast<vlink::Status::RequestedDeadlineMissed>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    put_handle("last_instance_handle", s->last_instance_handle);
+  } else if (auto s = std::static_pointer_cast<vlink::Status::LivelinessChanged>(status)) {
+    d["alive_count"] = s->alive_count;
+    d["not_alive_count"] = s->not_alive_count;
+    d["alive_count_change"] = s->alive_count_change;
+    d["not_alive_count_change"] = s->not_alive_count_change;
+    put_handle("last_publication_handle", s->last_publication_handle);
+  } else if (auto s = std::static_pointer_cast<vlink::Status::SampleRejected>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["last_reason"] = static_cast<int>(s->last_reason);
+    put_handle("last_instance_handle", s->last_instance_handle);
+  } else if (auto s = std::static_pointer_cast<vlink::Status::RequestedIncompatibleQos>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+    d["last_policy_id"] = s->last_policy_id;
+  } else if (auto s = std::static_pointer_cast<vlink::Status::SampleLost>(status)) {
+    d["total_count"] = s->total_count;
+    d["total_count_change"] = s->total_count_change;
+  }
+#else
   if (auto s = std::dynamic_pointer_cast<vlink::Status::PublicationMatched>(status)) {
     d["total_count"] = s->total_count;
     d["total_count_change"] = s->total_count_change;
@@ -358,6 +406,7 @@ inline nb::dict status_to_dict(const vlink::Status::BasePtr& status) {
     d["total_count"] = s->total_count;
     d["total_count_change"] = s->total_count_change;
   }
+#endif
 
   return d;
 }

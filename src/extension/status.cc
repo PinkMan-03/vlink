@@ -33,7 +33,11 @@ namespace Status {
 
 template <typename T>
 static void write_if_type(std::ostream& ostream, const Base& status) noexcept {
+#if defined(NDEBUG) || defined(__ANDROID__)
   const auto* target = static_cast<const T*>(&status);
+#else
+  const auto* target = dynamic_cast<const T*>(&status);
+#endif
 
   if VLIKELY (target) {
     ostream << *target;

@@ -39,11 +39,11 @@ namespace {
 #include "../thirdparty/access_private.h"
 
 #if FASTCDR_VERSION_MAJOR >= 2
-ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, offset_);
-ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, end_);
+ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, offset_)
+ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, end_)
 #else
-ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, m_currentPosition);
-ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, m_lastPosition);
+ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, m_currentPosition)
+ACCESS_PRIVATE_FIELD(eprosima::fastcdr::Cdr, eprosima::fastcdr::FastBuffer::iterator, m_lastPosition)
 #endif
 
 #endif
