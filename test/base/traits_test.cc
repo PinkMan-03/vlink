@@ -57,12 +57,12 @@ struct StreamableObj {
   int v{0};
 };
 
-std::ostringstream& operator<<(std::ostringstream& os, const StreamableObj& s) {
+[[maybe_unused]] std::ostringstream& operator<<(std::ostringstream& os, const StreamableObj& s) {
   os << s.v;
   return os;
 }
 
-std::ostringstream& operator>>(std::ostringstream& os, StreamableObj& s) {
+[[maybe_unused]] std::ostringstream& operator>>(std::ostringstream& os, StreamableObj& s) {
   s.v = 0;
   return os;
 }
