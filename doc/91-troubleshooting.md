@@ -74,10 +74,10 @@
 **`vlink-check diag` 新增参数：**
 
 - `-s` / `--summary`：执行完毕后打印 `PASSED / WARNING / FAILED` 统计，便于 CI 汇总；
-- `-f <substring>` / `--filter <substring>`：只跑标题包含子串的诊断项，例如 `-f dds` 只关心 DDS 相关检查；
+- `-f SUBSTRING` / `--filter SUBSTRING`：只跑标题包含子串的诊断项，例如 `-f dds` 只关心 DDS 相关检查；
 - `-a` / `--all`：附加打印所有 `VLINK_ENABLE_*` 编译选项状态。
 
-**`vlink-check env`** 会把 `cli/check/check.cc` 内显式列出的那组 `VLINK_*` 环境变量逐条打印出来（是否已设置、当前值），并在末尾输出汇总行。清单项按编译时传输模块开关动态裁剪：未启用 `VLINK_SUPPORT_ZENOH` / `VLINK_SUPPORT_SHM2` / `VLINK_SUPPORT_MQTT` / `VLINK_SUPPORT_DDS*` / `VLINK_SUPPORT_SOMEIP` / `VLINK_SUPPORT_INTRA` 等模块时，相关 env 段会自动隐藏。`VLINK_BENCH_*` 由 `vlink-bench` 读取，不在 `vlink-check env` 的内置清单中。完整清单仍以 [`doc/21-environment-vars.md`](21-environment-vars.md) 为准。可用 `-p <prefix>` 按前缀过滤，例如 `vlink-check env -p VLINK_ZENOH_` 只看 Zenoh 专属变量。`-b/--available` 只显示已设置项。
+**`vlink-check env`** 会把 `cli/check/check.cc` 内显式列出的那组 `VLINK_*` 环境变量逐条打印出来（是否已设置、当前值），并在末尾输出汇总行。清单项按编译时传输模块开关动态裁剪：未启用 `VLINK_SUPPORT_ZENOH` / `VLINK_SUPPORT_SHM2` / `VLINK_SUPPORT_MQTT` / `VLINK_SUPPORT_DDS*` / `VLINK_SUPPORT_SOMEIP` / `VLINK_SUPPORT_INTRA` 等模块时，相关 env 段会自动隐藏。`VLINK_BENCH_*` 由 `vlink-bench` 读取，不在 `vlink-check env` 的内置清单中。完整清单仍以 [`doc/21-environment-vars.md`](21-environment-vars.md) 为准。可用 `-p PREFIX` 按前缀过滤，例如 `vlink-check env -p VLINK_ZENOH_` 只看 Zenoh 专属变量。`-b/--available` 只显示已设置项。
 
 **`vlink-check test`** 分两段：
 - Part 1 在 `intra://` 上跑 Event / Method / Field 三种 paradigm 的最小往返（对应 `Publisher/Subscriber`、`Client/Server`、`Setter/Getter`）。
@@ -180,14 +180,14 @@ export VLINK_LOG_LEVEL=0
 
 **确认**：
 ```bash
-strace -f -p <pid>                # 看是否卡在 recvfrom / sem_wait
+strace -f -p PID                  # 看是否卡在 recvfrom / sem_wait
 ls /dev/shm/                      # 看有无 iceoryx* 段
 ps aux | grep -E "iox-roudi|vlink-proxy"
 ```
 
 **修复**：
 - **首选**：起 `vlink-proxy -c`（内嵌 iox-roudi + 针对 VLink 载荷分级的 chunk 内存池：默认 `-l 2` Middle = 7 档 / `-l 3` High = 8 档 / `-l 1` Low = 6 档；自带远程监控能力）—— 详见 [§91.6.1](#9161-shm-endpoint-报错启动不了)
-- 多播网卡：用 `VLINK_DDS_IP=<ip>`（DDS 家族）或 `VLINK_ZENOH_MULTICAST_IF=<iface>`（zenoh）显式指定网卡；`VLINK_DDS_BIND=<scheme>` 只是在 URL 层选择 DDS 后端（如 `ddsc`/`ddst`），`VLINK_INTRA_BIND=<scheme>` 是把 `intra://` 重定向到其它后端（值是 scheme 名，如 `shm`/`dds`，不是网卡名），见 [21-environment-vars.md](21-environment-vars.md)
+- 多播网卡：用 `VLINK_DDS_IP=IP`（DDS 家族）或 `VLINK_ZENOH_MULTICAST_IF=IFACE`（zenoh）显式指定网卡；`VLINK_DDS_BIND=SCHEME` 只是在 URL 层选择 DDS 后端（如 `ddsc`/`ddst`），`VLINK_INTRA_BIND=SCHEME` 是把 `intra://` 重定向到其它后端（值是 scheme 名，如 `shm`/`dds`，不是网卡名），见 [21-environment-vars.md](21-environment-vars.md)
 - 改用 `InitType::kWithoutInit` + 显式 `init()` + 超时控制
 
 ### 91.3.3 `Failed to load plugin` / `Unsupported plugin module`
@@ -470,16 +470,16 @@ iox-roudi -c /path/to/iceoryx_config.toml &
 ### 91.8.3 回放速率跟不上原始速率
 
 - 用 `-r 0.5` 放慢；用 `-r 2.0` 加速
-- 解码开销大（Protobuf 大消息）：先 `vlink-bag clone <src> <dst>`（省略 `-p`，即不开压缩）得到无压缩版本再回放
+- 解码开销大（Protobuf 大消息）：先 `vlink-bag clone SRC DST`（省略 `-p`，即不开压缩）得到无压缩版本再回放
 - IO 瓶颈：NVMe → HDD 差一个数量级；存档用 HDD 没问题，回放建议放 SSD
 
 ### 91.8.4 `split_by_size` 和 `split_by_time` 能同时使用吗
 
 可以；任一条件触发都会切。时间单位是**毫秒**。
 
-### 91.8.5 VCAP（`.vcap`）与 MCAP 标准兼容吗
+### 91.8.5 VCAP（.vcap）与 MCAP 标准兼容吗
 
-**是** —— `.vcap` 内部就是 MCAP。可以用 Foxglove 直接打开，也可以 `vlink-bag2mcap` 转一步（主要是改扩展名和补 schema 注册）。
+**是** —— .vcap 内部就是 MCAP。可以用 Foxglove 直接打开，也可以 `vlink-bag2mcap` 转一步（主要是改扩展名和补 schema 注册）。
 
 ### 91.8.6 `Cache size is full, waiting to consume.` 刷屏
 
@@ -501,9 +501,9 @@ iox-roudi -c /path/to/iceoryx_config.toml &
 
 **源码**：`src/extension/vdb_writer.cc:371`、`vdb_reader.cc:179`。
 
-**原因**：VLink 构建时 `ENABLE_SQLITE=OFF`，`.vdb` 读写不可用。
+**原因**：VLink 构建时 `ENABLE_SQLITE=OFF`，.vdb 读写不可用。
 
-**修复**：重新构建时打开 `-DENABLE_SQLITE=ON`；或只用 `.vcap`/MCAP。
+**修复**：重新构建时打开 `-DENABLE_SQLITE=ON`；或只用 .vcap/MCAP。
 
 ---
 
@@ -613,7 +613,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 - `Empty IP address` → 机器无网卡或全部 down
 - `Only find lo` → 物理网卡未启用
 - `VLINK_DDS_IP is empty` → 你没设这个变量（WARN）
-- `<ip> is invalid` → 你设的 `VLINK_DDS_IP` 不在本机 IP 列表
+- `IP is invalid` → 你设的 `VLINK_DDS_IP` 不在本机 IP 列表
 - `Cannot find 239.255.0.100` / `Cannot find 239.255.0.1` → 路由表缺多播项
 - `Unsupported command: ip route` → 系统没有 `ip` 命令（古老发行版）
 - `List running failed` → 无权限读 `/proc` 或 ps 不可用
@@ -717,7 +717,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 - `ZenohFactory: Found invalid qos.` — qos 配置非法
 - `ZenohFactory: Failed to invoke server [z_view_keyexpr_from_str].` / `[z_declare_queryable].`
 
-配置可通过 `VLINK_ZENOH_CONFIG=<json5>`（zenoh-c 仅接受 JSON5 配置）、`VLINK_ZENOH_MODE=router|peer|client`、`VLINK_ZENOH_PEER=<endpoint>` 等调节。
+配置可通过 `VLINK_ZENOH_CONFIG=JSON5`（zenoh-c 仅接受 JSON5 配置）、`VLINK_ZENOH_MODE=router|peer|client`、`VLINK_ZENOH_PEER=ENDPOINT` 等调节。
 
 ### 91.13.8 `someip://` (vsomeip3)
 
@@ -922,7 +922,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 | `--net=bridge`（默认） | ❌（除非额外配置） | 不推荐用 dds:// / intra：跨容器用 host 或 overlay |
 | `--net=container:other` | 取决于 other | — |
 
-**修复**：启动容器时加 `--net=host`；或改用 unicast（`VLINK_DDS_PEER=<ip>`）。
+**修复**：启动容器时加 `--net=host`；或改用 unicast（`VLINK_DDS_PEER=IP`）。
 
 ### 91.18.2 Kubernetes / Service Mesh
 
@@ -935,7 +935,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 ### 91.18.3 VPN / 跨子网
 
 - DDS / VLink 多播不路由到另一个子网；用 `ddsr://`、`zenoh://`、或自己搭 multicast relay
-- `vlink-proxy` 可以跨子网桥接：一端起 `vlink-proxy -b <subnetA>`，另一端起 `vlink-proxy -p <subnetB>`
+- `vlink-proxy` 可以跨子网桥接：一端起 `vlink-proxy -b SUBNET_A`，另一端起 `vlink-proxy -p SUBNET_B`
 
 ### 91.18.4 Docker `/dev/shm` 太小
 
@@ -1141,7 +1141,7 @@ lsof /dev/shm/* | head              # 谁在用
 | `Must set proto dir [-d], ...` | [§91.10.2](#91102-vlink-eproto-sub-报-must-set-proto-dir) | 动态 proto 没 schema 目录 |
 | `Plugin: Version mismatch: local X.Y, required X.Z.` | [§91.22.1](#91221-plugin-版本) | plugin ABI 不对 |
 | `Cache size is full, waiting to consume.` | [§91.8.6](#9186-cache-size-is-full-waiting-to-consume-刷屏) | 回放消费跟不上 |
-| `DiscoveryReporter: Failed to set multicast ...` | [§91.15.1](#91151-failed-to-set-multicast-interface-to-loopback-discovery_reportercc202) | 多播接口配置问题 |
+| `DiscoveryReporter: Failed to set multicast ...` | [§91.15.1](#91151-failed-to-set-multicast-interface-to-loopback-discovery_reportercc206) | 多播接口配置问题 |
 | `Invalid domain id.` | [§91.12.6](#91126-vlink-proxyproxyproxycc) | `vlink-proxy -d` 参数超出 0–255 |
 | `VLINK_RET_RUNTIME_ERROR` | [§91.9.1](#9191-vlink_ret_runtime_error-是什么意思) | C++ 构造时抛异常 |
 | `VLINK_RET_MEMORY_ERROR` | [§91.9.3](#9193-vlink_ret_memory_error-是什么) | 调用方 buffer 太小 |

@@ -4,7 +4,7 @@
 >
 > **核心原则**：拒绝"看起来像对的代码"，只接收"被验证过的代码"。
 >
-> **约定状态**：部分配套工具（如统一的 clang-tidy 检查脚本、统一的格式检查脚本、PR 模板、`.clang-tidy` 的 `WarningsAsErrors` 配置、pre-commit hook、CI 流水线）当前仓库内可能尚未落地——本文描述的是**目标规范**，新贡献者在对应工具上线前应以本文描述的精神作为自检标准。
+> **约定状态**：部分配套工具（如统一的 clang-tidy 检查脚本、统一的格式检查脚本、PR 模板、.clang-tidy 的 WarningsAsErrors 配置、pre-commit hook、CI 流水线）当前仓库内可能尚未落地——本文描述的是**目标规范**，新贡献者在对应工具上线前应以本文描述的精神作为自检标准。
 
 目录：
 
@@ -64,7 +64,7 @@
   - `doc/91-troubleshooting.md`（若影响排障建议）
   - `CHANGELOG.md`（放入当前未发布版本）
   - 相关模块 doc（例如 `doc/07-transport.md`、`doc/13-cli-tools.md` 等）
-- [ ] 改了 CLI 子命令/选项 → 同步 `cli/<tool>/etc/completions/vlink-<tool>.{bash,zsh}` 两份补全脚本
+- [ ] 改了 CLI 子命令/选项 → 同步 `cli/TOOL/etc/completions/vlink-TOOL.{bash,zsh}` 两份补全脚本
 - [ ] 改了 env 变量 → 同步 `doc/21-environment-vars.md`
 - [ ] 新增/改示例 → 同级 `README.md` 更新；顶层 `doc/22-examples.md` 类别计数更新
 - [ ] 涉及的 `doc/images/*.drawio` 若有文字过期 → 同时更新 `.drawio` 源 + 重新导出同名 `.png`
@@ -89,7 +89,7 @@
 | CMake | 3.15 | Conan 2 要求 3.15 |
 | C++ 编译器 | GCC 9 / Clang 10 / MSVC 2019 / Apple Clang 12 | 必须支持 C++17 |
 | Conan | 2.0 | 非强制，但推荐 |
-| clang-format | 14 以上 | 更低版本对 `.clang-format` 某些选项兼容性不一致 |
+| clang-format | 14 以上 | 更低版本对 .clang-format 某些选项兼容性不一致 |
 | clang-tidy | 14 以上 | 与 clang-format 对齐 |
 | Git | 2.25 | sparse-checkout / worktree 相关功能依赖 |
 | drawio (CLI) | 24.x | 用于 headless 导出 PNG（参见 [§92.13](#9213-示意图drawio贡献规则)） |
@@ -133,7 +133,7 @@ VLink 采用 **master + 功能分支（feature branch）** 模型：
 
 ### 92.3.2 分支命名
 
-格式：`<类型>/<短描述>-<issue 号?>`
+格式：`TYPE/SUMMARY-ISSUE?`
 
 | 类型 | 何时用 | 示例 |
 |---|---|---|
@@ -148,7 +148,7 @@ VLink 采用 **master + 功能分支（feature branch）** 模型：
 
 规则：
 - 全小写、以连字符 `-` 分词
-- `<短描述>` 不超过 50 字符
+- `SUMMARY` 不超过 50 字符
 - 最好带对应 issue 号
 - **禁止** 用 `tmp/`、`test-1/`、`xxx/`、人名前缀等不规范命名
 
@@ -158,16 +158,16 @@ VLink 采用 **master + 功能分支（feature branch）** 模型：
 
 VLink 采用 **Conventional Commits** 简化版。
 
-> **当前仓库基线**：`git log` 中现存提交普遍是 `<type>: <subject>` 形式（不带 scope），且 subject 多为简短中文/英文短语。本节描述的是**目标规范**——新贡献请按目标规范提交；历史提交可能不完全符合，逐步迁移即可。
+> **当前仓库基线**：`git log` 中现存提交普遍是 `type: subject` 形式（不带 scope），且 subject 多为简短中文/英文短语。本节描述的是**目标规范**——新贡献请按目标规范提交；历史提交可能不完全符合，逐步迁移即可。
 
 ### 92.4.1 格式
 
 ```
-<type>(<scope>): <subject>
+type(scope): subject
 
-<body, optional>
+body (optional)
 
-<footer, optional>
+footer (optional)
 ```
 
 ### 92.4.2 type 合法值
@@ -188,7 +188,7 @@ VLink 采用 **Conventional Commits** 简化版。
 
 ### 92.4.3 scope 常用值
 
-`core` · `base` · `extension` · `impl` · `c_api` · `python_api` · `proxy` · `viewer` · `webviz` · `cli-<name>` · `module-<name>` · `examples` · `docs` · `cmake`
+`core` · `base` · `extension` · `impl` · `c_api` · `python_api` · `proxy` · `viewer` · `webviz` · `cli-NAME` · `module-NAME` · `examples` · `docs` · `cmake`
 
 对跨多 scope 的改动，可省略 scope 或用 `*`。
 
@@ -387,7 +387,7 @@ docs: align cheatsheet with v2.0.0 API snapshot
 - `examples/**/README.md` 中的说明
 - 任何 `.md` / `.txt` 类非源码文档
 
-**违反本规则的代码会被 CI grep 拦截。** 如果某个术语（如"北斗"、"国标"）确实需要中文出现在代码里，请在 PR 描述中说明并附加 `// NOLINT: chinese-ok <reason>` 注释。
+**违反本规则的代码会被 CI grep 拦截。** 如果某个术语（如"北斗"、"国标"）确实需要中文出现在代码里，请在 PR 描述中说明并附加 `// NOLINT: chinese-ok reason` 注释。
 
 **错误示例**：
 ```cpp
@@ -417,7 +417,7 @@ Bytes serialize(const MsgT& msg);
 
 ```cpp
 /**
- * @brief One-line summary (< 80 chars).
+ * @brief One-line summary (under 80 chars).
  *
  * @details
  * Longer explanation. Multiple paragraphs allowed.
@@ -445,7 +445,7 @@ Bytes serialize(const MsgT& msg);
 
 ```cpp
 /*
- * Copyright (C) <YEAR> by Thun Lu. All rights reserved.
+ * Copyright (C) YEAR by Thun Lu. All rights reserved.
  * Author: <Your Name> <your.email@example.com>
  * Repo:   https://github.com/thun-res/vlink
  *  _    __   __      _           __
@@ -468,7 +468,7 @@ Bytes serialize(const MsgT& msg);
  */
 ```
 
-ASCII art logo 块可直接 copy 自任意现有 VLink 源文件。`<YEAR>` 填创建年份，后续修改不用改年份。
+ASCII art logo 块可直接 copy 自任意现有 VLink 源文件。`YEAR` 填创建年份，后续修改不用改年份。
 
 对 CMake 文件、shell 脚本、Python 脚本，用相应注释风格转写同一段 license 文本。
 
@@ -540,7 +540,7 @@ git diff --name-only --diff-filter=ACMR HEAD \
 **如何绕开（仅在有明确原因时）**：
 
 ```cpp
-// NOLINTNEXTLINE(<check-name>): <reason, one line>
+// NOLINTNEXTLINE(check-name): reason, one line
 auto x = questionable_call();
 ```
 
@@ -560,7 +560,7 @@ auto x = questionable_call();
 
 ### 92.7.2 新代码覆盖要求
 
-- 新 `.cc` 文件 → 必须有对应的 `test/<same-path>_test.cc`
+- 新 .cc 文件 → 必须有对应的 `test/SAME_PATH_test.cc`
 - 修 bug → 必须先写重现该 bug 的**失败**测试，再让修复让它变绿
 - 仅删代码 → 可以只修测试，不必新增
 - 所有公共 API（`include/vlink/**` 里的导出类/函数）都要有正向 + 异常路径的测试
@@ -609,7 +609,7 @@ TEST_CASE("Publisher::publish returns false when no subscribers and force=false"
 | 序列化类型数量 | `doc/06-serialization.md` / `include/vlink/serializer.h` / 根 README / `doc/90-cheatsheet.md` |
 | QoS 预设数量 | `include/vlink/extension/qos_profile.h` 的 docstring 表 / `doc/08-qos.md` / `doc/90-cheatsheet.md` / `CHANGELOG.md` |
 | base 库组件数量 | `doc/11-base-library.md` 的表格 + 摘要 / `doc/00-whitepaper.md` "其他实用组件"表 |
-| 示例数量 / 类别 | `doc/22-examples.md` 类别计数 / 各 `examples/<category>/README.md` |
+| 示例数量 / 类别 | `doc/22-examples.md` 类别计数 / 各 `examples/CATEGORY/README.md` |
 | 环境变量 | `doc/21-environment-vars.md` / `doc/90-cheatsheet.md` |
 | CMake 选项 | 根 README "Available CMake targets" / `doc/01-build.md` / `doc/00-whitepaper.md` "常用构建选项" |
 
@@ -618,8 +618,8 @@ TEST_CASE("Publisher::publish returns false when no subscribers and force=false"
 ### 92.8.2 CLI completion 脚本
 
 改了 CLI 的任何**子命令 / 顶层选项**，必须更新：
-- `cli/<tool>/etc/completions/vlink-<tool>.bash`
-- `cli/<tool>/etc/completions/vlink-<tool>.zsh`
+- `cli/TOOL/etc/completions/vlink-TOOL.bash`
+- `cli/TOOL/etc/completions/vlink-TOOL.zsh`
 
 两份文件必须列举**完全相同**的子命令集合。
 
@@ -711,7 +711,7 @@ void old_function();
 - 文件路径分隔符：只用 `/`；`\` 只出现在 Windows 路径字面量里
 - 线程 API：优先用 `std::thread`、`std::atomic`、`std::mutex`；需要高性能时再用 `base/spin_lock.h` / `base/semaphore.h`
 - 时间 API：用 `std::chrono`，禁止混用 `time()` / `gettimeofday()` / `GetSystemTime()`
-- 整数类型：用 `<cstdint>` 的定长类型（`int32_t` / `int64_t` / `uint8_t`），不用 `int` / `long`（Windows 和 Linux 对 long 的宽度不一致）
+- 整数类型：用 cstdint 的定长类型（`int32_t` / `int64_t` / `uint8_t`），不用 `int` / `long`（Windows 和 Linux 对 long 的宽度不一致）
 
 ### 92.10.3 QNX / Android 特别注意
 
@@ -725,7 +725,7 @@ void old_function();
 
 ### 92.11.1 性能测试
 
-- 所有"快路径"（publish / invoke / listen 回调链路）修改必须跑一轮 `vlink-bench run --preset quick` 并对比 HEAD 基线
+- 所有"快路径"（publish / invoke / listen 回调链路）修改必须跑一轮 vlink-bench quick 预设并对比 HEAD 基线
 - PR 描述里贴截屏或对比表；性能下降 >5% 必须在评审中说明原因或回滚
 
 ### 92.11.2 性能约束
@@ -776,15 +776,15 @@ void old_function();
 
 ### 92.13.1 文件组织
 
-- 源文件：`doc/images/<topic>.drawio`
-- 导出：`doc/images/<topic>.png`
+- 源文件：`doc/images/TOPIC.drawio`
+- 导出：`doc/images/TOPIC.png`
 - 两者**必须同名成对提交**；任何只改 `.png` 不改 `.drawio` 的 PR 会被拒
 
 ### 92.13.2 导出命令
 
 ```bash
 cd doc/images/
-drawio -x -t -f png -o <topic>.png <topic>.drawio
+drawio -x -t -f png -o TOPIC.png TOPIC.drawio
 ```
 
 `-x` 进入导出模式、`-t` 透明背景、`-f png` 指定格式；headless 环境（CI / SSH 终端）如遇沙箱权限错误，可临时追加 `--no-sandbox`。
@@ -804,7 +804,7 @@ drawio -x -t -f png -o <topic>.png <topic>.drawio
 
 ### 92.13.4 图与 doc 的绑定
 
-- 每张图在引用它的 doc 里必须至少**提一个锚点**（标题或 `images/<name>.png` 形式的图片引用）
+- 每张图在引用它的 doc 里必须至少**提一个锚点**（标题或 `images/NAME.png` 形式的图片引用）
 - 改代码时若影响图面信息（CLI 数量、transport 数量、枚举、流程），**同时** 改 drawio 源 + 重生 PNG
 - 没有引用的孤儿 drawio 会被周期性清理
 
@@ -816,35 +816,35 @@ drawio -x -t -f png -o <topic>.png <topic>.drawio
 
 ### 92.14.1 代码
 - [ ] 在 `include/vlink/impl/types.h` 的 `enum class TransportType` 末尾加新值（**不要** 插在中间，保留整数稳定）
-- [ ] 在 `modules/` 下新建 `modules/<name>/` 目录，仿照 `modules/mqtt/` 结构
-- [ ] `modules/<name>/CMakeLists.txt`：
-  - 定义 `SKIP_<NAME>` 选项（beta 建议默认 ON）
-  - 定义 `VLINK_SUPPORT_<NAME>` 编译宏
+- [ ] 在 `modules/` 下新建 `modules/NAME/` 目录，仿照 `modules/mqtt/` 结构
+- [ ] `modules/NAME/CMakeLists.txt`：
+  - 定义 `SKIP_NAME` 选项（beta 建议默认 ON）
+  - 定义 `VLINK_SUPPORT_NAME` 编译宏
   - 在缺依赖时 `return()`，不要 `FATAL_ERROR`
 - [ ] 实现 6 个原语的工厂类：Publisher / Subscriber / Server / Client / Setter / Getter
-- [ ] URL 解析在 `<name>_conf.cc`：非法时抛 `Exception::RuntimeError`（参考 `modules/mqtt/src/mqtt_conf.cc`）
+- [ ] URL 解析在 `NAME_conf.cc`：非法时抛 `Exception::RuntimeError`（参考 `modules/mqtt/src/mqtt_conf.cc`）
 
 ### 92.14.2 构建集成
 - [ ] 在根 `CMakeLists.txt` 的 `modules/` 扫描列表里加入（如适用）
-- [ ] 新增 CMake target：`vlink::<name>`
+- [ ] 新增 CMake target：`vlink::NAME`
 - [ ] 更新根 `README.md`（中文）与 `README.en_us.md`（英文）的 transport 表 + target 列表
 - [ ] 更新 `doc/07-transport.md`（加详细行）
 - [ ] 更新 `doc/90-cheatsheet.md` 的 Transport 表
 
 ### 92.14.3 测试
-- [ ] 行为测试放在 `test/<name>_test.cc`，至少覆盖：Pub/Sub 双向、Server/Client 双向、Setter/Getter 双向
-- [ ] 配置解析测试放在 `test/modules/<name>_conf_test.cc`
+- [ ] 行为测试放在 `test/NAME_test.cc`，至少覆盖：Pub/Sub 双向、Server/Client 双向、Setter/Getter 双向
+- [ ] 配置解析测试放在 `test/modules/NAME_conf_test.cc`
 - [ ] 如果依赖外部 broker（如 mqtt），测试要能用 `--docker` 起 broker（参照现有 `test/mqtt_test.cc`）
 
 ### 92.14.4 文档
-- [ ] 示例：`examples/url_guide/url_<name>/` 新建一个完整示例 + README
-- [ ] 诊断：在 `doc/91-troubleshooting.md` 加一节"§N. <name>:// 专属问题"
+- [ ] 示例：`examples/url_guide/url_NAME/` 新建一个完整示例 + README
+- [ ] 诊断：在 `doc/91-troubleshooting.md` 加一节"§N. NAME:// 专属问题"
 - [ ] drawio：`doc/images/transport-decision-tree.drawio` 的决策树里加新分支 + 重生 PNG
 
 ### 92.14.5 CHANGELOG
 - [ ] 在 `CHANGELOG.md` 当前未发布版本下加：
   ```
-  - New transport: `<name>://` (backed by <dependency>, beta). See doc/07.
+  - New transport: NAME:// (backed by DEPENDENCY, beta). See doc/07.
   ```
 
 ---
@@ -853,31 +853,31 @@ drawio -x -t -f png -o <topic>.png <topic>.drawio
 
 完整 checklist：
 
-- [ ] `cli/<toolname>/` 目录，至少含 `<tool>.cc` / `CMakeLists.txt`；只有工具复杂到需要拆分时再增加额外 `.h/.cc`
-- [ ] CMake 里 `project(vlink-<toolname> LANGUAGES CXX)` + `add_executable`
-- [ ] 根 `CMakeLists.txt` 加 `option(ENABLE_CLI_<TOOLNAME>)` 和 `add_subdirectory`
-- [ ] 工具名统一 `vlink-<toolname>`；install 时创建无前缀符号链接
+- [ ] `cli/TOOLNAME/` 目录，至少含 `TOOL.cc` / `CMakeLists.txt`；只有工具复杂到需要拆分时再增加额外 .h/.cc
+- [ ] CMake 里 `project(vlink-TOOLNAME LANGUAGES CXX)` + `add_executable`
+- [ ] 根 `CMakeLists.txt` 加 `option(ENABLE_CLI_TOOLNAME)` 和 `add_subdirectory`
+- [ ] 工具名统一 `vlink-TOOLNAME`；install 时创建无前缀符号链接
 - [ ] `-h / --help` 和 `-v / --version` 支持；argparse 统一用项目内置实现
-- [ ] 补全脚本：`cli/<toolname>/etc/completions/vlink-<toolname>.bash` + `.zsh`
+- [ ] 补全脚本：`cli/TOOLNAME/etc/completions/vlink-TOOLNAME.bash` + `.zsh`
 - [ ] 更新：根 README ×2 / `doc/00-whitepaper.md` / `doc/13-cli-tools.md` / `doc/90-cheatsheet.md` / CLI 数量计数
 - [ ] drawio：`cli-tools-overview.drawio` + `foreword-cli-tools-table.drawio` 加新条目 + 重生 PNG
-- [ ] 示例 / 文档里至少有一个 `vlink-<toolname> ...` 的完整调用示例
+- [ ] 示例 / 文档里至少有一个 `vlink-TOOLNAME ...` 的完整调用示例
 
 ---
 
 ## 92.16 VLink 专属：新增 Example
 
-在 `examples/<category>/<name>/` 下：
+在 `examples/CATEGORY/NAME/` 下：
 
-- [ ] `CMakeLists.txt`：使用 `project(example_<name> LANGUAGES CXX)`，再 `add_executable(${PROJECT_NAME} ...)` + `target_link_libraries(... PRIVATE vlink::...)`
+- [ ] `CMakeLists.txt`：使用 `project(example_NAME LANGUAGES CXX)`，再 `add_executable(${PROJECT_NAME} ...)` + `target_link_libraries(... PRIVATE vlink::...)`
 - [ ] `README.md`：必须包含
   - 一句话说明示例目标
   - 使用到的 API 列表
   - 怎么运行（包括需要预先起什么：RouDi / broker / ...）
   - 预期输出（至少贴 2-3 行）
 - [ ] 源码：一个文件 ≤ 300 行；凡超过就拆或证明它是整体必要的
-- [ ] 更新 `examples/<category>/CMakeLists.txt` 的 `add_subdirectory`
-- [ ] 更新 `doc/22-examples.md` 的 `<category>` 计数和描述
+- [ ] 更新 `examples/CATEGORY/CMakeLists.txt` 的 `add_subdirectory`
+- [ ] 更新 `doc/22-examples.md` 的 `CATEGORY` 计数和描述
 
 ---
 
@@ -885,12 +885,12 @@ drawio -x -t -f png -o <topic>.png <topic>.drawio
 
 新的 plugin 接口（Conf / Logger / Schema / Runnable / UrlRemap 之外）：
 
-- [ ] `include/vlink/extension/<name>_plugin_interface.h` 定义抽象基类
+- [ ] `include/vlink/extension/NAME_plugin_interface.h` 定义抽象基类
   - 所有虚函数声明为 `= 0`
   - 必须有虚析构函数
   - 必须有 `get_plugin_id()` / `get_version_major()` / `get_version_minor()`
 - [ ] 在 `src/base/plugin.cc` 的已知插件表里登记
-- [ ] 提供一个参考实现 `examples/plugin/plugin_<name>/`
+- [ ] 提供一个参考实现 `examples/plugin/plugin_NAME/`
 - [ ] 文档：更新 `doc/19-extensions.md` 的"5 种插件类型"计数与说明
 
 ---
@@ -922,7 +922,7 @@ drawio -x -t -f png -o <topic>.png <topic>.drawio
 
 ### 92.18.4 可读性
 
-- [ ] 命名足够表意（变量名不是 `x`, `tmp`, `data2`）
+- [ ] 命名足够表意（变量名不是 x, tmp, data2）
 - [ ] 注释解释"为什么"（不是"是什么"——那已经写在代码里了）
 - [ ] 函数长度 ≤ 80 行；深度嵌套 ≤ 4 层
 

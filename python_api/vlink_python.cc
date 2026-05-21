@@ -550,7 +550,8 @@ void bind_publisher(nb::module_& m, const char* name, const char* doc) {
           },
           "data"_a, "force"_a = false, "Publish a finished FlatBuffers byte buffer.")
       .def("mark_as_setter", &PubT::mark_as_setter)
-      .def("__repr__", [](const PubT& self) { return "Publisher(url='" + self.get_url() + "')"; });
+      .def("__repr__",
+           [name = std::string(name)](const PubT& self) { return name + "(url='" + self.get_url() + "')"; });
 }
 
 template <typename SubT, typename MsgT, typename Codec = PythonCodec<MsgT>, bool SecurityNode = false>
@@ -575,7 +576,8 @@ void bind_subscriber(nb::module_& m, const char* name, const char* doc) {
       .def("get_latency", &SubT::get_latency)
       .def("get_lost", &SubT::get_lost)
       .def("mark_as_getter", &SubT::mark_as_getter)
-      .def("__repr__", [](const SubT& self) { return "Subscriber(url='" + self.get_url() + "')"; });
+      .def("__repr__",
+           [name = std::string(name)](const SubT& self) { return name + "(url='" + self.get_url() + "')"; });
 }
 
 template <typename ServerT, typename ReqT, typename RespT, typename ReqCodec = PythonCodec<ReqT>,
@@ -636,7 +638,8 @@ void bind_server(nb::module_& m, const char* name, const char* doc) {
             return self.reply(req_id, RespCodec::from_python_owned(data));
           },
           "req_id"_a, "data"_a)
-      .def("__repr__", [](const ServerT& self) { return "Server(url='" + self.get_url() + "')"; });
+      .def("__repr__",
+           [name = std::string(name)](const ServerT& self) { return name + "(url='" + self.get_url() + "')"; });
 }
 
 template <typename ServerT, typename ReqT, typename ReqCodec = PythonCodec<ReqT>, bool SecurityNode = false>
@@ -668,7 +671,8 @@ void bind_fire_forget_server(nb::module_& m, const char* name, const char* doc) 
            });
          },
          "callback"_a, "callback(request) -> None")
-      .def("__repr__", [](const ServerT& self) { return "FireForgetServer(url='" + self.get_url() + "')"; });
+      .def("__repr__",
+           [name = std::string(name)](const ServerT& self) { return name + "(url='" + self.get_url() + "')"; });
 }
 
 template <typename ClientT, typename ReqT, typename RespT, typename ReqCodec = PythonCodec<ReqT>,
@@ -761,8 +765,9 @@ void bind_client(nb::module_& m, const char* name, const char* doc) {
             return py_future;
           },
           "data"_a, "Return a concurrent.futures.Future resolved with the response bytes.")
-      .def("__repr__", [](const ClientT& self) {
-        return "Client(url='" + self.get_url() + "', connected=" + (self.is_connected() ? "True" : "False") + ")";
+      .def("__repr__", [name = std::string(name)](const ClientT& self) {
+        const char* connected = !self.has_inited() ? "Unknown" : (self.is_connected() ? "True" : "False");
+        return name + "(url='" + self.get_url() + "', connected=" + connected + ")";
       });
 }
 
@@ -800,9 +805,9 @@ void bind_fire_forget_client(nb::module_& m, const char* name, const char* doc) 
             return self.send(req);
           },
           "data"_a)
-      .def("__repr__", [](const ClientT& self) {
-        return "FireForgetClient(url='" + self.get_url() + "', connected=" + (self.is_connected() ? "True" : "False") +
-               ")";
+      .def("__repr__", [name = std::string(name)](const ClientT& self) {
+        const char* connected = !self.has_inited() ? "Unknown" : (self.is_connected() ? "True" : "False");
+        return name + "(url='" + self.get_url() + "', connected=" + connected + ")";
       });
 }
 
@@ -820,7 +825,8 @@ void bind_setter(nb::module_& m, const char* name, const char* doc) {
   cls.def(
          "set", [](SetterT& self, nb::handle data) { self.set(Codec::from_python_owned(data)); }, "data"_a)
       .def("mark_as_publisher", &SetterT::mark_as_publisher)
-      .def("__repr__", [](const SetterT& self) { return "Setter(url='" + self.get_url() + "')"; });
+      .def("__repr__",
+           [name = std::string(name)](const SetterT& self) { return name + "(url='" + self.get_url() + "')"; });
 }
 
 template <typename GetterT, typename ValueT, typename Codec = PythonCodec<ValueT>, bool SecurityNode = false>
@@ -864,7 +870,8 @@ void bind_getter(nb::module_& m, const char* name, const char* doc) {
       .def("get_latency", &GetterT::get_latency)
       .def("get_lost", &GetterT::get_lost)
       .def("mark_as_subscriber", &GetterT::mark_as_subscriber)
-      .def("__repr__", [](const GetterT& self) { return "Getter(url='" + self.get_url() + "')"; });
+      .def("__repr__",
+           [name = std::string(name)](const GetterT& self) { return name + "(url='" + self.get_url() + "')"; });
 }
 
 }  // namespace
@@ -1470,11 +1477,11 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("try_lock", &vlink::SpinLock::try_lock)
       .def("unlock", &vlink::SpinLock::unlock)
       .def("__enter__",
-           [](vlink::SpinLock& self) -> vlink::SpinLock& {
-             self.lock();
+           [](nb::object self) -> nb::object {
+             nb::cast<vlink::SpinLock&>(self).lock();
              return self;
            })
-      .def("__exit__", [](vlink::SpinLock& self, nb::object, nb::object, nb::object) { self.unlock(); });
+      .def("__exit__", [](vlink::SpinLock& self, nb::args, nb::kwargs) { self.unlock(); });
 
   nb::class_<vlink::CpuProfiler>(m, "CpuProfiler", "CPU active-time profiler")
       .def(nb::init<>())
@@ -1484,11 +1491,11 @@ NB_MODULE(_vlink_nanobind, m) {
       .def("get", &vlink::CpuProfiler::get)
       .def("restart", &vlink::CpuProfiler::restart)
       .def("__enter__",
-           [](vlink::CpuProfiler& self) -> vlink::CpuProfiler& {
-             self.begin();
+           [](nb::object self) -> nb::object {
+             nb::cast<vlink::CpuProfiler&>(self).begin();
              return self;
            })
-      .def("__exit__", [](vlink::CpuProfiler& self, nb::object, nb::object, nb::object) { self.end(); });
+      .def("__exit__", [](vlink::CpuProfiler& self, nb::args, nb::kwargs) { self.end(); });
 
   nb::class_<vlink::CpuProfilerGuard>(m, "CpuProfilerGuard", "RAII guard that brackets CpuProfiler.begin/end")
       .def(nb::init<vlink::CpuProfiler*>(), "profiler"_a, nb::keep_alive<1, 2>());

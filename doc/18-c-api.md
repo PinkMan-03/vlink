@@ -37,7 +37,7 @@ VLink C API 提供了一套稳定的、语言无关的纯 C 绑定，封装了 V
 
 ## 18.3 编译选项
 
-C API 以独立库 `vlink-c_api` 的形式提供，需单独链接。
+C API 以独立库 `vlink-c_api` 的形式提供，由构建开关 `ENABLE_C_API` 控制。CMake 目标同时导出为 `vlink::c_api` 和 `vlink::vlink-c_api`，使用方需单独链接其中一个别名。
 
 ### 18.3.1 CMake 集成
 
@@ -54,7 +54,7 @@ target_link_libraries(my_c_app PRIVATE vlink::c_api)
 | `VLINK_C_API_LIBRARY`       | 构建动态库时由库自动定义（启用 `dllexport`）       |
 | `VLINK_C_API_LIBRARY_STATIC`| 构建静态库时由库自动定义，使用方也需定义           |
 | `VLINK_C_API_EXPORT`        | 函数可见性修饰符，自动根据平台和构建类型展开       |
-| `VLINK_ENABLE_C_INTERFACE`  | 库内部编译标志，表明正在构建 C API 模块            |
+| `VLINK_ENABLE_C_INTERFACE`  | 库内部编译标志，表明正在构建 C API 模块；用户侧构建开关是 `ENABLE_C_API` |
 
 ### 18.3.3 头文件包含
 

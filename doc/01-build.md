@@ -181,7 +181,7 @@ cmake -B build -S . -LH
 
 | 选项名                 | 默认值   | 类型   | 说明                                                           |
 | ---------------------- | -------- | ------ | -------------------------------------------------------------- |
-| `BUILD_SHARED_LIBS`    | `ON`     | BOOL   | 构建动态库（`.so`/`.dll`）；`OFF` 时构建静态库（`.a`/`.lib`）  |
+| `BUILD_SHARED_LIBS`    | `ON`     | BOOL   | 构建动态库（.so/.dll）；`OFF` 时构建静态库（.a/.lib）          |
 | `CMAKE_BUILD_TYPE`     | `Release`| STRING | 构建类型：`Release`/`Debug`/`RelWithDebInfo`/`MinSizeRel`      |
 | `ENABLE_CXX_STD_20`    | 自动检测 | BOOL   | 启用 C++20 特性；若编译器支持则自动开启                        |
 | `ENABLE_CCACHE_BUILD`  | `OFF`    | BOOL   | 启用 ccache 编译缓存加速（需要系统安装 ccache）                |
@@ -1224,7 +1224,7 @@ tools/
 | `QNX_INSTALL_PREFIX`    | QNX       | 自定义安装前缀（默认 `$QNX_TARGET/aarch64le/usr/local`）|
 | `CFLAGS` / `CXXFLAGS`   | 全平台    | 追加编译标志                                  |
 | `OE_CMAKE_TOOLCHAIN_FILE` | 全平台  | Yocto SDK 工具链文件路径（优先包含）          |
-| `VLINK_HOST_PLATFORM`   | Linux/macOS | 运行时主机平台标识，用于调整 find_* 模式    |
+| `VLINK_HOST_PLATFORM`   | Linux/macOS | CMake 配置期主机平台标识，用于交叉编译工具链判断宿主架构并调整 `find_*` 行为 |
 
 ### 1.7.4 ARM Linux (aarch64-linux-gnu)
 

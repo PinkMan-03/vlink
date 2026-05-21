@@ -2,7 +2,7 @@
 
 ## 10.1 概述
 
-![Zerocopy Layers](images/zerocopy-layers.png)
+![Zero-copy Layers](images/zerocopy-layers.png)
 
 VLink 的零拷贝能力分布在两个正交的层次：
 

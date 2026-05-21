@@ -76,7 +76,7 @@
         <mxCell id="ld_bar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8e24aa;strokeColor=none;arcSize=30;" vertex="1" parent="1">
           <mxGeometry x="560" y="430" width="300" height="6" as="geometry" />
         </mxCell>
-        <mxCell id="ld_t" value="Runable Plugins + Loader" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor=#4a148c;" vertex="1" parent="1">
+        <mxCell id="ld_t" value="Runnable Plugins + Loader" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor=#4a148c;" vertex="1" parent="1">
           <mxGeometry x="576" y="444" width="268" height="24" as="geometry" />
         </mxCell>
         <mxCell id="ld_l" value="MessageLoop plugin plus loader checks" style="text;html=1;align=left;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=11;fontStyle=2;fontColor=#6a1b9a;" vertex="1" parent="1">

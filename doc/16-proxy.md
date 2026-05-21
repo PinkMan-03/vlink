@@ -256,7 +256,7 @@ vlink-proxy [选项]
   -c, --iox_config PATH   Iceoryx TOML 配置路径（**给 -c 即隐式 use_iox=true**，无独立 use_iox 开关）
   -l, --iox_strategy INT  Iceoryx 内存策略（1/2/3，CLI 默认 2；注意 ProxyServer::Config 结构体默认是 1，此处为 vlink-proxy CLI 覆盖）
   -m, --iox_monitoring STR  Iceoryx 监控（on/off，默认 on）
-  --dds_impl STRING       DDS 实现（CLI 仅接受 dds/ddsc，依赖编译期 ENABLE_DDS/ENABLE_DDSC，默认 dds；ddsr/ddst 仅可在程序里通过 ProxyServer::Config.dds_impl 设置）
+  --dds_impl STRING       DDS 实现（CLI 仅接受 dds/ddsc，依赖编译期 VLINK_SUPPORT_DDS/VLINK_SUPPORT_DDSC；构建侧由 SKIP_DDS/SKIP_DDSC 控制，默认 dds；ddsr/ddst 仅可在程序里通过 ProxyServer::Config.dds_impl 设置）
   --runnable NAME...      加载 runnable 插件名称列表（API 名为 RunablePluginInterface）
 ```
 
@@ -445,8 +445,8 @@ message HandshakeResp {
 
 #### 16.8.6.6 与早期版本的兼容性
 
-| 客户端 ENABLE_HANDSHAKE | 服务端 ENABLE_HANDSHAKE | 行为 |
-|------------------------|-------------------------|------|
+| 客户端 `VLINK_PROXY_ENABLE_HANDSHAKE` | 服务端 `VLINK_PROXY_ENABLE_HANDSHAKE` | 行为 |
+|--------------------------------------|--------------------------------------|------|
 | 1 (默认) | 1 (默认) | 完整握手,Control / Time 带 token,失配自愈 |
 | 0 | 0 | 跳过握手,Time/Control 不写 token；服务端不校验 token；行为同早期版本 |
 | 1 | 0 | 客户端反复重试握手且 `token` 为空，`send_control_sync()` 拒发；不会因 RPC 通道超时上报 `kTokenError`，但行为不直观 |

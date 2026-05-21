@@ -603,7 +603,7 @@ URL TYPE    COUNT    SIZE      FREQ        SER
 ...
 ```
 
-> `Compression:` 的值由 writer 写入：`.vdb`/`.vdbx`（SQLite）启用压缩时写 `lzav`，否则 `None`；`.vcap`/`.vcapx`（MCAP）启用压缩时写 `zstd`，否则 `None`。
+> `Compression:` 的值由 writer 写入：.vdb/.vdbx（SQLite）启用压缩时写 `lzav`，否则 `None`；.vcap/.vcapx（MCAP）启用压缩时写 `zstd`，否则 `None`。
 
 #### 13.7.2.4 clone — 克隆/转换
 
@@ -947,7 +947,7 @@ vlink-eproto pub dds://test/msg -d /home/protos/ -s pb.TestMsg \
 
 ### 13.10.1 功能说明
 
-`vlink-efbs` 功能与 `vlink-eproto` 相同，但针对 FlatBuffers 序列化格式。同样支持 `sub`（订阅显示）和 `pub`（发布消息）两个子命令。FlatBuffers 的 schema 文件（`.fbs`）目录通过 `-d/--fbs_dir` 参数或 `VLINK_FBS_DIR` 环境变量指定。普通 FlatBuffers 消息的输入本身按 JSON 语法解析，显示时也默认输出 JSON 风格文本，因此不再单独提供 `--json` 开关。
+`vlink-efbs` 功能与 `vlink-eproto` 相同，但针对 FlatBuffers 序列化格式。同样支持 `sub`（订阅显示）和 `pub`（发布消息）两个子命令。FlatBuffers 的 schema 文件（.fbs）目录通过 `-d/--fbs_dir` 参数或 `VLINK_FBS_DIR` 环境变量指定。普通 FlatBuffers 消息的输入本身按 JSON 语法解析，显示时也默认输出 JSON 风格文本，因此不再单独提供 `--json` 开关。
 
 ### 13.10.2 子命令：sub — 订阅并显示消息
 
@@ -1284,14 +1284,14 @@ vlink-bench run \
   --rate 1000,10000 \
   --report terminal
 
-# 执行完整矩阵并同时生成 html + csv + json（正式报告 / 横向对比）
-vlink-bench run --preset full --report html,csv,json -o /tmp/vlink-full-bench
+# 执行完整矩阵并同时生成 html + csv + json（正式报告 / 横向对比）；-o 是输出文件前缀
+vlink-bench run --preset full --report html,csv,json -o /tmp/bench-full
 
 # CI 回归：quick 预设 + 仅 json，不进分页，前缀写到固定路径
 vlink-bench run --preset quick --report json --no-pager -o /tmp/ci-bench
 
 # 从已有 json 重建 html + terminal 视图
-vlink-bench plot /tmp/vlink-full-bench.json --report html,terminal
+vlink-bench plot /tmp/bench-full.json --report html,terminal
 ```
 
 ---

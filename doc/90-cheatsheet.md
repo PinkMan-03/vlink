@@ -448,7 +448,7 @@ r->fix();                                     // 可选 r->fix(/*rebuild=*/true)
 **Config 字段**（`extension/bag_reader.h:181-191`）：
 `begin_time/end_time`（ms，0 = 从头/到尾）、`times`（-1 = 无限）、`rate`（默认 1.0）、`skip_blank`（跳过静默段）、`force_delay`（-1 = 用原始间隔）、`auto_pause`（每条暂停）、`auto_quit`（结束后退出）、`filter_urls`。
 
-**格式识别**：`.vdb`/`.vdbx` → SQLite（VDBWriter）；`.vcap`/`.vcapx` → MCAP（VCAPWriter）。
+**格式识别**：.vdb/.vdbx → SQLite（VDBWriter）；.vcap/.vcapx → MCAP（VCAPWriter）。
 
 ---
 
@@ -569,7 +569,7 @@ int vlink_get(vlink_getter_handle_t handle, uint8_t* data, size_t* size);
 
 | 短/长参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `path`（位置参数） | string | — | 录制输出文件（`.vdb` / `.vdbx` / `.vcap` / `.vcapx`） |
+| `path`（位置参数） | string | — | 录制输出文件（.vdb / .vdbx / .vcap / .vcapx） |
 | `-u, --urls` | string 列表 | `[]` | 录制的 URL 列表（可多个） |
 | `-t, --tag` | string | `""` | bag 头标签 |
 | `-i, --filter` | string | `""` | URL 关键字过滤 |

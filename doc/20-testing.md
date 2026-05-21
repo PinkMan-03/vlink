@@ -327,7 +327,7 @@ ctest --output-on-failure
 
 | 测试文件                                       | 测试内容                                                                |
 | ---------------------------------------------- | ----------------------------------------------------------------------- |
-| `bag_config_test.cc`                           | Bag 文件后缀识别（`.vdb` / `.vdbx` / `.vcap` / `.vcapx`）与配置解析        |
+| `bag_config_test.cc`                           | Bag 文件后缀识别（.vdb / .vdbx / .vcap / .vcapx）与配置解析              |
 | `bag_writer_test.cc`                           | `BagWriter` 录制路径、压缩、分段、回调                                    |
 | `bag_reader_test.cc`                           | `BagReader` 顺序回放、跳转、过滤                                          |
 | `bag_reader_processor_test.cc`                 | `BagReaderProcessor` 时间轴对齐与节流                                     |
@@ -1144,7 +1144,7 @@ jobs:
 可能原因：
 
 1. 忘记在链接阶段加 `--coverage`（`CMAKE_EXE_LINKER_FLAGS`）
-2. 测试二进制未运行，`.gcda` 文件未生成
+2. 测试二进制未运行，.gcda 文件未生成
 3. `lcov --directory` 指向了错误的构建目录
 
 排查命令：
@@ -1159,7 +1159,7 @@ cmake -B build-coverage --log-level=VERBOSE 2>&1 | grep "coverage"
 
 ### 20.20.3 Q3: lcov 报 "mismatch" 错误
 
-原因：源文件修改后未重新编译，`.gcno` 与 `.gcda` 版本不一致。
+原因：源文件修改后未重新编译，.gcno 与 .gcda 版本不一致。
 
 解决：
 

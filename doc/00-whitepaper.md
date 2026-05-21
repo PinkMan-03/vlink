@@ -4,7 +4,7 @@
 
 **[官方网站: https://vlink.work](https://vlink.work)**
 
-**[Github: https://github.com/thun-res/vlink](https://github.com/thun-res/vlink)**
+**[GitHub: https://github.com/thun-res/vlink](https://github.com/thun-res/vlink)**
 
 ## 0.1 摘要
 
@@ -132,7 +132,7 @@
    - [0.16.3 AI 原生通信原语](#0163-ai-原生通信原语)
    - [0.16.4 生态系统建设](#0164-生态系统建设)
 16. [0.17 结论](#017-结论)
-17. [0.18 参考文献](#018-参考文献)
+17. [0.18 参考文献](#references)
 ---
 
 ## 0.2 引言
@@ -698,7 +698,7 @@ SLOG_I << "Connection established";
 | `ObjectPool<T>`         | 对象池，减少频繁构造/析构开销，用于内部消息缓冲区管理                  |
 | `MemoryPool`            | 分级（金字塔）free-list 内存池，Bytes 默认分配器；通过 `VLINK_MEMORY_LEVEL`（0..9）选档，L0 = bypass |
 | `MemoryResource`        | `std::pmr::memory_resource` 适配器，桥接 `MemoryPool`；提供 `make_shared` / `make_unique` 工厂供热路径替换 `std::` 版本 |
-| `Plugin`                | 动态库（`.so`）插件加载器，用于传输后端的动态加载                      |
+| `Plugin`                | 动态库（.so）插件加载器，用于传输后端的动态加载                        |
 | `NameDetector`          | 进程名与线程名检测工具，用于 DiscoveryViewer 的进程识别               |
 | `CachedTimestamp`       | 缓存时间戳，以可配置的时间间隔刷新系统时钟读取，降低高频调用的系统调用开销 |
 | `DeadlineTimer`         | 截止时间定时器，用于操作超时管理                                        |
@@ -1736,7 +1736,7 @@ vlink-bag tag /data/bags/incident.vcap test_run
 
 **SQLite 后端的工程优势：**
 
-VLink Bag 文件按后缀显式选择后端：`.vdb`/`.vdbx` 使用 SQLite，`.vcap`/`.vcapx` 使用 MCAP，其中后缀 `x` 表示启用分包模式；未知后缀会创建失败。SQLite 格式有以下工程考量：
+VLink Bag 文件按后缀显式选择后端：.vdb/.vdbx 使用 SQLite，.vcap/.vcapx 使用 MCAP，其中后缀 x 表示启用分包模式；未知后缀会创建失败。SQLite 格式有以下工程考量：
 1. **标准化访问**：任何支持 SQLite 的工具（DB Browser for SQLite、Python sqlite3、R DBI 等）均可直接打开 Bag 文件，不需要专用读取库
 2. **事务完整性**：SQLite 的 WAL（Write-Ahead Logging）模式确保在录制异常中断时，已写入的消息数据不会损坏，`vlink-bag fix` 利用这一特性恢复不完整的 Bag 文件
 3. **随机访问**：基于时间索引的 B-Tree 结构支持高效的时间范围查询，使 `play` 的时间跳转（seek）操作可在毫秒内完成，无需顺序扫描整个文件
@@ -1781,7 +1781,7 @@ vlink-dump shm://sensor/camera -t h264                 # 从实时流导出 H264
 
 **功能定位：** Protobuf 序列化数据的动态发布与订阅调试工具。
 
-**vlink-eproto** 支持 Protobuf（`.proto` 文件）的动态加载与解析，无需预先编译消息类型即可进行发布与订阅，提供 `pub`/`sub` 两个子命令：
+**vlink-eproto** 支持 Protobuf（.proto 文件）的动态加载与解析，无需预先编译消息类型即可进行发布与订阅，提供 `pub`/`sub` 两个子命令：
 
 ```bash
 # 订阅 Protobuf 话题并实时打印解码内容（url 是位置参数）
@@ -1834,11 +1834,11 @@ vlink-eproto pub shm://sensor/imu -d /path/to/protos \
 # 默认基础覆盖包（html + terminal 报告）
 vlink-bench run
 
-# 完整矩阵并输出 html + csv + json
-vlink-bench run --preset full --report html,csv,json -o /tmp/vlink-full-bench
+# 完整矩阵并输出 html + csv + json；-o 指定输出文件前缀
+vlink-bench run --preset full --report html,csv,json -o /tmp/bench-full
 
 # 从已有结果重建报告
-vlink-bench plot /tmp/vlink-full-bench.json --report html,terminal
+vlink-bench plot /tmp/bench-full.json --report html,terminal
 ```
 
 测试套件覆盖 `throughput`、`latency`、`topology`、`fanout`、`serialization`、`backpressure` 六类；执行模式支持 `local-direct`、`local-loop`、`process`；拓扑覆盖 `1:1`、`1:n`、`n:1`、`n:n`。完整的命令行参数、终端交互按键、HTML 报告结构和默认测试策略详见 [13-cli-tools.md#vlink-bench](13-cli-tools.md#1311-vlink-bench--发布订阅性能基准测试)。
@@ -2203,8 +2203,8 @@ vlink-rerun -m save --save_path out.rrd  # 保存为 RRD 文件
 
 WebViz 还提供了两个离线 Bag 文件转换工具：
 
-- **vlink-bag2mcap**：将 VLink Bag 文件（`.vdb`/`.vcap`）转换为 MCAP 格式，可在 Foxglove Studio 中离线打开。输出的 MCAP 文件按 MCAP 路径的压缩实现走 Zstandard 压缩（SQLite `.vdb` 侧实际仅启用 LZAV，两种格式互转时会重新按目标格式的压缩策略处理），自动注册 Schema 和 Channel，实时显示转换进度。
-- **vlink-bag2rrd**：将 VLink Bag 文件转换为 Rerun 的 `.rrd` 格式，可在 Rerun Viewer 中离线分析。
+- **vlink-bag2mcap**：将 VLink Bag 文件（.vdb/.vcap）转换为 MCAP 格式，可在 Foxglove Studio 中离线打开。输出的 MCAP 文件按 MCAP 路径的压缩实现走 Zstandard 压缩（SQLite .vdb 侧实际仅启用 LZAV，两种格式互转时会重新按目标格式的压缩策略处理），自动注册 Schema 和 Channel，实时显示转换进度。
+- **vlink-bag2rrd**：将 VLink Bag 文件转换为 Rerun 的 .rrd 格式，可在 Rerun Viewer 中离线分析。
 
 两者均复用各自后端的 Converter 引擎和自定义消息映射配置，保证在线实时可视化与离线文件分析的数据转换行为完全一致。
 
@@ -2542,6 +2542,8 @@ VLink 目前仍处于早期发展阶段，在以下方面尚有改进空间：
 尽管如此，VLink 扎实的工程基础、清晰的设计哲学与主动的生态建设意愿，已经为其长期发展奠定了坚实基础。在国内自动驾驶与具身智能产业的持续高速发展背景下，随着开源社区的不断壮大和产业合作的深化，VLink 有望在未来的智能系统软件栈中占据举足轻重的地位，成为推动中国智能产业技术自立自强的重要基础设施力量之一。
 
 ---
+
+<a id="references"></a>
 
 ## 0.18 参考文献
 

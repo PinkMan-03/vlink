@@ -1,6 +1,6 @@
 # 21. 环境变量参考
 
-本章列出 VLink **运行时**读取的环境变量。数据来源：对源码 `Utils::get_env("VLINK_*")` 调用的完整扫描（截至当前提交）。
+本章列出 VLink 运行时、工具入口和交叉编译辅助路径读取的环境变量。数据来源：对源码中 `VLINK_*` 环境变量读取点的完整扫描（截至当前提交）。
 
 所有 VLink 专有环境变量以 `VLINK_` 前缀开头。`vlink-check env` 会按编译时启用的传输模块（`VLINK_SUPPORT_*` 宏）裁剪 `cli/check/check.cc` 内置清单：模块未编译则对应私有 env 不会展示（例如未启用 Zenoh 时不列 `VLINK_ZENOH_*`、未启用 SHM2 时不列 `VLINK_SHM2_*`）。它不是完整运行时变量枚举，例如 `VLINK_BENCH_*` 由 `vlink-bench` 读取但不在 `vlink-check env` 输出中。若要确认某变量是否被使用，最权威的方法是搜索源码 `Utils::get_env("<NAME>")`。参见 [13-cli-tools.md](13-cli-tools.md#134-vlink-check--系统配置与环境诊断)。
 
@@ -29,6 +29,7 @@
 | ----------------------- | -------- | ----------------------------------------------------------------- |
 | `VLINK_URL_PLUGINS`     | 插件名列表 | 传输后端插件基础名（不含路径、`lib` 前缀和 `.so` 后缀），**分号分隔**。`vlink-` 前缀可省略。 |
 | `VLINK_SCHEMA_PLUGIN`   | 路径/插件名 | SchemaPluginInterface 插件共享库路径或插件基础名                |
+| `VLINK_CONVERT_PLUGIN`  | 路径/插件名 | MessageConvertPlugin 插件共享库路径或插件基础名；WebViz 实时桥接和 `vlink-bag2mcap` / `vlink-bag2rrd` 离线转换工具在未显式传 `--convert_plugin` 时读取 |
 | `VLINK_PROTO_DIR`       | 目录路径 | `.proto` 搜索目录（由 SchemaPluginBase 实现主动读取时生效）       |
 | `VLINK_FBS_DIR`         | 目录路径 | `.fbs` 搜索目录（同上）                                           |
 | `VLINK_PLUGIN_DIR`      | 目录路径 | 插件共享库搜索目录                                                |
@@ -53,6 +54,9 @@ export VLINK_FBS_DIR=/opt/vlink/fbs
 
 # 指定 schema 插件（可写基础名或共享库路径）
 export VLINK_SCHEMA_PLUGIN=my_schema_plugin
+
+# 指定 WebViz/离线转换插件（可写基础名或共享库路径）
+export VLINK_CONVERT_PLUGIN=my_convert_plugin
 ```
 
 ---
