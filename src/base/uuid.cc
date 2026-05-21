@@ -39,8 +39,6 @@ namespace vlink {
 
 static constexpr char kHexDigits[] = "0123456789abcdef";
 
-static constexpr std::mt19937::result_type kFallbackSeedLiteral = 0xDEADBEEFU;
-
 static bool is_hex_char(char ch) noexcept {
   return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
 }
