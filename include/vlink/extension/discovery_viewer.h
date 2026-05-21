@@ -34,11 +34,11 @@
  * publish or subscribe to it.  Entries are sorted for stable display.
  *
  * @par Filter modes
- * | FilterType       | Shows                                                   |
- * | ---------------- | ------------------------------------------------------- |
- * | kFilterNone      | All discovered endpoints                                |
+ * | FilterType       | Shows                                                       |
+ * | ---------------- | ----------------------------------------------------------- |
+ * | kFilterNone      | All discovered endpoints                                    |
  * | kFilterAvailable | All endpoints except local-transport URLs from remote hosts |
- * | kFilterNative    | Only endpoints reported by the same host                |
+ * | kFilterNative    | Only endpoints reported by the same host                    |
  *
  * @par Usage
  * @code

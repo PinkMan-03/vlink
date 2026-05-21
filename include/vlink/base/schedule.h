@@ -47,9 +47,9 @@
  * | @c delay_ms             | Delay before the task is posted (via one-shot Timer)           |
  * | @c priority             | Task dispatch priority (for @c kPriorityType loop)             |
  * | @c schedule_timeout_ms  | Queue wait budget after @c delay_ms.  Checked once when the    |
- * |                         | task is dequeued: if elapsed time since scheduling exceeds      |
- * |                         | @c delay_ms + this budget, the task is **dropped** and          |
- * |                         | @c on_schedule_timeout fires instead of the user callback.      |
+ * |                         | task is dequeued: if elapsed time since scheduling exceeds     |
+ * |                         | @c delay_ms + this budget, the task is **dropped** and         |
+ * |                         | @c on_schedule_timeout fires instead of the user callback.     |
  * | @c execution_timeout_ms | Run-time budget for each executed callback in the chain.       |
  * |                         | Checked once **after** the callback returns: if it ran longer  |
  * |                         | than the budget, @c on_execution_timeout fires.  This is a     |

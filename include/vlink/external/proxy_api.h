@@ -55,18 +55,18 @@
  *
  * @par Error Codes
  *
- * | Error                 | Value | Description                                       |
- * | --------------------- | ----- | ------------------------------------------------- |
- * | kNoError              |   0   | No error.                                         |
- * | kModeError            |   1   | Reserved legacy code for unsupported modes.       |
- * | kControlError         |   2   | Control ID mismatch with the server.              |
- * | kReliableCompError    |   3   | reliable setting mismatch between client/server.  |
- * | kTcpCompError         |   4   | enable_tcp setting mismatch.                      |
- * | kDirectCompError      |   5   | direct setting mismatch.                          |
- * | kMultiProxyError      |   7   | Multiple proxy servers or Time identity mismatch. |
- * | kVersionCompError     |   8   | VLink version mismatch between client and server. |
+ * | Error                 | Value | Description                                                    |
+ * | --------------------- | ----- | -------------------------------------------------------------- |
+ * | kNoError              |   0   | No error.                                                      |
+ * | kModeError            |   1   | Reserved legacy code for unsupported modes.                    |
+ * | kControlError         |   2   | Control ID mismatch with the server.                           |
+ * | kReliableCompError    |   3   | reliable setting mismatch between client/server.               |
+ * | kTcpCompError         |   4   | enable_tcp setting mismatch.                                   |
+ * | kDirectCompError      |   5   | direct setting mismatch.                                       |
+ * | kMultiProxyError      |   7   | Multiple proxy servers or Time identity mismatch.              |
+ * | kVersionCompError     |   8   | VLink version mismatch between client and server.              |
  * | kTokenError           |   9   | Handshake refused/empty token or same-identity token mismatch. |
- * | kUnknownError         |  10   | Unknown or unclassified error.                    |
+ * | kUnknownError         |  10   | Unknown or unclassified error.                                 |
  *
  * @par Connectivity, Handshake, and Heartbeat
  * Internally the API subscribes to a 1-second Time heartbeat published by

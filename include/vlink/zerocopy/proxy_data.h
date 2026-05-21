@@ -113,7 +113,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
   /**
    * @brief Copy constructor -- deep-copies @p target.
    *
-   * Parameter @c target: Source to copy.
+   * @param target Source to copy.
    */
   ProxyData(const ProxyData& target) noexcept;
 
@@ -123,14 +123,14 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * @details
    * After the call @p target is empty and does not own any buffer.
    *
-   * Parameter @c target: Source to move from.
+   * @param target Source to move from.
    */
   ProxyData(ProxyData&& target) noexcept;
 
   /**
    * @brief Copy-assignment operator.
    *
-   * Parameter @c target: Source to copy.  Self-assignment is a no-op.
+   * @param target Source to copy.  Self-assignment is a no-op.
    * @return        Reference to @c *this.
    */
   ProxyData& operator=(const ProxyData& target) noexcept;
@@ -138,7 +138,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
   /**
    * @brief Move-assignment operator.
    *
-   * Parameter @c target: Source to move.  Self-assignment is a no-op.
+   * @param target Source to move.  Self-assignment is a no-op.
    * @return        Reference to @c *this.
    */
   ProxyData& operator=(ProxyData&& target) noexcept;
@@ -152,7 +152,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * The tail buffer pointer references memory inside @p bytes (zero-copy);
    * @p bytes must outlive this @c ProxyData.
    *
-   * Parameter @c bytes: Buffer produced by @c operator>>.
+   * @param bytes Buffer produced by @c operator>>.
    * @return       @c true on success; @c false on magic-number mismatch,
    *               size inconsistency, or invalid region layout.
    */
@@ -165,7 +165,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * Writes the magic-number envelope, this object's raw struct snapshot, and
    * the tail payload into @p bytes, resizing it as needed.
    *
-   * Parameter @c bytes: Output buffer (reallocated automatically if necessary).
+   * @param bytes Output buffer (reallocated automatically if necessary).
    * @return       Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
@@ -257,35 +257,35 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
   /**
    * @brief Sets the proxy control identifier.
    *
-   * Parameter @c control_id: Control identifier value.
+   * @param control_id Control identifier value.
    */
   void set_control_id(uint32_t control_id) noexcept;
 
   /**
    * @brief Sets the proxy operation mode.
    *
-   * Parameter @c mode: Mode value.
+   * @param mode Mode value.
    */
   void set_mode(uint32_t mode) noexcept;
 
   /**
    * @brief Sets the message timestamp in microseconds.
    *
-   * Parameter @c timestamp: Timestamp value (microseconds since epoch).
+   * @param timestamp Timestamp value (microseconds since epoch).
    */
   void set_timestamp(int64_t timestamp) noexcept;
 
   /**
    * @brief Sets the message sequence number.
    *
-   * Parameter @c seq: Sequence number.
+   * @param seq Sequence number.
    */
   void set_seq(int64_t seq) noexcept;
 
   /**
    * @brief Sets the coarse schema family associated with the payload.
    *
-   * Parameter @c schema: Numeric @c SchemaType value.
+   * @param schema Numeric @c SchemaType value.
    */
   void set_schema(uint32_t schema) noexcept;
 
@@ -295,7 +295,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * @details
    * Verifies minimum buffer size and both magic-number sentinels.
    *
-   * Parameter @c bytes: Buffer to validate.
+   * @param bytes Buffer to validate.
    * @return       @c true if magic numbers match and size is sufficient.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
@@ -330,7 +330,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * @c false.  Any previously owned buffer is freed.  The target backing
    * buffer must outlive this borrowed envelope.
    *
-   * Parameter @c target: Source to borrow from.
+   * @param target Source to borrow from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool shallow_copy(const ProxyData& target) noexcept;
@@ -342,7 +342,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * Allocates a new buffer of the same size and copies the payload.  If
    * @c *this already owns a same-size buffer the data is copied in-place.
    *
-   * Parameter @c target: Source to copy.
+   * @param target Source to copy.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool deep_copy(const ProxyData& target) noexcept;
@@ -353,7 +353,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * @details
    * After the call @p target is empty.
    *
-   * Parameter @c target: Source to move from.
+   * @param target Source to move from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool move_copy(ProxyData& target) noexcept;
@@ -369,11 +369,11 @@ struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
    * callers that accept dynamic input should check @c is_valid() or @c size()
    * afterwards.  A total length of zero leaves the object invalid.
    *
-   * Parameter @c raw: Raw serialised message payload.
-   * Parameter @c url: Topic URL string (e.g., @c "dds://my/topic").
-   * Parameter @c ser: Serialisation type (e.g., @c "demo.proto.PointCloud").
-   * Parameter @c schema: Coarse schema family, typically a @c SchemaType value.
-   * Parameter @c hostname: Optional source hostname; empty if not provided.
+   * @param raw Raw serialised message payload.
+   * @param url Topic URL string (e.g., @c "dds://my/topic").
+   * @param ser Serialisation type (e.g., @c "demo.proto.PointCloud").
+   * @param schema Coarse schema family, typically a @c SchemaType value.
+   * @param hostname Optional source hostname; empty if not provided.
    */
   void create(const Bytes& raw, std::string_view url, std::string_view ser, uint32_t schema = 0,
               std::string_view hostname = {}) noexcept;

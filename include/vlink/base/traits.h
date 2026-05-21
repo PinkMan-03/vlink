@@ -47,7 +47,7 @@
  * | IsAtomic            | Detects whether T is a std::atomic specialization                     |
  * | IsSharedPtr         | Detects whether T is a std::shared_ptr specialization                 |
  * | RemoveSharedPtr     | Strips the std::shared_ptr wrapper to obtain the element type         |
- * | has_member          | Runtime-style SFINAE check for a named member                         |
+ * | has_member          | Compile-time SFINAE check for an accessible data member               |
  * | is_non_char_ptr     | True when T decays to a non-char pointer                              |
  * | is_integer          | True for integer types excluding bool, char, and signed/unsigned char |
  * | is_floating         | True for floating-point types                                         |
@@ -56,14 +56,17 @@
  * These utilities live in the @c vlink::Traits namespace (note the capital T).
  * @c VLINK_HAS_MEMBER is the corresponding macro wrapper for has_member.
  *
- * @par Example: checking for a member at compile time
+ * @par Example: checking for a data member at compile time
  * @code
- * struct Foo { void bar() {} };
+ * struct Foo { int bar; };
  * struct Baz {};
  *
- * // Using the macro (preferred for member name checks):
- * static_assert(VLINK_HAS_MEMBER(Foo, bar));
+ * // Data-member check (preferred form):
+ * static_assert( VLINK_HAS_MEMBER(Foo, bar));
  * static_assert(!VLINK_HAS_MEMBER(Baz, bar));
+ *
+ * // To check for a callable member, use call syntax:
+ * // static_assert(VLINK_HAS_MEMBER(Foo, method_name()));
  * @endcode
  */
 
@@ -254,7 +257,7 @@ struct RemoveSharedPtr<T, true> {
  *
  * @tparam T  The type to probe.
  * @tparam F  A callable that takes a @c T and accesses the member of interest.
- * @param  f  A lambda of the form @c [](auto&& obj) -> decltype(obj.member) { return 0; }
+ * @param  f  A lambda of the form @c [](auto&& obj) -> decltype((void)(obj.member), 0) { return 0; }
  * @return @c true if the member is accessible, @c false otherwise.
  *
  * @note Prefer the @c VLINK_HAS_MEMBER macro for member-name checks.
@@ -328,20 +331,27 @@ template <typename T>
 
 /**
  * @def VLINK_HAS_MEMBER(T, member)
- * @brief Checks at compile time whether type @p T has an accessible member named @p member.
+ * @brief Checks at compile time whether type @p T has an accessible **data member** named @p member.
  *
  * @details
  * Expands to a @c constexpr boolean expression (true/false) evaluated at compile time.
  * Internally delegates to @c vlink::Traits::has_member.
  *
+ * To detect a **callable member** (member function), append @c () to the name:
+ * @code
+ * VLINK_HAS_MEMBER(T, method_name())  // checks for callable member
+ * @endcode
+ *
  * @param T       The type to inspect.
- * @param member  The unquoted member name to look for.
+ * @param member  The unquoted data member name to look for.  For member functions,
+ *                use @c member() call syntax (see above).
  *
  * @par Example
  * @code
- * struct Foo { int bar; };
- * static_assert(VLINK_HAS_MEMBER(Foo, bar));
- * static_assert(!VLINK_HAS_MEMBER(Foo, baz));
+ * struct Foo { int bar; void baz() {} };
+ * static_assert( VLINK_HAS_MEMBER(Foo, bar));    // data member: OK
+ * static_assert(!VLINK_HAS_MEMBER(Foo, qux));    // absent member: OK
+ * static_assert( VLINK_HAS_MEMBER(Foo, baz()));  // callable member: OK
  * @endcode
  */
 #define VLINK_HAS_MEMBER(T, member) \

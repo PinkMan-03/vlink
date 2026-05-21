@@ -39,10 +39,10 @@
  *   fdbus://<address>[?event=<name>][#<transport>]
  * @endcode
  *
- * | Component  | Description                                                           |
- * | ---------- | --------------------------------------------------------------------- |
- * | @c address | FDBus service/topic address; formed from @c host + @c "/" + @c path   |
- * | @c event   | Optional secondary event name (@c ?event=)                            |
+ * | Component     | Description                                                           |
+ * | ------------- | --------------------------------------------------------------------- |
+ * | @c address    | FDBus service/topic address; formed from @c host + @c "/" + @c path   |
+ * | @c event      | Optional secondary event name (@c ?event=)                            |
  * | @c transport  | Transport mode: @c "svc" (service, default) or @c "ipc" (fragment)    |
  *
  * @par Example

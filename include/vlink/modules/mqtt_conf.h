@@ -44,7 +44,7 @@
  * | @c address   | MQTT topic path; formed from @c host + @c "/" + @c path                   |
  * | @c event     | Optional secondary event filter (@c ?event=)                              |
  * | @c domain    | Domain/namespace identifier (@c ?domain=, default from @c MqttFactory)    |
- * | @c qos       | MQTT QoS level; default from @c MqttFactory: 0, 1, or 2                  |
+ * | @c qos       | MQTT QoS level; default from @c MqttFactory: 0, 1, or 2                   |
  * | @c fragment  | Optional broker URI override (e.g. @c tcp://192.168.1.1:1883)             |
  *
  * @par Environment Variables
@@ -53,7 +53,7 @@
  * | ---------------------- | ------------------------------------- | ------------------------ |
  * | VLINK_MQTT_BROKER      | MQTT broker URI                       | tcp://localhost:1883     |
  * | VLINK_MQTT_DOMAIN      | Default domain ID                     | 0                        |
- * | VLINK_MQTT_QOS         | Default QoS level (0, 1, 2)          | 1                        |
+ * | VLINK_MQTT_QOS         | Default QoS level (0, 1, 2)           | 1                        |
  * | VLINK_MQTT_KEEPALIVE   | Keep-alive interval in seconds        | 60                       |
  * | VLINK_MQTT_CLIENT_ID   | Client ID prefix                      | vlink_mqtt               |
  *

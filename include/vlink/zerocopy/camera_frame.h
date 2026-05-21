@@ -168,7 +168,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
   /**
    * @brief Copy constructor -- performs a deep copy of @p target.
    *
-   * Parameter @c target: Source frame to copy.
+   * @param target Source frame to copy.
    */
   CameraFrame(const CameraFrame& target) noexcept;
 
@@ -178,14 +178,14 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * @details
    * After the call @p target is empty and does not own any buffer.
    *
-   * Parameter @c target: Source frame to move from.
+   * @param target Source frame to move from.
    */
   CameraFrame(CameraFrame&& target) noexcept;
 
   /**
    * @brief Copy-assignment operator -- deep-copies @p target.
    *
-   * Parameter @c target: Source frame to copy.  Self-assignment is a no-op.
+   * @param target Source frame to copy.  Self-assignment is a no-op.
    * @return        Reference to @c *this.
    */
   CameraFrame& operator=(const CameraFrame& target) noexcept;
@@ -193,7 +193,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
   /**
    * @brief Move-assignment operator -- transfers ownership from @p target.
    *
-   * Parameter @c target: Source frame to move.  Self-assignment is a no-op.
+   * @param target Source frame to move.  Self-assignment is a no-op.
    * @return        Reference to @c *this.
    */
   CameraFrame& operator=(CameraFrame&& target) noexcept;
@@ -207,7 +207,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * (zero-copy).  @c is_owner() will be @c false after a successful call;
    * @p bytes must outlive this @c CameraFrame.
    *
-   * Parameter @c bytes: Buffer produced by @c operator>>.
+   * @param bytes Buffer produced by @c operator>>.
    * @return       @c true on success, @c false if the buffer fails validation
    *               or the total size is inconsistent.
    */
@@ -220,7 +220,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * Writes the magic-number envelope, this object's raw struct snapshot, and
    * pixel payload into @p bytes, resizing it if necessary.
    *
-   * Parameter @c bytes: Output buffer (reallocated automatically if needed).
+   * @param bytes Output buffer (reallocated automatically if needed).
    * @return       Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
@@ -231,7 +231,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * @details
    * Verifies minimum size and both magic-number sentinels.
    *
-   * Parameter @c bytes: Buffer to validate.
+   * @param bytes Buffer to validate.
    * @return       @c true if the sentinels match and the size is sufficient.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
@@ -262,7 +262,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * first.  The reserved field is not copied.  The source backing buffer must
    * outlive this borrowed frame.
    *
-   * Parameter @c target: Source frame to borrow from.
+   * @param target Source frame to borrow from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool shallow_copy(const CameraFrame& target) noexcept;
@@ -274,7 +274,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * If @c *this already owns a same-size buffer the data is copied in-place;
    * otherwise a new buffer is allocated.  The reserved field is not copied.
    *
-   * Parameter @c target: Source frame to copy.
+   * @param target Source frame to copy.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool deep_copy(const CameraFrame& target) noexcept;
@@ -285,7 +285,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * @details
    * After the call @p target is empty.  Self-move is a no-op.
    *
-   * Parameter @c target: Source frame to move from.
+   * @param target Source frame to move from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool move_copy(CameraFrame& target) noexcept;
@@ -297,7 +297,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * Frees any existing owned buffer before allocating the new one.
    * Buffer content is uninitialised after the call.
    *
-   * Parameter @c size: Number of bytes to allocate.  Must be non-zero.
+   * @param size Number of bytes to allocate.  Must be non-zero.
    * @return      @c false if @p size is zero, otherwise @c true.
    */
   bool create(size_t size) noexcept;
@@ -317,8 +317,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * Sets the internal data pointer to @p data with @c is_owner() == false.
    * The caller is responsible for the buffer lifetime.
    *
-   * Parameter @c data: Non-null pointer to pixel data.
-   * Parameter @c size: Size of the buffer in bytes.
+   * @param data Non-null pointer to pixel data.
+   * @param size Size of the buffer in bytes.
    * @return      @c false on invalid arguments or if the pointer is unchanged.
    */
   bool shallow_copy(uint8_t* data, size_t size) noexcept;
@@ -329,8 +329,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
    * @details
    * Allocates or reuses an owned buffer and copies @p size bytes from @p data.
    *
-   * Parameter @c data: Source pixel data pointer.  Must be non-null.
-   * Parameter @c size: Number of bytes to copy.  Must be non-zero.
+   * @param data Source pixel data pointer.  Must be non-null.
+   * @param size Number of bytes to copy.  Must be non-zero.
    * @return      @c false if @p data is null, @p size is zero, this object
    *              claims ownership but has no buffer, or @p data already equals
    *              the current internal pointer; otherwise @c true.
@@ -340,8 +340,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
   /**
    * @brief Alias for @c deep_copy(uint8_t*, size_t).
    *
-   * Parameter @c data: Source pointer.
-   * Parameter @c size: Number of bytes.
+   * @param data Source pointer.
+   * @param size Number of bytes.
    * @return      Result of the underlying @c deep_copy call.
    */
   bool fill_data(uint8_t* data, size_t size) noexcept;
@@ -418,42 +418,42 @@ struct VLINK_EXPORT_AND_ALIGNED(8) CameraFrame final {
   /**
    * @brief Sets the camera channel (sensor index).
    *
-   * Parameter @c channel: Channel identifier.
+   * @param channel Channel identifier.
    */
   void set_channel(uint32_t channel) noexcept;
 
   /**
    * @brief Sets the image width in pixels.
    *
-   * Parameter @c width: Pixel width of the image.
+   * @param width Pixel width of the image.
    */
   void set_width(uint32_t width) noexcept;
 
   /**
    * @brief Sets the image height in pixels.
    *
-   * Parameter @c height: Pixel height of the image.
+   * @param height Pixel height of the image.
    */
   void set_height(uint32_t height) noexcept;
 
   /**
    * @brief Sets the capture frequency in Hz.
    *
-   * Parameter @c freq: Capture rate in frames per second.
+   * @param freq Capture rate in frames per second.
    */
   void set_freq(uint32_t freq) noexcept;
 
   /**
    * @brief Sets the pixel/codec encoding format.
    *
-   * Parameter @c format: One of the @c Format enum values.
+   * @param format One of the @c Format enum values.
    */
   void set_format(Format format) noexcept;
 
   /**
    * @brief Sets the video stream frame type.
    *
-   * Parameter @c stream: One of the @c Stream enum values.
+   * @param stream One of the @c Stream enum values.
    */
   void set_stream(Stream stream) noexcept;
 

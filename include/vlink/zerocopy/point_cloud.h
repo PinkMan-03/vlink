@@ -194,17 +194,17 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
     /**
      * @brief Value constructor.
      *
-     * Parameter @c _x: X component.
-     * Parameter @c _y: Y component.
-     * Parameter @c _z: Z component.
+     * @param _x X component.
+     * @param _y Y component.
+     * @param _z Z component.
      */
     explicit Vector3f(float _x, float _y, float _z) noexcept;
 
     /**
      * @brief Formats the vector as @c (x, y, z) on an output stream.
      *
-     * Parameter @c ostream: Output stream.
-     * Parameter @c v3f: Vector to format.
+     * @param ostream Output stream.
+     * @param v3f Vector to format.
      * @return         Reference to @p ostream.
      */
     friend std::ostream& operator<<(std::ostream& ostream, const Vector3f& v3f) noexcept;
@@ -235,17 +235,17 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
     /**
      * @brief Value constructor.
      *
-     * Parameter @c _x: X component.
-     * Parameter @c _y: Y component.
-     * Parameter @c _z: Z component.
+     * @param _x X component.
+     * @param _y Y component.
+     * @param _z Z component.
      */
     explicit Vector3d(double _x, double _y, double _z) noexcept;
 
     /**
      * @brief Formats the vector as @c (x, y, z) on an output stream.
      *
-     * Parameter @c ostream: Output stream.
-     * Parameter @c v3d: Vector to format.
+     * @param ostream Output stream.
+     * @param v3d Vector to format.
      * @return         Reference to @p ostream.
      */
     friend std::ostream& operator<<(std::ostream& ostream, const Vector3d& v3d) noexcept;
@@ -268,21 +268,21 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Copy constructor -- performs a deep copy of @p target.
    *
-   * Parameter @c target: Source to copy.
+   * @param target Source to copy.
    */
   PointCloud(const PointCloud& target) noexcept;
 
   /**
    * @brief Move constructor -- transfers ownership from @p target.
    *
-   * Parameter @c target: Source to move from.  Left empty after the call.
+   * @param target Source to move from.  Left empty after the call.
    */
   PointCloud(PointCloud&& target) noexcept;
 
   /**
    * @brief Copy-assignment operator -- deep-copies @p target.
    *
-   * Parameter @c target: Source to copy.  Self-assignment is a no-op.
+   * @param target Source to copy.  Self-assignment is a no-op.
    * @return        Reference to @c *this.
    */
   PointCloud& operator=(const PointCloud& target) noexcept;
@@ -290,7 +290,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Move-assignment operator -- transfers ownership from @p target.
    *
-   * Parameter @c target: Source to move.  Self-assignment is a no-op.
+   * @param target Source to move.  Self-assignment is a no-op.
    * @return        Reference to @c *this.
    */
   PointCloud& operator=(PointCloud&& target) noexcept;
@@ -304,7 +304,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * memory inside @p bytes (zero-copy; @c is_owner() == false).
    * @p bytes must outlive this @c PointCloud.
    *
-   * Parameter @c bytes: Buffer produced by @c operator>>.
+   * @param bytes Buffer produced by @c operator>>.
    * @return       @c true on success; @c false on invalid magic numbers or
    *               size mismatch.
    */
@@ -317,7 +317,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * Writes the magic-number envelope, all struct fields (including the
    * protocol descriptor), and @c size() * @c pack_size() bytes of point data.
    *
-   * Parameter @c bytes: Output buffer (reallocated if the size does not match).
+   * @param bytes Output buffer (reallocated if the size does not match).
    * @return       Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
@@ -325,7 +325,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Checks whether @p bytes contains a valid @c PointCloud wire buffer.
    *
-   * Parameter @c bytes: Buffer to validate.
+   * @param bytes Buffer to validate.
    * @return       @c true if magic sentinels are present and minimum size is met.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
@@ -345,7 +345,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @c is_owner() becomes @c false.  Any previously owned buffer is freed.
    * The caller must ensure @p target outlives this object.
    *
-   * Parameter @c target: Source to borrow from.
+   * @param target Source to borrow from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool shallow_copy(const PointCloud& target) noexcept;
@@ -359,7 +359,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * otherwise a new buffer sized to the target's current logical point data is
    * allocated.  Extra reserved capacity from @p target is not preserved.
    *
-   * Parameter @c target: Source to copy.
+   * @param target Source to copy.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool deep_copy(const PointCloud& target) noexcept;
@@ -370,7 +370,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @details
    * After the call @p target is empty.
    *
-   * Parameter @c target: Source to move from.
+   * @param target Source to move from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool move_copy(PointCloud& target) noexcept;
@@ -393,7 +393,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * packed point record.  Optionally fills @p key_list with ordered @c Key
    * entries that also carry type information.
    *
-   * Parameter @c key_list: Optional output; filled with ordered field descriptors.
+   * @param key_list Optional output; filled with ordered field descriptors.
    * @return          Unordered map from field name to byte offset.
    */
   [[nodiscard]] KeyMap get_key_map(KeyList* key_list = nullptr) const noexcept;
@@ -510,10 +510,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * Requires that the schema was created with @c create_v3f or that the first
    * three fields are @c float.  Reads directly using @c memcpy.
    *
-   * Parameter @c x: Output X value.
-   * Parameter @c y: Output Y value.
-   * Parameter @c z: Output Z value.
-   * Parameter @c loop_index: Zero-based point index.
+   * @param x Output X value.
+   * @param y Output Y value.
+   * @param z Output Z value.
+   * @param loop_index Zero-based point index.
    * @return            @c false if @p loop_index is out of range.
    */
   bool get_value_v3f(float& x, float& y, float& z, size_t loop_index) const noexcept;
@@ -521,8 +521,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Reads the first three floats of point @p loop_index into a @c Vector3f.
    *
-   * Parameter @c v3f: Output vector.
-   * Parameter @c loop_index: Zero-based point index.
+   * @param v3f Output vector.
+   * @param loop_index Zero-based point index.
    * @return            @c false if @p loop_index is out of range.
    */
   bool get_value_v3f(Vector3f& v3f, size_t loop_index) const noexcept;
@@ -530,7 +530,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Returns the first three floats of point @p loop_index as a @c Vector3f.
    *
-   * Parameter @c loop_index: Zero-based point index.
+   * @param loop_index Zero-based point index.
    * @return            @c Vector3f with X, Y, Z; zero-initialised on out-of-range.
    */
   [[nodiscard]] Vector3f get_value_v3f(size_t loop_index) const noexcept;
@@ -538,10 +538,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Reads the first three doubles of point @p loop_index as XYZ.
    *
-   * Parameter @c x: Output X value.
-   * Parameter @c y: Output Y value.
-   * Parameter @c z: Output Z value.
-   * Parameter @c loop_index: Zero-based point index.
+   * @param x Output X value.
+   * @param y Output Y value.
+   * @param z Output Z value.
+   * @param loop_index Zero-based point index.
    * @return            @c false if @p loop_index is out of range.
    */
   bool get_value_v3d(double& x, double& y, double& z, size_t loop_index) const noexcept;
@@ -549,8 +549,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Reads the first three doubles of point @p loop_index into a @c Vector3d.
    *
-   * Parameter @c v3d: Output vector.
-   * Parameter @c loop_index: Zero-based point index.
+   * @param v3d Output vector.
+   * @param loop_index Zero-based point index.
    * @return            @c false if @p loop_index is out of range.
    */
   bool get_value_v3d(Vector3d& v3d, size_t loop_index) const noexcept;
@@ -558,7 +558,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Returns the first three doubles of point @p loop_index as a @c Vector3d.
    *
-   * Parameter @c loop_index: Zero-based point index.
+   * @param loop_index Zero-based point index.
    * @return            @c Vector3d with X, Y, Z; zero-initialised on out-of-range.
    */
   [[nodiscard]] Vector3d get_value_v3d(size_t loop_index) const noexcept;
@@ -571,9 +571,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @c get_key_map() to resolve field names to byte offsets.
    *
    * Template parameter @c T: Field type; must be fundamental.
-   * Parameter @c t: Output value.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c offset: Byte offset within one packed record.
+   * @param t Output value.
+   * @param loop_index Zero-based point index.
+   * @param offset Byte offset within one packed record.
    * @return            @c false and zeroes @p t if the access would be out of bounds.
    */
   template <typename T>
@@ -583,8 +583,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Returns a fundamental-type field from point @p loop_index at byte @p offset.
    *
    * Template parameter @c T: Field type; must be fundamental.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c offset: Byte offset within one packed record.
+   * @param loop_index Zero-based point index.
+   * @param offset Byte offset within one packed record.
    * @return            Field value; zero-initialised if out of bounds.
    */
   template <typename T>
@@ -601,10 +601,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * slice.
    *
    * Template parameter @c T: Field type; must be fundamental.
-   * Parameter @c t: Output value.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c key_map: Map obtained from @c get_key_map().
-   * Parameter @c key: NUL-terminated full field name to look up.
+   * @param t Output value.
+   * @param loop_index Zero-based point index.
+   * @param key_map Map obtained from @c get_key_map().
+   * @param key NUL-terminated full field name to look up.
    * @return            @c false if the key is not found or the access is out of bounds.
    */
   template <typename T>
@@ -614,9 +614,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Returns a named field from point @p loop_index using a cached @c KeyMap.
    *
    * Template parameter @c T: Field type; must be fundamental.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c key_map: Map obtained from @c get_key_map().
-   * Parameter @c key: NUL-terminated full field name.
+   * @param loop_index Zero-based point index.
+   * @param key_map Map obtained from @c get_key_map().
+   * @param key NUL-terminated full field name.
    * @return            Field value; zero-initialised if not found or out of bounds.
    */
   template <typename T>
@@ -630,9 +630,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @p type and casts the result to @c double.  Useful when the caller knows
    * the field type at runtime (e.g. from @c Key::type).
    *
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c offset: Byte offset within one record.
-   * Parameter @c type: @c Type enum value for this field.
+   * @param loop_index Zero-based point index.
+   * @param offset Byte offset within one record.
+   * @param type @c Type enum value for this field.
    * @return            Field value as @c double, or 0 on unknown type.
    */
   [[nodiscard]] double get_value_for_double_float(size_t loop_index, uint16_t offset, uint8_t type) const noexcept;
@@ -640,10 +640,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Returns a named field value as @c double using a @c KeyMap.
    *
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c key_map: Map obtained from @c get_key_map().
-   * Parameter @c key: NUL-terminated full field name.
-   * Parameter @c type: @c Type enum value for this field.
+   * @param loop_index Zero-based point index.
+   * @param key_map Map obtained from @c get_key_map().
+   * @param key NUL-terminated full field name.
+   * @param type @c Type enum value for this field.
    * @return            Field value as @c double, or 0 on unknown type or key not found.
    */
   [[nodiscard]] double get_value_for_double_float(size_t loop_index, KeyMap& key_map, std::string_view key,
@@ -655,9 +655,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @details
    * Calls @c std::to_string (or "true"/"false" for bool) based on @p type.
    *
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c offset: Byte offset within one record.
-   * Parameter @c type: @c Type enum value.
+   * @param loop_index Zero-based point index.
+   * @param offset Byte offset within one record.
+   * @param type @c Type enum value.
    * @return            String representation, or empty on unknown type.
    */
   [[nodiscard]] std::string get_value_for_print(size_t loop_index, uint16_t offset, uint8_t type) const noexcept;
@@ -665,10 +665,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
   /**
    * @brief Returns a named field value formatted as a printable string.
    *
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c key_map: Map obtained from @c get_key_map().
-   * Parameter @c key: NUL-terminated full field name.
-   * Parameter @c type: @c Type enum value.
+   * @param loop_index Zero-based point index.
+   * @param key_map Map obtained from @c get_key_map().
+   * @param key NUL-terminated full field name.
+   * @param type @c Type enum value.
    * @return            String representation; missing keys or out-of-bounds
    *                    reads format the zero value for known types, while
    *                    unknown types return an empty string.
@@ -684,10 +684,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @p size_num and @p type_num (e.g. from a received wire buffer).
    * Use the template @c create<T...>() for type-safe construction.
    *
-   * Parameter @c size: Maximum number of points to pre-allocate.
-   * Parameter @c size_num: Protocol size encoding (nibbles = byte sizes per field).
-   * Parameter @c type_num: Protocol type encoding (nibbles = @c Type per field), stored as provided.
-   * Parameter @c key_str: Comma-separated field names (accepted up to 160 bytes,
+   * @param size Maximum number of points to pre-allocate.
+   * @param size_num Protocol size encoding (nibbles = byte sizes per field).
+   * @param type_num Protocol type encoding (nibbles = @c Type per field), stored as provided.
+   * @param key_str Comma-separated field names (accepted up to 160 bytes,
    *                 3-16 fields).  Keep the encoded string below 160 bytes if
    *                 you rely on string-returning helpers.
    * @return         @c false if @p size_num or @p key_str fail protocol validation.
@@ -702,8 +702,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * parameters.  @p keys must contain exactly @c sizeof...(T) names.
    *
    * Template parameter @c T: Field types; must all be fundamental.  3-16 types required.
-   * Parameter @c _size: Maximum number of points.
-   * Parameter @c keys: Field names in the same order as @c T... .
+   * @param _size Maximum number of points.
+   * @param keys Field names in the same order as @c T... .
    * @return         @c false if the number of keys does not match, the field
    *                 count is out of range, or key/type packing fails.  The
    *                 caller should use the supported exact C++ types listed
@@ -721,8 +721,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * then calls @c create<float,float,float,T...>().
    *
    * Template parameter @c T: Types for additional fields beyond XYZ.
-   * Parameter @c _size: Maximum number of points.
-   * Parameter @c keys: Names for the additional fields (not including x, y, z).
+   * @param _size Maximum number of points.
+   * @param keys Names for the additional fields (not including x, y, z).
    * @return         @c false if schema creation fails.
    */
   template <typename... T>
@@ -737,8 +737,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @c create<double,double,double,T...>().
    *
    * Template parameter @c T: Types for additional fields beyond XYZ.
-   * Parameter @c _size: Maximum number of points.
-   * Parameter @c keys: Names for the additional fields (not including x, y, z).
+   * @param _size Maximum number of points.
+   * @param keys Names for the additional fields (not including x, y, z).
    * @return         @c false if schema creation fails.
    */
   template <typename... T>
@@ -753,8 +753,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * have been set up by a prior @c create() call.  The buffer must be large
    * enough to hold @p _size points.
    *
-   * Parameter @c src_data: Source buffer in packed row order.  Must be non-null.
-   * Parameter @c _size: Number of points to copy.  Must be non-zero.
+   * @param src_data Source buffer in packed row order.  Must be non-null.
+   * @param _size Number of points to copy.  Must be non-zero.
    * @return          @c false on invalid arguments or insufficient capacity.
    */
   bool fill_packed_data(const uint8_t* src_data, size_t _size) noexcept;
@@ -769,7 +769,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * the total packed byte size, not semantic equality with @c Protocol::type_num.
    *
    * Template parameter @c T: Field value types; must all be fundamental.  3-16 required.
-   * Parameter @c args: Field values in schema order.
+   * @param args Field values in schema order.
    * @return       @c false if there is no owned buffer, the buffer is full, or
    *               the pack size does not match.
    */
@@ -780,10 +780,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Appends one point with float XYZ coordinates plus additional fields.
    *
    * Template parameter @c T: Types for additional fields beyond XYZ.
-   * Parameter @c x: X coordinate.
-   * Parameter @c y: Y coordinate.
-   * Parameter @c z: Z coordinate.
-   * Parameter @c args: Additional field values.
+   * @param x X coordinate.
+   * @param y Y coordinate.
+   * @param z Z coordinate.
+   * @param args Additional field values.
    * @return       @c false on overflow or packed-size mismatch.
    */
   template <typename... T>
@@ -793,8 +793,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Appends one point from a @c Vector3f plus additional fields.
    *
    * Template parameter @c T: Types for additional fields beyond XYZ.
-   * Parameter @c v3f: XYZ coordinates.
-   * Parameter @c args: Additional field values.
+   * @param v3f XYZ coordinates.
+   * @param args Additional field values.
    * @return       @c false on overflow or packed-size mismatch.
    */
   template <typename... T>
@@ -804,10 +804,10 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Appends one point with double XYZ coordinates plus additional fields.
    *
    * Template parameter @c T: Types for additional fields beyond XYZ.
-   * Parameter @c x: X coordinate.
-   * Parameter @c y: Y coordinate.
-   * Parameter @c z: Z coordinate.
-   * Parameter @c args: Additional field values.
+   * @param x X coordinate.
+   * @param y Y coordinate.
+   * @param z Z coordinate.
+   * @param args Additional field values.
    * @return       @c false on overflow or packed-size mismatch.
    */
   template <typename... T>
@@ -817,8 +817,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Appends one point from a @c Vector3d plus additional fields.
    *
    * Template parameter @c T: Types for additional fields beyond XYZ.
-   * Parameter @c v3d: XYZ coordinates.
-   * Parameter @c args: Additional field values.
+   * @param v3d XYZ coordinates.
+   * @param args Additional field values.
    * @return       @c false on overflow or packed-size mismatch.
    */
   template <typename... T>
@@ -832,7 +832,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * before calling @c set_value() to overwrite existing records.  Does not
    * zero-initialise newly exposed records.
    *
-   * Parameter @c size: New logical point count.  Must not exceed allocated capacity.
+   * @param size New logical point count.  Must not exceed allocated capacity.
    * @return      @c false if no owned buffer exists, @c pack_size_ is zero, or
    *              @p size exceeds allocated capacity.
    */
@@ -850,8 +850,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * cursor state is invalid.
    *
    * Template parameter @c T: Field value types; must all be fundamental.  3-16 required.
-   * Parameter @c loop_index: Zero-based point index to overwrite.
-   * Parameter @c args: Field values in schema order.
+   * @param loop_index Zero-based point index to overwrite.
+   * @param args Field values in schema order.
    * @return            @c false if there is no owned buffer, @p loop_index is
    *                    out of range, current size exceeds capacity, the write
    *                    cursor is inconsistent, or the pack size does not match.
@@ -863,9 +863,11 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Overwrites point @p loop_index with float XYZ plus additional fields.
    *
    * Template parameter @c T: Types for additional fields.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c x, @c y, @c z: XYZ float coordinates.
-   * Parameter @c args: Additional field values.
+   * @param loop_index Zero-based point index.
+   * @param x X float coordinate.
+   * @param y Y float coordinate.
+   * @param z Z float coordinate.
+   * @param args Additional field values.
    * @return            @c false on failure.
    */
   template <typename... T>
@@ -875,9 +877,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Overwrites point @p loop_index from a @c Vector3f plus additional fields.
    *
    * Template parameter @c T: Types for additional fields.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c v3f: XYZ float coordinates.
-   * Parameter @c args: Additional field values.
+   * @param loop_index Zero-based point index.
+   * @param v3f XYZ float coordinates.
+   * @param args Additional field values.
    * @return            @c false on failure.
    */
   template <typename... T>
@@ -887,9 +889,11 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Overwrites point @p loop_index with double XYZ plus additional fields.
    *
    * Template parameter @c T: Types for additional fields.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c x, @c y, @c z: XYZ double coordinates.
-   * Parameter @c args: Additional field values.
+   * @param loop_index Zero-based point index.
+   * @param x X double coordinate.
+   * @param y Y double coordinate.
+   * @param z Z double coordinate.
+   * @param args Additional field values.
    * @return            @c false on failure.
    */
   template <typename... T>
@@ -899,9 +903,9 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * @brief Overwrites point @p loop_index from a @c Vector3d plus additional fields.
    *
    * Template parameter @c T: Types for additional fields.
-   * Parameter @c loop_index: Zero-based point index.
-   * Parameter @c v3d: XYZ double coordinates.
-   * Parameter @c args: Additional field values.
+   * @param loop_index Zero-based point index.
+   * @param v3d XYZ double coordinates.
+   * @param args Additional field values.
    * @return            @c false on failure.
    */
   template <typename... T>
@@ -919,7 +923,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) PointCloud final {
    * header fields are zeroed -- equivalent to returning the object to its
    * default-constructed state.
    *
-   * Parameter @c force: If @c true, free the buffer and reset all state.
+   * @param force If @c true, free the buffer and reset all state.
    */
   void clear(bool force = false) noexcept;
 

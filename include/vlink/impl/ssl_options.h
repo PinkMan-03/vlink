@@ -52,15 +52,15 @@
  * When a property is not set explicitly, the factory reads these environment
  * variables as lowest-priority defaults (property values always take precedence):
  *
- * | Environment Variable   | Maps to            |
- * | ---------------------- | ------------------ |
- * | @c VLINK_SSL_CA        | @c ssl.ca          |
- * | @c VLINK_SSL_CERT      | @c ssl.cert        |
- * | @c VLINK_SSL_KEY       | @c ssl.key         |
- * | @c VLINK_SSL_KEY_PASS  | @c ssl.key_password|
- * | @c VLINK_SSL_VERIFY    | @c ssl.verify      |
- * | @c VLINK_SSL_SNI       | @c ssl.server_name |
- * | @c VLINK_SSL_CIPHERS   | @c ssl.ciphers     |
+ * | Environment Variable   | Maps to             |
+ * | ---------------------- | ------------------- |
+ * | @c VLINK_SSL_CA        | @c ssl.ca           |
+ * | @c VLINK_SSL_CERT      | @c ssl.cert         |
+ * | @c VLINK_SSL_KEY       | @c ssl.key          |
+ * | @c VLINK_SSL_KEY_PASS  | @c ssl.key_password |
+ * | @c VLINK_SSL_VERIFY    | @c ssl.verify       |
+ * | @c VLINK_SSL_SNI       | @c ssl.server_name  |
+ * | @c VLINK_SSL_CIPHERS   | @c ssl.ciphers      |
  *
  * @par Auto-detection
  * SSL is considered valid (enabled) when @c ca_file or @c cert_file is

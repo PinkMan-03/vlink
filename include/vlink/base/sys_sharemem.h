@@ -96,10 +96,17 @@ class VLINK_EXPORT SysSharemem final {
  public:
   /**
    * @brief Access mode for the shared memory mapping.
+   *
+   * @note The enum names mirror POSIX @c O_RDONLY / @c O_RDWR semantics.
+   *       On Linux and macOS the implementation uses @c shm_open with the
+   *       appropriate flags; on Windows it maps to @c CreateFileMapping /
+   *       @c MapViewOfFile page-protection constants.  The observable
+   *       behaviour (read-only vs. read-write access) is identical across
+   *       all supported platforms.
    */
   enum Mode : uint8_t {
-    kReadOnly = 0,  ///< Read-only mapping (PROT_READ)
-    kReadWrite = 1  ///< Read-write mapping (PROT_READ | PROT_WRITE)
+    kReadOnly = 0,  ///< Read-only access (no write permitted).
+    kReadWrite = 1  ///< Read-write access.
   };
 
   /**

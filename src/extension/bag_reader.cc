@@ -80,7 +80,7 @@ std::shared_ptr<BagReader> BagReader::create(const std::string& path, bool read_
   } else if (Helpers::has_endwith(suffix_check, ".vcap") || Helpers::has_endwith(suffix_check, ".vcapx")) {
     return std::make_shared<VCAPReader>(path, read_only, try_to_fix);
   } else {
-    CLOG_F("BagReader: Unknown bag suffix, path=%s", path.c_str());
+    CLOG_E("BagReader: Unknown bag suffix, path=%s", path.c_str());
     return nullptr;
   }
 }

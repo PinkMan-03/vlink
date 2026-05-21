@@ -41,13 +41,13 @@
  * @par Macro Overview
  * Several helper macros reduce boilerplate in concrete @c Conf subclasses:
  *
- * | Macro                          | Purpose                                                        |
- * | ------------------------------ | -------------------------------------------------------------- |
- * | VLINK_DECLARE_CONF_FRIEND()    | Grants friendship to all six Node<> template specialisations.  |
- * | VLINK_CONF_IMPL(classname)     | Declares the private Conf interface inside a concrete class.   |
- * | VLINK_ALLOW_IMPL_TYPE(type)    | Declares which ImplType bitmask the Conf supports.             |
- * | VLINK_DECLARE_GLOBAL_PROPERTY()| Declares per-class thread count and global property storage.   |
- * | VLINK_DEFINE_GLOBAL_PROPERTY() | Defines the static members declared by the above macro.        |
+ * | Macro                           | Purpose                                                        |
+ * | ------------------------------- | -------------------------------------------------------------- |
+ * | VLINK_DECLARE_CONF_FRIEND()     | Grants friendship to all six Node<> template specialisations.  |
+ * | VLINK_CONF_IMPL(classname)      | Declares the private Conf interface inside a concrete class.   |
+ * | VLINK_ALLOW_IMPL_TYPE(type)     | Declares which ImplType bitmask the Conf supports.             |
+ * | VLINK_DECLARE_GLOBAL_PROPERTY() | Declares per-class thread count and global property storage.   |
+ * | VLINK_DEFINE_GLOBAL_PROPERTY()  | Defines the static members declared by the above macro.        |
  */
 
 #pragma once

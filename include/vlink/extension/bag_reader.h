@@ -198,6 +198,11 @@ class VLINK_EXPORT BagReader : public MessageLoop {
    * Called on the BagReader's loop thread.  The @p data reference is valid only
    * for the duration of the callback.
    *
+   * @note The timestamp delivered here is in **microseconds**, while
+   *       @c Config::begin_time and @c Config::end_time are expressed in
+   *       **milliseconds**.  Multiply @c begin_time / @c end_time by 1000 to
+   *       compare them directly against this value.
+   *
    * @param microseconds_timestamp    Message timestamp in microseconds.
    * @param url          Topic URL string.
    * @param action_type  Action type (kPublish, kRequest, etc.).

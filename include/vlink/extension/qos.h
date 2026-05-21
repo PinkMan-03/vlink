@@ -36,20 +36,20 @@
  *
  * Pre-built profiles are available in the @c QosProfile namespace (see @c qos_profile.h).
  *
- * | Sub-policy          | Key parameter                | Default                    |
- * | ------------------- | ---------------------------- | -------------------------- |
- * | @c Reliability      | @c kind, block_time          | Reliable, 100 ms block     |
- * | @c History          | @c kind, depth               | KeepLast, depth=1          |
- * | @c Durability       | @c kind                      | Volatile                   |
- * | @c PublishMode      | @c kind                      | Sync                       |
- * | @c Liveliness       | @c kind, duration            | Automatic, infinite        |
- * | @c DestinationOrder | @c kind                      | ReceptionTimestamp         |
- * | @c Ownership        | @c kind                      | Shared                     |
- * | @c Deadline         | @c period                    | -1 (no deadline)           |
- * | @c Lifespan         | @c duration                  | -1 (infinite)              |
- * | @c LatencyBudget    | @c duration                  | 0 (best-effort)            |
- * | @c ResourceLimits   | max_samples / instances      | 6000 / 10 / 500            |
- * | @c Additions        | @c priority, @c is_express   | Normal, not express        |
+ * | Sub-policy          | Key parameter                       | Default                            |
+ * | ------------------- | ----------------------------------- | ---------------------------------- |
+ * | @c Reliability      | @c kind, block_time, heartbeat_time | Reliable, 100 ms block, 3000 ms hb |
+ * | @c History          | @c kind, depth                      | KeepLast, depth=1                  |
+ * | @c Durability       | @c kind                             | Volatile                           |
+ * | @c PublishMode      | @c kind                             | Sync                               |
+ * | @c Liveliness       | @c kind, duration                   | Automatic, infinite                |
+ * | @c DestinationOrder | @c kind                             | ReceptionTimestamp                 |
+ * | @c Ownership        | @c kind                             | Shared                             |
+ * | @c Deadline         | @c period                           | -1 (no deadline)                   |
+ * | @c Lifespan         | @c duration                         | -1 (infinite)                      |
+ * | @c LatencyBudget    | @c duration                         | 0 (best-effort)                    |
+ * | @c ResourceLimits   | max_samples / instances             | 6000 / 10 / 500                    |
+ * | @c Additions        | @c priority, @c is_express          | Normal, not express                |
  *
  * @par Example
  * @code

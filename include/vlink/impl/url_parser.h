@@ -38,17 +38,17 @@
  * @endcode
  *
  * @par Supported URL Components
- * | Component  | Example                     | Description                            |
- * | ---------- | --------------------------- | -------------------------------------- |
+ * | Component  | Example                     | Description                                       |
+ * | ---------- | --------------------------- | ------------------------------------------------- |
  * | transport  | @c dds                      | URI scheme / VLink transport prefix before @c :// |
- * | content    | @c //host/path              | Full content portion after the scheme     |
- * | username   | @c user                     | Optional credential before host        |
- * | password   | @c pass                     | Optional credential after @c :         |
- * | host       | @c 127.0.0.1                | Hostname or IP address                 |
- * | port       | @c 30490                    | TCP/UDP port number                    |
- * | path       | @c vehicle/speed            | Topic path; leading slash stored separately |
- * | query      | @c domain_id=1&qos=...      | Raw query string after @c ?            |
- * | fragment   | @c section1                 | Fragment identifier after @c #         |
+ * | content    | @c //host/path              | Full content portion after the scheme             |
+ * | username   | @c user                     | Optional credential before host                   |
+ * | password   | @c pass                     | Optional credential after @c :                    |
+ * | host       | @c 127.0.0.1                | Hostname or IP address                            |
+ * | port       | @c 30490                    | TCP/UDP port number                               |
+ * | path       | @c vehicle/speed            | Topic path; leading slash stored separately       |
+ * | query      | @c domain_id=1&qos=...      | Raw query string after @c ?                       |
+ * | fragment   | @c section1                 | Fragment identifier after @c #                    |
  *
  * @par Query Dictionary
  * The query string is automatically split into a @c std::map<string,string> using
@@ -152,6 +152,11 @@ class VLINK_EXPORT UrlParser final {
    * @param category    Hierarchical or non-hierarchical form.
    * @param rooted      @c true if the path begins with @c / (hierarchical URLs only).
    * @param separator   Query key-value delimiter; default ampersand.
+   *
+   * @throws Exception::RuntimeError if @p category is @c Category::kHierarchical and
+   *         @c Component::kPath is absent from @p components (an empty path must still
+   *         be present as an explicit key), or if @p category is
+   *         @c Category::kNonHierarchical and @c Component::kContent is absent.
    */
   explicit UrlParser(const std::map<Component, std::string>& components, Category category, bool rooted,
                      Separator separator = Separator::kAmpersand);

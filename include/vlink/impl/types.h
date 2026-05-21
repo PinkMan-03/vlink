@@ -58,7 +58,7 @@
  * | kDdsr    | ddsr://      | RTI DDS.                             |
  * | kDdst    | ddst://      | TravoDDS.                            |
  * | kSomeip  | someip://    | SOME/IP via vsomeip.                 |
- * | kMqtt    | mqtt://      | MQTT publish/subscribe.            |
+ * | kMqtt    | mqtt://      | MQTT publish/subscribe.              |
  * | kFdbus   | fdbus://     | FDBus IPC.                           |
  * | kQnx     | qnx://       | QNX IPC (QNX only).                  |
  */

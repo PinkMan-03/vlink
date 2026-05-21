@@ -39,7 +39,7 @@
  * | Copy prevention    | VLINK_DISALLOW_COPY_AND_ASSIGN                 | Disable copy constructor/operator  |
  * | Singleton guard    | VLINK_SINGLETON_CHECK, VLINK_SINGLETON_DECLARE | Enforce single-instance classes    |
  * | String utilities   | VLINK_MACRO_STRING_IFY, VLINK_MACRO_STRING_GET | Stringify macro tokens             |
- * | Constant check     | VLINK_ASSERT_CONSTANT                        | Static-assert constant string args |
+ * | Constant check     | VLINK_ASSERT_CONSTANT                          | Static-assert constant string args |
  *
  * @note
  * - All macros are designed to be no-ops when the relevant feature is unavailable

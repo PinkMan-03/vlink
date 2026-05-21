@@ -44,13 +44,13 @@
  * | --------- | ------------------------------------------------------------------------- |
  * | @c topic  | CycloneDDS topic name; formed from @c host + @c "/" + @c path             |
  * | @c domain | DDS Domain ID (@c ?domain=, default from @c VLINK_DDS_DOMAIN env var)     |
- * | @c depth  | DDS history depth override; 0 keeps the selected QoS history depth         |
+ * | @c depth  | DDS history depth override; 0 keeps the selected QoS history depth        |
  * | @c qos    | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
  *
  * @par QoS Registration
  * @code
  *   vlink::Qos my_qos;
- *   my_qos.reliability = vlink::Reliability::kReliable;
+ *   my_qos.reliability.kind = vlink::Qos::Reliability::kReliable;
  *   vlink::DdscConf::register_qos("my_profile", my_qos);
  *
  *   vlink::Subscriber<MyMsg> sub("ddsc://my_topic?qos=my_profile");

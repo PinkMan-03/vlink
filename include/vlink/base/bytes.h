@@ -38,13 +38,13 @@
  *
  * Ownership model:
  *
- * | Factory method                  | Owns memory | On copy     | Use case                          |
- * | ------------------------------- | ----------- | ----------- | --------------------------------- |
- * | @c Bytes::create()              | Yes         | Deep copy   | Fresh allocation                  |
- * | @c Bytes::shallow_copy()        | No          | Ptr alias   | Zero-copy wrapping of extern buf  |
- * | @c Bytes::deep_copy()           | Conditional | Deep copy   | Owned copy when source data exists|
- * | @c Bytes::loan_internal()       | No (loaned) | Ptr alias   | Iceoryx zero-copy loan            |
- * | @c Bytes::shallow_copy_ptr()    | No          | Ptr alias   | Wrap opaque pointer (size == 0)   |
+ * | Factory method                  | Owns memory | On copy     | Use case                           |
+ * | ------------------------------- | ----------- | ----------- | ---------------------------------- |
+ * | @c Bytes::create()              | Yes         | Deep copy   | Fresh allocation                   |
+ * | @c Bytes::shallow_copy()        | No          | Ptr alias   | Zero-copy wrapping of extern buf   |
+ * | @c Bytes::deep_copy()           | Conditional | Deep copy   | Owned copy when source data exists |
+ * | @c Bytes::loan_internal()       | No (loaned) | Ptr alias   | Iceoryx zero-copy loan             |
+ * | @c Bytes::shallow_copy_ptr()    | No          | Ptr alias   | Wrap opaque pointer (size == 0)    |
  *
  * Compression support (LZAV):
  * - @c compress_data() appends a 4-byte header magic, a 4-byte original-size field and a
@@ -831,7 +831,7 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @return @c true on success, @c false for non-owned buffers or if
    *         allocation failed.
    */
-  bool reserve(size_t new_capacity) noexcept;
+  [[nodiscard]] bool reserve(size_t new_capacity) noexcept;
 
   /**
    * @brief Resizes the logical data region to @p size bytes.

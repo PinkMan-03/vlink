@@ -110,7 +110,9 @@ using IntraData = std::shared_ptr<IntraDataType>;
  *    - @c bool operator<<(const Bytes&) -- deserialise @c Bytes into @c value.
  *    - @c bool operator>>(Bytes&) const -- serialise @c value into @c Bytes.
  *    - @c size_t get_serialized_size() const -- byte count needed for serialisation.
- *    - @c static std::string get_serialized_type() -- type name string.
+ *    - @c static std::string get_serialized_type() -- type name string.  For @c Bytes
+ *      instantiations this returns an empty string by design (matches the serializer
+ *      contract documented in @c serializer.h).
  *    - @c static constexpr SchemaType get_schema_type() -- coarse schema family.
  *    - A @c static_assert ensuring @c target_type is a supported serialiser type.
  *

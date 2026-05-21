@@ -120,7 +120,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Performs a deep copy of @p target, allocating a new buffer and copying
    * the payload.
    *
-   * Parameter @c target: Source to copy from.
+   * @param target Source to copy from.
    */
   RawData(const RawData& target) noexcept;
 
@@ -131,7 +131,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Transfers ownership from @p target.  After the call @p target is empty
    * and no longer owns any buffer.
    *
-   * Parameter @c target: Source to move from.
+   * @param target Source to move from.
    */
   RawData(RawData&& target) noexcept;
 
@@ -141,7 +141,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * @details
    * Deep-copies @p target into @c *this.  Self-assignment is a no-op.
    *
-   * Parameter @c target: Source to copy from.
+   * @param target Source to copy from.
    * @return        Reference to @c *this.
    */
   RawData& operator=(const RawData& target) noexcept;
@@ -153,7 +153,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Transfers ownership from @p target into @c *this.  Self-assignment is a
    * no-op.  After the call @p target is empty.
    *
-   * Parameter @c target: Source to move from.
+   * @param target Source to move from.
    * @return        Reference to @c *this.
    */
   RawData& operator=(RawData&& target) noexcept;
@@ -167,7 +167,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * directly into @p bytes (zero-copy, @c is_owner() == false).  The caller
    * must ensure @p bytes outlives this @c RawData.
    *
-   * Parameter @c bytes: Serialised buffer produced by @c operator>>.
+   * @param bytes Serialised buffer produced by @c operator>>.
    * @return       @c true on success, @c false if the buffer is invalid or
    *               the total size does not match @c get_serialized_size().
    */
@@ -181,7 +181,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * the payload into @p bytes.  If @p bytes is the wrong size it is reallocated
    * automatically.
    *
-   * Parameter @c bytes: Output buffer (resized if necessary).
+   * @param bytes Output buffer (resized if necessary).
    * @return       Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
@@ -193,7 +193,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Verifies that the buffer is large enough and that both the begin and end
    * magic numbers match the expected constants.
    *
-   * Parameter @c bytes: Buffer to check.
+   * @param bytes Buffer to check.
    * @return       @c true if the magic numbers are present and the minimum
    *               size constraint is satisfied.
    */
@@ -224,7 +224,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * copying data.  @c is_owner() becomes @c false.  The source must outlive
    * this object.  Any previously owned buffer is freed first.
    *
-   * Parameter @c target: Source to borrow from.
+   * @param target Source to borrow from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool shallow_copy(const RawData& target) noexcept;
@@ -237,7 +237,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * already owns a buffer of the same size, the data is copied in-place without
    * reallocation.
    *
-   * Parameter @c target: Source to copy from.
+   * @param target Source to copy from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool deep_copy(const RawData& target) noexcept;
@@ -249,7 +249,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Equivalent to a move operation implemented as a member function.  After
    * the call @p target is empty and @c is_owner() on @p target is @c false.
    *
-   * Parameter @c target: Source to move from.
+   * @param target Source to move from.
    * @return        @c false if @p target == @c *this, otherwise @c true.
    */
   bool move_copy(RawData& target) noexcept;
@@ -261,7 +261,7 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * Any previously owned buffer is freed before the new allocation.  The
    * new buffer content is uninitialised.
    *
-   * Parameter @c size: Number of bytes to allocate.  Must be non-zero.
+   * @param size Number of bytes to allocate.  Must be non-zero.
    * @return      @c false if @p size is zero, otherwise @c true.
    */
   bool create(size_t size) noexcept;
@@ -283,8 +283,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * owned buffer is freed.  The caller is responsible for the lifetime of
    * @p data.
    *
-   * Parameter @c data: Pointer to the data to borrow.  Must be non-null.
-   * Parameter @c size: Size of the data in bytes.  Must be non-zero.
+   * @param data Pointer to the data to borrow.  Must be non-null.
+   * @param size Size of the data in bytes.  Must be non-zero.
    * @return      @c false if @p data is null, @p size is zero, or @p data
    *              already equals the current internal pointer.
    */
@@ -297,8 +297,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
    * If @c *this already owns a buffer of the same @p size the data is copied
    * in-place; otherwise a new buffer is allocated first via @c create().
    *
-   * Parameter @c data: Source data pointer.  Must be non-null.
-   * Parameter @c size: Number of bytes to copy.  Must be non-zero.
+   * @param data Source data pointer.  Must be non-null.
+   * @param size Number of bytes to copy.  Must be non-zero.
    * @return      @c false if @p data is null, @p size is zero, this object
    *              claims ownership but has no buffer, or @p data already equals
    *              the current internal pointer; otherwise @c true.
@@ -308,8 +308,8 @@ struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
   /**
    * @brief Alias for @c deep_copy(uint8_t*, size_t).
    *
-   * Parameter @c data: Source data pointer.
-   * Parameter @c size: Number of bytes.
+   * @param data Source data pointer.
+   * @param size Number of bytes.
    * @return      Result of the underlying @c deep_copy call.
    */
   bool fill_data(uint8_t* data, size_t size) noexcept;

@@ -265,8 +265,12 @@ VLINK_EXPORT bool set_thread_name(const std::string& name, std::thread* thread =
  * @c RLIMIT_RTPRIO permissions for real-time policies.
  *
  * @param priority_level  Scheduling priority (policy-dependent range).
- * @param policy          Scheduling policy (e.g., @c SCHED_FIFO, @c SCHED_RR, @c SCHED_OTHER).
- *                        Pass -1 to keep the current policy.  Default: -1.
+ * @param policy          Scheduling policy.  POSIX systems accept @c SCHED_FIFO,
+ *                        @c SCHED_RR, and @c SCHED_OTHER (defined in @c <sched.h>,
+ *                        which the caller must include explicitly).  On Windows,
+ *                        these POSIX constants do not exist; the value is mapped
+ *                        to a Win32 thread priority level or silently ignored.
+ *                        Pass @c -1 to keep the current policy.  Default: @c -1.
  * @param thread          Thread to configure, or @c nullptr for the calling thread.  Default: @c nullptr.
  * @return @c true on success.
  */

@@ -52,8 +52,8 @@
  * Named QoS profiles must be registered before creating any @c dds:// nodes:
  * @code
  *   vlink::Qos my_qos;
- *   my_qos.reliability = vlink::Reliability::kReliable;
- *   my_qos.durability  = vlink::Durability::kTransientLocal;
+ *   my_qos.reliability.kind = vlink::Qos::Reliability::kReliable;
+ *   my_qos.durability.kind  = vlink::Qos::Durability::kTransientLocal;
  *   vlink::DdsConf::register_qos("my_profile", my_qos);
  *
  *   vlink::Subscriber<MyMsg> sub("dds://my_topic?qos=my_profile");

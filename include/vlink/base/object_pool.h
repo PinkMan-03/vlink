@@ -32,10 +32,10 @@
  *
  * Acquisition API:
  *
- * | Method        | Return type                       | Auto-return on destruction        |
- * | ------------- | --------------------------------- | --------------------------------- |
- * | @c get()      | unique_ptr<T, PoolDeleter>        | Yes (via PoolDeleter)             |
- * | @c get_shared | shared_ptr<T>   (PoolDeleter)     | Yes (via shared_ptr deleter)      |
+ * | Method        | Return type                       | Auto-return on destruction         |
+ * | ------------- | --------------------------------- | ---------------------------------- |
+ * | @c get()      | unique_ptr<T, PoolDeleter>        | Yes (via PoolDeleter)              |
+ * | @c get_shared | shared_ptr<T>   (PoolDeleter)     | Yes (via shared_ptr deleter)       |
  * | @c borrow()   | T*  (raw pointer)                 | No -- caller must call give_back() |
  *
  * Reset policy controls when the optional @c ResetCallback is invoked:

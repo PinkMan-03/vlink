@@ -41,7 +41,7 @@
  * | @c kFlatTableType   | Inherits @c flatbuffers::NativeTable                   | FlatBuffers native table.         |
  * | @c kFlatPtrType     | Pointer to @c flatbuffers::Table subclass              | Zero-copy FlatBuffers read.       |
  * | @c kFlatBuilderType | Has @c fbb_ member and @c Finish()                     | FlatBuffers builder.              |
- * | @c kCustomType      | Has @c operator>>(Bytes&) and @c operator<<(const Bytes&) | User-defined codec.            |
+ * | @c kCustomType      | Has @c operator>>(Bytes&)  @c operator<<(const Bytes&) | User-defined codec.               |
  * | @c kStringType      | @c T == std::string                                    | UTF-8 string.                     |
  * | @c kCharsType       | Constructible as @c std::string but not @c std::string | C string literal / @c char*.      |
  * | @c kStreamType      | Has @c operator<< and @c operator>> with stringstream  | Stream-based text encoding.       |

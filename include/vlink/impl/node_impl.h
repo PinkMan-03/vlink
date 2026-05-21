@@ -47,20 +47,20 @@
  * | Data recording         | @c set_record_path() / @c try_record()            |
  * | Discovery registration | @c init_ext() / @c deinit_ext()                   |
  * | Version check          | @c check_version()                                |
- * | Global init            | @c global_init() -- called once per process        |
+ * | Global init            | @c global_init() -- called once per process       |
  *
  * @par Callback Types
  * @c NodeImpl defines the standardised callback signatures used throughout all
  * transport backends:
  *
- * | Type              | Signature                               | Used by                    |
- * | ----------------- | --------------------------------------- | -------------------------- |
+ * | Type              | Signature                               | Used by                               |
+ * | ----------------- | --------------------------------------- | ------------------------------------- |
  * | ConnectCallback   | @c void(bool)                           | PublisherImpl, ClientImpl, ServerImpl |
- * | StatusCallback    | @c void(const Status::BasePtr&)         | DDS status events          |
- * | SyncCallback      | @c void()                               | SetterImpl sync            |
- * | ReqRespCallback   | @c void(uint64_t, const Bytes&, Bytes*) | ServerImpl listen          |
- * | MsgCallback       | @c void(const Bytes&)                   | SubscriberImpl, GetterImpl |
- * | IntraMsgCallback  | @c void(const IntraData&)               | intra:// subscriber        |
+ * | StatusCallback    | @c void(const Status::BasePtr&)         | DDS status events                     |
+ * | SyncCallback      | @c void()                               | SetterImpl sync                       |
+ * | ReqRespCallback   | @c void(uint64_t, const Bytes&, Bytes*) | ServerImpl listen                     |
+ * | MsgCallback       | @c void(const Bytes&)                   | SubscriberImpl, GetterImpl            |
+ * | IntraMsgCallback  | @c void(const IntraData&)               | intra:// subscriber                   |
  */
 
 #pragma once

@@ -30,8 +30,8 @@
  * Each of the three VLink communication models is exposed through a handle-based
  * interface that wraps the corresponding C++ template class:
  *
- * | Model   | C++ class                         | C handle types                                     |
- * | ------- | --------------------------------- | -------------------------------------------------- |
+ * | Model   | C++ class                         | C handle types                                       |
+ * | ------- | --------------------------------- | ---------------------------------------------------- |
  * | Event   | Publisher / Subscriber            | vlink_publisher_handle_t / vlink_subscriber_handle_t |
  * | Method  | Server / Client                   | vlink_server_handle_t / vlink_client_handle_t        |
  * | Field   | Setter / Getter                   | vlink_setter_handle_t / vlink_getter_handle_t        |

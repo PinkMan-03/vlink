@@ -42,25 +42,25 @@
  *                    &shm_loan_threshold=<N>&shm_blocking=<bool>][#<fragment>]
  * @endcode
  *
- * | Component    | Description                                                               |
- * | ------------ | ------------------------------------------------------------------------- |
- * | @c address   | Zenoh key expression; formed from @c host + @c "/" + @c path              |
- * | @c event     | Optional secondary event filter (@c ?event=)                              |
- * | @c domain    | Zenoh domain/session identifier (@c ?domain=, default from factory)       |
- * | @c qos       | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
- * | @c depth     | Optional TX queue override; 0 uses selected QoS history depth             |
- * | @c shm       | Optional Zenoh shared-memory transport optimization enable (@c ?shm=)     |
- * | @c shm_mode  | Optional Zenoh SHM init mode: @c lazy or @c init                          |
- * | @c shm_size  | Optional SHM pool size; accepts bytes, K, M, or G suffixes                |
- * | @c shm_threshold | Optional SHM optimization message-size threshold                      |
- * | @c shm_loan_threshold | Optional minimum size for VLink SHM loan buffers                 |
- * | @c shm_blocking | Optional blocking allocation mode for @c loan()                       |
- * | @c fragment  | Optional transport hint or config fragment passed to the Zenoh session    |
+ * | Component             | Description                                                               |
+ * | --------------------- | ------------------------------------------------------------------------- |
+ * | @c address            | Zenoh key expression; formed from @c host + @c "/" + @c path              |
+ * | @c event              | Optional secondary event filter (@c ?event=)                              |
+ * | @c domain             | Zenoh domain/session identifier (@c ?domain=, default from factory)       |
+ * | @c qos                | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
+ * | @c depth              | Optional TX queue override; 0 uses selected QoS history depth             |
+ * | @c shm                | Optional Zenoh shared-memory transport optimization enable (@c ?shm=)     |
+ * | @c shm_mode           | Optional Zenoh SHM init mode: @c lazy or @c init                          |
+ * | @c shm_size           | Optional SHM pool size; accepts bytes, K, M, or G suffixes                |
+ * | @c shm_threshold      | Optional SHM optimization message-size threshold                          |
+ * | @c shm_loan_threshold | Optional minimum size for VLink SHM loan buffers                          |
+ * | @c shm_blocking       | Optional blocking allocation mode for @c loan()                           |
+ * | @c fragment           | Optional transport hint or config fragment passed to the Zenoh session    |
  *
  * @par QoS Registration
  * @code
  *   vlink::Qos my_qos;
- *   my_qos.reliability = vlink::Reliability::kReliable;
+ *   my_qos.reliability.kind = vlink::Qos::Reliability::kReliable;
  *   vlink::ZenohConf::register_qos("my_profile", my_qos);
  *
  *   vlink::Publisher<MyMsg> pub("zenoh://vehicle/speed?qos=my_profile");
