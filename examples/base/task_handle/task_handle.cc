@@ -28,6 +28,7 @@
 #include <vlink/base/thread_pool.h>
 
 #include <atomic>
+#include <chrono>
 #include <stdexcept>
 #include <thread>
 #include <vector>

@@ -53,6 +53,7 @@
 #include <vlink/vlink.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>

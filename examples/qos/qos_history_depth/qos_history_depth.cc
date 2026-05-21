@@ -30,6 +30,7 @@
 #endif
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <thread>
 

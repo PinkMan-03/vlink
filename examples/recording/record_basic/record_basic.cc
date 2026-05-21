@@ -25,6 +25,7 @@
 #include <vlink/extension/bag_writer.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)

@@ -1436,7 +1436,8 @@ static vlink::Bytes extract_zerocopy_binary(const std::string& ser, const vlink:
       vlink::zerocopy::PointCloud pc;
 
       if (vlink::Serializer::convert(bytes, pc)) {
-        size_t payload_size = static_cast<size_t>(pc.size()) * static_cast<size_t>(pc.pack_size());
+        // NOLINTNEXTLINE(readability-redundant-casting)
+        auto payload_size = static_cast<size_t>(pc.size()) * static_cast<size_t>(pc.pack_size());
         return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(pc.get_internal_data()), payload_size);
       }
     } else if (ser.find("OccupancyGrid") != std::string::npos) {
@@ -1455,7 +1456,8 @@ static vlink::Bytes extract_zerocopy_binary(const std::string& ser, const vlink:
       vlink::zerocopy::ObjectArray arr;
 
       if (vlink::Serializer::convert(bytes, arr)) {
-        size_t payload_size = static_cast<size_t>(arr.count()) * static_cast<size_t>(arr.pack_size());
+        // NOLINTNEXTLINE(readability-redundant-casting)
+        auto payload_size = static_cast<size_t>(arr.count()) * static_cast<size_t>(arr.pack_size());
         return vlink::Bytes::shallow_copy(const_cast<uint8_t*>(arr.data()), payload_size);
       }
     } else if (ser.find("AudioFrame") != std::string::npos) {
@@ -2182,7 +2184,8 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
     vlink::Utils::stop_detect_keyboard();
 
     if (!quiet_flag) {
-      std::cout << "\033[2K\r" << "Done." << std::endl;
+      std::cout << "\033[2K\r"
+                << "Done." << std::endl;
     }
   }
 

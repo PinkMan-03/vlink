@@ -25,6 +25,7 @@
 #include <vlink/vlink.h>
 #include <vlink/zerocopy/camera_frame.h>
 
+#include <chrono>
 #include <thread>
 
 #include "frame_producer.h"

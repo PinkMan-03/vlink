@@ -26,6 +26,7 @@
 #include <vlink/zerocopy/audio_frame.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 #include "audio_consumer.h"

@@ -24,6 +24,7 @@
 #include <vlink/base/logger.h>
 #include <vlink/base/thread_pool.h>
 
+#include <chrono>
 #include <thread>
 
 #include "parallel_tasks.h"

@@ -26,6 +26,7 @@
 #include <vlink/zerocopy/object_array.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 #include "array_consumer.h"

@@ -30,6 +30,7 @@
 #include <doctest/doctest.h>
 
 #include <atomic>
+#include <chrono>
 #include <stdexcept>
 #include <thread>
 

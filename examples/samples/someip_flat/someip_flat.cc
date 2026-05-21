@@ -46,6 +46,7 @@
 
 #include <atomic>
 #include <thread>
+#include <chrono>
 
 // FlatBuffers generated message types
 #if __has_include("./someip_flat.fbs.hpp")

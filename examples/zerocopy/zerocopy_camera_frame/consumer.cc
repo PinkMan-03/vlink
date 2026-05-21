@@ -26,6 +26,7 @@
 #include <vlink/zerocopy/camera_frame.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 #include "frame_consumer.h"

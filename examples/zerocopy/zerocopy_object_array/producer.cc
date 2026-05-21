@@ -25,6 +25,7 @@
 #include <vlink/vlink.h>
 #include <vlink/zerocopy/object_array.h>
 
+#include <chrono>
 #include <thread>
 
 #include "array_producer.h"

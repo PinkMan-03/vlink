@@ -24,6 +24,7 @@
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
 #include <cmath>
 
 #include "math_types.h"

@@ -32,6 +32,8 @@
 #include <vlink/base/utils.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
+
 #include "../ping_pong_common.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)

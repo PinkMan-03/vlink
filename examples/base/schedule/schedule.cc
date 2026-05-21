@@ -24,6 +24,7 @@
 #include <vlink/base/logger.h>
 #include <vlink/base/message_loop.h>
 
+#include <chrono>
 #include <stdexcept>
 #include <thread>
 

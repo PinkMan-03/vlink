@@ -29,6 +29,7 @@
 #include <vlink/vlink.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)

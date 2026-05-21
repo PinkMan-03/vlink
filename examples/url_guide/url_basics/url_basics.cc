@@ -25,6 +25,7 @@
 #include <vlink/impl/url_parser.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
 #include <map>
 #include <string>
 #include <thread>

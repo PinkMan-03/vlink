@@ -26,6 +26,7 @@
 #include <vlink/zerocopy/occupancy_grid.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 #include "grid_consumer.h"

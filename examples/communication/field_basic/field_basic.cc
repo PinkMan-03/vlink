@@ -25,6 +25,7 @@
 #include <vlink/vlink.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 #include "vehicle_types.h"

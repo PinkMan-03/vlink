@@ -28,6 +28,7 @@
 #include <vlink/base/task_handle.h>
 
 #include <atomic>
+#include <chrono>
 #include <stdexcept>
 #include <thread>
 #include <vector>

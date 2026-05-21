@@ -33,6 +33,7 @@
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
 #include <thread>
 
 #if defined(__ANDROID__) && __has_include("ddsc_proto/ddsc_proto.pb.h")

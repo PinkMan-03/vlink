@@ -24,6 +24,8 @@
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
+
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)
 
 // Request / response are PODs -- dispatched via vlink "Standard" serializer.

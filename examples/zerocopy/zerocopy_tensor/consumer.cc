@@ -26,6 +26,7 @@
 #include <vlink/zerocopy/tensor.h>
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 
 #include "tensor_consumer.h"

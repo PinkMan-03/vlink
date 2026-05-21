@@ -35,6 +35,7 @@
 
 #include <atomic>
 #include <thread>
+#include <chrono>
 
 #include "dds_idlPubSubTypes.h"
 

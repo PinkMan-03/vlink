@@ -25,6 +25,7 @@
 #include <vlink/impl/intra_data.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
 #include <cstring>
 #include <string>
 

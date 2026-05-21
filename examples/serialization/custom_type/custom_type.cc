@@ -24,6 +24,8 @@
 #include <vlink/base/logger.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
+
 #include "custom_types.h"
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)

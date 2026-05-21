@@ -25,6 +25,7 @@
 #include <vlink/extension/dynamic_data.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
 #include <string>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)

@@ -38,6 +38,8 @@
 #include <vlink/base/utils.h>
 #include <vlink/vlink.h>
 
+#include <chrono>
+
 #if defined(__ANDROID__) && __has_include("helloworld/proto/helloworld.pb.h")
 #include "helloworld/proto/helloworld.pb.h"
 #else

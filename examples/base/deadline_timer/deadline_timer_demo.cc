@@ -24,6 +24,7 @@
 #include <vlink/base/deadline_timer.h>
 #include <vlink/base/logger.h>
 
+#include <chrono>
 #include <thread>
 
 using namespace std::chrono_literals;  // NOLINT(build/namespaces, google-build-using-namespace)

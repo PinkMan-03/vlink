@@ -26,6 +26,7 @@
 #include <vlink/vlink.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <thread>
 

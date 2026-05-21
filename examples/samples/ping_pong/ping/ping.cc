@@ -36,6 +36,7 @@
 #include <vlink/vlink.h>
 
 #include <charconv>
+#include <chrono>
 #include <string>
 
 #include "../ping_pong_common.h"
