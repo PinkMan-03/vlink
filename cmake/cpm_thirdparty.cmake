@@ -101,6 +101,7 @@ if(ENABLE_CPM_ALL OR ENABLE_CPM_PROTOBUF)
     URL
     "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip"
     OPTIONS
+    "CMAKE_INTERPROCEDURAL_OPTIMIZATION ON"
     "CMAKE_POSITION_INDEPENDENT_CODE ON"
     "BUILD_SHARED_LIBS OFF"
     "protobuf_BUILD_TESTS OFF"
