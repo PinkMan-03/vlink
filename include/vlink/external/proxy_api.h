@@ -131,12 +131,16 @@
  *
  * vlink::ProxyAPI api(cfg);
  * api.register_connect_callback([](bool connected) {
- *   if (connected) { /* server online *\/ }
+ *   if (connected) {
+ *     // server online
+ *   }
  * });
  * api.register_info_callback([](const std::vector<vlink::ProxyAPI::Info>& list) {
- *   for (const auto& info : list) { /* info.url, info.freq, info.status, ... *\/ }
+ *   for (const auto& info : list) {
+ *     // info.url, info.freq, info.status, ...
+ *   }
  * });
- * api.async_run();                       // start the loop so handshake/timers can run
+ * api.async_run(); // start the loop so handshake/timers can run
  *
  * vlink::ProxyAPI::Control ctrl;
  * ctrl.mode = vlink::ProxyAPI::kObserveOne;
