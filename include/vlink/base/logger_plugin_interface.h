@@ -23,49 +23,58 @@
 
 /**
  * @file logger_plugin_interface.h
- * @brief Abstract interface for pluggable logger backends loaded via the Plugin system.
+ * @brief Abstract contract for shared-library logger backends loaded via the VLink @c Plugin system.
  *
  * @details
- * @c LoggerPluginInterface defines the contract that every custom logger plugin must implement.
- * A plugin is a shared library (.so / .dll) that exports a factory function registered via
- * the @c VLINK_PLUGIN_REGISTER macro and compiled with @c VLINK_PLUGIN_DECLARE.
+ * A logger plugin is a shared library that exports a factory through @c VLINK_PLUGIN_DECLARE and
+ * embeds @c VLINK_PLUGIN_REGISTER inside its concrete subclass.  At runtime the host application
+ * uses @c vlink::Plugin::load<LoggerPluginInterface> to construct an instance and forwards every
+ * log record to its @c log method.
  *
- * @par Plugin registration
- * Each implementing class must embed @c VLINK_PLUGIN_REGISTER(LoggerPluginInterface) and
- * provide a corresponding @c VLINK_PLUGIN_DECLARE in its translation unit so the @c Plugin
- * loader can create and destroy instances dynamically.
+ * @par Plugin contract
  *
- * @par Loading a logger plugin
+ * | Hook                     | Direction        | Contract                                         |
+ * | ------------------------ | ---------------- | ------------------------------------------------ |
+ * | @c VLINK_PLUGIN_REGISTER | inside the class | Wires factory and destructor pointers            |
+ * | @c VLINK_PLUGIN_DECLARE  | translation unit | Exposes the factory and the version metadata     |
+ * | @c init                  | host -> plugin   | Called once after construction with the app name |
+ * | @c log                   | host -> plugin   | Called per record after passing level filters    |
+ * | Destructor               | host -> plugin   | Called when the host releases the plugin handle  |
+ *
+ * @par Lifecycle
+ *
+ * @verbatim
+ *  host                          plugin
+ *  ----                          ------
+ *  Plugin::load<...> ----------> factory creates instance
+ *  init(app_name)    ---------->  initialise backend
+ *  log(level, msg)   ---------->  forward to backend     (repeated)
+ *  Plugin destroy    ---------->  destroy instance
+ * @endverbatim
+ *
+ * @par Loading example
  * @code
- * vlink::Plugin plugin;
- * auto logger_backend = plugin.load<vlink::LoggerPluginInterface>("my_logger_plugin", 1, 0);
+ *   vlink::Plugin plugin;
+ *   auto backend = plugin.load<vlink::LoggerPluginInterface>("my_logger_plugin", 1, 0);
  *
- * if (logger_backend) {
- *     logger_backend->init("my_app");
- *     logger_backend->log(vlink::Logger::kInfo, "Hello from plugin!");
- * }
+ *   if (backend) {
+ *     backend->init("my_app");
+ *     backend->log(vlink::Logger::kInfo, "Hello from plugin!");
+ *   }
  * @endcode
  *
- * @par Implementing a logger plugin
+ * @par Implementation example
  * @code
- * class MyLogger : public vlink::LoggerPluginInterface {
- * public:
- *     bool init(std::string_view app_name) override {
- *         // initialise your logging backend
- *         return true;
- *     }
- *     bool log(int level, std::string_view str) override {
- *         // forward to your backend
- *         return true;
- *     }
- * };
- * VLINK_PLUGIN_DECLARE(MyLogger, 1, 0)
+ *   class MyLogger : public vlink::LoggerPluginInterface {
+ *    public:
+ *     bool init(std::string_view app_name) override { return true; }
+ *     bool log(int level, std::string_view str)  override { return write_to_backend(level, str); }
+ *   };
+ *   VLINK_PLUGIN_DECLARE(MyLogger, 1, 0)
  * @endcode
  *
- * @note
- * - The @p level parameter passed to @c log() corresponds to @c vlink::Logger::Level values.
- * - Both methods should be implemented to be non-throwing; exceptions escaping a plugin
- *   boundary may cause undefined behaviour.
+ * @note @p level mirrors @c vlink::Logger::Level values.  Both methods must avoid throwing
+ *       across the plugin boundary; thrown exceptions there cause undefined behaviour.
  *
  * @see Plugin, Logger
  */
@@ -80,12 +89,12 @@ namespace vlink {
 
 /**
  * @class LoggerPluginInterface
- * @brief Pure-virtual interface for a custom logger backend loaded as a dynamic plugin.
+ * @brief Pure-virtual interface that every shared-library logger backend implements.
  *
  * @details
- * Concrete implementations are loaded at runtime by @c Plugin::load<LoggerPluginInterface>().
- * The @c VLINK_PLUGIN_REGISTER macro inside the class body wires up the factory/destroy
- * functions that @c Plugin uses to manage the lifetime of the plugin instance.
+ * Concrete subclasses use @c VLINK_PLUGIN_REGISTER internally to expose their factory and
+ * destructor functions to the @c Plugin loader.  Instances are owned by the host application
+ * for the duration of the plugin handle.
  */
 class LoggerPluginInterface {
   VLINK_PLUGIN_REGISTER(LoggerPluginInterface)
@@ -97,30 +106,23 @@ class LoggerPluginInterface {
 
  public:
   /**
-   * @brief Initialises the logger backend for the given application name.
+   * @brief Initialises the backend immediately after the plugin instance is constructed.
    *
-   * @details
-   * Called once by the host application after the plugin is loaded.  The @p app_name
-   * string may be used to label log entries or configure a log file path.
-   *
-   * @param app_name  Name of the calling application.
-   * @return @c true on success; @c false if initialisation failed and the plugin should
-   *         not be used.
+   * @param app_name  Calling application name; may inform log labels or file paths.
+   * @return @c true on success; @c false to indicate the plugin must not be used further.
    */
   virtual bool init(std::string_view app_name) = 0;
 
   /**
-   * @brief Writes a single log entry to the backend.
+   * @brief Writes a single record to the backend.
    *
    * @details
-   * Called from @c vlink::Logger internals whenever a log message passes the current
-   * log level filter.  Implementations should be non-blocking to avoid stalling the
-   * caller thread.
+   * Implementations should be non-blocking; @p str remains valid only for the duration of the
+   * call.
    *
-   * @param level  Log severity level.  Corresponds to @c vlink::Logger::Level values
-   *               (e.g., @c kDebug, @c kInfo, @c kWarn, @c kError).
-   * @param str    The fully-formatted log message string.
-   * @return @c true if the message was written successfully; @c false on error.
+   * @param level  Severity using @c vlink::Logger::Level values.
+   * @param str    Fully formatted record.
+   * @return @c true on success; @c false to indicate a write error.
    */
   virtual bool log(int level, std::string_view str) = 0;
 

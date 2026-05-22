@@ -23,31 +23,44 @@
 
 /**
  * @file cpu_profiler_guard.h
- * @brief RAII guard that automatically calls CpuProfiler::begin() and CpuProfiler::end().
+ * @brief Stack-based RAII bracket that pairs every @c CpuProfiler::begin with a guaranteed end.
  *
  * @details
- * @c CpuProfilerGuard is a lightweight RAII wrapper that calls @c CpuProfiler::begin()
- * in its constructor and @c CpuProfiler::end() in its destructor.  This ensures the
- * active interval is always closed, even if an exception is thrown.
+ * @c CpuProfilerGuard ties the @c begin / @c end pair of a @c CpuProfiler to scope lifetime so
+ * the active interval closes even when the protected region exits through an exception.
+ *
+ * @par RAII pattern
+ *
+ * @verbatim
+ *   scope entry +---------------------------+ scope exit
+ *   ----------> | CpuProfilerGuard guard(p) | ---------->
+ *               +-----------+---------------+
+ *                           | ctor: p->begin()
+ *                           v
+ *                       active interval
+ *                           |
+ *                           | dtor: p->end()
+ *                           v
+ *                       interval closed
+ * @endverbatim
+ *
+ * The guard accepts a @c nullptr profiler so call sites can be guarded uniformly while a
+ * higher-level switch (typically @c CpuProfiler::is_global_enabled) decides whether the work is
+ * worth measuring.
  *
  * @par Example
  * @code
- * vlink::CpuProfiler profiler;
+ *   vlink::CpuProfiler profiler;
  *
- * void process_frame() {
- *     vlink::CpuProfilerGuard guard(&profiler);
- *     // ... do work ...
- * }  // profiler.end() called here automatically
+ *   void process_frame() {
+ *     vlink::CpuProfilerGuard guard(&profiler);   // profiler.begin()
+ *     do_frame_work();
+ *   }                                             // profiler.end() on scope exit
  *
- * double usage = profiler.get();
+ *   const double utilisation = profiler.get();
  * @endcode
  *
- * @note
- * - Passing @c nullptr as the profiler pointer is safe; both constructor and destructor
- *   check for @c nullptr before calling any method.
- * - The guard is non-copyable and non-movable; it must be used as a stack-allocated object.
- * - Use @c CpuProfiler::is_global_enabled() to skip guard construction when profiling
- *   is disabled globally, reducing overhead in hot paths.
+ * @note Non-copyable and non-movable; the guard must live on the stack of the protected region.
  */
 
 #pragma once
@@ -58,24 +71,23 @@ namespace vlink {
 
 /**
  * @class CpuProfilerGuard
- * @brief RAII scope guard that brackets a @c CpuProfiler active interval.
+ * @brief Scope guard that opens and closes a @c CpuProfiler active interval.
  *
  * @details
- * Calls @c profiler->begin() on construction and @c profiler->end() on destruction.
- * Handles @c nullptr profiler gracefully (no-op).
+ * Calls @c CpuProfiler::begin in its constructor and @c CpuProfiler::end in its destructor.
+ * A null profiler pointer is accepted; both ends become no-ops in that case.
  */
 class VLINK_EXPORT CpuProfilerGuard final {
  public:
   /**
-   * @brief Constructs the guard and calls @c profiler->begin().
+   * @brief Constructs the guard and opens the active interval on @p profiler.
    *
-   * @param profiler  Pointer to the @c CpuProfiler to bracket.
-   *                  If @c nullptr, both construction and destruction are no-ops.
+   * @param profiler  Target profiler; @c nullptr disables both ends.
    */
   explicit CpuProfilerGuard(class CpuProfiler* profiler) noexcept;
 
   /**
-   * @brief Destructor -- calls @c profiler->end() to close the active interval.
+   * @brief Destructor; closes the active interval on the bound profiler.
    */
   ~CpuProfilerGuard() noexcept;
 

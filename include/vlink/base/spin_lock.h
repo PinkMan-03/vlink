@@ -23,53 +23,53 @@
 
 /**
  * @file spin_lock.h
- * @brief Adaptive, cache-line-aligned spin lock and RAII guard.
+ * @brief Cache-line aligned adaptive spin lock with exponential back-off.
  *
  * @details
- * @c SpinLock implements a simple user-space mutex that spins instead of
- * sleeping.  It is intended for very short critical sections (a few CPU
- * instructions) where the overhead of a @c std::mutex context switch would
- * dominate.  It is used inside @c CpuProfiler and other hot-path VLink internals.
+ * @c vlink::SpinLock is a user-space mutex aimed at very short critical sections (a few
+ * instructions) where a @c std::mutex context switch would dominate the cost.  It is used
+ * inside @c CpuProfiler and other hot-path internals.
  *
- * Locking strategy inside @c lock():
- * -# Try to acquire with @c exchange(true, acquire); if successful, return.
- * -# Spin with @c load(relaxed) until the flag appears free, then retry the
- *    @c exchange.  The @c do/while form guarantees at least one spin tick
- *    per outer iteration so back-off is honoured even under tight contention.
- * -# Apply exponential back-off: after every @c backoff spins, call
- *    @c Utils::yield_cpu() (a CPU-pause instruction).
- * -# Back-off starts at 8 and doubles each round up to 1024.
- * -# Once @c kMaxSpinCount (50000) is exceeded, the back-off action switches
- *    from @c yield_cpu to a 10 us sleep (repeating per back-off cycle).  The
- *    "exceeded" warning is logged at most once over this @c SpinLock's
- *    lifetime (latched in an atomic flag) to avoid log floods under sustained
- *    pathological contention across many acquisitions.
+ * The acquisition loop applies exponential back-off so contention does not saturate the
+ * cache-coherence bus.  Each back-off ladder rung doubles the inner spin budget until the
+ * cap is reached, then a CPU-pause instruction yields the core; once the total spin count
+ * exceeds the hard ceiling the back-off action switches to a sleep:
  *
- * Cache-line alignment (@c alignas(64)) prevents false sharing when multiple
- * @c SpinLock objects reside in adjacent memory.
+ * @verbatim
+ *   round 1   | XXXX---- 8 spins   ----> yield_cpu()
+ *   round 2   | XXXX-XXX 16 spins  ----> yield_cpu()
+ *   round 3   | XXXXXXXX 32 spins  ----> yield_cpu()
+ *   ...       |         ... up to 1024 spins per ladder rung
+ *   total > 50000 spins            ----> sleep_for(10 us)  (latched warn-once)
+ * @endverbatim
+ *
+ * Comparison with @c std::mutex:
+ *
+ * | Property            | @c SpinLock                            | @c std::mutex                |
+ * | ------------------- | -------------------------------------- | ---------------------------- |
+ * | Wait strategy       | Adaptive busy-spin + yield + sleep     | OS futex / kernel wait       |
+ * | Critical-section    | Single-digit microseconds              | Any duration                 |
+ * | Recursive           | No (deadlocks on re-entry)             | Use @c std::recursive_mutex  |
+ * | False sharing       | Avoided via @c alignas(64)             | Implementation defined       |
+ * | Header-only         | Yes (no @c VLINK_EXPORT)               | Library symbol               |
  *
  * @note
- * - @b Do not use this lock for long critical sections or I/O -- use a
- *   @c std::mutex instead.
- * - @c SpinLock is not recursive; a thread that calls @c lock() twice will
- *   deadlock.
- * - The lock is not @c VLINK_EXPORT because it is header-only and entirely
- *   inlined.
+ * - The lock is non-recursive; double-locking from the same thread spins forever.
+ * - The hard-ceiling warning is latched per instance so a permanently contended lock does
+ *   not flood the log.
  *
  * @par Example
  * @code
  * vlink::SpinLock lock;
  *
- * // Manual lock/unlock:
  * lock.lock();
  * critical_section();
  * lock.unlock();
  *
- * // RAII guard (preferred):
  * {
  *   vlink::SpinLockGuard guard(lock);
  *   critical_section();
- * }  // automatically unlocked here
+ * }
  * @endcode
  */
 
@@ -92,60 +92,49 @@ namespace vlink {
 
 /**
  * @class SpinLock
- * @brief Adaptive, cache-line-aligned spin lock.
+ * @brief Adaptive spin lock satisfying the C++ @c Lockable named requirement.
  *
  * @details
- * Implements the @c Lockable named requirement: @c lock(), @c try_lock(),
- * and @c unlock().  Can be used directly with @c std::lock_guard.
+ * Cache-line aligned through @c alignas(64) to prevent false sharing.  Composes with
+ * @c std::lock_guard, @c std::unique_lock and the supplied @c SpinLockGuard.
  */
 class SpinLock final {
  public:
   /**
-   * @brief Default constructor.  Initialises the flag to @c false (unlocked).
+   * @brief Constructs an unlocked spin lock.
    */
   SpinLock() noexcept = default;
 
   /**
-   * @brief Destructor.
+   * @brief Destructor.  Assumes the lock has already been released.
    */
   ~SpinLock() noexcept = default;
 
   /**
-   * @brief Acquires the lock, spinning until successful.
+   * @brief Acquires the lock, spinning with adaptive back-off until it becomes free.
    *
    * @details
-   * Uses an exponential back-off strategy to reduce bus contention:
-   * - Spins with @c load(relaxed) for up to @c backoff iterations per cycle.
-   * - Calls @c Utils::yield_cpu() (PAUSE/WFE/yield) at the end of each cycle.
-   * - Back-off starts at 8 and doubles each cycle up to 1024.
-   * - Once total spins exceed 50000, switches the back-off action to a 10 us
-   *   sleep (repeated per back-off cycle).  The warning is logged at most
-   *   once per @c SpinLock instance over its lifetime.
+   * The inner loop alternates @c exchange attempts with relaxed-load spins.  Each back-off
+   * rung doubles the spin budget from @c 8 up to @c 1024 then yields the CPU.  After
+   * @c 50000 spins the back-off action switches to a 10 us sleep and a one-time warning
+   * is emitted.
    *
-   * @warning
-   * This function must not be called recursively from the same thread; doing so
-   * will cause an infinite deadlock.
+   * @warning Recursive acquisition by the same thread deadlocks the lock.
    */
   void lock() noexcept;
 
   /**
-   * @brief Attempts to acquire the lock without blocking.
+   * @brief Attempts a single non-blocking acquire of the lock.
    *
-   * @details
-   * Performs a single @c exchange(true, acquire).  Returns immediately
-   * regardless of whether the lock was acquired.
-   *
-   * @return @c true if the lock was successfully acquired, @c false if it
-   *         was already held by another thread.
+   * @return @c true when the lock was successfully acquired.
    */
   bool try_lock() noexcept;
 
   /**
-   * @brief Releases the lock.
+   * @brief Releases the lock with @c memory_order_release.
    *
    * @details
-   * Stores @c false with @c release memory order.  Must only be called by
-   * the thread that successfully called @c lock() or @c try_lock().
+   * May only be called by the thread that currently owns the lock.
    */
   void unlock() noexcept;
 
@@ -160,19 +149,18 @@ class SpinLock final {
 
 /**
  * @class SpinLockGuard
- * @brief RAII guard that acquires a @c SpinLock on construction and releases it
- *        on destruction.
+ * @brief RAII wrapper that locks a @c SpinLock on construction and unlocks on destruction.
  *
  * @details
- * Analogous to @c std::lock_guard<SpinLock>.  Preferred over manual
- * @c lock() / @c unlock() because it is exception-safe.
+ * Equivalent to @c std::lock_guard<SpinLock>.  Preferred over manual @c lock / @c unlock
+ * because it is exception-safe.
  *
  * @par Example
  * @code
  * SpinLock my_lock;
  * {
  *   SpinLockGuard guard(my_lock);
- *   // critical section
+ *   critical_section();
  * }
  * @endcode
  */
@@ -181,12 +169,12 @@ class SpinLockGuard final {
   /**
    * @brief Acquires @p lock immediately.
    *
-   * @param lock  The @c SpinLock to acquire.  Must outlive this guard.
+   * @param lock  Spin lock to acquire.  Must outlive this guard.
    */
   explicit SpinLockGuard(SpinLock& lock) noexcept;
 
   /**
-   * @brief Releases the lock held by this guard.
+   * @brief Releases the held spin lock.
    */
   ~SpinLockGuard() noexcept;
 

@@ -23,71 +23,62 @@
 
 /**
  * @file graph_task.h
- * @brief DAG-based task graph with condition branching, cycle detection, and DOT export.
+ * @brief Directed acyclic task graph with condition branching, cycle guard and DOT export.
  *
  * @details
- * @c GraphTask implements a directed acyclic graph (DAG) of work units.  Tasks define
- * their dependencies by calling @c precede() (this task must finish before the target starts)
- * or @c succeed() (the target must finish before this task starts) — same Taskflow convention.
- * The entire graph is then submitted to any @c MessageLoop, @c MultiLoop or @c ThreadPool via @c execute().
+ * @c GraphTask is VLink's data-flow primitive: every node carries a callback, a list of
+ * predecessors and a list of successors, and is submitted to any engine that exposes
+ * @c post_task / @c post_task_with_priority -- @c MessageLoop, @c MultiLoop or @c ThreadPool.
+ * Edges are declared with @c precede / @c succeed (Taskflow convention) and a process-wide
+ * topology mutex serialises all mutators across every graph instance.
  *
- * Read the calls as "X.precede(Y) registers Y as a successor of X (Y runs after X)" and
- * "X.succeed(Y) registers Y as a predecessor of X (Y runs before X)".  Both methods describe
- * the same edge from the perspective of the calling side; the resulting execution order is
- * determined by the @c succeed_task_list of the predecessor.
+ * @par DAG diagram
  *
- * Task types:
+ * @verbatim
+ *               +---+   precede   +---+   precede   +---+
+ *               | A | ----------> | B | ----------> | C |
+ *               +-+-+             +-+-+             +-+-+
+ *                 |     condition   |                 |
+ *                 v                 v                 v
+ *              +-----+           +-----+           +-----+
+ *              | D0  |           | E   |           | F   |
+ *              +-----+           +-----+           +-----+
+ *                 ^
+ *                 |  D0/D1/...   condition task selects which successor branch fires
+ *              +-----+
+ *              | D1  |
+ *              +-----+
+ * @endverbatim
  *
- * | Factory                        | Callback signature       | Use case                            |
- * | ------------------------------ | ------------------------ | ----------------------------------- |
- * | @c create(callback)            | @c void()                | Regular work task                   |
- * | @c create_condition(callback)  | @c int()                 | Branch selector (returns branch id) |
+ * @par Task factories
  *
- * Condition task:
- * A condition task returns an integer selecting which successor sub-graph to activate.
- * All other successors are skipped.  This enables if/switch style DAG branching.
+ * | Factory                       | Callback signature  | Use case                              |
+ * | ----------------------------- | ------------------- | ------------------------------------- |
+ * | @c create(callback)           | @c void()           | Regular work node                     |
+ * | @c create_condition(callback) | @c int()            | Branch selector (return value picks)  |
  *
- * Execution policies:
+ * @par Execution policies
  *
- * | Policy            | Behaviour                                                         |
- * | ----------------- | ----------------------------------------------------------------- |
- * | @c kPolicyOnce    | Task runs exactly once per @c execute() call (default)            |
- * | @c kPolicyMultiple| Task may run multiple times in one @c execute() pass              |
- * | @c kPolicyWaitAll | Task waits for all predecessors before running                    |
- *
- * Operator syntax for building graphs:
- * @code
- * auto A = vlink::GraphTask::create("A", []{ step_a(); });
- * auto B = vlink::GraphTask::create("B", []{ step_b(); });
- * auto C = vlink::GraphTask::create("C", []{ step_c(); });
- *
- * A-- > B-- > C;  // A->precede(B); B->precede(C);  execution order: A, B, C
- * @endcode
- *
- * @note
- * - @c execute() traverses the reachable sub-graph and dispatches all ready tasks to the engine.
- * - @c precede / @c succeed perform a reachability pre-check on the affected sub-graph
- *   BEFORE mutating any list; if adding the edge would introduce a cycle it is rejected
- *   (no list is ever modified) and an error is logged.  A process-wide recursive topology
- *   mutex serialises all topology mutators across every @c GraphTask instance.
- *   @c has_cycle() remains available for explicit verification of arbitrary sub-graphs.
- * - @c export_to_dot() produces a Graphviz DOT string for visualisation.
+ * | Policy             | Behaviour                                                          |
+ * | ------------------ | ------------------------------------------------------------------ |
+ * | @c kPolicyOnce     | Runs exactly once per @c execute pass (default)                    |
+ * | @c kPolicyMultiple | Runs multiple times within one @c execute pass                     |
+ * | @c kPolicyWaitAll  | Waits for every predecessor before running                         |
  *
  * @par Example
  * @code
- * vlink::MultiLoop engine(4);
- * engine.async_run();
+ *   vlink::MultiLoop engine(4);
+ *   engine.async_run();
  *
- * auto load  = vlink::GraphTask::create("load",  [] { load_data(); });
- * auto proc  = vlink::GraphTask::create("proc",  [] { process();   });
- * auto save  = vlink::GraphTask::create("save",  [] { save_data(); });
+ *   auto load = vlink::GraphTask::create("load", [] { load_data(); });
+ *   auto proc = vlink::GraphTask::create("proc", [] { process();   });
+ *   auto save = vlink::GraphTask::create("save", [] { save_data(); });
  *
- * // A-- > B calls A->precede(B), meaning A must complete before B.
- * // load-- > proc-- > save produces execution order: load, proc, save.
- * load-- > proc-- > save;
+ *   // load -- > proc means load->precede(proc); produces execution order load, proc, save.
+ *   load-- > proc-- > save;
  *
- * assert(!load->has_cycle());
- * load->execute(&engine);
+ *   assert(!load->has_cycle());
+ *   load->execute(&engine);
  * @endcode
  */
 
@@ -108,92 +99,88 @@ namespace vlink {
 
 /**
  * @class GraphTask
- * @brief Node in a directed acyclic task graph supporting condition branching and parallel execution.
+ * @brief DAG node carrying a callback, predecessor and successor links, and run-time state.
  *
  * @details
- * Must be created via one of the static factory methods (@c create / @c create_condition).
- * Inherits from @c std::enable_shared_from_this to safely pass @c shared_ptr to internal callbacks.
+ * Must be created through the @c create / @c create_condition factories so callbacks share
+ * @c std::enable_shared_from_this safely.  @c execute traverses the reachable sub-graph and
+ * submits ready tasks to a user-supplied engine.
  */
 class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTask> {
  public:
   /**
-   * @brief Execution state of the task within a single @c execute() pass.
+   * @brief Run-time execution state of a node within an @c execute pass.
    */
   enum Status : uint8_t {
-    kStatusInActive = 0,  ///< Not yet submitted or cancelled
-    kStatusPending = 1,   ///< Waiting for predecessors to complete
-    kStatusRunning = 2,   ///< Currently executing
-    kStatusDone = 3,      ///< Execution completed
+    kStatusInActive = 0,  ///< Not yet submitted or cancelled.
+    kStatusPending = 1,   ///< Waiting for predecessors to complete.
+    kStatusRunning = 2,   ///< Currently executing.
+    kStatusDone = 3,      ///< Execution finished.
   };
 
   /**
-   * @brief Execution policy controlling how many times and when the task runs.
+   * @brief Policy controlling how many times the task may run within a pass.
    */
   enum Policy : uint8_t {
-    kPolicyOnce = 0,      ///< Run exactly once per execute() call (default)
-    kPolicyMultiple = 1,  ///< Allow multiple invocations in a single pass
-    kPolicyWaitAll = 2,   ///< Wait for ALL predecessors before running
+    kPolicyOnce = 0,      ///< Run exactly once per @c execute pass (default).
+    kPolicyMultiple = 1,  ///< Allow multiple invocations within the pass.
+    kPolicyWaitAll = 2,   ///< Wait for every predecessor before running.
   };
 
   /**
-   * @brief Callback type for regular (void-returning) tasks.
+   * @brief Callback type for void-returning work nodes.
    */
   using Callback = MoveFunction<void()>;
 
   /**
-   * @brief Callback type for condition tasks; returns the branch index to activate.
+   * @brief Callback type for condition nodes; the return value selects an outgoing branch.
    */
   using ConditionCallback = MoveFunction<int()>;
 
   /**
-   * @brief Callback for status change notifications.
+   * @brief Status-change notification callback.
    *
    * @details
-   * Called whenever the task's @c Status changes.
-   * First argument is the task name; second is the new status.
+   * Invoked with the task name and the new status whenever the node transitions.
    */
   using StatusCallback = MoveFunction<void(const std::string&, Status)>;
 
   /**
-   * @brief Creates a regular (void) task node.
+   * @brief Creates a regular work node.
    *
-   * @param callback          Work function to execute.
-   * @param condition_number  Number of successor branches available.  0 = no branches.
+   * @param callback          Work function.
+   * @param condition_number  Number of outgoing branches (@c 0 disables branching).
    * @return Shared pointer to the new task.
    */
   [[nodiscard]] static std::shared_ptr<GraphTask> create(Callback&& callback, int condition_number = 0);
 
   /**
-   * @brief Creates a named regular (void) task node.
+   * @brief Creates a named regular work node.
    *
-   * @param name              Task name (used in DOT export and status callbacks).
-   * @param callback          Work function to execute.
-   * @param condition_number  Number of successor branches available.  0 = no branches.
+   * @param name              Node name used in DOT output and status callbacks.
+   * @param callback          Work function.
+   * @param condition_number  Number of outgoing branches.
    * @return Shared pointer to the new task.
    */
   [[nodiscard]] static std::shared_ptr<GraphTask> create(const std::string& name, Callback&& callback,
                                                          int condition_number = 0);
 
   /**
-   * @brief Creates a condition task that returns a branch index.
+   * @brief Creates a condition node whose return value selects a successor branch.
    *
-   * @details
-   * The integer returned by @p callback selects which successor sub-graph to activate.
-   * Return values outside [0, condition_number) skip all successors.
-   *
-   * @param callback          Condition function returning the branch index.
-   * @param condition_number  Number of possible branches.
+   * @param callback          Predicate returning the branch index.
+   * @param condition_number  Number of branches accepted; out-of-range returns skip all successors.
    * @return Shared pointer to the new condition task.
    */
   [[nodiscard]] static std::shared_ptr<GraphTask> create_condition(ConditionCallback&& callback,
                                                                    int condition_number = 0);
 
   /**
-   * @brief Creates a named condition task.
+   * @brief Creates a named condition node.
    *
-   * @param name              Task name.
-   * @param callback          Condition function returning the branch index.
-   * @param condition_number  Number of possible branches.
+   * @param name              Node name.
+   * @param callback          Predicate returning the branch index.
+   * @param condition_number  Branch count.
    * @return Shared pointer to the new condition task.
    */
   [[nodiscard]] static std::shared_ptr<GraphTask> create_condition(const std::string& name,
@@ -201,264 +188,232 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
                                                                    int condition_number = 0);
 
   /**
-   * @brief Submits this task (and all reachable successors) to a graph execution engine.
+   * @brief Submits the reachable sub-graph to @p graph_engine.
    *
    * @details
-   * Traverses the reachable sub-graph, identifies tasks whose predecessors have all
-   * completed, and posts them to @p graph_engine using either @c post_task() or
-   * @c post_task_with_priority() (if available).
+   * Traverses the sub-graph, identifies ready nodes and posts them via @c post_task or
+   * @c post_task_with_priority when available.  Compatible with @c MessageLoop, @c MultiLoop and
+   * @c ThreadPool.
    *
-   * @tparam GraphEngineT  Any type providing @c post_task(Callback) and optionally
-   *                       @c post_task_with_priority(Callback, uint16_t).
-   *                       @c MessageLoop, @c MultiLoop and @c ThreadPool all satisfy this.
-   * @param graph_engine   Pointer to the execution engine.
+   * @tparam GraphEngineT  Engine type exposing @c post_task and optionally @c post_task_with_priority.
+   * @param graph_engine   Target engine instance.
    */
   template <class GraphEngineT>
   void execute(GraphEngineT* graph_engine);
 
   /**
-   * @brief Cancels this task and cascades cancellation to all reachable successors.
+   * @brief Cancels this node and propagates the cancellation downstream.
    *
    * @details
-   * Sets this task's status to @c kStatusInActive and walks the
-   * @c succeed_task_list forward, marking every reachable successor
-   * @c kStatusInActive as well.  Cancelled tasks are skipped by the engine and
-   * by downstream @c kPolicyWaitAll counters.  Cancellation does not propagate
-   * to predecessors.
+   * Sets this node's status to @c kStatusInActive and walks the successor list forward marking
+   * every reachable node inactive.  Predecessors are unaffected.  Inactive nodes are skipped
+   * by the engine and by downstream @c kPolicyWaitAll counters.
    */
   void cancel();
 
   /**
-   * @brief Declares that this task must complete before @p task starts (Taskflow convention).
+   * @brief Declares that this node must complete before @p task starts.
    *
    * @details
-   * Equivalent to @c task->succeed(this_task).  Before mutating any list a
-   * reachability pre-check runs over @p task's downstream cone; if adding the
-   * edge would create a cycle it is rejected (no list is ever mutated) and an
-   * error is logged.  On success @p task is appended to this task's
-   * @c succeed_task_list (successors) and @c *this is appended to @p task's
-   * @c precede_task_list (predecessors).
+   * Runs a reachability pre-check on @p task 's downstream cone before mutating any list; the
+   * edge is rejected (with an error log) if it would form a cycle.  On success @p task is
+   * appended to this node's successor list and this node is appended to @p task 's predecessor
+   * list.  Topology mutation is serialised by a process-wide recursive mutex shared across
+   * every @c GraphTask instance, so concurrent writers are safe; read paths (@c execute,
+   * @c has_cycle, @c export_to_dot) read per-node snapshots without taking that mutex.
    *
-   * A process-wide recursive topology mutex serialises all topology mutators
-   * (@c precede / @c succeed / @c remove_precede_task / @c remove_succeed_task /
-   * @c cancel) across every @c GraphTask instance, so concurrent topology
-   * writers from multiple threads are safe.  Read paths (@c execute /
-   * @c has_cycle / @c export_to_dot) do NOT take this lock and observe per-node
-   * snapshots only.
-   *
-   * @param task  Successor task that runs after @c *this.
+   * @param task  Successor node.
    */
   void precede(const std::shared_ptr<GraphTask>& task);
 
   /**
-   * @brief Declares that @p task must complete before this task starts (Taskflow convention).
+   * @brief Declares that @p task must complete before this node starts.
    *
    * @details
-   * Equivalent to @c task->precede(this_task).  Reachability pre-check is the
-   * mirror of @c precede; if it would create a cycle the edge is rejected and
-   * an error is logged.  On success @p task is appended to this task's
-   * @c precede_task_list and @c *this is appended to @p task's
-   * @c succeed_task_list.  Same single-writer caveat as @c precede applies.
+   * Mirror of @c precede; rejects edges that would form a cycle.  Shares the same single-writer
+   * topology mutex as @c precede.
    *
-   * @param task  Predecessor task that must run before @c *this.
+   * @param task  Predecessor node.
    */
   void succeed(const std::shared_ptr<GraphTask>& task);
 
   /**
-   * @brief Registers a callback invoked whenever this task's status changes.
+   * @brief Subscribes a callback to status transitions on this node.
    *
    * @details
-   * Each call appends a new subscriber.  On every status transition the task
-   * takes a snapshot of the current subscriber set under
-   * @c status_callbacks_mtx, releases the lock, and then invokes the
-   * snapshotted callbacks in unspecified order.  Because callbacks fire with
-   * @c status_callbacks_mtx already released, a callback is free to call
-   * @c register_status_callback, @c unregister_status_callback or
-   * @c clear_status_callbacks on the same task without self-deadlock; such
-   * mutations take effect for the @b next transition, not the current one.
-   * Exceptions thrown from a callback are caught and logged; remaining
-   * snapshotted subscribers still fire.
+   * Each call appends a new subscriber.  On every status change the node snapshots the current
+   * subscriber set under @c status_callbacks_mtx, releases the lock, then invokes the snapshot
+   * in unspecified order.  Because callbacks fire without the mutex held they may freely
+   * register / unregister callbacks on the same node; such mutations apply on the next
+   * transition.  Exceptions are caught and logged; remaining subscribers still fire.
    *
-   * @param callback  Called with (name, new_status) on every status transition.
-   * @return Subscription id (>0).  Returns 0 if @p callback is empty.  Pass
-   *         the id to @c unregister_status_callback to remove the subscription.
+   * @param callback  Status change callback.
+   * @return Subscription id (>0).  Returns @c 0 when @p callback is empty.
    */
   uint32_t register_status_callback(StatusCallback&& callback);
 
   /**
-   * @brief Removes a previously registered status callback.
+   * @brief Removes a previously registered status callback by id.
    *
    * @param id  Subscription id returned by @c register_status_callback.
-   * @return @c true if the subscription was found and removed.
+   * @return @c true when the subscription was found and removed.
    */
   bool unregister_status_callback(uint32_t id);
 
   /**
-   * @brief Removes all registered status callbacks.
+   * @brief Removes every status callback subscription on this node.
    */
   void clear_status_callbacks();
 
   /**
-   * @brief Sets the task name used in DOT export and status callbacks.
+   * @brief Sets the node name used in DOT output and status callbacks.
    *
-   * @param name  Task name string.
+   * @param name  Node name.
    */
   void set_name(const std::string& name);
 
   /**
-   * @brief Sets a group name for visual grouping in DOT export.
+   * @brief Sets a group name used to visually cluster nodes in DOT output.
    *
-   * @param name  Group name string.
+   * @param name  Group name.
    */
   void set_group_name(const std::string& name);
 
   /**
-   * @brief Sets the number of condition branches this task can select.
+   * @brief Sets the number of outgoing condition branches.
    *
-   * @param condition_number  Branch count (used for condition tasks).
+   * @param condition_number  Branch count.
    */
   void set_condition_number(int condition_number);
 
   /**
-   * @brief Sets the task dispatch priority (used by priority-aware engines).
+   * @brief Sets the dispatch priority used by priority-aware engines.
    *
    * @param priority  Priority value.
    */
   void set_priority(uint16_t priority);
 
   /**
-   * @brief Sets the maximum recursion depth to guard against infinitely deep graphs.
+   * @brief Sets the maximum recursion depth that bounds DFS traversals.
    *
    * @details
-   * If a task graph exceeds this depth during execution, a @c kFatal log is emitted.
-   * The default value is 10000.
+   * Traversals exceeding this depth treat the graph as conservatively cyclic.  Default: @c 10000.
    *
-   * @param depth  Maximum depth.
+   * @param depth  Maximum recursion depth.
    */
   void set_max_recursion_depth(uint32_t depth);
 
   /**
-   * @brief Sets the execution policy.
+   * @brief Sets the execution policy for this node.
    *
-   * @param policy  See @c Policy enum.
+   * @param policy  Policy enumerator.
    */
   void set_policy(Policy policy);
 
   /**
-   * @brief Returns the task name.
+   * @brief Returns the node name.
    *
-   * @return Task name string.
+   * @return Node name.
    */
   [[nodiscard]] std::string get_name() const;
 
   /**
    * @brief Returns the group name.
    *
-   * @return Group name string.
+   * @return Group name.
    */
   [[nodiscard]] std::string get_group_name() const;
 
   /**
-   * @brief Returns the number of condition branches.
+   * @brief Returns the configured branch count.
    *
-   * @return Condition number.
+   * @return Branch count.
    */
   [[nodiscard]] int get_condition_number() const;
 
   /**
-   * @brief Returns the dispatch priority.
+   * @brief Returns the configured dispatch priority.
    *
    * @return Priority value.
    */
   [[nodiscard]] uint16_t get_priority() const;
 
   /**
-   * @brief Returns the maximum recursion depth.
+   * @brief Returns the maximum recursion depth used for cycle detection.
    *
-   * @return Max recursion depth.  Default is 10000.
+   * @return Recursion depth bound.
    */
   [[nodiscard]] uint32_t get_max_recursion_depth() const;
 
   /**
-   * @brief Returns the execution policy.
+   * @brief Returns the configured execution policy.
    *
-   * @return Policy value.
+   * @return Policy enumerator.
    */
   [[nodiscard]] Policy get_policy() const;
 
   /**
-   * @brief Returns the current execution status of this task.
+   * @brief Returns the current execution status of this node.
    *
-   * @return Status value.
+   * @return Status enumerator.
    */
   [[nodiscard]] Status get_status() const;
 
   /**
-   * @brief Undoes a previous @c this->precede(task) edge.
+   * @brief Removes an outgoing edge created by @c precede.
    *
    * @details
-   * Removes @p task from this task's @c succeed_task_list and removes @c *this
-   * from @p task's @c precede_task_list.  Logs an error if no such edge exists.
+   * Removes @p task from the successor list and removes this node from @p task 's predecessor
+   * list.  Logs an error when the edge does not exist.
    *
-   * @param task  The successor previously attached via @c precede.
+   * @param task  Previously attached successor.
    */
   void remove_precede_task(const std::shared_ptr<GraphTask>& task);
 
   /**
-   * @brief Undoes a previous @c this->succeed(task) edge.
+   * @brief Removes an incoming edge created by @c succeed.
    *
-   * @details
-   * Removes @p task from this task's @c precede_task_list and removes @c *this
-   * from @p task's @c succeed_task_list.
-   *
-   * @param task  The predecessor previously attached via @c succeed.
+   * @param task  Previously attached predecessor.
    */
   void remove_succeed_task(const std::shared_ptr<GraphTask>& task);
 
   /**
-   * @brief Returns the list of predecessor tasks (this task depends on them).
+   * @brief Returns the current predecessor list as weak pointers.
    *
-   * @return Vector of weak pointers to predecessor tasks.
+   * @return Vector of weak predecessor pointers.
    */
   [[nodiscard]] std::vector<std::weak_ptr<GraphTask>> get_precede_task_list() const;
 
   /**
-   * @brief Returns the list of successor tasks (they depend on this task).
+   * @brief Returns the current successor list as weak pointers.
    *
-   * @return Vector of weak pointers to successor tasks.
+   * @return Vector of weak successor pointers.
    */
   [[nodiscard]] std::vector<std::weak_ptr<GraphTask>> get_succeed_task_list() const;
 
   /**
-   * @brief Returns @c true if this task was created with @c create_condition().
+   * @brief Reports whether this node was created via @c create_condition.
    *
-   * @return @c true for condition tasks.
+   * @return @c true for condition nodes.
    */
   [[nodiscard]] bool is_condition_task() const;
 
   /**
-   * @brief Detects whether the reachable sub-graph contains any cycles.
+   * @brief Detects whether the reachable sub-graph contains a cycle.
    *
    * @details
-   * Uses DFS with a recursion stack to find back edges.  Recursion depth is
-   * bounded by @c get_max_recursion_depth() — graphs whose longest DFS path
-   * exceeds that bound are conservatively treated as cyclic.  Acquires
-   * per-node mutexes one-at-a-time and does NOT take the global topology
-   * mutex; safe to call from status callbacks fired by @c invoke() or
-   * @c cancel() (those paths release per-node mutexes before invoking
-   * subscribers).
+   * Iterative DFS with a recursion stack.  Acquires per-node mutexes one at a time and does
+   * not take the global topology mutex; safe to call from status callbacks fired by @c invoke
+   * or @c cancel.
    *
-   * @return @c true if a cycle is detected (or depth bound exceeded).
+   * @return @c true when a cycle is found or the recursion bound is exceeded.
    */
   [[nodiscard]] bool has_cycle() const;
 
   /**
-   * @brief Exports the reachable sub-graph as a Graphviz DOT string.
+   * @brief Exports the reachable sub-graph as a Graphviz DOT document.
    *
-   * @details
-   * The DOT output can be passed to @c dot -Tpng to produce a dependency diagram.
-   *
-   * @return DOT language string representing the task graph.
+   * @return DOT source string.
    */
   [[nodiscard]] std::string export_to_dot() const;
 
@@ -505,6 +460,10 @@ class VLINK_EXPORT GraphTask final : public std::enable_shared_from_this<GraphTa
   VLINK_DISALLOW_COPY_AND_ASSIGN(GraphTask)
 };
 
+/**
+ * @typedef GraphTaskPtr
+ * @brief Convenience alias for the canonical @c shared_ptr<GraphTask> handle.
+ */
 using GraphTaskPtr = std::shared_ptr<GraphTask>;
 
 ////////////////////////////////////////////////////////////////

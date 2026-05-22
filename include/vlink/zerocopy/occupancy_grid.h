@@ -23,66 +23,108 @@
 
 /**
  * @file occupancy_grid.h
- * @brief Zero-copy 2-D occupancy grid map container for VLink transport.
+ * @brief Zero-copy 2-D occupancy / cost-map grid container with typed cell storage.
  *
  * @details
- * @c OccupancyGrid carries one 2-D occupancy / cost map together with a
- * @c Header for sequencing and timestamping.  The map is rectangular with
- * @c width() columns and @c height() rows; cells are stored in row-major
- * order and each cell consumes 1, 2, or 4 bytes depending on @c cell_type().
- * The struct is exactly 152 bytes on 64-bit platforms.  Common per-map
- * metadata (channel, publish frequency, map identifier, state timestamp,
- * value range, default value, occupied / free thresholds, plane height) is
- * baked in to preserve binary wire compatibility across revisions.
+ * @c OccupancyGrid is the canonical 2-D map message for VLink autonomous-driving
+ * stacks: local costmaps, global occupancy, lane-level reachability, signed
+ * distance fields, log-odds buffers, etc.  Each grid carries the cell buffer,
+ * the world-to-grid transform, value range, default value, occupied / free
+ * thresholds, a 40-byte @c Header for sequencing, and a map identifier so
+ * that multiple map types can share one topic.
  *
- * @par Cell types
- * | Value          | C++ type | Size | Typical use                       |
- * | -------------- | -------- | ---- | --------------------------------- |
- * | kCellInt8      | int8_t   | 1    | ROS-style -1/0..100 occupancy     |
- * | kCellUint8     | uint8_t  | 1    | 0..255 costmap / grayscale        |
- * | kCellUint16    | uint16_t | 2    | High-resolution costmap           |
- * | kCellFloat32   | float    | 4    | Log-odds / probability / SDF      |
+ * @par Cell-value semantics
+ * | @c CellType    | C++ type   | Bytes | Free   | Occupied | Unknown                         |
+ * | -------------- | ---------- | ----- | ------ | -------- | ------------------------------- |
+ * | @c kCellInt8   | @c int8_t  | 1     | 0      | 100      | -1 (ROS @c nav_msgs convention) |
+ * | @c kCellUint8  | @c uint8_t | 1     | 0      | 254      | 255                             |
+ * | @c kCellUint16 | @c uint16_t| 2     | 0      | 65534    | 65535                           |
+ * | @c kCellFloat32| @c float   | 4     | <= ft  | >= ot    | NaN (ft / ot = thresholds)      |
  *
- * @par Coordinate convention
- * The map origin @c (origin_x, origin_y, origin_z) lies at the bottom-left
- * corner of the cell at row 0 / column 0.  The map is rotated by
- * @c origin_yaw radians around that origin (REP-103 convention).
- *
- * @par Binary wire format
+ * @par Coordinate system
  * @code
- * [ magic_begin (4) | OccupancyGrid struct (152) | cell bytes (W*H*cell_size) | magic_end (4) ]
- * @endcode
- * The struct block is a raw snapshot of the 64-bit ABI layout used by this
- * library; receivers must parse it through @c operator<< and must not treat
- * embedded pointer/ownership fields as portable wire values.
+ *     +y
+ *      ^
+ *      |   (origin_x, origin_y) lies at the bottom-left
+ *      |   corner of the cell at column 0 / row 0.  The
+ *      |   grid is rotated by origin_yaw radians (REP-103)
+ *      |   around that origin.
+ *      |
+ *      +---->-->-->-->-->  +x
+ *      origin_x,origin_y   each cell spans resolution metres
  *
- * @par Usage
+ *     world(x, y) = origin + R(origin_yaw) * (column, row) * resolution
+ * @endcode
+ *
+ * @par Wire format
+ * @c OccupancyGrid is POD; @c memcpy is the canonical serialiser.  The
+ * @c sizeof value is locked by @c static_assert and forms a permanent contract:
+ * @c vlink::zerocopy::* containers offer NO forward and NO backward binary
+ * compatibility -- every field, including reserved bytes, is wire-locked.
+ * @code
+ * static_assert(sizeof(OccupancyGrid) == 152, "Sizeof must be 152 bytes.");
+ * @endcode
+ *
+ * @par Memory layout
+ * @code
+ * Offset  Size  Field
+ * ------  ----  --------------------------------
+ *      0    40  Header   header
+ *     40     8  uint8_t* data_
+ *     48     8  size_t   size_
+ *     56     8  uint64_t update_time_ns_
+ *     64    16  char     map_id_[16]
+ *     80     4  uint32_t channel_
+ *     84     4  uint32_t freq_
+ *     88     4  uint32_t width_
+ *     92     4  uint32_t height_
+ *     96     4  uint32_t valid_cell_count_
+ *    100     4  float    resolution_
+ *    104     4  float    origin_x_
+ *    108     4  float    origin_y_
+ *    112     4  float    origin_z_
+ *    116     4  float    origin_yaw_
+ *    120     4  float    value_min_
+ *    124     4  float    value_max_
+ *    128     4  int32_t  default_value_
+ *    132     4  float    occupied_threshold_
+ *    136     4  float    free_threshold_
+ *    140     1  CellType cell_type_
+ *    141     1  bool     is_owner_
+ *    142     2  uint16_t reserved16_
+ *    144     4  uint32_t reserved32_
+ *    148     4  uint32_t reserved2_
+ * ------  ----  --------------------------------
+ *  Total   152  bytes (alignas 8)
+ *
+ * Wire envelope:
+ * [ magic_begin (4) | OccupancyGrid (152) | cell bytes (width*height*cell_size) | magic_end (4) ]
+ * @endcode
+ *
+ * @par Reserved bytes
+ * @c reserved16_, @c reserved32_, @c reserved2_ are exposed through
+ * @c get_reserved* helpers and survive @c clear() and the copy / move helpers.
+ * These slots MUST NOT be repurposed by application code: future library
+ * revisions may bind them to real fields, silently breaking peers that abused
+ * the slot.
+ *
+ * @par Example
  * @code
  * vlink::zerocopy::OccupancyGrid og;
  * og.set_width(400);
  * og.set_height(400);
- * og.set_resolution(0.05f);
- * og.set_origin_x(-10.0f);
- * og.set_origin_y(-10.0f);
- * og.set_origin_yaw(0.0f);
+ * og.set_resolution(0.05F);
+ * og.set_origin_x(-10.0F);
+ * og.set_origin_y(-10.0F);
  * og.set_cell_type(vlink::zerocopy::OccupancyGrid::kCellInt8);
  * og.set_default_value(-1);
- * og.set_occupied_threshold(0.65f);
- * og.set_free_threshold(0.20f);
+ * og.set_occupied_threshold(0.65F);
+ * og.set_free_threshold(0.20F);
  * og.create(400 * 400);
  *
  * vlink::Bytes wire;
- * og >> wire;                            // serialise
- *
- * vlink::zerocopy::OccupancyGrid og2;
- * og2 << wire;                           // deserialise (zero-copy, borrows wire)
+ * og >> wire;
  * @endcode
- *
- * @note
- * - 32-bit architectures emit a compile-time warning and are not supported.
- * - After @c operator<<, the data pointer references memory inside the source
- *   @c Bytes.  The @c Bytes must outlive the @c OccupancyGrid.
- * - @c fill_data is an alias for @c deep_copy(uint8_t*, size_t).
  */
 
 #pragma once
@@ -99,536 +141,449 @@ namespace zerocopy {
 
 /**
  * @struct OccupancyGrid
- * @brief Zero-copy 2-D occupancy grid map with typed cell storage and Header.
+ * @brief 152-byte POD container holding a typed 2-D occupancy / cost grid plus pose metadata.
  *
  * @details
- * Stores a rectangular grid of homogeneous cells in row-major order together
- * with the world-to-grid transform, value range, default cell, thresholds,
- * and a map identifier.  The struct size is fixed at 152 bytes on 64-bit
- * targets, with a small reserved tail (10 bytes) for future extensions.
- * Copies of the struct are either shallow (borrow the data pointer) or deep
- * (allocate and copy).  The move constructor and move-assignment transfer
- * ownership from the source without allocation.
+ * Cells are stored in row-major order with a stride of @c cell_size() bytes.
+ * The struct size is locked at 152 bytes on 64-bit targets via
+ * @c static_assert.  Copy semantics are deep; the move constructor / assignment
+ * transfer ownership without allocation.
  */
 struct VLINK_EXPORT_AND_ALIGNED(8) OccupancyGrid final {
   /**
-   * @brief Per-cell storage type tag.
-   *
-   * @details
-   * Pass to @c set_cell_type() and read via @c cell_type().  The byte size of
-   * one cell is derived via @c cell_size_of().
+   * @brief Per-cell storage type tag (drives @c cell_size()).
    */
   enum CellType : uint8_t {
-    kCellUnknown = 0,  ///< Unknown or uninitialised cell type.
-    kCellInt8 = 1,     ///< Signed 8-bit per cell (ROS @c nav_msgs/OccupancyGrid).
-    kCellUint8 = 2,    ///< Unsigned 8-bit per cell (generic 0..255 costmap).
-    kCellUint16 = 3,   ///< Unsigned 16-bit per cell (high-resolution costmap).
-    kCellFloat32 = 4,  ///< IEEE-754 single-precision per cell (log-odds, probability, SDF).
+    kCellUnknown = 0,  ///< Uninitialised / unspecified cell type.
+    kCellInt8 = 1,     ///< Signed 8-bit cell (ROS @c nav_msgs/OccupancyGrid style).
+    kCellUint8 = 2,    ///< Unsigned 8-bit cell (0..255 costmap / grayscale).
+    kCellUint16 = 3,   ///< Unsigned 16-bit cell (high-resolution costmap).
+    kCellFloat32 = 4,  ///< IEEE-754 single-precision cell (log-odds, probability, SDF).
   };
 
   /**
-   * @brief Default constructor.
-   *
-   * @details
-   * Verifies via @c static_assert that the struct is exactly 152 bytes on
-   * 64-bit platforms.  32-bit architectures emit a compile-time warning.
+   * @brief Default-constructs an empty grid and asserts the 152-byte contract.
    */
   OccupancyGrid() noexcept;
 
   /**
-   * @brief Destructor -- frees the owned cell buffer if @c is_owner() is @c true.
+   * @brief Frees the owned cell buffer when @c is_owner() is @c true.
    */
   ~OccupancyGrid() noexcept;
 
   /**
-   * @brief Copy constructor -- performs a deep copy of @p target.
+   * @brief Deep-copies @p target into a freshly allocated grid.
    *
-   * @param target Source grid to copy.
+   * @param target Source grid to clone.
    */
   OccupancyGrid(const OccupancyGrid& target) noexcept;
 
   /**
-   * @brief Move constructor -- transfers ownership from @p target.
+   * @brief Steals @p target's allocation and metadata; @p target ends empty.
    *
-   * @details
-   * After the call @p target is empty and does not own any buffer.
-   *
-   * @param target Source grid to move from.
+   * @param target Source grid moved from.
    */
   OccupancyGrid(OccupancyGrid&& target) noexcept;
 
   /**
-   * @brief Copy-assignment operator -- deep-copies @p target.
+   * @brief Deep-copy-assigns @p target; self-assignment is a no-op.
    *
-   * @param target Source grid to copy.  Self-assignment is a no-op.
-   * @return        Reference to @c *this.
+   * @param target Source grid to clone.
+   * @return Reference to @c *this.
    */
   OccupancyGrid& operator=(const OccupancyGrid& target) noexcept;
 
   /**
-   * @brief Move-assignment operator -- transfers ownership from @p target.
+   * @brief Move-assigns @p target; self-assignment is a no-op.
    *
-   * @param target Source grid to move.  Self-assignment is a no-op.
-   * @return        Reference to @c *this.
+   * @param target Source grid moved from.
+   * @return Reference to @c *this.
    */
   OccupancyGrid& operator=(OccupancyGrid&& target) noexcept;
 
   /**
-   * @brief Deserialises an @c OccupancyGrid from a @c Bytes wire buffer.
+   * @brief Deserialises an @c OccupancyGrid from @p bytes with zero-copy borrowing semantics.
    *
-   * @details
-   * Validates the magic-number envelope, copies the raw struct snapshot, and
-   * sets the cell data pointer to reference memory inside @p bytes
-   * (zero-copy).  @c is_owner() will be @c false after a successful call;
-   * @p bytes must outlive this @c OccupancyGrid.
-   *
-   * @param bytes Buffer produced by @c operator>>.
-   * @return       @c true on success, @c false if the buffer fails validation
-   *               or the total size is inconsistent.
+   * @param bytes Wire buffer previously produced by @c operator>>.
+   * @return @c true on success; @c false on magic mismatch or size mismatch.
    */
   bool operator<<(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Serialises this @c OccupancyGrid into a @c Bytes wire buffer.
+   * @brief Serialises the struct snapshot plus cell bytes into @p bytes.
    *
-   * @details
-   * Writes the magic-number envelope, this object's raw struct snapshot, and
-   * cell payload into @p bytes, resizing it if necessary.
-   *
-   * @param bytes Output buffer (reallocated automatically if needed).
-   * @return       Always @c true.
+   * @param bytes Output buffer; resized automatically when too small.
+   * @return Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
 
   /**
-   * @brief Checks whether @p bytes contains a valid @c OccupancyGrid wire buffer.
+   * @brief Validates that @p bytes carries a well-formed @c OccupancyGrid envelope.
    *
-   * @param bytes Buffer to validate.
-   * @return       @c true if the sentinels match and the size is sufficient.
+   * @param bytes Wire buffer to inspect.
+   * @return @c true when both magic sentinels match and the minimum size holds.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Returns the total serialised byte count for this grid.
+   * @brief Total bytes that @c operator>> would write for this grid.
    *
-   * @details
-   * Equals: @c sizeof(magic_begin) + @c sizeof(OccupancyGrid) + @c size() + @c sizeof(magic_end)
-   *
-   * @return Total bytes written by @c operator>>.
+   * @return @c sizeof(magic_begin) + @c sizeof(OccupancyGrid) + @c size() + @c sizeof(magic_end).
    */
   [[nodiscard]] size_t get_serialized_size() const noexcept;
 
   /**
-   * @brief Returns @c true when the cell buffer is present and non-empty.
+   * @brief Whether the cell buffer pointer is non-null and the byte size is positive.
    *
-   * @return @c true if @c data() is non-null and @c size() > 0.
+   * @return @c true when the grid holds usable cell data.
    */
   [[nodiscard]] bool is_valid() const noexcept;
 
   /**
-   * @brief Borrows the cell buffer from @p target without copying.
+   * @brief Borrows @p target's cell buffer without copying.
    *
-   * @details
-   * Sets header, grid metadata, and data pointer to match @p target;
-   * @c is_owner() becomes @c false.  Any previously owned buffer is freed
-   * first.  Reserved fields are left unchanged.  The source backing buffer must
-   * outlive this borrowed grid.
-   *
-   * @param target Source grid to borrow from.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source grid whose buffer must outlive @c *this.
+   * @return @c false on self-borrow, otherwise @c true.
    */
   bool shallow_copy(const OccupancyGrid& target) noexcept;
 
   /**
-   * @brief Deep-copies the cell buffer from @p target.
+   * @brief Allocates (or reuses) an owned buffer and copies @p target's cells.
    *
-   * @details
-   * If @c *this already owns a same-size buffer the data is copied in-place;
-   * otherwise a new buffer is allocated.  Reserved fields are left unchanged.
-   *
-   * @param target Source grid to copy.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source grid to clone.
+   * @return @c false on self-copy, otherwise @c true.
    */
   bool deep_copy(const OccupancyGrid& target) noexcept;
 
   /**
-   * @brief Transfers ownership from @p target to @c *this.
+   * @brief Transfers ownership from @p target; @p target ends empty.
    *
-   * @details
-   * After the call @p target is empty.  Self-move is a no-op.
-   *
-   * @param target Source grid to move from.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source grid moved from.
+   * @return @c false on self-move, otherwise @c true.
    */
   bool move_copy(OccupancyGrid& target) noexcept;
 
   /**
-   * @brief Allocates an owned cell buffer of @p size bytes.
+   * @brief Allocates an uninitialised owned cell buffer of @p size bytes.
    *
    * @details
-   * Frees any existing owned buffer before allocating the new one.  Buffer
-   * content is uninitialised after the call.  The caller is responsible for
-   * sizing @p size consistently with @c width() * @c height() * @c cell_size().
+   * The caller is responsible for keeping @p size consistent with
+   * @c width() * @c height() * @c cell_size().
    *
-   * @param size Number of bytes to allocate.  Must be non-zero.
-   * @return      @c false if @p size is zero, otherwise @c true.
+   * @param size Byte count; must be non-zero.
+   * @return @c false when @p size is zero, otherwise @c true.
    */
   bool create(size_t size) noexcept;
 
   /**
-   * @brief Releases owned resources and resets grid metadata and @c header.
-   *
-   * @details
-   * Reserved fields are left unchanged.
+   * @brief Releases the owned buffer (if any) and resets metadata except reserved fields.
    */
   void clear() noexcept;
 
   /**
-   * @brief Borrows an external raw cell pointer without copying.
+   * @brief Borrows an externally owned cell buffer without copying.
    *
-   * @details
-   * Sets the internal data pointer to @p data with @c is_owner() == false.
-   * The caller is responsible for the buffer lifetime.
-   *
-   * @param data Non-null pointer to cell data.
-   * @param size Size of the buffer in bytes.
-   * @return      @c false on invalid arguments or if the pointer is unchanged.
+   * @param data Non-null source pointer that must outlive @c *this.
+   * @param size Buffer length in bytes; must be non-zero.
+   * @return @c false on invalid arguments or unchanged pointer, otherwise @c true.
    */
   bool shallow_copy(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Deep-copies cell data from a raw pointer.
+   * @brief Copies @p size bytes from @p data into an owned cell buffer.
    *
-   * @details
-   * Allocates or reuses an owned buffer and copies @p size bytes from @p data.
-   *
-   * @param data Source cell data pointer.  Must be non-null.
-   * @param size Number of bytes to copy.  Must be non-zero.
-   * @return      @c false if @p data is null, @p size is zero, this object
-   *              claims ownership but has no buffer, or @p data already equals
-   *              the current internal pointer; otherwise @c true.
+   * @param data Non-null source pointer.
+   * @param size Number of bytes to copy; must be non-zero.
+   * @return @c false on invalid arguments or aliasing, otherwise @c true.
    */
   bool deep_copy(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Alias for @c deep_copy(uint8_t*, size_t).
+   * @brief Compatibility alias for @c deep_copy(uint8_t*, size_t).
    *
    * @param data Source pointer.
    * @param size Number of bytes.
-   * @return      Result of the underlying @c deep_copy call.
+   * @return Result of the delegated @c deep_copy call.
    */
   bool fill_data(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Returns the map state timestamp in nanoseconds since epoch.
+   * @brief Producer-side timestamp recording when the map was last updated.
    *
-   * @details
-   * Independent of @c header.time_pub -- this is the time at which the map
-   * content was last updated, which may lag behind the publish timestamp.
-   *
-   * @return Map state timestamp.
+   * @return Stored nanosecond timestamp.
    */
   [[nodiscard]] uint64_t update_time_ns() const noexcept;
 
   /**
-   * @brief Returns the unique map identifier as a NUL-terminated string view.
+   * @brief Unique map identifier (e.g. @c "local", @c "global", @c "lane").
    *
-   * @details
-   * Useful when multiple maps (e.g. local / global / lane-level) are
-   * published on the same topic and consumers need to disambiguate.
-   *
-   * @return Borrowed view into the embedded @c map_id buffer.
+   * @return Non-owning view into the embedded buffer.
    */
   [[nodiscard]] std::string_view map_id() const noexcept;
 
   /**
-   * @brief Returns the sensor / producer channel identifier.
+   * @brief Sensor / producer channel identifier.
    *
-   * @return Channel set by @c set_channel().
+   * @return Stored channel id.
    */
   [[nodiscard]] uint32_t channel() const noexcept;
 
   /**
-   * @brief Returns the nominal publish frequency in Hz.
+   * @brief Nominal publish frequency in Hz.
    *
-   * @return Frequency set by @c set_freq().
+   * @return Stored value.
    */
   [[nodiscard]] uint32_t freq() const noexcept;
 
   /**
-   * @brief Returns the grid width in cells (columns).
+   * @brief Grid width in cells (columns).
    *
-   * @return Width set by @c set_width().
+   * @return Stored width.
    */
   [[nodiscard]] uint32_t width() const noexcept;
 
   /**
-   * @brief Returns the grid height in cells (rows).
+   * @brief Grid height in cells (rows).
    *
-   * @return Height set by @c set_height().
+   * @return Stored height.
    */
   [[nodiscard]] uint32_t height() const noexcept;
 
   /**
-   * @brief Returns the count of cells whose value is not the default.
+   * @brief Number of cells whose value differs from @c default_value() (producer-supplied hint).
    *
-   * @details
-   * Producers may set this as a sparsity / quality hint; consumers should
-   * treat zero as "unknown / not provided" rather than "fully empty map".
-   *
-   * @return Valid-cell count set by @c set_valid_cell_count().
+   * @return Stored count; zero means "not provided".
    */
   [[nodiscard]] uint32_t valid_cell_count() const noexcept;
 
   /**
-   * @brief Returns the cell resolution in metres per cell.
+   * @brief Cell side length in metres.
    *
-   * @return Resolution set by @c set_resolution().
+   * @return Stored resolution.
    */
   [[nodiscard]] float resolution() const noexcept;
 
   /**
-   * @brief Returns the world-frame X coordinate of the grid origin.
+   * @brief World-frame X coordinate of the bottom-left grid corner.
    *
-   * @return Origin X set by @c set_origin_x().
+   * @return Stored origin X.
    */
   [[nodiscard]] float origin_x() const noexcept;
 
   /**
-   * @brief Returns the world-frame Y coordinate of the grid origin.
+   * @brief World-frame Y coordinate of the bottom-left grid corner.
    *
-   * @return Origin Y set by @c set_origin_y().
+   * @return Stored origin Y.
    */
   [[nodiscard]] float origin_y() const noexcept;
 
   /**
-   * @brief Returns the world-frame Z coordinate of the 2-D plane.
+   * @brief World-frame Z coordinate of the 2-D plane.
    *
-   * @details
-   * Allows the 2-D grid to be placed at an arbitrary height in 3-D space
-   * (e.g. multi-floor occupancy stacks).
-   *
-   * @return Origin Z set by @c set_origin_z().
+   * @return Stored origin Z.
    */
   [[nodiscard]] float origin_z() const noexcept;
 
   /**
-   * @brief Returns the rotation of the grid origin in radians.
+   * @brief Yaw rotation of the grid origin in radians (REP-103).
    *
-   * @return Origin yaw set by @c set_origin_yaw().
+   * @return Stored origin yaw.
    */
   [[nodiscard]] float origin_yaw() const noexcept;
 
   /**
-   * @brief Returns the lower bound of cell values (for normalisation / visualisation).
+   * @brief Lower bound of cell values used for normalisation / visualisation.
    *
-   * @return Value lower bound set by @c set_value_min().
+   * @return Stored minimum.
    */
   [[nodiscard]] float value_min() const noexcept;
 
   /**
-   * @brief Returns the upper bound of cell values.
+   * @brief Upper bound of cell values used for normalisation / visualisation.
    *
-   * @return Value upper bound set by @c set_value_max().
+   * @return Stored maximum.
    */
   [[nodiscard]] float value_max() const noexcept;
 
   /**
-   * @brief Returns the value used for unknown / uninitialised cells.
+   * @brief Value used for unknown / uninitialised cells.
    *
-   * @details
-   * Typical convention: @c -1 for ROS-style int8 occupancy, @c 255 for
-   * @c kCellUint8 costmaps, or a sentinel float NaN for float maps.
-   *
-   * @return Default cell value set by @c set_default_value().
+   * @return Stored default value (e.g. -1 for ROS int8 occupancy).
    */
   [[nodiscard]] int32_t default_value() const noexcept;
 
   /**
-   * @brief Returns the threshold above which a cell is considered occupied.
+   * @brief Threshold above which a cell is considered occupied.
    *
-   * @details
-   * Common ROS default is @c 0.65 (65% probability).  Producers may leave
-   * this at zero if no fixed threshold applies.
-   *
-   * @return Occupied threshold set by @c set_occupied_threshold().
+   * @return Stored threshold.
    */
   [[nodiscard]] float occupied_threshold() const noexcept;
 
   /**
-   * @brief Returns the threshold below which a cell is considered free.
+   * @brief Threshold below which a cell is considered free.
    *
-   * @details
-   * Common ROS default is @c 0.20 (20% probability).
-   *
-   * @return Free threshold set by @c set_free_threshold().
+   * @return Stored threshold.
    */
   [[nodiscard]] float free_threshold() const noexcept;
 
   /**
-   * @brief Returns the per-cell storage type tag.
+   * @brief Per-cell storage type tag.
    *
-   * @return @c CellType set by @c set_cell_type().
+   * @return @c CellType enum value.
    */
   [[nodiscard]] CellType cell_type() const noexcept;
 
   /**
-   * @brief Returns the byte size of one cell derived from @c cell_type().
+   * @brief Byte size of one cell derived from @c cell_type().
    *
-   * @return Cell size in bytes (0 for @c kCellUnknown).
+   * @return Cell stride in bytes (0 for @c kCellUnknown).
    */
   [[nodiscard]] uint8_t cell_size() const noexcept;
 
   /**
-   * @brief Returns a read-only pointer to the cell data buffer.
+   * @brief Read-only pointer to the cell bytes.
    *
-   * @return Pointer to cell bytes.  Empty deserialised grids may still hold a
-   *         non-null borrowed pointer; use @c size() / @c is_valid() to test
-   *         for usable cell data.
+   * @return Pointer to payload start.
    */
   [[nodiscard]] const uint8_t* data() const noexcept;
 
   /**
-   * @brief Returns the cell buffer size in bytes.
+   * @brief Cell buffer size in bytes.
    *
-   * @return Number of payload bytes, or 0 if empty.
+   * @return Byte count, or 0 when empty.
    */
   [[nodiscard]] size_t size() const noexcept;
 
   /**
-   * @brief Returns @c true if this object owns its cell buffer.
+   * @brief Whether this grid owns its cell buffer.
    *
-   * @return @c true when memory ownership is held.
+   * @return @c true when the destructor would free the buffer.
    */
   [[nodiscard]] bool is_owner() const noexcept;
 
   /**
-   * @brief Sets the map state timestamp in nanoseconds since epoch.
+   * @brief Stores the producer-side map timestamp.
    *
-   * @param update_time_ns Last-update timestamp.
+   * @param update_time_ns Timestamp in nanoseconds.
    */
   void set_update_time_ns(uint64_t update_time_ns) noexcept;
 
   /**
-   * @brief Sets the unique map identifier.
+   * @brief Stores the unique map identifier (truncated to @c sizeof(map_id) - 1 bytes).
    *
-   * @details
-   * Copies up to @c sizeof(map_id) - 1 bytes from @p map_id and writes a NUL
-   * terminator.  Longer inputs are truncated.
-   *
-   * @param map_id Identifier to embed.
+   * @param map_id Identifier string.
    */
   void set_map_id(std::string_view map_id) noexcept;
 
   /**
-   * @brief Sets the sensor / producer channel identifier.
+   * @brief Stores the sensor / producer channel identifier.
    *
-   * @param channel Channel identifier.
+   * @param channel Channel id.
    */
   void set_channel(uint32_t channel) noexcept;
 
   /**
-   * @brief Sets the nominal publish frequency in Hz.
+   * @brief Stores the nominal publish frequency.
    *
-   * @param freq Publish rate in Hz.
+   * @param freq Frequency in Hz.
    */
   void set_freq(uint32_t freq) noexcept;
 
   /**
-   * @brief Sets the grid width in cells (columns).
+   * @brief Stores the grid width.
    *
    * @param width Number of columns.
    */
   void set_width(uint32_t width) noexcept;
 
   /**
-   * @brief Sets the grid height in cells (rows).
+   * @brief Stores the grid height.
    *
    * @param height Number of rows.
    */
   void set_height(uint32_t height) noexcept;
 
   /**
-   * @brief Sets the count of valid (non-default) cells.
+   * @brief Stores the count of cells differing from the default value.
    *
-   * @param valid_cell_count Number of cells whose value differs from @c default_value().
+   * @param valid_cell_count Producer-supplied hint.
    */
   void set_valid_cell_count(uint32_t valid_cell_count) noexcept;
 
   /**
-   * @brief Sets the cell resolution in metres per cell.
+   * @brief Stores the cell resolution.
    *
    * @param resolution Metres per cell.
    */
   void set_resolution(float resolution) noexcept;
 
   /**
-   * @brief Sets the world-frame X coordinate of the grid origin.
+   * @brief Stores the world-frame X origin.
    *
    * @param origin_x World X coordinate of the bottom-left corner.
    */
   void set_origin_x(float origin_x) noexcept;
 
   /**
-   * @brief Sets the world-frame Y coordinate of the grid origin.
+   * @brief Stores the world-frame Y origin.
    *
    * @param origin_y World Y coordinate of the bottom-left corner.
    */
   void set_origin_y(float origin_y) noexcept;
 
   /**
-   * @brief Sets the world-frame Z coordinate of the 2-D plane.
+   * @brief Stores the world-frame Z value of the 2-D plane.
    *
    * @param origin_z World Z coordinate of the plane.
    */
   void set_origin_z(float origin_z) noexcept;
 
   /**
-   * @brief Sets the grid yaw rotation in radians.
+   * @brief Stores the yaw rotation of the grid origin.
    *
-   * @param origin_yaw Rotation of the grid origin (REP-103 convention).
+   * @param origin_yaw Rotation in radians (REP-103).
    */
   void set_origin_yaw(float origin_yaw) noexcept;
 
   /**
-   * @brief Sets the lower bound of cell values.
+   * @brief Stores the lower bound for cell values.
    *
-   * @param value_min Value lower bound.
+   * @param value_min Stored minimum.
    */
   void set_value_min(float value_min) noexcept;
 
   /**
-   * @brief Sets the upper bound of cell values.
+   * @brief Stores the upper bound for cell values.
    *
-   * @param value_max Value upper bound.
+   * @param value_max Stored maximum.
    */
   void set_value_max(float value_max) noexcept;
 
   /**
-   * @brief Sets the value used for unknown / uninitialised cells.
+   * @brief Stores the value used for unknown cells.
    *
    * @param default_value Default cell value.
    */
   void set_default_value(int32_t default_value) noexcept;
 
   /**
-   * @brief Sets the threshold above which a cell is considered occupied.
+   * @brief Stores the occupied threshold.
    *
-   * @param occupied_threshold Occupied threshold.
+   * @param occupied_threshold Stored threshold.
    */
   void set_occupied_threshold(float occupied_threshold) noexcept;
 
   /**
-   * @brief Sets the threshold below which a cell is considered free.
+   * @brief Stores the free threshold.
    *
-   * @param free_threshold Free threshold.
+   * @param free_threshold Stored threshold.
    */
   void set_free_threshold(float free_threshold) noexcept;
 
   /**
-   * @brief Sets the per-cell storage type tag.
+   * @brief Stores the per-cell storage type tag.
    *
-   * @param cell_type One of the @c CellType enum values.
+   * @param cell_type @c CellType enum value.
    */
   void set_cell_type(CellType cell_type) noexcept;
 
@@ -636,46 +591,41 @@ struct VLINK_EXPORT_AND_ALIGNED(8) OccupancyGrid final {
    * @brief Returns the byte size of one cell of @p type.
    *
    * @param type Cell type tag.
-   * @return      Cell size in bytes (0 for @c kCellUnknown).
+   * @return Cell stride in bytes (0 for @c kCellUnknown).
    */
   [[nodiscard]] static uint8_t cell_size_of(CellType type) noexcept;
 
   /**
-   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   * @brief Mutable accessor for the primary 32-bit reserved slot (compatibility alias).
    *
-   * @details
-   * Compatibility alias for @c get_reserved32().  Reserved fields are left
-   * unchanged by @c clear() and the copy/move helpers, and are included in the
-   * binary wire format.
-   *
-   * @return Mutable reference to the primary 32-bit reserved field.
+   * @return Reference to @c reserved32_.
    */
   uint32_t& get_reserved() noexcept { return reserved32_; }
 
   /**
-   * @brief Returns a mutable reference to the 16-bit reserved field.
+   * @brief Mutable accessor for the 16-bit reserved slot.
    *
-   * @return Mutable reference to the 16-bit reserved field.
+   * @return Reference to @c reserved16_.
    */
   uint16_t& get_reserved16() noexcept { return reserved16_; }
 
   /**
-   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   * @brief Mutable accessor for the primary 32-bit reserved slot.
    *
-   * @return Mutable reference to the primary 32-bit reserved field.
+   * @return Reference to @c reserved32_.
    */
   uint32_t& get_reserved32() noexcept { return reserved32_; }
 
   /**
-   * @brief Returns a mutable reference to the second 32-bit reserved field.
+   * @brief Mutable accessor for the second 32-bit reserved slot.
    *
-   * @return Mutable reference to the second 32-bit reserved field.
+   * @return Reference to @c reserved2_.
    */
   uint32_t& get_reserved2() noexcept { return reserved2_; }
 
-  Header header;  ///< Sequencing and timestamp metadata for this grid.
+  Header header;  ///< Sequencing and timestamp metadata prefix.
 
-  static constexpr bool kZerocopyTypes{true};  ///< Internal marker for VLink zero-copy type traits.
+  static constexpr bool kZerocopyTypes{true};  ///< Marker probed by the VLink type-trait machinery.
 
  private:
   uint8_t* data_{nullptr};

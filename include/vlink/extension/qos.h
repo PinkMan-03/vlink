@@ -110,8 +110,8 @@ struct Qos final {
    *
    * | Kind       | Behaviour                                                |
    * | ---------- | -------------------------------------------------------- |
-   * | kKeepLast  | Keep the @c depth most recent samples per instance      |
-   * | kKeepAll   | Keep all samples (subject to ResourceLimits)            |
+   * | kKeepLast  | Keep the @c depth most recent samples per instance       |
+   * | kKeepAll   | Keep all samples (subject to ResourceLimits)             |
    */
   struct History final {
     enum Kind : uint8_t {
@@ -127,12 +127,12 @@ struct Qos final {
    * @struct Durability
    * @brief Controls how samples persist after they are published.
    *
-   * | Kind            | Behaviour                                            |
-   * | --------------- | ---------------------------------------------------- |
-   * | kVolatile       | No persistence; late joiners see only new samples   |
+   * | Kind            | Behaviour                                               |
+   * | --------------- | ------------------------------------------------------- |
+   * | kVolatile       | No persistence; late joiners see only new samples       |
    * | kTransientLocal | Samples cached in the DataWriter; late joiners catch up |
-   * | kTransient      | Samples persist in an external service              |
-   * | kPersistent     | Samples persist to stable storage                  |
+   * | kTransient      | Samples persist in an external service                  |
+   * | kPersistent     | Samples persist to stable storage                       |
    */
   struct Durability final {
     enum Kind : uint8_t {
@@ -151,8 +151,8 @@ struct Qos final {
    *
    * | Kind   | Behaviour                                                     |
    * | ------ | ------------------------------------------------------------- |
-   * | kSync  | Write completes before returning to the caller               |
-   * | kASync | Write is queued and sent by a background thread              |
+   * | kSync  | Write completes before returning to the caller                |
+   * | kASync | Write is queued and sent by a background thread               |
    */
   struct PublishMode final {
     enum Kind : uint8_t {
@@ -169,9 +169,9 @@ struct Qos final {
    *
    * | Kind                | Behaviour                                         |
    * | ------------------- | ------------------------------------------------- |
-   * | kAutomatic          | Middleware asserts liveliness automatically      |
-   * | kManualParticipant  | Application must assert at participant level     |
-   * | kManualTopic        | Application must assert at topic level           |
+   * | kAutomatic          | Middleware asserts liveliness automatically       |
+   * | kManualParticipant  | Application must assert at participant level      |
+   * | kManualTopic        | Application must assert at topic level            |
    */
   struct Liveliness final {
     enum Kind : uint8_t {
@@ -190,8 +190,8 @@ struct Qos final {
    *
    * | Kind                 | Behaviour                                       |
    * | -------------------- | ----------------------------------------------- |
-   * | kReceptionTimestamp  | Order by time the reader received the sample   |
-   * | kSourceTimestamp     | Order by time the writer sent the sample       |
+   * | kReceptionTimestamp  | Order by time the reader received the sample    |
+   * | kSourceTimestamp     | Order by time the writer sent the sample        |
    */
   struct DestinationOrder final {
     enum Kind : uint8_t {
@@ -208,7 +208,7 @@ struct Qos final {
    *
    * | Kind       | Behaviour                                                 |
    * | ---------- | --------------------------------------------------------- |
-   * | kShared    | Multiple writers may update the same instance            |
+   * | kShared    | Multiple writers may update the same instance             |
    * | kExclusive | Only the writer with the highest strength may update      |
    */
   struct Ownership final {

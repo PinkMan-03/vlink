@@ -23,43 +23,55 @@
 
 /**
  * @file url_remap.h
- * @brief JSON-driven URL remapping for VLink topic address translation.
+ * @brief JSON-driven substring rewriter for VLink topic URLs.
  *
  * @details
- * @c UrlRemap loads a JSON configuration file that maps source URL patterns to
- * target URL strings, enabling topic renaming at runtime without recompiling.
+ * @c UrlRemap turns a flat JSON dictionary into a runtime topic-renaming layer.  Each entry maps
+ * a fragment that should appear in an input URL to the replacement URL emitted to the transport,
+ * allowing operators to switch backends, redirect topics, or stage migrations without rebuilding
+ * application binaries.
  *
- * The JSON format is a flat object of key/value pairs:
+ * @par Rewrite rules
+ *
+ * | Source key (substring of input)   | Target value (replacement URL)        | Effect                            |
+ * | --------------------------------- | ------------------------------------- | --------------------------------- |
+ * | @c "intra://sensor/lidar"         | @c "dds://vehicle/lidar"              | promote local topic to DDS        |
+ * | @c "shm://camera/front"           | @c "zenoh://camera/front"             | switch transport to Zenoh         |
+ * | @c "dds://"                       | @c "ddst://"                          | force TCP DDS transport globally  |
+ * | @c "fdbus://"                     | @c "intra://"                         | merge to intra-process bus        |
+ *
+ * Lookup is linear in the configured order; the first key that occurs as a substring of the
+ * input URL wins.  Results are cached so repeated lookups for the same input are O(1).
+ *
+ * @par Environment-driven remap
  * @code
- * {
- *     "intra://sensor/lidar": "dds://vehicle/lidar",
- *     "shm://camera/front":   "zenoh://camera/front"
- * }
+ *  +-------------------------+   load(path)      +---------------------+   convert(url)
+ *  | VLINK_URL_REMAP=path    | ----------------> | UrlRemap (JSON map) | -----------------> rewritten URL
+ *  | or load(path) at init   |                   | + result cache      |    cache hit -> O(1)
+ *  +-------------------------+                   +---------------------+
+ *                                                          |
+ *                                                          v
+ *                                                     transports receive
+ *                                                     the rewritten URL
  * @endcode
  *
- * @par Matching algorithm
- * For each call to @c convert(), the remap list is searched in order.  The first
- * entry whose key is found as a substring of the input URL is selected, and its
- * value is returned as the remapped URL.  Results are cached in an internal
- * @c unordered_map to avoid repeated linear scans.
- *
- * @par Lifecycle
+ * @par Example
  * @code
- * vlink::UrlRemap remap;
- * remap.load("/etc/vlink/remap.json");
+ *   vlink::UrlRemap remap;
  *
- * std::string topic = remap.convert("intra://sensor/lidar");
- * // topic == "dds://vehicle/lidar"
+ *   if (remap.load("/etc/vlink/remap.json")) {
+ *     auto target = remap.convert("intra://sensor/lidar");
+ *     auto pub = vlink::Publisher<MyMsg>::create_unique(target);
+ *   } else {
+ *     VLOG_W("remap unavailable: ", remap.get_error_string());
+ *   }
  *
- * remap.reload("/etc/vlink/new_remap.json");
+ *   remap.reload("/etc/vlink/remap-v2.json");
  * @endcode
  *
  * @note
- * - @c load() returns @c false if the file does not exist, cannot be parsed, or
- *   the instance is already loaded.  File and parse failures set the error string.
- * - @c unload() clears the remap table and the result cache.
- * - @c convert() returns the original URL unchanged if @c is_valid() is @c false
- *   or no matching rule is found.
+ * - @c UrlRemap is not thread-safe; serialise calls externally or confine to a single thread.
+ * - @c convert() returns its input unchanged when the table is empty or unloaded.
  */
 
 #pragma once
@@ -74,106 +86,81 @@ namespace vlink {
 
 /**
  * @class UrlRemap
- * @brief Loads a JSON remap file and translates VLink URL strings at runtime.
+ * @brief Loads a JSON rewrite table and substitutes VLink URLs at runtime.
  *
  * @details
- * Not thread-safe.  All methods should be called from a single thread, or
- * the caller must provide external synchronisation.
+ * Each instance holds an ordered rewrite list, a result cache, and a status string used for
+ * diagnostics.  Copy and assignment are disabled.
  */
 class VLINK_EXPORT UrlRemap {
  public:
   /**
-   * @brief Constructs an empty, invalid @c UrlRemap.  No file is loaded.
+   * @brief Constructs an empty, unloaded instance.
    */
   UrlRemap() noexcept;
 
   /**
-   * @brief Destructor.
+   * @brief Destroys the instance and clears caches.
    */
   ~UrlRemap() noexcept;
 
   /**
-   * @brief Loads and parses a JSON remap configuration from @p file_path.
+   * @brief Parses @p file_path and installs the rewrite table.
    *
-   * @details
-   * The file must be a flat JSON object with string keys and string values.
-   * Calling @c load() on an already-loaded instance returns @c false without
-   * modifying state (call @c unload() or @c reload() first).
-   *
-   * @param file_path  Absolute or relative path to the JSON file.
-   * @return @c true on success; @c false if the instance is already loaded, the file
-   *         is missing or unreadable, or the file contains invalid JSON.  File and
-   *         parse errors are accessible via @c get_error_string().
+   * @param file_path  Absolute or relative path to a flat JSON object of string pairs.
+   * @return @c true on success; @c false when already loaded, the file is missing, unreadable,
+   *         or contains invalid JSON.  Errors are surfaced via @c get_error_string().
    */
   bool load(const std::string& file_path) noexcept;
 
   /**
-   * @brief Clears the remap table and marks the instance as invalid.
+   * @brief Clears the rewrite table and the result cache.
    *
-   * @details
-   * Also clears the conversion result cache.  Does nothing and returns @c false
-   * if the instance is not currently loaded.
-   *
-   * @return @c true if the table was cleared; @c false if already unloaded.
+   * @return @c true when the table was cleared; @c false when no table was loaded.
    */
   bool unload() noexcept;
 
   /**
-   * @brief Unloads the current configuration and loads a new one atomically.
+   * @brief Atomically unloads the current table and loads @p file_path.
    *
-   * @details
-   * Equivalent to calling @c unload() followed by @c load(@p file_path).
-   *
-   * @param file_path  Path to the new JSON remap file.
-   * @return @c true if the new file was loaded successfully.
+   * @param file_path  Path of the replacement JSON file.
+   * @return @c true when the new file loaded successfully.
    */
   bool reload(const std::string& file_path) noexcept;
 
   /**
-   * @brief Translates @p url according to the loaded remap rules.
+   * @brief Translates @p url using the loaded rules; returns @p url unchanged on miss.
    *
-   * @details
-   * Checks an internal cache first for O(1) repeated lookups.  If not cached,
-   * iterates the ordered remap list and returns the first matching target.
-   * The result is cached before returning.
-   *
-   * Returns @p url unchanged if:
-   * - The remap table is not loaded (@c is_valid() is @c false).
-   * - No rule matches.
-   *
-   * @param url  Input URL string.
-   * @return Remapped URL, or the original @p url if no rule matches.
+   * @param url  Input URL to rewrite.
+   * @return Reference to the rewritten URL, owned by the internal cache.
    */
   const std::string& convert(const std::string& url) noexcept;
 
   /**
-   * @brief Enables or disables logging of each URL conversion.
+   * @brief Toggles per-conversion INFO logging.
    *
-   * @param enable_log  If @c true, each successful remap is logged at INFO level.
+   * @param enable_log  @c true emits one log line per successful rewrite.
    */
   void set_enable_log(bool enable_log) noexcept;
 
   /**
-   * @brief Returns whether conversion logging is currently enabled.
+   * @brief Reports whether per-conversion logging is enabled.
    *
-   * @return @c true if logging is enabled.
+   * @return @c true when logging is currently enabled.
    */
   [[nodiscard]] bool is_enable_log() const noexcept;
 
   /**
-   * @brief Returns whether a remap file has been successfully loaded.
+   * @brief Reports whether a rewrite table has been successfully loaded.
    *
-   * @return @c true if @c load() or @c reload() succeeded.
+   * @return @c true after a successful @c load() or @c reload() and before the next @c unload().
    */
   [[nodiscard]] bool is_valid() const noexcept;
 
   /**
-   * @brief Returns the human-readable error description from the last failed operation.
+   * @brief Returns the diagnostic message produced by the last failure.
    *
-   * @details
-   * Populated by @c load() on failure.  Cleared on @c unload() and on successful @c load().
-   *
-   * @return Error string, or an empty string if no error has occurred.
+   * @return Error string or empty when no failure has occurred since the last successful load.
    */
   [[nodiscard]] const std::string& get_error_string() const noexcept;
 

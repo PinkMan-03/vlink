@@ -23,104 +23,92 @@
 
 /**
  * @file message_convert_plugin.h
- * @brief Plugin interface for VLink/webviz message conversion across visualization backends.
+ * @brief Plugin contract for converting VLink payloads to visualisation backend formats.
  *
  * @details
- * @c MessageConvertPlugin allows users to implement custom VLink/webviz message conversion
- * logic in a shared library plugin. The plugin receives raw VLink message bytes
- * (Protobuf, FlatBuffers, CDR, POD, or any custom serialisation) and produces a
- * backend-specific payload along with schema/type metadata.
+ * @c MessageConvertPlugin lets users supply custom encoders that translate raw VLink
+ * messages -- in any serialisation -- into the payload format expected by a particular
+ * webviz frontend.  The plugin is loaded as a shared library via the VLink @c Plugin
+ * framework and has no third-party dependencies of its own: it consumes @c Bytes and
+ * emits @c Bytes, so consumers may implement it without linking Protobuf, FlatBuffers,
+ * the Rerun SDK or any JSON library.
  *
- * This interface has **zero third-party dependencies** -- it only uses VLink base
- * types (@c Bytes) and standard C++ types, making it easy to implement in external
- * projects without linking against Protobuf, FlatBuffers, Rerun SDK, or JSON libraries.
+ * Conversion pipeline:
  *
- * A single plugin can support multiple visualization backends by checking the
- * @c ConvertTarget parameter in each method. The plugin coexists with JSON-based
- * VLink-to-webviz mapping files. When both are present, the plugin is tried
- * first; if it returns @c false for a given type, the JSON mapping pipeline takes over.
+ * @verbatim
+ *                          can_convert(ser, target)?
+ *   VLink Bytes  ----->  +-----------------------+
+ *                        |  MessageConvertPlugin |  --get_schema_info(ser, target)--> channel registration
+ *                        +-----------------------+
+ *                                 |
+ *                                 v convert(ser, raw, target, payload)
+ *                              backend Bytes  --->  Foxglove / Rerun frontend
+ * @endverbatim
  *
- * @par Supported targets
- * | Target       | Payload format                    | type_name meaning              |
- * |------------- |-----------------------------------|--------------------------------|
- * | @c kFoxglove | FlatBuffer / Protobuf binary      | Foxglove schema name           |
- * | @c kRerun    | JSON string describing components | Rerun archetype name           |
+ * Supported source/target combinations and the meaning of each output field:
+ *
+ * | @c ConvertTarget   | Wire payload                        | @c type_name meaning                  |
+ * | ------------------ | ----------------------------------- | ------------------------------------- |
+ * | @c kFoxglove       | FlatBuffer / Protobuf binary bytes  | Foxglove schema name                  |
+ * | @c kRerun          | UTF-8 JSON describing components    | Rerun archetype name                  |
  *
  * @par Rerun JSON payload format
- * When targeting Rerun, the plugin should produce a UTF-8 JSON string as the payload.
- * The JSON object describes the Rerun archetype components. Each archetype has its own
- * expected fields:
+ * Plugins targeting Rerun emit a UTF-8 JSON object whose fields match the Rerun
+ * archetype.  Binary archetypes carry their bytes through a @c data_base64 field.
  *
  * @code{.json}
- * // Points3D example:
- * {
- *   "positions": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
- *   "colors": [[255, 0, 0, 255], [0, 255, 0, 255]],
- *   "radii": [0.1, 0.2]
- * }
+ * // Points3D
+ * { "positions": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+ *   "colors":    [[255, 0, 0, 255], [0, 255, 0, 255]],
+ *   "radii":     [0.1, 0.2] }
  *
- * // EncodedImage example (binary data is base64-encoded):
- * {
- *   "media_type": "image/jpeg",
- *   "data_base64": "<base64-encoded image bytes>"
- * }
+ * // EncodedImage  (binary payload base64-encoded)
+ * { "media_type": "image/jpeg",
+ *   "data_base64": "<base64 image bytes>" }
  *
- * // GeoPoints example:
- * {
- *   "lat_deg": [37.7749, 37.7750],
- *   "lon_deg": [-122.4194, -122.4195]
- * }
+ * // GeoPoints
+ * { "lat_deg": [37.7749, 37.7750],
+ *   "lon_deg": [-122.4194, -122.4195] }
  *
- * // TextLog example:
- * {
- *   "text": "Hello world",
- *   "level": "INFO"
- * }
+ * // TextLog
+ * { "text": "Hello world", "level": "INFO" }
  *
- * // Scalars example:
- * {
- *   "value": 3.14
- * }
+ * // Scalars
+ * { "value": 3.14 }
  *
- * // Transform3D example:
- * {
- *   "translation": [1.0, 2.0, 3.0],
- *   "rotation_quat": [0.0, 0.0, 0.0, 1.0]
- * }
+ * // Transform3D
+ * { "translation":   [1.0, 2.0, 3.0],
+ *   "rotation_quat": [0.0, 0.0, 0.0, 1.0] }
  *
- * // Boxes3D example:
- * {
- *   "half_sizes": [[1.0, 2.0, 3.0]],
- *   "centers": [[0.0, 0.0, 0.0]],
+ * // Boxes3D
+ * { "half_sizes":  [[1.0, 2.0, 3.0]],
+ *   "centers":     [[0.0, 0.0, 0.0]],
  *   "quaternions": [[0.0, 0.0, 0.0, 1.0]],
- *   "colors": [[255, 0, 0, 255]],
- *   "labels": ["box1"]
- * }
+ *   "colors":      [[255, 0, 0, 255]],
+ *   "labels":      ["box1"] }
  *
- * // Pinhole example:
- * {
- *   "image_from_camera": [[fx, 0, cx], [0, fy, cy], [0, 0, 1]],
- *   "resolution": [1920, 1080]
- * }
+ * // Pinhole
+ * { "image_from_camera": [[fx, 0, cx], [0, fy, cy], [0, 0, 1]],
+ *   "resolution":        [1920, 1080] }
  * @endcode
  *
- * Binary archetypes should carry their raw bytes in a @c data_base64 string. Currently the
- * built-in Rerun JSON bridge supports this for @c EncodedImage, @c Image, @c DepthImage,
- * @c SegmentationImage, @c EncodedDepthImage, @c Asset3D, @c AssetVideo, and @c Tensor.
- * @c Image, @c DepthImage, and @c SegmentationImage also require @c width/@c height (or
- * @c resolution). @c Tensor additionally requires @c shape and may provide @c dim_names.
- * Direct VLink-to-Rerun mappings still cover a broader set of archetypes than the plugin
- * JSON bridge.
+ * The built-in Rerun JSON bridge currently handles @c data_base64 for @c EncodedImage,
+ * @c Image, @c DepthImage, @c SegmentationImage, @c EncodedDepthImage, @c Asset3D,
+ * @c AssetVideo and @c Tensor.  @c Image, @c DepthImage and @c SegmentationImage also
+ * require @c width / @c height (or @c resolution).  @c Tensor additionally requires
+ * @c shape and may provide @c dim_names.  Direct VLink-to-Rerun mappings still cover
+ * a broader set of archetypes than the JSON bridge.
  *
- * @par Plugin lifecycle
- * 1. @c init() is called once after loading, with an optional config string.
- * 2. @c can_convert() is called for each discovered VLink serialisation type
- *    (with the target backend) to determine if the plugin handles it.
- * 3. @c get_schema_info() is called once per type to register the channel/archetype.
- * 4. @c convert() is called for every incoming message on matched types.
- * 5. The plugin is destroyed when the server shuts down.
+ * Plugin lifecycle:
+ * 1. @c init() runs once after dynamic load, with an opaque configuration string.
+ * 2. @c can_convert() is queried per discovered VLink serialisation type, per target.
+ * 3. @c get_schema_info() is called once per accepted type to register the channel.
+ * 4. @c convert() runs for every incoming payload on accepted types.
+ * 5. Optional reverse hooks (@c can_convert_frontend(), @c get_publish_info(),
+ *    @c convert_frontend()) handle inbound frontend command/control flows.
+ * 6. The destructor runs when the host unloads the plugin.
  *
- * @par Example implementation (supports both Foxglove and Rerun)
+ * @par Example
  * @code
  * #include <vlink/extension/message_convert_plugin.h>
  *
@@ -129,14 +117,12 @@
  *
  *  public:
  *   bool init(const std::string& config) override {
- *     // Parse config, load schemas, etc.
+ *     (void)config;
  *     return true;
  *   }
  *
  *   bool can_convert(const std::string& vlink_ser, ConvertTarget target) override {
- *     if (vlink_ser != "my_pkg.MyMessage") return false;
- *     // Support both backends
- *     return target == ConvertTarget::kFoxglove || target == ConvertTarget::kRerun;
+ *     return vlink_ser == "my_pkg.MyMessage";
  *   }
  *
  *   bool get_schema_info(const std::string& vlink_ser, ConvertTarget target,
@@ -147,21 +133,17 @@
  *       type_name = "foxglove.LocationFix";
  *       encoding = "flatbuffers";
  *       schema_encoding = "flatbuffers";
- *       // schema_data = binary FBS schema bytes
- *     } else if (target == ConvertTarget::kRerun) {
+ *       // schema_data = compiled BFBS bytes
+ *     } else {
  *       type_name = "GeoPoints";
  *       encoding = "json";
- *       // schema_encoding and schema_data are unused for Rerun
  *     }
  *     return true;
  *   }
  *
  *   bool convert(const std::string& vlink_ser, const vlink::Bytes& raw,
  *                ConvertTarget target, vlink::Bytes& payload) override {
- *     if (target == ConvertTarget::kFoxglove) {
- *       // Build Foxglove FlatBuffer payload
- *     } else if (target == ConvertTarget::kRerun) {
- *       // Build JSON: {"lat_deg":[37.77], "lon_deg":[-122.41]}
+ *     if (target == ConvertTarget::kRerun) {
  *       std::string json = R"({"lat_deg":[37.77],"lon_deg":[-122.41]})";
  *       payload = vlink::Bytes::deep_copy(json.data(), json.size());
  *     }
@@ -184,57 +166,52 @@ namespace vlink {
 
 /**
  * @enum ConvertTarget
- * @brief Identifies the visualization backend that the plugin is converting for.
+ * @brief Visualisation backend identifier carried by every conversion hook.
  *
  * @details
- * Passed to @c can_convert(), @c get_schema_info(), and @c convert() so that
- * a single plugin implementation can produce the appropriate output format
- * for each backend.
+ * Allows a single plugin to support multiple backends from one binary -- the plugin
+ * branches on this value to produce the appropriate payload format.
  */
 enum class ConvertTarget : uint8_t {
-  kFoxglove = 0,  ///< Foxglove Studio (WebSocket + FlatBuffers/Protobuf)
-  kRerun = 1,     ///< Rerun Viewer (gRPC + Arrow IPC, plugin outputs JSON)
+  kFoxglove = 0,  ///< Foxglove Studio (WebSocket transport, FlatBuffers/Protobuf payloads).
+  kRerun = 1,     ///< Rerun Viewer (gRPC + Arrow IPC; plugin payload is UTF-8 JSON).
 };
 
 /**
  * @struct WebChannel
- * @brief Describes a frontend-advertised publish channel.
+ * @brief Frontend-advertised channel description used by inbound conversion hooks.
  *
  * @details
- * Used by inbound/web command conversion hooks so plugins can route Foxglove
- * webviz-published payloads to the correct VLink topic and serialisation type.
+ * Allows plugins to route Foxglove @c clientPublish-style messages onto the right VLink
+ * topic by inspecting the channel's topic, encoding and schema metadata.
  */
 struct WebChannel final {
-  std::string topic;            ///< Frontend channel topic as advertised by the client.
-  std::string encoding;         ///< Frontend payload encoding (e.g. json/protobuf/flatbuffers).
-  std::string schema_name;      ///< Frontend schema/type name.
-  std::string schema_encoding;  ///< Encoding of @c schema (if provided by the client).
-  std::string schema;           ///< Raw schema string/binary payload (transport-specific).
+  std::string topic;            ///< Channel topic advertised by the frontend client.
+  std::string encoding;         ///< Frontend payload encoding (json/protobuf/flatbuffers/...).
+  std::string schema_name;      ///< Frontend-side schema or type name.
+  std::string schema_encoding;  ///< Encoding of @c schema when provided.
+  std::string schema;           ///< Raw schema string or binary payload (transport-specific).
 };
 
 /**
  * @struct VlinkPublish
- * @brief VLink publish destination resolved for an inbound frontend message.
+ * @brief VLink publish destination resolved from an inbound frontend channel.
  */
 struct VlinkPublish final {
   std::string url;                               ///< Destination VLink URL (e.g. @c "dds://vehicle/cmd").
   std::string serialization;                     ///< Destination VLink serialisation type.
-  SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse backend schema family for the published payload.
+  SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse schema family for the published payload.
 };
 
 /**
  * @class MessageConvertPlugin
- * @brief Abstract interface for VLink/webviz message conversion plugins supporting
- *        multiple visualization backends.
+ * @brief Abstract plugin base translating between VLink payloads and visualisation backends.
  *
  * @details
- * Loaded as a dynamic plugin via @c Plugin::load<MessageConvertPlugin>().
- *
- * The plugin must be thread-safe: @c convert() may be called concurrently from
- * multiple ProxyAPI data callback threads.
- *
- * A plugin may support only one target or both. Return @c false from
- * @c can_convert() for unsupported targets.
+ * Loaded via @c Plugin::load<MessageConvertPlugin>().  The plugin must be thread-safe:
+ * @c convert() and the inbound @c convert_frontend() hooks may run concurrently from
+ * multiple ProxyAPI worker threads.  A plugin that only supports one backend should
+ * return @c false from @c can_convert() / @c can_convert_frontend() for the others.
  */
 class MessageConvertPlugin {
   VLINK_PLUGIN_REGISTER(MessageConvertPlugin)
@@ -246,54 +223,48 @@ class MessageConvertPlugin {
 
  public:
   /**
-   * @brief Initialises the plugin with an optional configuration string.
+   * @brief Initialises the plugin with an opaque configuration string.
    *
    * @details
-   * Called once after the plugin is loaded. The @p config parameter may contain
-   * a file path, JSON string, or any format the plugin understands.
-   * Returning @c false causes the plugin to be unloaded.
+   * Called once after the plugin is loaded; the @p config string may be a file path,
+   * JSON document or anything the plugin defines.  Returning @c false causes the host
+   * to unload the plugin.
    *
-   * @param config  Configuration string (may be empty).
-   * @return @c true on success, @c false if initialisation failed.
+   * @param config Configuration payload; may be empty.
+   * @return @c true on success.
    */
   virtual bool init(const std::string& config) = 0;
 
   /**
-   * @brief Tests whether this plugin can handle the given VLink serialisation type
-   *        for the specified target backend.
+   * @brief Reports whether this plugin handles a (serialisation, target) pair.
    *
    * @details
-   * Called during channel/topic discovery for each new VLink type. If this returns
-   * @c true, @c get_schema_info() and @c convert() will be used for that type.
-   * The result may be cached by the caller.
+   * Polled during channel discovery for each new VLink type.  A @c true answer commits
+   * the plugin to subsequent @c get_schema_info() and @c convert() calls for that pair.
    *
-   * @param vlink_ser  VLink serialisation type name (e.g. @c "proto.VehiclePose").
-   * @param target     The visualization backend requesting the conversion.
-   * @return @c true if this plugin handles the type for the given target.
+   * @param vlink_ser VLink serialisation type name (e.g. @c "proto.VehiclePose").
+   * @param target    Visualisation backend asking about the conversion.
+   * @return @c true when the plugin can produce a payload for @p target.
    */
   [[nodiscard]] virtual bool can_convert(const std::string& vlink_ser, ConvertTarget target) = 0;
 
   /**
-   * @brief Returns schema/type metadata for the given VLink type and target backend.
+   * @brief Provides schema metadata for an accepted (serialisation, target) pair.
    *
    * @details
-   * Called once per type during channel/topic registration.
-   *
-   * For @c ConvertTarget::kFoxglove, the plugin must fill in the Foxglove schema name,
-   * encoding type, schema encoding, and the binary schema data (typically a serialised
-   * FlatBuffers binary schema @c .bfbs file content).
-   *
-   * For @c ConvertTarget::kRerun, the plugin should fill in:
-   * - @p type_name: Rerun archetype name (e.g. @c "Points3D", @c "EncodedImage")
-   * - @p encoding: @c "json" (the payload format)
-   * - @p schema_encoding and @p schema_data may be left empty.
+   * Called once per accepted pair when registering the frontend channel.  Outputs
+   * differ per target:
+   * - @c kFoxglove: fill @p type_name, @p encoding, @p schema_encoding and @p schema_data
+   *   (typically the bytes of a compiled BFBS file).
+   * - @c kRerun: fill @p type_name with the archetype name and @p encoding with
+   *   @c "json"; @p schema_encoding and @p schema_data are unused.
    *
    * @param[in]  vlink_ser        VLink serialisation type name.
-   * @param[in]  target           The visualization backend requesting the metadata.
-   * @param[out] type_name        Schema/archetype name.
-   * @param[out] encoding         Wire encoding (e.g. @c "flatbuffers", @c "json").
-   * @param[out] schema_encoding  Schema encoding (Foxglove only, e.g. @c "flatbuffers").
-   * @param[out] schema_data      Binary schema data bytes (Foxglove only).
+   * @param[in]  target           Visualisation backend.
+   * @param[out] type_name        Backend schema or archetype name.
+   * @param[out] encoding         Wire encoding label (e.g. @c "flatbuffers", @c "json").
+   * @param[out] schema_encoding  Schema encoding label (Foxglove only).
+   * @param[out] schema_data      Binary schema bytes (Foxglove only).
    * @return @c true on success.
    */
   [[nodiscard]] virtual bool get_schema_info(const std::string& vlink_ser, ConvertTarget target, std::string& type_name,
@@ -301,46 +272,32 @@ class MessageConvertPlugin {
                                              std::string& schema_data) = 0;
 
   /**
-   * @brief Converts a raw VLink message to a backend-specific payload.
+   * @brief Converts a single raw VLink payload to the backend-specific representation.
    *
    * @details
-   * Called for every incoming message whose type was accepted by @c can_convert().
+   * Invoked once per incoming message on accepted types.  Must be thread-safe.
    *
-   * For @c ConvertTarget::kFoxglove, the plugin should build the target Foxglove
-   * FlatBuffer (or Protobuf) and write the result to @p payload using
-   * @c Bytes::deep_copy() or @c Bytes::create().
-   *
-   * For @c ConvertTarget::kRerun, the plugin should produce a UTF-8 JSON string
-   * describing the Rerun archetype components. The JSON format is documented in the
-   * file-level documentation. Write the JSON bytes to @p payload.
-   *
-   * This method must be thread-safe.
-   *
-   * @param[in]  vlink_ser  VLink serialisation type name.
-   * @param[in]  raw        Raw serialised message bytes from VLink.
-   * @param[in]  target     The visualization backend requesting the conversion.
-   * @param[out] payload    Output buffer for the converted payload.
+   * @param[in]  vlink_ser VLink serialisation type name.
+   * @param[in]  raw       Raw serialised VLink payload.
+   * @param[in]  target    Visualisation backend.
+   * @param[out] payload   Output buffer that receives the backend payload.
    * @return @c true on success.
    */
   [[nodiscard]] virtual bool convert(const std::string& vlink_ser, const Bytes& raw, ConvertTarget target,
                                      Bytes& payload) = 0;
 
   /**
-   * @brief Extracts a message-level timestamp from the raw message, in nanoseconds.
+   * @brief Optionally extracts a per-message timestamp from the raw payload.
    *
    * @details
-   * Called after @c convert() to obtain a per-message timestamp derived from the
-   * message content (e.g. a sensor timestamp field). This allows the visualization
-   * frontend to use the actual data timestamp rather than the proxy transport timestamp.
+   * Called after @c convert() so the frontend can prefer a sensor or content timestamp
+   * over the proxy transport timestamp.  The default implementation returns @c -1,
+   * causing the host to fall back to the transport-level timestamp.
    *
-   * The default implementation returns @c -1 (not available), meaning the server
-   * falls back to the proxy-provided timestamp. Override this method to extract
-   * timestamps from your message format.
-   *
-   * @param[in] vlink_ser  VLink serialisation type name.
-   * @param[in] raw        Raw serialised message bytes from VLink.
-   * @param[in] target     The visualization backend.
-   * @return Timestamp in nanoseconds since epoch, or @c -1 if not available.
+   * @param[in] vlink_ser VLink serialisation type name.
+   * @param[in] raw       Raw serialised VLink payload.
+   * @param[in] target    Visualisation backend.
+   * @return Timestamp in nanoseconds since epoch, or @c -1 when unavailable.
    */
   [[nodiscard]] virtual int64_t extract_timestamp(const std::string& vlink_ser, const Bytes& raw,
                                                   ConvertTarget target) {
@@ -351,11 +308,11 @@ class MessageConvertPlugin {
   }
 
   /**
-   * @brief Tests whether this plugin handles a frontend-published channel.
+   * @brief Inbound counterpart of @c can_convert() for frontend-published channels.
    *
    * @details
-   * This hook is used for inbound command/control flows such as Foxglove
-   * clientPublish. The default implementation returns @c false.
+   * Default implementation returns @c false; override to opt in to clientPublish-style
+   * command flows.
    */
   [[nodiscard]] virtual bool can_convert_frontend(const WebChannel& channel, ConvertTarget target) {
     (void)channel;
@@ -364,14 +321,11 @@ class MessageConvertPlugin {
   }
 
   /**
-   * @brief Resolves the destination VLink publish URL and serialisation type for
-   *        an inbound frontend channel.
+   * @brief Resolves the VLink publish destination for an inbound frontend channel.
    *
    * @details
-   * Called when a frontend channel is advertised. Returning @c true enables the
-   * host to provision the required VLink publisher(s) ahead of time.
-   *
-   * The default implementation returns @c false.
+   * Returning @c true allows the host to provision the required VLink publishers ahead
+   * of time.  Default implementation returns @c false.
    */
   [[nodiscard]] virtual bool get_publish_info(const WebChannel& channel, ConvertTarget target,
                                               VlinkPublish& publish_info) {
@@ -382,14 +336,11 @@ class MessageConvertPlugin {
   }
 
   /**
-   * @brief Converts a frontend-published payload into a raw VLink message payload.
+   * @brief Converts a frontend-published payload into a raw VLink payload.
    *
    * @details
-   * Called for each inbound frontend message after @c get_publish_info()
-   * resolved the destination topic. The plugin should write the destination raw
-   * VLink payload to @p payload.
-   *
-   * The default implementation returns @c false.
+   * Invoked once per inbound message after @c get_publish_info() routed the channel.
+   * Default implementation returns @c false.
    */
   [[nodiscard]] virtual bool convert_frontend(const WebChannel& channel, const Bytes& raw, ConvertTarget target,
                                               Bytes& payload) {

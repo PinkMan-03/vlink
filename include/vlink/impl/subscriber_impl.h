@@ -23,23 +23,44 @@
 
 /**
  * @file subscriber_impl.h
- * @brief Abstract base class for all transport-specific subscriber implementations.
+ * @brief Transport-neutral base class for every event-model subscriber implementation.
  *
  * @details
- * @c SubscriberImpl is the intermediate layer between the generic @c Subscriber<T>
- * template and a concrete transport backend (e.g. @c DdsSubscriberImpl,
- * @c ShmSubscriberImpl).  It inherits from @c NodeImpl and adds receive-side
- * semantics:
+ * This is an internal implementation header used by the public @c Subscriber
+ * template; applications should depend on @c subscriber.h.  @c SubscriberImpl
+ * extends @c NodeImpl with the receive-side semantics: two listen overloads
+ * cover the serialised wire path (the default) and the zero-copy in-process
+ * path used only by the intra backend, plus optional latency / loss tracking
+ * that mirrors @c GetterImpl.
  *
- * - Two listen overloads: a serialised @c MsgCallback for network transports and
- *   a zero-copy @c IntraMsgCallback for the @c intra:// backend.
- * - Optional latency and sample-loss tracking via @c CalculateSample.
- * - A public @c is_listened flag indicating whether a listener has been installed.
+ * @par ImplType
+ * The constructor stamps @c impl_type with @c kSubscriber so subscriptions are
+ * tagged correctly in discovery, recording and proxy paths.
  *
- * @note Concrete subclasses must implement @c listen(MsgCallback&&).
- *       @c listen(IntraMsgCallback&&) is only overridden by @c IntraSubscriberImpl;
- *       all other transports inherit the base no-op that logs a warning and returns
- *       @c false.
+ * @par Lifecycle
+ * - Constructed by the matching @c Conf::create_subscriber().
+ * - The public @c Subscriber template calls @c listen() once the user installs
+ *   a callback; @c is_listened becomes @c true on success.
+ * - @c set_latency_and_lost_enabled() may be toggled before or after listen.
+ * - @c init() / @c deinit() inherited from @c NodeImpl drive the transport.
+ *
+ * @par Role table
+ * | Capability                      | Provider                                                         |
+ * | ------------------------------- | ---------------------------------------------------------------- |
+ * | Wire receive callback           | Subclass override of @c listen(MsgCallback&&)                    |
+ * | Zero-copy in-process callback   | @c IntraSubscriberImpl override of @c listen(IntraMsgCallback&&) |
+ * | Latency / loss reporting        | Subclass overrides of the optional getters                       |
+ * | Listen state flag               | @c is_listened (set by @c Subscriber)                            |
+ *
+ * @par Internal API contract
+ * | Method                                | Default                       | Subclass duty           |
+ * | ------------------------------------- | ----------------------------- | ----------------------- |
+ * | @c listen(MsgCallback&&)              | Pure virtual                  | Wire transport receiver |
+ * | @c listen(IntraMsgCallback&&)         | Warns, returns @c false       | Only intra:// overrides |
+ * | @c set_latency_and_lost_enabled(bool) | No-op                         | Toggle instrumentation  |
+ * | @c is_latency_and_lost_enabled() const| Returns @c false              | Report tracking state   |
+ * | @c get_latency() const                | Returns @c 0                  | Latest measured latency |
+ * | @c get_lost() const                   | Returns zero @c SampleLostInfo| Cumulative loss stats   |
  */
 
 #pragma once
@@ -50,103 +71,91 @@ namespace vlink {
 
 /**
  * @class SubscriberImpl
- * @brief Transport-agnostic base for subscriber node implementations.
+ * @brief Event-model receive base shared by every transport-specific subscriber.
  *
  * @details
- * Provides default (no-op) implementations for the optional latency/loss tracking
- * interface.  Concrete transport backends override @c listen(MsgCallback&&) to
- * register their receive callback and, optionally, override the latency/loss
- * methods if the transport provides that information.
+ * Provides safe defaults for the optional latency / loss instrumentation so
+ * backends without those signals can be plugged in without empty overrides.
+ * Concrete backends override @c listen() to bind the supplied callback to the
+ * transport receive path.
  */
 class VLINK_EXPORT SubscriberImpl : public NodeImpl {
  public:
   /**
-   * @brief Destructor.
+   * @brief Releases backend resources.
    */
   ~SubscriberImpl() override;
 
   /**
-   * @brief Registers the serialised-message receive callback.
+   * @brief Installs the serialised-message receive callback.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  The callback is
-   * invoked with a @c Bytes buffer containing the raw serialised message each
-   * time a new message arrives.  After registration @c is_listened is set to
-   * @c true by the @c Subscriber<T> layer.
+   * Pure virtual.  Backends invoke @p callback with the raw payload bytes for
+   * each frame received.  The public @c Subscriber sets @c is_listened to
+   * @c true on success.
    *
-   * @param callback  Callable @c void(const Bytes&) invoked on every received message.
-   * @return          @c true if registration succeeded; @c false on error.
+   * @param callback  Callable @c void(const Bytes&) invoked on every received frame.
+   * @return @c true when registration succeeded; @c false on error.
    */
   virtual bool listen(MsgCallback&& callback) = 0;
 
   /**
-   * @brief Registers the zero-copy in-process receive callback.
+   * @brief Installs the zero-copy in-process receive callback.
    *
    * @details
-   * Used exclusively on the @c intra:// transport to receive @c IntraData directly
-   * from a co-located publisher without serialisation.  The default implementation
-   * logs a warning and returns @c false; only @c IntraSubscriberImpl overrides this.
+   * Only the @c intra:// backend overrides this overload; the default logs a
+   * warning and returns @c false.
    *
-   * @param callback  Callable @c void(const IntraData&) invoked on every received
-   *                  in-process message.
-   * @return          @c true if registration succeeded; @c false if this transport
-   *                  does not support @c IntraData.
+   * @param callback  Callable @c void(const IntraData&) invoked for each in-process delivery.
+   * @return @c true when registration succeeded; @c false when the transport does not support
+   *         @c IntraData.
    */
   virtual bool listen(IntraMsgCallback&& callback);
 
   /**
-   * @brief Enables or disables per-message latency and sample-loss tracking.
+   * @brief Enables or disables per-message latency / loss tracking.
    *
    * @details
-   * When enabled, the transport backend tracks message timestamps (for latency)
-   * and sequence numbers (for loss detection).  The default implementation is a
-   * no-op; transports that support tracking override this method.
+   * Default no-op.  Backends that maintain timestamps and sequence numbers
+   * override the method.
    *
-   * @param enable  @c true to enable tracking; @c false to disable.
+   * @param enable  @c true to enable; @c false to disable.
    */
   virtual void set_latency_and_lost_enabled(bool enable);
 
   /**
-   * @brief Returns whether latency and sample-loss tracking is currently enabled.
+   * @brief Reports whether tracking is currently enabled.
    *
-   * @details
-   * The default implementation always returns @c false.  Transports that support
-   * tracking override this to reflect the current enabled state.
-   *
-   * @return @c true if tracking is active; @c false otherwise.
+   * @return @c true when the backend is collecting latency / loss data.
    */
   [[nodiscard]] virtual bool is_latency_and_lost_enabled() const;
 
   /**
-   * @brief Returns the most recently measured end-to-end message latency in nanoseconds.
+   * @brief Returns the most recently measured end-to-end latency in nanoseconds.
    *
    * @details
-   * Only meaningful when @c is_latency_and_lost_enabled() returns @c true.  The
-   * default implementation returns @c 0.  Transports that support latency measurement
-   * override this to return the measured value.
+   * Only meaningful when @c is_latency_and_lost_enabled() returns @c true.
    *
-   * @return Latency in nanoseconds, or @c 0 if tracking is disabled or unsupported.
+   * @return Latency in nanoseconds; @c 0 when tracking is off or unsupported.
    */
   [[nodiscard]] virtual int64_t get_latency() const;
 
   /**
-   * @brief Returns cumulative sample delivery statistics.
+   * @brief Returns cumulative delivered / lost counters.
    *
    * @details
-   * Returns the total number of expected samples and the number that were lost due
-   * to queue overflow or network gaps.  Only meaningful when
-   * @c is_latency_and_lost_enabled() returns @c true.  The default implementation
-   * returns a zero-initialised @c SampleLostInfo.
+   * Only meaningful when tracking is enabled.  Default returns a zero-initialised
+   * @c SampleLostInfo.
    *
-   * @return @c SampleLostInfo containing @c total and @c lost counts.
+   * @return @c SampleLostInfo with @c total and @c lost counts.
    */
   [[nodiscard]] virtual SampleLostInfo get_lost() const;
 
-  bool is_listened{false};  ///< @c true after @c listen() has been successfully called.
+  bool is_listened{false};  ///< @c true once @c listen() has been registered successfully.
 
  protected:
   /**
-   * @brief Protected constructor; initialises the subscriber with @c kSubscriber role.
+   * @brief Stamps the node as @c kSubscriber.
    */
   SubscriberImpl();
 

@@ -23,31 +23,66 @@
 
 /**
  * @file conf.h
- * @brief Abstract transport configuration base class and associated helper macros.
+ * @brief Transport-configuration base contract and the supporting boilerplate macros.
  *
  * @details
- * @c Conf is the pure-virtual base for every transport backend configuration
- * object (e.g. @c DdsConf, @c ShmConf, @c IntraConf).  It acts as a bridge
- * between the URL parsing layer and the concrete @c NodeImpl factories:
+ * This is an internal implementation header used by the public node templates and
+ * by every transport-specific @c *Conf class; user code should never include it
+ * directly.  The @c Conf base struct is the bridge between the URL parsing layer
+ * and the concrete factories that produce @c NodeImpl instances.  A typical node
+ * construction follows the chain
+ * @c Url -> concrete @c Conf -> @c Conf::create_xxx() -> @c NodeImpl subclass.
  *
- * -# A @c Url object parses the transport from the URL string and constructs
- *    the corresponding @c Conf subclass.
- * -# During @c Publisher<T> / @c Subscriber<T> / etc. construction, the
- *    node template calls @c Conf::parse(impl_type) followed by
- *    @c Conf::create_publisher() / @c create_subscriber() / etc. to obtain a
- *    transport-specific @c NodeImpl instance.
- * -# The @c NodeImpl carries out the actual IPC/DDS/SHM operations.
+ * @par Inheritance hierarchy
+ * @code
+ *                              +--------+
+ *                              |  Conf  |
+ *                              +---+----+
+ *                                  |
+ *      +---------+--------+--------+---------+----------+--------------+-----------+
+ *      |         |        |        |         |          |              |           |
+ *   IntraConf ShmConf  Shm2Conf ZenohConf  DdsConf  DdscConf        MqttConf   ...etc
+ *                                                      (DdsrConf,   DdstConf,  SomeipConf,
+ *                                                       FdbusConf,  QnxConf,   plugin Conf)
+ * @endcode
  *
- * @par Macro Overview
- * Several helper macros reduce boilerplate in concrete @c Conf subclasses:
+ * @par Virtual interface contract
+ * | Method                       | Default behaviour                             | Subclass responsibility            |
+ * | ---------------------------- | --------------------------------------------- | ---------------------------------- |
+ * | @c parse(impl_type)          | Caches @p impl_type; rejects @c kUnknown.     | Validate transport-specific data.  |
+ * | @c is_valid()                | Returns @c false.                             | Report readiness for factories.    |
+ * | @c get_impl_type()           | Returns the cached value from @c parse().     | Usually inherited unchanged.       |
+ * | @c get_transport_type()      | Returns @c TransportType::kUnknown.           | Return the backend identifier.     |
+ * | @c parse_protocol(protocol)  | Returns @c false.                             | Pull URL fields into the conf.     |
+ * | @c create_publisher() / etc. | Returns @c nullptr.                           | Allocate the matching @c NodeImpl. |
  *
- * | Macro                           | Purpose                                                        |
- * | ------------------------------- | -------------------------------------------------------------- |
- * | VLINK_DECLARE_CONF_FRIEND()     | Grants friendship to all six Node<> template specialisations.  |
- * | VLINK_CONF_IMPL(classname)      | Declares the private Conf interface inside a concrete class.   |
- * | VLINK_ALLOW_IMPL_TYPE(type)     | Declares which ImplType bitmask the Conf supports.             |
- * | VLINK_DECLARE_GLOBAL_PROPERTY() | Declares per-class thread count and global property storage.   |
- * | VLINK_DEFINE_GLOBAL_PROPERTY()  | Defines the static members declared by the above macro.        |
+ * @par Macro reference
+ * | Macro                            | Purpose                                                              |
+ * | -------------------------------- | -------------------------------------------------------------------- |
+ * | @c VLINK_DECLARE_CONF_FRIEND     | Grants friend access to all six public Node<> templates.             |
+ * | @c VLINK_CONF_IMPL(classname)    | Bundles friend grant + standard override declarations + ostream op.  |
+ * | @c VLINK_ALLOW_IMPL_TYPE(type)   | Records which @c ImplType bits a conf may serve, for compile checks. |
+ * | @c VLINK_DECLARE_GLOBAL_PROPERTY | Declares static thread-count and global-property storage in a conf.  |
+ * | @c VLINK_DEFINE_GLOBAL_PROPERTY  | Provides the storage definitions for the declaration above.          |
+ *
+ * @par Example
+ * @code
+ * // include/myapp/my_conf.h
+ * struct MyConf final : public vlink::Conf {
+ *   VLINK_CONF_IMPL(MyConf)
+ *   VLINK_ALLOW_IMPL_TYPE(vlink::kPublisher | vlink::kSubscriber)
+ *   VLINK_DECLARE_GLOBAL_PROPERTY()
+ *
+ *   std::string host;
+ *   uint16_t port{0};
+ * };
+ *
+ * // src/myapp/my_conf.cc
+ * VLINK_DEFINE_GLOBAL_PROPERTY(MyConf)
+ *
+ * void MyConf::global_init() { setup_shared_transport_state(); }
+ * bool MyConf::is_valid() const { return !host.empty() && port != 0; }
+ * @endcode
  */
 
 #pragma once
@@ -65,29 +100,25 @@ namespace vlink {
 
 /**
  * @struct Conf
- * @brief Abstract base class for VLink transport configuration objects.
+ * @brief Abstract base for every transport-specific configuration aggregate.
  *
  * @details
- * Each supported transport backend has a corresponding @c Conf subclass that
- * implements the virtual factory methods (@c create_publisher, @c create_server,
- * etc.) to produce transport-specific @c NodeImpl instances.  The base class
- * provides default implementations that return @c nullptr / @c false, so
- * subclasses only need to override the methods they support.
+ * Holds the cached @c ImplType selected by @c parse() and declares the protected
+ * factory hooks that the public node templates use to instantiate @c NodeImpl
+ * peers.  Default implementations of the factory hooks return @c nullptr so
+ * subclasses only need to override the roles they actually support; combine
+ * with @c VLINK_ALLOW_IMPL_TYPE to make the compile-time guard explicit.
  *
- * @c Conf objects are held exclusively by @c Url and the six Node<> template
- * classes; they are not intended for direct use by application code.
- *
- * @note The @c parse() method caches the @c ImplType so that subsequent
- *       factory calls know which node role is being requested.
+ * @note Instances are never owned by application code; they are produced by
+ *       @c Url and live as long as the node that references them.
  */
 struct VLINK_EXPORT Conf {
   /**
-   * @brief Key/value property map type.
+   * @brief Key/value property map shared between confs and node implementations.
    *
    * @details
-   * Used by transport conf subclasses and @c NodeImpl to store DDS QoS
-   * strings, IP addresses, buffer sizes, and other per-channel tuning
-   * parameters (e.g. @c "dds.ip" = @c "127.0.0.1").
+   * Stores transport tuning entries (e.g. @c "dds.ip" = @c "127.0.0.1") that
+   * are read by backends during @c init() and by helpers such as @c SslOptions.
    */
   using PropertiesMap = std::map<std::string, std::string>;
 
@@ -97,52 +128,49 @@ struct VLINK_EXPORT Conf {
   virtual ~Conf();
 
   /**
-   * @brief Validates the conf for the given node role and caches the type.
+   * @brief Validates the conf for @p impl_type and caches it for subsequent factories.
    *
    * @details
-   * Called by the Node<> template before invoking any @c create_*() factory.
-   * The base implementation logs a fatal message for @c kUnknownImplType;
-   * that fatal path throws, so the documented @c false return is not normally
-   * observable for the unknown type.  Otherwise it caches @p impl_type and
-   * returns @c true.  Concrete subclasses typically call this base and then
-   * validate their own fields.
+   * The base implementation rejects @c kUnknownImplType (the underlying logger
+   * call is configured to abort the process) and stores any other value into
+   * @c impl_type_ so that follow-up @c create_*() calls know the requested role.
+   * Subclasses typically chain @c Conf::parse() and then run their own checks.
    *
-   * @param impl_type  The role being requested (e.g. @c kPublisher).
-   * @return           @c true on success; the unknown-type fatal path throws.
+   * @param impl_type  Role the caller intends to instantiate.
+   * @return @c true on success; the unknown-type fatal path never returns.
    */
   [[nodiscard]] virtual bool parse(ImplType impl_type) const;
 
   /**
-   * @brief Returns @c true when the configuration holds valid, usable data.
+   * @brief Indicates whether the conf currently holds usable data.
    *
    * @details
-   * The base implementation always returns @c false.  Subclasses override
-   * this to perform transport-specific validation.
+   * The base implementation returns @c false; concrete confs override it to
+   * verify that mandatory fields have been populated.
    *
-   * @return @c true if the configuration is ready to create @c NodeImpl objects.
+   * @return @c true once the conf is ready to drive @c create_*() factories.
    */
   [[nodiscard]] virtual bool is_valid() const;
 
   /**
-   * @brief Returns the most recently parsed @c ImplType.
+   * @brief Returns the @c ImplType cached by the most recent @c parse() call.
    *
-   * @return @c ImplType cached by the last call to @c parse(); @c kUnknownImplType
-   *         before @c parse() is called.
+   * @return Cached @c ImplType, or @c kUnknownImplType before @c parse() runs.
    */
   [[nodiscard]] virtual ImplType get_impl_type() const;
 
   /**
-   * @brief Returns the transport backend this configuration represents.
+   * @brief Returns the transport backend this conf wraps.
    *
    * @details
-   * The base implementation returns @c TransportType::kUnknown.
-   * Each subclass overrides this to return its own @c TransportType value.
+   * Default implementation returns @c TransportType::kUnknown; concrete confs
+   * (and dynamic plugins) override it to advertise their backend.
    *
-   * @return @c TransportType identifier for this conf.
+   * @return Matching @c TransportType identifier.
    */
   [[nodiscard]] virtual TransportType get_transport_type() const;
 
-  uint32_t hash_code{0};  ///< Transport-specific channel/topic hash set by concrete implementations.
+  uint32_t hash_code{0};  ///< Channel / topic hash assigned by concrete backends.
 
  protected:
   Conf();
@@ -187,15 +215,13 @@ struct VLINK_EXPORT Conf {
 
 /**
  * @def VLINK_DECLARE_CONF_FRIEND
- * @brief Declares all six VLink Node template specialisations as friends.
+ * @brief Grants the six public Node<> templates friend access to the conf.
  *
  * @details
- * Placed inside a concrete @c Conf subclass declaration to allow
- * @c Server<>, @c Client<>, @c Publisher<>, @c Subscriber<>, @c Setter<>,
- * and @c Getter<> to access the protected @c create_*() factory methods and
- * @c parse_protocol().  Use @c VLINK_CONF_IMPL(classname) which already
- * expands this macro; only include this macro directly when you need friend
- * access without the full @c VLINK_CONF_IMPL boilerplate.
+ * Inject this macro into a concrete @c Conf subclass to expose the protected
+ * factory methods to @c Server, @c Client, @c Publisher, @c Subscriber,
+ * @c Setter and @c Getter.  @c VLINK_CONF_IMPL already expands it; use this
+ * macro on its own only when @c VLINK_CONF_IMPL is not suitable.
  */
 #define VLINK_DECLARE_CONF_FRIEND()           \
   template <typename, typename, SecurityType> \
@@ -213,17 +239,14 @@ struct VLINK_EXPORT Conf {
 
 /**
  * @def VLINK_CONF_IMPL
- * @brief Standard boilerplate for concrete @c Conf subclass declarations.
+ * @brief Convenience macro that emits the standard concrete conf boilerplate.
  *
  * @details
- * Adds to the class:
- * - @c VLINK_DECLARE_CONF_FRIEND() -- friend access for Node<> templates.
- * - Overrides for all six protected @c Conf factory methods.
- * - @c operator<<(ostream, classname) for debug printing.
- * - A public default constructor.
- * - @c bool is_valid() const override -- subclass must define the body.
+ * Expands to the friend grant, the six factory overrides, an ostream insertion
+ * operator declaration, the default constructor / destructor and an
+ * @c is_valid() override declaration whose body the subclass must provide.
  *
- * @param classname  The name of the concrete @c Conf subclass.
+ * @param classname  Subclass name being declared.
  */
 #define VLINK_CONF_IMPL(classname)                                                                     \
  private:                                                                                              \
@@ -254,17 +277,17 @@ struct VLINK_EXPORT Conf {
 
 /**
  * @def VLINK_ALLOW_IMPL_TYPE
- * @brief Declares a static constexpr bitmask of supported @c ImplType values.
+ * @brief Records the bitmask of @c ImplType values supported by a conf.
  *
  * @details
- * Expands to a public @c get_allow_impl_type() that returns @p type, allowing
- * the Node<> template to assert at compile time that the conf supports the
- * requested node role.  Use bitwise-OR to combine multiple roles, e.g.:
+ * Expands to a public @c get_allow_impl_type() that returns @p type so the
+ * @c Node<> template can validate at compile time that the conf supports the
+ * requested node role.  Combine roles with bitwise OR, e.g.
  * @code
  * VLINK_ALLOW_IMPL_TYPE(kServer | kClient | kPublisher | kSubscriber | kSetter | kGetter)
  * @endcode
  *
- * @param type  Bitmask of @c ImplType values this conf supports.
+ * @param type  Bitmask of @c ImplType values supported by the conf.
  */
 #define VLINK_ALLOW_IMPL_TYPE(type) \
  public:                            \
@@ -272,23 +295,16 @@ struct VLINK_EXPORT Conf {
 
 /**
  * @def VLINK_DECLARE_GLOBAL_PROPERTY
- * @brief Declares per-transport global state: thread count and property storage.
+ * @brief Declares per-transport static configuration storage and access helpers.
  *
  * @details
- * Intended for use inside a concrete @c Conf subclass body.  Declares:
- * - @c thread_count_  -- number of I/O threads for this transport.
- * - @c global_properties_ -- default properties applied to every node of this transport.
- * - @c global_mtx_ -- shared mutex protecting @c global_properties_.
+ * Inject into a concrete @c Conf subclass body to expose:
+ * - @c thread_count_, @c global_properties_ and @c global_mtx_ static members.
+ * - @c get_thread_count() / @c set_thread_count() accessors.
+ * - @c set_global_property() / @c get_global_property() / @c get_global_all_properties().
+ * - A @c global_init() declaration whose definition the subclass supplies.
  *
- * Also injects:
- * - @c get_thread_count() -- retrieve current thread count.
- * - @c set_thread_count() -- set thread count (must be called before @c global_init()).
- * - @c set_global_property(prop, value) -- set a default property for all nodes.
- * - @c get_global_property(prop) -- retrieve a default property.
- * - @c get_global_all_properties() -- retrieve a snapshot of all properties.
- * - @c global_init() declaration -- must be defined by the subclass.
- *
- * Pair with @c VLINK_DEFINE_GLOBAL_PROPERTY(classname) in the @c .cc file.
+ * Pair with @c VLINK_DEFINE_GLOBAL_PROPERTY in the matching translation unit.
  */
 #define VLINK_DECLARE_GLOBAL_PROPERTY()                                                \
  private:                                                                              \
@@ -321,14 +337,14 @@ struct VLINK_EXPORT Conf {
 
 /**
  * @def VLINK_DEFINE_GLOBAL_PROPERTY
- * @brief Provides definitions for the static members declared by @c VLINK_DECLARE_GLOBAL_PROPERTY.
+ * @brief Provides storage for the statics declared by @c VLINK_DECLARE_GLOBAL_PROPERTY.
  *
  * @details
- * Place once in the @c .cc file of the corresponding @c Conf subclass.
- * Initialises @c thread_count_ to @c 1, @c global_properties_ to an empty map,
- * and default-constructs @c global_mtx_.
+ * Place once in the @c .cc file of the matching subclass.  Sets
+ * @c thread_count_ to @c 1, default-constructs the property map, and
+ * default-initialises the shared mutex.
  *
- * @param classname  The name of the concrete @c Conf subclass.
+ * @param classname  Subclass that owns the static members.
  */
 #define VLINK_DEFINE_GLOBAL_PROPERTY(classname)      \
   size_t classname::thread_count_{1};                \

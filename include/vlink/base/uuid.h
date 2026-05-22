@@ -23,28 +23,43 @@
 
 /**
  * @file uuid.h
- * @brief Lightweight RFC 4122 UUID value type used across VLink.
+ * @brief Value-typed RFC 4122 UUID and project random-bytes primitive.
  *
  * @details
- * Provides a value-typed @c Uuid class with the canonical RFC 4122 layout (128 bits,
- * big-endian byte order, variant + version bits) and the project-wide random-byte
- * primitive used by the proxy auth-token handshake.
+ * @c vlink::Uuid stores 16 bytes in big-endian (network) order matching RFC 4122 section
+ * 4.1.  The class is trivially comparable, parses and emits both the canonical 36-character
+ * hyphenated form and the 32-character compact form, and ships with a thread-local v4
+ * generator backed by @c std::mt19937.
  *
- * The class is default-constructible to a nil value, can be built from a
- * @c std::array or a raw 16-byte buffer, exposes byte-level access via @c bytes(),
- * canonical text conversion via @c to_string() / @c from_string(), and structural
- * validation via @c is_valid().
+ * UUID variant and version reference:
  *
- * Random v4 UUID generation pipeline: eight @c std::random_device samples are fed
- * into a @c std::seed_seq, then a @c std::mt19937 engine, then a
- * @c std::uniform_int_distribution<uint32_t> emits four bytes per draw.  Byte
- * extraction uses explicit shifts (no @c reinterpret_cast), so the output is
- * identical on little-endian and big-endian targets given the same seed sequence.
- * The generator is pseudo-random and is not a CSPRNG.
+ * | Field    | Enumerator          | RFC 4122 meaning                              |
+ * | -------- | ------------------- | --------------------------------------------- |
+ * | Variant  | @c kNcs             | NCS backward compatibility (@c 0xxx)          |
+ * | Variant  | @c kRfc             | RFC 4122 / DCE 1.1 (@c 10xx)                  |
+ * | Variant  | @c kMicrosoft       | Microsoft GUID (@c 110x)                      |
+ * | Variant  | @c kReserved        | Reserved (@c 111x)                            |
+ * | Version  | @c kNone            | Nil UUID or invalid version nibble            |
+ * | Version  | @c kTimeBased       | v1 — gregorian time + node                    |
+ * | Version  | @c kDceSecurity     | v2 — DCE Security                             |
+ * | Version  | @c kNameBasedMd5    | v3 — Name + MD5                               |
+ * | Version  | @c kRandomBased     | v4 — Random / pseudo-random (this generator)  |
+ * | Version  | @c kNameBasedSha1   | v5 — Name + SHA-1                             |
  *
- * @note Following the @c Bytes header layout, most non-trivial bodies live in
- *       @c uuid.cc.  @c constexpr value operations stay inline to preserve
- *       literal-type use at compile time.
+ * Random v4 generation pipeline:
+ *
+ * @verbatim
+ *   std::random_device x8 ---> std::seed_seq ---> std::mt19937 ---> uniform_int(uint32_t)
+ *                                                       |
+ *                                                       v
+ *                                            byte extraction via shifts
+ *                                                       |
+ *                                                       v
+ *                            set variant (octet 8 = 10xxxxxx) + version (octet 6 = 0100xxxx)
+ * @endverbatim
+ *
+ * @note Bodies live in @c uuid.cc; only @c constexpr operations remain inline so
+ *       @c Uuid stays a literal type for compile-time use.
  */
 
 #pragma once
@@ -72,60 +87,60 @@ namespace vlink {
  * @brief Value-typed RFC 4122 UUID.
  *
  * @details
- * Stores 16 bytes in network (big-endian) order.  The class is trivially copyable and
- * comparable, and offers parse/serialise helpers as well as a v4 random-UUID generator
- * backed by a thread-local @c std::mt19937 engine.
+ * Stores 16 bytes in network byte order.  Trivially copyable and comparable; provides
+ * canonical/compact text I/O and a v4 random generator built on top of a thread-local
+ * @c std::mt19937 engine.
  */
 class VLINK_EXPORT Uuid final {
  public:
   /**
-   * @brief Underlying byte type.
+   * @brief Underlying byte type used by the 16-byte payload.
    */
   using value_type = uint8_t;
 
   /**
-   * @brief UUID byte length (always 16 per RFC 4122).
+   * @brief UUID payload length (16 bytes per RFC 4122).
    */
   static constexpr size_t kByteSize = 16U;
 
   /**
-   * @brief Length of the canonical textual representation @c "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
+   * @brief Canonical 36-character textual length: @c xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
    */
   static constexpr size_t kStringSize = 36U;
 
   /**
    * @enum Variant
-   * @brief UUID variant field (octet 8 high bits) per RFC 4122 section 4.1.1.
+   * @brief UUID variant inferred from the high bits of octet 8.
    */
   enum class Variant : uint8_t {
-    kNcs = 0,        ///< NCS backward compatibility (bit pattern 0xxx).
-    kRfc = 1,        ///< RFC 4122 / DCE 1.1 (bit pattern 10xx).
-    kMicrosoft = 2,  ///< Microsoft GUID (bit pattern 110x).
-    kReserved = 3,   ///< Reserved for future use (bit pattern 111x).
+    kNcs = 0,        ///< NCS backward compatibility (@c 0xxx).
+    kRfc = 1,        ///< RFC 4122 / DCE 1.1 (@c 10xx).
+    kMicrosoft = 2,  ///< Microsoft GUID (@c 110x).
+    kReserved = 3,   ///< Reserved for future use (@c 111x).
   };
 
   /**
    * @enum Version
-   * @brief UUID version field (octet 6 high nibble) per RFC 4122 section 4.1.3.
+   * @brief UUID version inferred from the high nibble of octet 6.
    */
   enum class Version : uint8_t {
-    kNone = 0,           ///< No version (nil UUID or invalid version bits).
-    kTimeBased = 1,      ///< Time-based v1.
-    kDceSecurity = 2,    ///< DCE Security v2.
-    kNameBasedMd5 = 3,   ///< Name-based MD5 hashing v3.
-    kRandomBased = 4,    ///< Random v4 (produced by @c generate_random()).
-    kNameBasedSha1 = 5,  ///< Name-based SHA-1 hashing v5.
+    kNone = 0,           ///< Nil UUID or invalid version nibble.
+    kTimeBased = 1,      ///< v1 time-based.
+    kDceSecurity = 2,    ///< v2 DCE Security.
+    kNameBasedMd5 = 3,   ///< v3 Name-based MD5.
+    kRandomBased = 4,    ///< v4 random (produced by @c generate_random).
+    kNameBasedSha1 = 5,  ///< v5 Name-based SHA-1.
   };
 
   /**
-   * @brief Default constructs a nil UUID (all 16 bytes zero).
+   * @brief Default-constructs a nil UUID (all 16 bytes zero).
    */
   constexpr Uuid() noexcept;
 
   /**
-   * @brief Constructs from an explicit byte array.
+   * @brief Constructs from a 16-byte array.
    *
-   * @param data  16-byte UUID payload in network order.
+   * @param data  Network-order UUID payload.
    */
   constexpr explicit Uuid(const std::array<value_type, kByteSize>& data) noexcept;
 
@@ -140,117 +155,103 @@ class VLINK_EXPORT Uuid final {
    * @brief Constructs from a forward-iterator range of exactly 16 bytes.
    *
    * @details
-   * If @c std::distance(first, last) is not 16 the UUID is left in the nil state.  A
-   * @c static_assert enforces that @p ForwardIteratorT satisfies the forward-iterator
-   * concept; passing an input-only iterator is a compile error.
+   * When @c std::distance(first, last) is not @c 16 the resulting UUID is the nil value.
+   * A @c static_assert enforces forward-iterator capability so input-only iterators do
+   * not silently produce a misaligned UUID.
    *
    * @tparam ForwardIteratorT  Forward iterator yielding @c uint8_t-convertible values.
-   * @param first  Begin iterator.
-   * @param last   End iterator.
+   * @param  first             Begin iterator.
+   * @param  last              End iterator.
    */
   template <typename ForwardIteratorT>
   Uuid(ForwardIteratorT first, ForwardIteratorT last);
 
   /**
-   * @brief Returns the UUID variant field inferred from octet 8.
+   * @brief Returns the variant field inferred from octet 8.
    *
-   * @return UUID variant enum value.
+   * @return Variant enumerator.
    */
   [[nodiscard]] constexpr Variant variant() const noexcept;
 
   /**
-   * @brief Returns the UUID version inferred from the high nibble of octet 6.
+   * @brief Returns the version field inferred from the high nibble of octet 6.
    *
-   * @return Version enum value.
+   * @return Version enumerator.
    */
   [[nodiscard]] constexpr Version version() const noexcept;
 
   /**
-   * @brief Returns @c true when every byte of the UUID is zero (nil UUID).
+   * @brief Reports whether every byte is zero (the nil UUID).
    *
-   * @return @c true when all 16 bytes are zero.
+   * @return @c true when the payload is all zeros.
    */
   [[nodiscard]] constexpr bool is_nil() const noexcept;
 
   /**
-   * @brief Direct read-only access to the underlying 16-byte payload.
+   * @brief Provides read-only access to the underlying 16-byte payload.
    *
-   * @return Const reference to the internal byte array.
+   * @return Const reference to the byte array.
    */
   [[nodiscard]] constexpr const std::array<value_type, kByteSize>& bytes() const noexcept;
 
   /**
-   * @brief Formats the UUID as a lowercase 36-character canonical string with hyphens.
+   * @brief Formats the UUID as the canonical 36-character lowercase hyphenated string.
    *
-   * @details
-   * Output form: @c "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
-   *
-   * @return 36-character lowercase string.
+   * @return Canonical text representation.
    */
   [[nodiscard]] std::string to_string() const noexcept;
 
   /**
-   * @brief Returns the UUID as a 32-character lowercase hex string with no hyphens.
+   * @brief Formats the UUID as a 32-character lowercase hex string without hyphens.
    *
-   * @return 32-character lowercase string (compact form).
+   * @return Compact text representation.
    */
   [[nodiscard]] std::string to_compact_string() const noexcept;
 
   /**
-   * @brief Swaps contents with another @c Uuid (no-throw).
+   * @brief Swaps contents with @p other in @c noexcept fashion.
    *
    * @param other  UUID to swap with.
    */
   void swap(Uuid& other) noexcept;
 
   /**
-   * @brief Validates whether @p str is a well-formed UUID textual representation.
+   * @brief Validates whether @p str is a well-formed UUID literal.
    *
    * @details
-   * Accepts the 36-character canonical form (@c "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"),
-   * the 32-character compact form with no hyphens, and either form wrapped in an
-   * outer brace pair (@c "{...}").  Hyphen positions are not enforced: any 32 hex
-   * digits within the allowed shape pass.
+   * Accepts the canonical 36-character form, the 32-character compact form, and either
+   * form wrapped in an outer brace pair @c "{...}".  Hyphen positions are not enforced:
+   * any 32 hex digits within the allowed shape pass.
    *
    * @param str  Candidate string.
-   * @return @c true when @p str is a valid UUID representation.
+   * @return @c true when @p str is valid.
    */
   [[nodiscard]] static bool is_valid(std::string_view str) noexcept;
 
   /**
    * @brief Null-safe C-string overload of @c is_valid().
    *
-   * @details
-   * Explicitly returns @c false when @p str is @c nullptr; non-null inputs are
-   * converted via @c std::string_view(str) which stops at the first NUL byte.
-   *
    * @param str  NUL-terminated candidate string, or @c nullptr.
-   * @return @c true when @p str is non-null and a valid UUID representation.
+   * @return @c true when @p str is non-null and a valid UUID literal.
    */
   [[nodiscard]] static bool is_valid(const char* str) noexcept;
 
   /**
-   * @brief Parses a UUID string into a @c Uuid value.
+   * @brief Parses a UUID literal and returns the resulting value.
    *
    * @details
-   * Accepts the same shapes as @c is_valid() (36-character canonical, 32-character
-   * compact, and either form wrapped in @c "{...}").  Returns @c std::nullopt for
-   * any malformed input.
+   * Accepts the same shapes as @c is_valid().
    *
    * @param str  Candidate string.
-   * @return Parsed UUID, or @c std::nullopt on failure.
+   * @return Parsed UUID, or @c std::nullopt on malformed input.
    */
   [[nodiscard]] static std::optional<Uuid> from_string(std::string_view str) noexcept;
 
   /**
    * @brief Null-safe C-string overload of @c from_string().
    *
-   * @details
-   * Returns @c std::nullopt when @p str is @c nullptr; otherwise forwards to the
-   * @c std::string_view overload, which stops at the first embedded NUL byte.
-   *
    * @param str  NUL-terminated candidate string, or @c nullptr.
-   * @return Parsed UUID, or @c std::nullopt on malformed or null input.
+   * @return Parsed UUID, or @c std::nullopt on malformed/null input.
    */
   [[nodiscard]] static std::optional<Uuid> from_string(const char* str) noexcept;
 
@@ -258,23 +259,23 @@ class VLINK_EXPORT Uuid final {
    * @brief Generates a random v4 UUID using a thread-local seeded engine.
    *
    * @details
-   * The engine is lazily seeded on first use from eight @c std::random_device samples
-   * through a @c std::seed_seq, then reused for the lifetime of the thread.  Sets the
-   * RFC variant bits (10xxxxxx in octet 8) and the v4 version bits (0100xxxx in octet 6).
+   * The engine is lazily seeded on first use from eight @c std::random_device samples fed
+   * through a @c std::seed_seq, then reused for the rest of the thread's lifetime.  Sets
+   * the RFC variant and v4 version bits before returning.
    *
-   * @return Freshly generated v4 UUID.
+   * @return Fresh v4 UUID.
    */
   [[nodiscard]] static Uuid generate_random() noexcept;
 
   /**
-   * @brief Generates a random v4 UUID using a caller-supplied engine.
+   * @brief Generates a random v4 UUID from a caller-managed engine.
    *
    * @details
    * Useful for deterministic test fixtures.  Sets the RFC variant and v4 version bits
    * identically to the no-argument overload.
    *
-   * @param engine  Caller-managed @c std::mt19937 instance.
-   * @return Freshly generated v4 UUID.
+   * @param engine  Caller-managed engine.
+   * @return Fresh v4 UUID.
    */
   [[nodiscard]] static Uuid generate_random(std::mt19937& engine) noexcept;
 
@@ -282,16 +283,16 @@ class VLINK_EXPORT Uuid final {
    * @brief Produces @p count random-device-seeded pseudo-random bytes.
    *
    * @details
-   * Uses the same canonical pipeline as @c generate_random(): eight-word @c std::seed_seq
-   * from @c std::random_device, @c std::mt19937 engine, @c std::uniform_int_distribution<uint32_t>
-   * distribution emitting four bytes per draw.  Byte extraction is endian-deterministic.
-   * Returns an empty vector when @p count is @c 0 or allocation fails.
+   * Uses the same pipeline as @c generate_random(): @c std::seed_seq from eight
+   * @c std::random_device samples, then @c std::mt19937 plus
+   * @c std::uniform_int_distribution<uint32_t> emitting four bytes per draw.  Byte
+   * extraction uses explicit shifts so the output is endian-deterministic.  Returns
+   * an empty vector when @p count is @c 0 or allocation fails.
    *
-   * @warning The underlying @c std::mt19937 engine is @b not a cryptographic RNG:
-   *          observing 624 consecutive 32-bit outputs from the same thread allows the
-   *          attacker to reconstruct the engine state.  Do NOT use this for long-term
-   *          cryptographic secrets; use a dedicated CSPRNG (e.g. OpenSSL @c RAND_bytes)
-   *          for that purpose.
+   * @warning The underlying @c std::mt19937 engine is @b not a CSPRNG.  Observing 624
+   *          consecutive 32-bit outputs allows the engine state to be reconstructed.  Do
+   *          not use this for long-term secrets; prefer a dedicated CSPRNG (for example
+   *          OpenSSL @c RAND_bytes).
    *
    * @param count  Number of bytes to emit.
    * @return Vector containing exactly @p count pseudo-random bytes.
@@ -302,48 +303,45 @@ class VLINK_EXPORT Uuid final {
    * @brief Produces @p byte_count pseudo-random bytes encoded as a lowercase hex string.
    *
    * @details
-   * The output is always @p byte_count * 2 characters long.  Defaults to 16 bytes
-   * (a 128-bit token, 32 hex characters), matching the width used by the proxy
-   * auth-token handshake.  Returns an empty string when @p byte_count is @c 0 or
-   * allocation fails.
+   * Length is always @c byte_count @c * @c 2.  The default of 16 bytes matches the
+   * 128-bit auth-token width used by the proxy handshake.  Returns an empty string when
+   * @p byte_count is @c 0 or allocation fails.  Same non-CSPRNG caveat as
+   * @c random_bytes().
    *
-   * @warning Same non-CSPRNG caveat as @c random_bytes() -- suitable for short-lived
-   *          session identifiers, not long-term secrets.
-   *
-   * @param byte_count  Number of bytes worth of randomness to encode.
-   * @return Lowercase hex string of length @p byte_count * 2.
+   * @param byte_count  Number of underlying bytes.
+   * @return Lowercase hex string.
    */
   [[nodiscard]] static std::string random_hex(size_t byte_count = 16U) noexcept;
 
   /**
-   * @brief Equality comparison.
+   * @brief Equality comparison over the 16-byte payload.
    *
-   * @param lhs  Left UUID.
-   * @param rhs  Right UUID.
-   * @return @c true when the two payloads compare byte-equal.
+   * @param lhs  Left operand.
+   * @param rhs  Right operand.
+   * @return @c true when both payloads compare byte-equal.
    */
   friend bool operator==(const Uuid& lhs, const Uuid& rhs) noexcept;
 
   /**
-   * @brief Inequality comparison.
+   * @brief Inequality comparison over the 16-byte payload.
    *
-   * @param lhs  Left UUID.
-   * @param rhs  Right UUID.
-   * @return @c true when the two payloads differ in any byte.
+   * @param lhs  Left operand.
+   * @param rhs  Right operand.
+   * @return @c true when the payloads differ in any byte.
    */
   friend bool operator!=(const Uuid& lhs, const Uuid& rhs) noexcept;
 
   /**
-   * @brief Lexicographic ordering on the underlying bytes.
+   * @brief Lexicographic less-than comparison over the 16-byte payload.
    *
-   * @param lhs  Left UUID.
-   * @param rhs  Right UUID.
+   * @param lhs  Left operand.
+   * @param rhs  Right operand.
    * @return @c true when @p lhs sorts strictly before @p rhs.
    */
   friend bool operator<(const Uuid& lhs, const Uuid& rhs) noexcept;
 
   /**
-   * @brief Stream insertion using @c to_string().
+   * @brief Stream insertion delegating to @c to_string().
    *
    * @param ostream  Output stream.
    * @param id       UUID to format.
@@ -440,7 +438,7 @@ inline bool operator<(const Uuid& lhs, const Uuid& rhs) noexcept { return lhs.da
 namespace std {
 
 /**
- * @brief Specialisation of @c std::hash so @c vlink::Uuid is usable in unordered containers.
+ * @brief @c std::hash specialisation so @c vlink::Uuid can be used inside unordered containers.
  */
 template <>
 struct hash<vlink::Uuid> {

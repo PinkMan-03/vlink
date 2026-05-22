@@ -23,43 +23,41 @@
 
 /**
  * @file cached_timestamp.h
- * @brief A low-overhead, thread-safe, formatted timestamp generator for log output.
+ * @brief Sub-second-cached timestamp string generator used by the VLink logger hot path.
  *
  * @details
- * @c CachedTimestamp generates a human-readable timestamp string (e.g.
- * @c "03-18 14:30:01.042") without formatting the full string every call.
- * Instead it caches the date-and-second part and only updates the millisecond
- * field on sub-second increments, significantly reducing the number of expensive
- * @c snprintf / @c localtime_r calls under high log throughput.
+ * @c CachedTimestamp renders a wall-clock or UTC timestamp into a stable internal buffer and
+ * patches only the millisecond suffix when the seconds field has not advanced.  This avoids the
+ * repeated @c snprintf / @c localtime_r round trip that dominates naive per-line logger output.
  *
- * The caching strategy:
- * - The full timestamp (up to seconds) is formatted only once per second.
- *   The second boundary is detected via an @c std::atomic<int64_t> storing the
- *   last formatted Unix second.  Access is serialized so only one thread
- *   updates the shared cache at a time.
- * - The millisecond field is patched in-place by @c update_milliseconds()
- *   without reformatting the entire string.
- * - A @c std::mutex protects the shared buffer while formatting or patching
- *   the millisecond field.
+ * @par Resolution and field layout
  *
- * @note
- * - The internal buffer is 32 bytes, which is sufficient for the default
- *   format.  Using a format that produces fewer than 3 characters or does not
- *   fit in the buffer results in an empty returned view for that refresh.
- * - The default format @c "%02d-%02d %02d:%02d:%02d.%03d" produces
- *   @c "MM-DD HH:MM:SS.mmm" (18 characters).  Do not include year if character
- *   count matters.
- * - This class is used internally by the VLink Logger.  There is normally no need
- *   to instantiate it directly in application code.
+ * | Field                         | Width | Source                                |
+ * | ----------------------------- | ----- | ------------------------------------- |
+ * | Month                         |   2   | @c %02d                               |
+ * | Day                           |   2   | @c %02d                               |
+ * | Hour                          |   2   | @c %02d                               |
+ * | Minute                        |   2   | @c %02d                               |
+ * | Second                        |   2   | @c %02d                               |
+ * | Millisecond (in-place patch)  |   3   | @c %03d, last three chars of buffer   |
+ *
+ * The default format @c "%02d-%02d @c %02d:%02d:%02d.%03d" produces 18 characters such as
+ * @c "03-18 14:30:01.042".  The internal buffer is 32 bytes; longer formats are dropped.
  *
  * @par Example
  * @code
- * vlink::CachedTimestamp ts;
- * for (int i = 0; i < 1000; ++i) {
- *   std::string_view sv = ts.get();
- *   write_to_log(sv);  // sv points to internal buffer; copy if needed
- * }
+ *   vlink::CachedTimestamp ts;
+ *   for (int i = 0; i < 1000; ++i) {
+ *     // Wall clock (local time) - patched in place on the same second.
+ *     std::string_view local = ts.get();
+ *     // UTC variant on demand:
+ *     std::string_view utc   = ts.get("%02d-%02d %02d:%02d:%02d.%03d", true);
+ *     write_to_log(local);
+ *   }
  * @endcode
+ *
+ * @note Used internally by @c vlink::Logger.  Application code rarely needs to construct one
+ *       directly; doing so is harmless and inexpensive.
  */
 
 #pragma once
@@ -76,19 +74,21 @@ namespace vlink {
 
 /**
  * @class CachedTimestamp
- * @brief Cached, thread-safe formatted timestamp generator.
+ * @brief Mutable cached generator for short formatted timestamps.
  *
  * @details
- * Reformats only the seconds portion of the timestamp once per second,
- * patching the milliseconds in-place for all other calls.  Used internally
- * by the Logger to stamp each log line.
+ * Holds a 32-byte buffer protected by a mutex plus an atomic last-second counter so concurrent
+ * @c get calls share a single formatted prefix and only the millisecond suffix is rewritten.
+ * The first call seeds the cache; subsequent same-second calls patch only the trailing three
+ * characters in place.
  */
 class VLINK_EXPORT CachedTimestamp final {
  public:
   /**
-   * @brief Constructs a @c CachedTimestamp with an empty internal cache.
+   * @brief Constructs the generator with an empty internal cache.
    *
-   * @details The cache is populated on the first call to @c get().
+   * @details
+   * The cache is populated lazily on the first @c get call.
    */
   CachedTimestamp();
 
@@ -98,31 +98,20 @@ class VLINK_EXPORT CachedTimestamp final {
   ~CachedTimestamp();
 
   /**
-   * @brief Returns a @c std::string_view of the current formatted timestamp.
+   * @brief Returns a view of the current formatted timestamp.
    *
    * @details
-   * The view points into the internal 32-byte buffer.  It is valid until the
-   * next call to @c get() from any thread that shares this instance.  Copy the
-   * string if a persistent value is needed.
+   * The returned view points into the internal 32-byte buffer.  It is invalidated by the next
+   * call to @c get on any thread sharing this instance.  The format must end with a 3-digit
+   * millisecond field because the cache patches the last three bytes in place; the entire
+   * formatted string must fit within 31 characters.  Switching @p format or @p use_utc forces
+   * a full reformat on the next second boundary.
    *
-   * The default format produces strings of the form @c "MM-DD HH:MM:SS.mmm".
-   *
-   * @param format   A @c snprintf-compatible format string consuming exactly six
-   *                 @c int arguments in this order: month (1-12), day, hour, minute,
-   *                 second, milliseconds (0-999).  Must end with a 3-digit milliseconds
-   *                 field (e.g., @c %03d) because the cached buffer is patched
-   *                 in-place at the last three characters of the formatted string.
-   *                 The resulting string must fit within 31 characters.  A
-   *                 changed @p format is applied only when the cached seconds
-   *                 value or @p use_utc mode changes; same-second calls patch
-   *                 only the millisecond field.
-   *                 Default: @c "%02d-%02d %02d:%02d:%02d.%03d"
-   * @param use_utc  If @c true, formats in UTC; if @c false (default), in local time.
-   * @return A @c std::string_view into the internal buffer with the current timestamp.
-   *
-   * @note
-   * The returned view is invalidated on the next call from any thread that
-   * holds a reference to this @c CachedTimestamp instance.
+   * @param format   @c snprintf format consuming six @c int arguments in this order:
+   *                 month, day, hour, minute, second, milliseconds.  Default:
+   *                 @c "%02d-%02d @c %02d:%02d:%02d.%03d".
+   * @param use_utc  @c true for UTC formatting; @c false for local time.  Default: @c false.
+   * @return @c std::string_view over the rendered timestamp.
    */
   [[nodiscard]] std::string_view get(const char* format = "%02d-%02d %02d:%02d:%02d.%03d", bool use_utc = false);
 

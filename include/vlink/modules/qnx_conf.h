@@ -23,37 +23,51 @@
 
 /**
  * @file qnx_conf.h
- * @brief Transport configuration for the @c qnx:// QNX IPC backend.
+ * @brief Transport configuration for the @c qnx:// QNX native channel transport.
  *
  * @details
- * @c QnxConf configures the QNX IPC transport, which uses QNX native inter-process
- * communication primitives for same-machine message passing on QNX Neutrino RTOS
- * targets.  It provides deterministic, real-time message delivery without relying
- * on a third-party middleware layer.
+ * @c QnxConf binds the @c qnx:// URL scheme to the QNX Neutrino native IPC
+ * primitives (channels and connections).  Messaging is performed directly through
+ * @c ChannelCreate / @c ConnectAttach / @c MsgSend / @c MsgReceive without any
+ * intermediate broker; this yields deterministic, low-jitter latency suitable
+ * for hard real-time workloads.  The transport is available only when the binary
+ * is compiled for a QNX target.
  *
  * @par Supported Node Types
- * @c qnx:// supports all six node types: @c kPublisher, @c kSubscriber, @c kServer,
- * @c kClient, @c kSetter, and @c kGetter.
+ *
+ * | Publisher | Subscriber | Server | Client | Getter | Setter |
+ * | :-------: | :--------: | :----: | :----: | :----: | :----: |
+ * | yes       | yes        | yes    | yes    | yes    | yes    |
  *
  * @par URL Format
  * @code
  *   qnx://<address>[?event=<name>]
  * @endcode
  *
- * | Component  | Description                                                        |
- * | ---------- | ------------------------------------------------------------------ |
- * | @c address | QNX channel/topic name; formed from @c host + @c "/" + @c path     |
- * | @c event   | Optional secondary event filter (@c ?event=)                       |
+ * | Component  | Description                                                            |
+ * | ---------- | ---------------------------------------------------------------------- |
+ * | @c address | QNX channel/topic name (URL host concatenated with path); not empty    |
+ * | @c event   | Optional secondary event filter (@c ?event=)                           |
+ *
+ * @par Channel / Connection Topology
+ * @code
+ *   Publisher / Server                            Subscriber / Client
+ *   ------------------                            ------------------------
+ *   ChannelCreate(<address>)  <---- MsgSend ----  ConnectAttach(<address>)
+ *           |                                              |
+ *           v                                              v
+ *      MsgReceive() loop                                MsgSend() / pulse
+ * @endcode
  *
  * @par Example
  * @code
- *   vlink::Publisher<MyMsg>  pub("qnx://my_topic");
- *   vlink::Subscriber<MyMsg> sub("qnx://my_topic");
+ *   auto pub = vlink::Publisher<MyMsg>::create_unique("qnx://control/cmd");
+ *   auto sub = vlink::Subscriber<MyMsg>::create_unique("qnx://control/cmd");
  * @endcode
  *
- * @note This header is compiled only when @c VLINK_SUPPORT_QNX is defined.
- * @note This transport is only available on QNX targets; it is not usable on Linux.
- * @note @c is_valid() returns @c false if @c address is empty.
+ * @note Compiled only when @c VLINK_SUPPORT_QNX is defined.
+ * @note QNX-only transport; not usable on Linux, Windows, or macOS hosts.
+ * @note @c is_valid() returns @c false when @c address is empty.
  */
 
 #pragma once
@@ -69,41 +83,43 @@ namespace vlink {
 
 /**
  * @struct QnxConf
- * @brief Configuration for the @c qnx:// QNX native IPC transport.
+ * @brief Concrete @c Conf describing a QNX-native channel endpoint addressed by a @c qnx:// URL.
  *
  * @details
- * Can be constructed directly or parsed from a URL string via @c Url.
+ * Carries only the channel/topic name and an optional secondary event filter.
+ * Other QNX-specific settings (priority inheritance, pulse code, etc.) are
+ * inferred from the @c Qos object attached at endpoint construction time.
  */
 struct VLINK_EXPORT QnxConf final : public Conf {
-  std::string address;  ///< QNX channel/topic address (host + "/" + path from URL).
+  std::string address;  ///< QNX channel/topic address (URL host concatenated with path); must not be empty.
   std::string event;    ///< Optional secondary event filter string.
 
   /**
-   * @brief Constructs a @c QnxConf with explicit parameters.
+   * @brief Builds a @c QnxConf from its two logical fields.
    *
-   * @param _address  Channel/topic address string.
-   * @param _event    Optional event filter; empty by default.
+   * @param _address  Channel/topic address string; must not be empty.
+   * @param _event    Optional secondary event filter; empty by default.
    */
   explicit QnxConf(const std::string& _address, const std::string& _event = "");
 
   /**
-   * @brief Returns @c true if both fields equal those of @p conf.
+   * @brief Component-wise equality on @c address and @c event.
    *
-   * @param conf  Configuration to compare.
-   * @return      @c true if @c address and @c event are equal.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when both fields match.
    */
   [[nodiscard]] bool operator==(const QnxConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c true if either field differs from @p conf.
+   * @brief Logical negation of @c operator==.
    *
-   * @param conf  Configuration to compare.
-   * @return      Logical negation of @c operator==.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when either field differs from @p conf.
    */
   [[nodiscard]] bool operator!=(const QnxConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c TransportType::kQnx identifying this transport.
+   * @brief Reports this object's transport tag.
    *
    * @return @c TransportType::kQnx.
    */

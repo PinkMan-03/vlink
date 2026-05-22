@@ -23,28 +23,41 @@
 
 /**
  * @file utils.h
- * @brief Platform-agnostic system utilities for process, thread, network and signal management.
+ * @brief Portable host-system utility surface used across the VLink runtime.
  *
  * @details
- * The @c Utils namespace provides a set of free functions that wrap platform-specific
- * system calls into a portable API.  Supported targets include Linux, macOS, Windows,
- * QNX, and Android.
+ * @c vlink::Utils gathers free functions that paper over differences between Linux, macOS,
+ * Windows, QNX and Android.  All public entry points are @c noexcept and report failure
+ * via empty strings, @c false return values or sentinel values such as @c pid @c == @c -1.
+ *
+ * Helper categories provided by the namespace:
+ *
+ * | Category               | Representative entry points                                       |
+ * | ---------------------- | ----------------------------------------------------------------- |
+ * | Process introspection  | @c get_app_path, @c get_app_dir, @c get_app_name, @c get_pid      |
+ * | Host identity          | @c get_host_name, @c get_machine_id, @c get_timezone_diff         |
+ * | Filesystem helpers     | @c get_tmp_dir, @c wait_for_device                                |
+ * | Environment management | @c get_env, @c set_env, @c unset_env                              |
+ * | Network discovery      | @c get_all_ipv4_address, @c get_dds_default_address               |
+ * | Thread control         | @c set_thread_name, @c set_thread_priority, @c set_thread_stick   |
+ * | Signal handling        | @c register_terminate_signal, @c register_crash_signal            |
+ * | Input/terminal         | @c start_detect_keyboard, @c get_terminal_size                    |
+ * | System metrics         | @c get_cpu_usage, @c get_memory_usage, @c is_process_running      |
+ * | Memory hints           | @c try_release_sys_memory                                         |
+ * | Low-level primitives   | @c yield_cpu                                                      |
  *
  * @note
- * - All functions are @c noexcept -- errors are indicated by empty strings, @c false
- *   return values or sentinel values (e.g., @c pid == -1).
- * - @c yield_cpu() is inlined and emits the most efficient CPU-pause instruction for
- *   the target architecture (PAUSE on x86, YIELD on ARM, .word 0x0100000f on RISC-V).
+ * - @c yield_cpu() is inlined to emit the optimal idle hint per ISA: @c PAUSE on x86,
+ *   @c YIELD on ARM, an explicit fence on RISC-V, otherwise @c std::this_thread::yield().
  *
  * @par Example
  * @code
- * // Set thread name and pin to cores 0 and 1:
  * vlink::Utils::set_thread_name("worker");
  * vlink::Utils::set_thread_stick(0b11);
  *
- * // Register SIGTERM / SIGINT handler:
  * vlink::Utils::register_terminate_signal([](int sig) {
- *   // shutdown logic
+ *   (void)sig;
+ *   shutdown_application();
  * });
  * @endcode
  */
@@ -67,79 +80,78 @@ namespace vlink {
 
 /**
  * @namespace vlink::Utils
- * @brief Platform-agnostic system utility functions.
+ * @brief Portable host-system utility functions.
  */
 namespace Utils {  // NOLINT(readability-identifier-naming)
 
 /**
- * @brief Returns the absolute path of the running executable.
+ * @brief Returns the absolute path of the executable that is currently running.
  *
- * @return Full file-system path, or empty string on failure.
+ * @return Full filesystem path, or an empty string when the OS query fails.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_app_path() noexcept;
 
 /**
- * @brief Returns the directory containing the running executable.
+ * @brief Returns the directory portion of the executable's absolute path.
  *
- * @return Directory path (without trailing slash), or empty string on failure.
+ * @return Directory without a trailing separator, or an empty string on failure.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_app_dir() noexcept;
 
 /**
- * @brief Returns the file name of the running executable (without directory prefix).
+ * @brief Returns the file-name portion of the executable's absolute path.
  *
- * @return Executable name, or empty string on failure.
+ * @return Executable name, or an empty string on failure.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_app_name() noexcept;
 
 /**
- * @brief Returns the host name of the current machine.
+ * @brief Returns the local machine's host name as reported by the operating system.
  *
- * @return Host name as reported by @c gethostname(), or empty string on failure.
+ * @return Host name string, or an empty string on failure.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_host_name() noexcept;
 
 /**
- * @brief Returns the process ID of the current process.
+ * @brief Returns the process identifier of the calling process.
  *
- * @return Process ID (PID), or -1 on failure.
+ * @return PID, or @c -1 on failure.
  */
 [[nodiscard]] VLINK_EXPORT int32_t get_pid() noexcept;
 
 /**
- * @brief Returns the process ID of the current process as a decimal string.
+ * @brief Returns the process identifier of the calling process as a decimal string.
  *
- * @return PID string, or empty string on failure.
+ * @return PID string, or an empty string on failure.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_pid_str() noexcept;
 
 /**
- * @brief Returns the platform-specific temporary directory path.
+ * @brief Returns a path suitable for short-lived temporary files.
  *
  * @details
- * Returns @c VLINK_TMP_DIR when set; otherwise uses the platform temporary
- * directory reported by @c std::filesystem::temp_directory_path() (or
- * @c /var/log on QNX).
+ * Honours the @c VLINK_TMP_DIR environment override.  Otherwise falls back to
+ * @c std::filesystem::temp_directory_path(), or @c /var/log on QNX.
  *
- * @return Temporary directory path, or empty string on failure.
+ * @return Temporary directory path.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_tmp_dir() noexcept;
 
 /**
- * @brief Reads the value of an environment variable.
+ * @brief Reads the current value of an environment variable.
  *
- * @param key            Name of the environment variable.
- * @param default_value  Value returned if the variable is not set.  Default: empty string.
- * @return Environment variable value, or @p default_value if not found.
+ * @param key            Variable name.
+ * @param default_value  Value returned when @p key is not set.  Default: empty string.
+ * @return Variable value, or @p default_value when unset.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_env(const std::string& key, const std::string& default_value = "") noexcept;
 
 /**
  * @brief Sets or updates an environment variable.
  *
- * @param key    Name of the environment variable.
- * @param value  New value.
- * @param force  If @c true, overwrite an existing variable.  Default: @c true.
+ * @param key    Variable name.
+ * @param value  Variable value.
+ * @param force  When @c true (default), overwrites an existing variable.
  * @return @c true on success.
  */
 VLINK_EXPORT bool set_env(const std::string& key, const std::string& value, bool force = true) noexcept;
@@ -147,143 +159,132 @@ VLINK_EXPORT bool set_env(const std::string& key, const std::string& value, bool
 /**
  * @brief Removes an environment variable.
  *
- * @param key  Name of the variable to unset.
+ * @param key  Variable name.
  * @return @c true on success.
  */
 VLINK_EXPORT bool unset_env(const std::string& key) noexcept;
 
 /**
- * @brief Returns all IPv4 addresses assigned to local network interfaces.
+ * @brief Returns every IPv4 address bound to a local network interface.
  *
- * @param filter_available  If @c true, only return addresses on interfaces that are UP.
- *                          Default: @c false.
- * @return Vector of dotted-decimal IPv4 address strings.
+ * @param filter_available  When @c true, only includes interfaces in the UP state.  Default: @c false.
+ * @return Vector of dotted-decimal strings.
  */
 [[nodiscard]] VLINK_EXPORT std::vector<std::string> get_all_ipv4_address(bool filter_available = false) noexcept;
 
 /**
- * @brief Returns all IPv6 addresses assigned to local network interfaces.
+ * @brief Returns every IPv6 address bound to a local network interface.
  *
- * @param filter_available  If @c true, only return addresses on interfaces that are UP.
- *                          Default: @c false.
- * @return Vector of IPv6 address strings.
+ * @param filter_available  When @c true, only includes interfaces in the UP state.  Default: @c false.
+ * @return Vector of IPv6 strings.
  */
 [[nodiscard]] VLINK_EXPORT std::vector<std::string> get_all_ipv6_address(bool filter_available = false) noexcept;
 
 /**
- * @brief Returns the network interface name that owns a given IPv4 address.
+ * @brief Returns the interface name that owns a given IPv4 address.
  *
- * @param ipv4  Dotted-decimal IPv4 address to look up.
- * @return Interface name (e.g., @c "eth0"), or empty string if not found.
+ * @param ipv4  Address to look up.
+ * @return Interface name, or an empty string when no match exists.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_interface_name_by_ipv4(const std::string& ipv4) noexcept;
 
 /**
- * @brief Returns the network interface name that owns a given IPv6 address.
+ * @brief Returns the interface name that owns a given IPv6 address.
  *
- * @param ipv6  IPv6 address string to look up.
- * @return Interface name, or empty string if not found.
+ * @param ipv6  Address to look up.
+ * @return Interface name, or an empty string when no match exists.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_interface_name_by_ipv6(const std::string& ipv6) noexcept;
 
 /**
- * @brief Returns suitable IPv4 addresses for use as DDS participant unicast locators.
+ * @brief Selects IPv4 addresses suitable as DDS participant unicast locators.
  *
  * @details
- * Filters out loopback and link-local addresses, preferring routable unicast addresses.
+ * Filters out loopback and link-local addresses, preferring routable unicast ones.
  *
- * @param filter_available  If @c true, only return addresses on UP interfaces.  Default: @c false.
- * @param max_count         Maximum number of addresses to return.  Default: 5.
- * @return Vector of selected IPv4 address strings.
+ * @param filter_available  When @c true, only includes UP interfaces.  Default: @c false.
+ * @param max_count         Upper bound on the number of returned addresses.  Default: @c 5.
+ * @return Vector of selected IPv4 strings.
  */
 [[nodiscard]] VLINK_EXPORT std::vector<std::string> get_dds_default_address(bool filter_available = false,
                                                                             int max_count = 5) noexcept;
 
 /**
- * @brief Checks that only one instance of the process is running (singleton guard).
+ * @brief Provides a singleton mutual-exclusion check for a program name.
  *
  * @details
- * Uses a Win32 mutex or a POSIX lock file to ensure mutual exclusion.
- * @c VLINK_LOCK_DIR can override the POSIX lock directory.
- * Returns @c false if another instance is already running.
+ * Uses a Win32 mutex on Windows and a POSIX lock file under @c VLINK_LOCK_DIR (or the
+ * platform default) elsewhere.  Returns @c false when another instance already holds
+ * the lock.
  *
- * @param program_name  Program name used for the lock.  Defaults to the executable name.
- * @return @c true if this is the only running instance.
+ * @param program_name  Program tag used to build the lock identity.  Empty defaults to the executable name.
+ * @return @c true when this process holds the singleton lock.
  */
 [[nodiscard]] VLINK_EXPORT bool check_singleton(const std::string& program_name = "") noexcept;
 
 /**
- * @brief Blocks until a file-system path appears or the timeout elapses.
+ * @brief Polls a filesystem path until it exists or a timeout expires.
  *
  * @details
- * Polls the path every @p poll_ms milliseconds.  Useful for waiting for a device
- * node (e.g., @c /dev/video0) to become available at startup.
+ * Useful for waiting for device nodes (e.g. @c /dev/video0) at startup.
  *
- * @param path        File-system path to poll.
- * @param timeout_ms  Maximum wait time in milliseconds.
- * @param poll_ms     Polling interval in milliseconds.  Default: 50.
- * @return @c true if the path appeared within the timeout; @c false on timeout.
+ * @param path        Filesystem path to poll.
+ * @param timeout_ms  Maximum total wait in milliseconds.
+ * @param poll_ms     Polling interval in milliseconds.  Default: @c 50.
+ * @return @c true when the path appears within the timeout.
  */
 VLINK_EXPORT bool wait_for_device(const std::string& path, int timeout_ms, int poll_ms = 50) noexcept;
 
 /**
- * @brief Emits a CPU pause/yield hint to reduce bus contention in busy-wait loops.
+ * @brief Emits the most efficient CPU pause/yield hint for the host ISA.
  *
  * @details
- * Issues the most efficient idle instruction for the target:
- * - x86/x86-64: @c PAUSE
- * - ARMv7/AArch64: @c YIELD
- * - RISC-V: fence hint (@c .word 0x0100000f)
- * - Fallback: @c std::this_thread::yield()
- *
- * This function is always inlined and has zero call overhead.
+ * Maps to @c PAUSE on x86, @c YIELD on ARMv7/AArch64, an explicit fence on RISC-V, and
+ * @c std::this_thread::yield() as a portable fallback.  Always inlined.
  */
 VLINK_EXPORT void yield_cpu() noexcept;
 
 /**
- * @brief Configures the Windows console for UTF-8 output.
+ * @brief Sets the Windows console output code page to UTF-8.
  *
  * @details
- * Calls @c SetConsoleOutputCP(CP_UTF8) on Windows.  No-op on other platforms.
+ * Calls @c SetConsoleOutputCP(CP_UTF8); a no-op on non-Windows targets.
  */
 VLINK_EXPORT void set_console_utf8_output() noexcept;
 
 /**
- * @brief Sets the OS-level name of a thread for debugging tools (e.g., gdb, perf).
+ * @brief Sets the OS-visible name of a thread so debug tools display it.
  *
- * @param name    Thread name string (max 15 characters on Linux due to @c pthread_setname_np).
+ * @param name    Thread name; Linux truncates beyond 15 characters.
  * @param thread  Thread to rename, or @c nullptr for the calling thread.  Default: @c nullptr.
  * @return @c true on success.
  */
 VLINK_EXPORT bool set_thread_name(const std::string& name, std::thread* thread = nullptr) noexcept;
 
 /**
- * @brief Sets the scheduling policy and priority of a thread.
+ * @brief Updates the scheduling policy and priority of a thread.
  *
  * @details
- * On Linux, wraps @c pthread_setschedparam.  Requires appropriate @c CAP_SYS_NICE or
- * @c RLIMIT_RTPRIO permissions for real-time policies.
+ * On Linux wraps @c pthread_setschedparam.  Real-time policies require @c CAP_SYS_NICE
+ * or an adequate @c RLIMIT_RTPRIO.  POSIX policy constants (@c SCHED_FIFO, @c SCHED_RR,
+ * @c SCHED_OTHER) come from @c <sched.h>, which callers must include.  On Windows the
+ * value is mapped to a thread priority class or silently ignored.
  *
- * @param priority_level  Scheduling priority (policy-dependent range).
- * @param policy          Scheduling policy.  POSIX systems accept @c SCHED_FIFO,
- *                        @c SCHED_RR, and @c SCHED_OTHER (defined in @c <sched.h>,
- *                        which the caller must include explicitly).  On Windows,
- *                        these POSIX constants do not exist; the value is mapped
- *                        to a Win32 thread priority level or silently ignored.
- *                        Pass @c -1 to keep the current policy.  Default: @c -1.
+ * @param priority_level  Policy-dependent priority value.
+ * @param policy          Scheduling policy; @c -1 leaves the existing policy untouched.
  * @param thread          Thread to configure, or @c nullptr for the calling thread.  Default: @c nullptr.
  * @return @c true on success.
  */
 VLINK_EXPORT bool set_thread_priority(int priority_level, int policy = -1, std::thread* thread = nullptr) noexcept;
 
 /**
- * @brief Pins a thread to a set of CPU cores specified by a bitmask.
+ * @brief Pins a thread to a set of CPU cores expressed as a bitmask.
  *
  * @details
- * Wraps @c pthread_setaffinity_np on Linux.  Bit @c i of @p core_mask corresponds to core @c i.
- * For example, @c core_mask == 0b0101 pins to cores 0 and 2.
+ * Bit @c i of @p core_mask corresponds to core @c i, so @c 0b0101 pins to cores @c 0 and
+ * @c 2.  Wraps @c pthread_setaffinity_np on Linux.
  *
- * @param core_mask  Bitmask of CPU cores (bit 0 = core 0).
+ * @param core_mask  Bitmask of CPU cores.
  * @param thread     Thread to pin, or @c nullptr for the calling thread.  Default: @c nullptr.
  * @return @c true on success.
  */
@@ -293,104 +294,90 @@ VLINK_EXPORT bool set_thread_stick(uint32_t core_mask, std::thread* thread = nul
  * @brief Returns the native OS thread identifier of the calling thread.
  *
  * @details
- * Platform mapping:
- *  - **Linux / Android / QNX**: @c syscall(SYS_gettid) — kernel TID (LWP id),
- *    matches what @c top / @c htop / @c perf show.
- *  - **macOS / iOS**: @c pthread_threadid_np() — 64-bit Mach thread id.
- *  - **Windows**: @c ::GetCurrentThreadId() — Win32 thread id.
+ * Maps to:
+ *  - Linux / Android / QNX: @c syscall(SYS_gettid) — kernel TID matching @c top / @c perf.
+ *  - macOS / iOS: @c pthread_threadid_np() — 64-bit Mach thread id.
+ *  - Windows: @c GetCurrentThreadId() — Win32 thread id.
  *
- * Note this is **not** @c pthread_self() (which is an opaque @c pthread_t
- * handle and is process-internal).  Use this id for profiling tools, log
- * correlation, or @c gdb @c "thread find @c ID".
- *
- * @return Native thread ID.
+ * @return Native thread identifier.
  */
 [[nodiscard]] VLINK_EXPORT uint64_t get_native_thread_id() noexcept;
 
 /**
- * @brief Registers a callback for graceful termination signals (SIGTERM, SIGINT, etc.).
+ * @brief Installs a callback for graceful termination signals.
  *
  * @details
- * On POSIX, installs a @c sigaction handler for @c SIGINT, @c SIGTERM and @c SIGHUP.
- * On Windows, hooks @c SIGINT and @c SIGTERM via @c ::signal.
- * The callback receives the signal number as its argument.
+ * Hooks @c SIGINT, @c SIGTERM and @c SIGHUP on POSIX, or @c SIGINT / @c SIGTERM on Windows.
  *
- * @param callback      Callback invoked when a termination signal arrives.
- * @param is_async      If @c true, the callback runs asynchronously in a dedicated thread.
- *                      Default: @c false (synchronous in the signal context).
- * @param pass_through  If @c true, re-raise the signal after the callback returns so that
- *                      the default OS behaviour (core dump, etc.) also occurs.  Default: @c false.
+ * @param callback      Callback receiving the signal number.
+ * @param is_async      When @c true, runs the callback on a dedicated thread instead of the
+ *                      signal context.  Default: @c false.
+ * @param pass_through  When @c true, re-raises the signal after the callback returns so the
+ *                      default OS behaviour also fires.  Default: @c false.
  */
 VLINK_EXPORT void register_terminate_signal(MoveFunction<void(int)>&& callback, bool is_async = false,
                                             bool pass_through = false) noexcept;
 
 /**
- * @brief Registers a callback for crash signals (SIGSEGV, SIGABRT, SIGFPE, SIGBUS, etc.).
+ * @brief Installs a callback for crash signals such as @c SIGSEGV, @c SIGABRT, @c SIGFPE, @c SIGBUS.
  *
  * @details
- * Useful for dumping logs or state before an unrecoverable crash.
- * The callback should be async-signal-safe or very short.
+ * Useful for emitting crash diagnostics.  The callback should be async-signal-safe and
+ * short.
  *
- * @param callback  Callback invoked with the signal number when a crash signal fires.
+ * @param callback  Callback receiving the signal number.
  */
 VLINK_EXPORT void register_crash_signal(MoveFunction<void(int)>&& callback) noexcept;
 
 /**
- * @brief Starts a background thread that detects keyboard input.
+ * @brief Starts a background poller that detects keyboard input on stdin.
  *
  * @details
- * Polls stdin every @p poll_ms milliseconds for a key press.  When a key is detected,
- * @p callback is invoked with the key name as a string (e.g., @c "enter", @c "q").
- * Stop the detector with @c stop_detect_keyboard().
+ * Calls @p callback with a key name string (such as @c "enter" or @c "q") whenever a
+ * key is detected.  Stop with @c stop_detect_keyboard().
  *
- * @param callback  Callback invoked with the key name, or @c nullptr to ignore.  Default: @c nullptr.
- * @param poll_ms   Polling interval in milliseconds.  Default: 20.
+ * @param callback  Callback receiving the key name.  Default: @c nullptr (ignore events).
+ * @param poll_ms   Polling interval in milliseconds.  Default: @c 20.
  */
 VLINK_EXPORT void start_detect_keyboard(MoveFunction<void(const std::string& key)>&& callback = nullptr,
                                         int poll_ms = 20) noexcept;
 
 /**
- * @brief Stops the keyboard detection thread started by @c start_detect_keyboard().
+ * @brief Stops the keyboard poller started by @c start_detect_keyboard().
  */
 VLINK_EXPORT void stop_detect_keyboard() noexcept;
 
 /**
- * @brief Returns the current terminal window dimensions.
+ * @brief Returns the current terminal dimensions in columns and rows.
  *
- * @return A pair @c {columns, rows}.  Returns @c {-1, -1} on failure or if not a tty.
+ * @return Pair @c {columns, @c rows}; @c {-1, @c -1} when stdout is not a TTY.
  */
 [[nodiscard]] VLINK_EXPORT std::pair<int, int> get_terminal_size() noexcept;
 
 /**
- * @brief Returns the current system-wide CPU usage as a percentage.
+ * @brief Returns the system-wide CPU usage as a percentage averaged over all logical CPUs.
  *
  * @details
- * Computes @c (1 @c - @c idle_delta @c / @c total_delta) @c * @c 100, where
- * the deltas come from @c /proc/stat (Linux/Android) or @c GetSystemTimes
- * (Windows).  The value is a snapshot taken between this call and the
- * previous call, so the first invocation usually returns @c 0.
+ * Implemented as @c (1 @c - @c idle_delta @c / @c total_delta) @c * @c 100 from
+ * @c /proc/stat on Linux/Android or @c GetSystemTimes on Windows.  The first call after
+ * process start usually returns @c 0 because there is no previous sample.
  *
- * @note
- * The result is **system-wide**, not process-specific, and is **normalised
- * to a single percentage** in @c [0.0, @c 100.0] regardless of core count
- * (it is averaged across all logical CPUs, not summed).
- *
- * @return System CPU usage in the range @c [0.0, @c 100.0].
+ * @return Percentage in @c [0.0, @c 100.0].
  */
 [[nodiscard]] VLINK_EXPORT double get_cpu_usage() noexcept;
 
 /**
- * @brief Returns approximate system-wide memory usage as a percentage of total RAM.
+ * @brief Returns the system-wide memory usage as a percentage of total physical RAM.
  *
- * @return Memory usage percentage in the range [0.0, 100.0].
+ * @return Percentage in @c [0.0, @c 100.0].
  */
 [[nodiscard]] VLINK_EXPORT double get_memory_usage() noexcept;
 
 /**
- * @brief Checks whether a process with the given name is currently running.
+ * @brief Reports whether at least one process with the given executable name is alive.
  *
- * @param process_name  Executable name to search for (without path).
- * @return @c true if at least one process with that name is running.
+ * @param process_name  Executable name without a path component.
+ * @return @c true when a matching process exists.
  */
 [[nodiscard]] VLINK_EXPORT bool is_process_running(const std::string& process_name) noexcept;
 
@@ -398,20 +385,19 @@ VLINK_EXPORT void stop_detect_keyboard() noexcept;
  * @brief Returns the local timezone offset from UTC in minutes.
  *
  * @details
- * For example, UTC+8 returns @c 480, UTC-5 returns @c -300.
+ * UTC+8 returns @c 480; UTC-5 returns @c -300.
  *
- * @return Timezone offset in minutes.
+ * @return Offset in minutes.
  */
 [[nodiscard]] VLINK_EXPORT int32_t get_timezone_diff() noexcept;
 
 /**
- * @brief Returns a unique identifier for the current machine.
+ * @brief Returns a stable identifier for the host machine.
  *
  * @details
- * On Linux, reads @c /etc/machine-id.  On other platforms a platform-specific
- * identifier is used.
+ * Reads @c /etc/machine-id on Linux and uses platform-specific equivalents elsewhere.
  *
- * @return Machine ID string, or empty string on failure.
+ * @return Machine ID string, or an empty string on failure.
  */
 [[nodiscard]] VLINK_EXPORT std::string get_machine_id() noexcept;
 
@@ -419,8 +405,7 @@ VLINK_EXPORT void stop_detect_keyboard() noexcept;
  * @brief Hints to the OS that any unreferenced cached memory pages can be released.
  *
  * @details
- * On Linux calls @c malloc_trim(0) to return freed memory from the glibc heap to the OS.
- * On other platforms this is a no-op.
+ * On Linux invokes @c malloc_trim(0); on other platforms it is a no-op.
  */
 VLINK_EXPORT void try_release_sys_memory() noexcept;
 

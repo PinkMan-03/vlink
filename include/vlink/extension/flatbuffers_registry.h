@@ -23,21 +23,51 @@
 
 /**
  * @file flatbuffers_registry.h
- * @brief Process-local registry for BFBS blobs compiled into the current library.
+ * @brief Process-local lookup table for compiled-in FlatBuffers BFBS reflection blobs.
  *
  * @details
- * Protobuf already provides @c google::protobuf::DescriptorPool::generated_pool()
- * as the global registry of generated descriptors. FlatBuffers has no equivalent
- * runtime pool for BFBS reflection data, so VLink keeps a small process-local
- * registry that stores BFBS blobs embedded into the current binary/library.
+ * Protobuf ships with a built-in process-wide registry of generated descriptors
+ * (@c google::protobuf::DescriptorPool::generated_pool()).  FlatBuffers offers no such
+ * runtime pool, so VLink keeps a small singleton table that stores BFBS reflection
+ * blobs embedded inside the running binary.  The schema plugin reads from this table
+ * when @c BagWriter or the proxy frontends need to attach FlatBuffers schemas to
+ * recorded URLs.
  *
- * The registry is intentionally limited to:
- * - registering compiled-in BFBS blobs
- * - looking up one schema by fully-qualified root type
- * - enumerating all registered BFBS schemas
+ * The registry is intentionally minimal and never touches the filesystem -- it does not
+ * read @c VLINK_FBS_DIR / @c VLINK_PROTO_DIR and does not own the BFBS buffer memory.
+ * Three operations are supported:
  *
- * It does not read schema files from disk and does not depend on
- * @c VLINK_PROTO_DIR / @c VLINK_FBS_DIR.
+ * | API                                                              | Purpose                                       |
+ * | ---------------------------------------------------------------- | --------------------------------------------- |
+ * | @c register_schema<BinarySchema>(name)                           | Register a generated @c *BinarySchema helper  |
+ * | @c register_schema(name, bfbs_data, bfbs_size)                   | Register raw BFBS bytes                       |
+ * | @c search_schema(name)                                           | Look up one entry by root type name           |
+ * | @c get_all_schemas()                                             | Enumerate every registered entry              |
+ *
+ * Type resolution flow:
+ *
+ * @verbatim
+ *   generated *BinarySchema  --register_schema-->  +-------------------+
+ *                                                  |   BFBS map        |
+ *                                                  | (name -> Schema)  |
+ *   user lookup (root type)  --search_schema--->   +-------------------+   --> SchemaData
+ * @endverbatim
+ *
+ * @par Example
+ * @code
+ * #include <vlink/extension/flatbuffers_registry.h>
+ * #include "helloworld/fbs/User_generated.h"
+ *
+ * // Auto-register at static initialisation time:
+ * VLINK_REGISTER_FLATBUFFERS("Helloworld.fbs.User", Helloworld::fbs::UserBinarySchema);
+ *
+ * void inspect() {
+ *   auto schema = vlink::FlatbuffersRegistry::get().search_schema("Helloworld.fbs.User");
+ *   if (!schema.data.empty()) {
+ *     // Use schema.data to populate bag metadata or webviz channel info.
+ *   }
+ * }
+ * @endcode
  */
 
 #pragma once
@@ -63,50 +93,48 @@ namespace vlink {
 
 /**
  * @class FlatbuffersRegistry
- * @brief Global BFBS registry shared by schema-plugin instances in one process.
+ * @brief Singleton storing non-owning views of compiled-in FlatBuffers BFBS reflection blobs.
  *
  * @details
- * The registry stores non-owning views of BFBS blobs supplied by the caller;
- * the caller must keep the underlying buffer alive for as long as the registry
- * is referenced.  In practice BFBS blobs come from generated @c *BinarySchema
- * helpers whose @c data() points into static link-time storage, which trivially
- * satisfies this requirement.
- * Each BFBS blob is keyed by its fully-qualified FlatBuffers root type name.
+ * The registry keeps a @c SchemaData entry per fully-qualified FlatBuffers root type
+ * name.  Callers must guarantee that the BFBS bytes outlive every registry reference;
+ * generated @c *BinarySchema helpers point into static link-time storage and satisfy
+ * this requirement automatically.  All public operations are thread-safe.
  */
 class FlatbuffersRegistry final {
  public:
   /**
-   * @brief Registers one BFBS blob from a generated @c *BinarySchema helper type.
+   * @brief Registers the BFBS data exposed by a generated @c *BinarySchema helper type.
    *
-   * @tparam BinarySchema  Generated type exposing @c data() and @c size().
-   * @param name           Fully-qualified FlatBuffers root type name.
-   * @return @c true if the BFBS blob is valid and was inserted successfully.
+   * @tparam BinarySchema Generated helper exposing @c data() and @c size() static accessors.
+   * @param name          Fully-qualified FlatBuffers root type name (table or struct).
+   * @return @c true when the blob is valid FlatBuffers reflection data and is now stored.
    */
   template <typename BinarySchema>
   static bool register_schema(const std::string& name);
 
   /**
-   * @brief Registers one BFBS blob into the global registry.
+   * @brief Registers raw BFBS bytes under the given root type name.
    *
-   * @param name       Fully-qualified FlatBuffers root type name.
-   * @param bfbs_data  Pointer to BFBS bytes.
-   * @param bfbs_size  Size of @p bfbs_data.
-   * @return @c true if the BFBS blob is valid and was inserted successfully.
+   * @param name      Fully-qualified FlatBuffers root type name.
+   * @param bfbs_data Pointer to BFBS reflection bytes.
+   * @param bfbs_size Length of @p bfbs_data in bytes.
+   * @return @c true when the blob is valid FlatBuffers reflection data and is now stored.
    */
   static bool register_schema(const std::string& name, const uint8_t* bfbs_data, size_t bfbs_size);
 
   /**
-   * @brief Finds one registered BFBS schema by root type name.
+   * @brief Looks up a single BFBS entry by root type name.
    *
-   * @param name  Fully-qualified FlatBuffers root type name.
-   * @return Copy of the registered @c SchemaData, or an empty schema when absent.
+   * @param name Fully-qualified root type name.
+   * @return Copy of the stored @c SchemaData, or an empty schema when no entry matches.
    */
   [[nodiscard]] SchemaData search_schema(const std::string& name);
 
   /**
-   * @brief Returns all BFBS schemas currently registered in this process.
+   * @brief Returns every BFBS entry currently held by the registry.
    *
-   * @return Vector of registered FlatBuffers schema blobs.
+   * @return Vector of @c SchemaData copies.
    */
   [[nodiscard]] std::vector<SchemaData> get_all_schemas();
 
@@ -201,30 +229,28 @@ inline SchemaData FlatbuffersRegistry::build_data(const std::string& name, const
 
 /**
  * @def VLINK_REGISTER_FLATBUFFERS_NOW(schema_name, binary_schema_type)
- * @brief Immediately registers a compiled FlatBuffers BFBS schema.
+ * @brief Immediately registers a compiled-in BFBS schema with the global registry.
  *
  * @details
  * Expands to a direct call to
- * ::vlink::FlatbuffersRegistry::register_schema<binary_schema_type>().
- * Registration is performed immediately at the point of expansion —
- * no static objects are created, and no automatic initialization is involved.
+ * @c ::vlink::FlatbuffersRegistry::register_schema<binary_schema_type>().  No static
+ * objects are created, so the macro may also be used from inside a function body.
  */
 #define VLINK_REGISTER_FLATBUFFERS_NOW(schema_name, binary_schema_type) \
   ::vlink::FlatbuffersRegistry::register_schema<binary_schema_type>(schema_name)
 
 /**
  * @def VLINK_REGISTER_FLATBUFFERS(schema_name, binary_schema_type)
- * @brief Automatically registers an embedded FlatBuffers BFBS schema
- *        during static initialization.
+ * @brief Auto-registers a BFBS schema at static initialisation time.
  *
  * @details
- * Defines one translation-unit-local helper type and one translation-unit-local
- * static object whose constructor registers the schema. The helper names are
- * made unique for every expansion, so the macro may be used multiple times in
- * the same translation unit and still works for namespaced or templated
- * @p binary_schema_type values.
+ * Defines a translation-unit-local helper type plus an unnamed @c static instance whose
+ * constructor invokes @c VLINK_REGISTER_FLATBUFFERS_NOW.  Each expansion uses
+ * @c __COUNTER__ to obtain a unique helper specialisation so the macro can be used
+ * multiple times in the same translation unit and works correctly with namespaced or
+ * templated @p binary_schema_type values.
  *
- * Example:
+ * @par Example
  * @code
  * VLINK_REGISTER_FLATBUFFERS("Helloworld.fbs.User",
  *                            Helloworld::fbs::UserBinarySchema);

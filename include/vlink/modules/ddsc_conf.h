@@ -23,42 +23,54 @@
 
 /**
  * @file ddsc_conf.h
- * @brief Transport configuration for the @c ddsc:// CycloneDDS backend.
+ * @brief Transport configuration for the @c ddsc:// CycloneDDS transport.
  *
  * @details
- * @c DdscConf configures the Eclipse CycloneDDS transport, an open-source
- * DDS implementation that targets both embedded and cloud deployments.
- * It provides the same VLink API as @c DdsConf (Fast-DDS) but delegates to
- * CycloneDDS internally.
+ * @c DdscConf binds the @c ddsc:// URL scheme to Eclipse CycloneDDS, the lightweight,
+ * production-grade open-source DDS implementation from the Eclipse Foundation.  The
+ * backend is fully cross-machine: writers and readers participate in a standards-
+ * compliant RTPS Domain and discover each other automatically over UDP multicast
+ * (or via a configured discovery server).  Use it whenever a DDS deployment is
+ * required and a small footprint is preferred over the broader Fast-DDS feature set.
  *
  * @par Supported Node Types
- * @c ddsc:// supports all six node types: @c kPublisher, @c kSubscriber, @c kServer,
- * @c kClient, @c kSetter, and @c kGetter.
+ *
+ * | Publisher | Subscriber | Server | Client | Getter | Setter |
+ * | :-------: | :--------: | :----: | :----: | :----: | :----: |
+ * | yes       | yes        | yes    | yes    | yes    | yes    |
  *
  * @par URL Format
  * @code
- *   ddsc://<topic>[?domain=<N>&depth=<N>&qos=<name>]
+ *   ddsc://<topic>[?domain=<N>&depth=<N>&qos=<profile>]
  * @endcode
  *
- * | Component | Description                                                               |
- * | --------- | ------------------------------------------------------------------------- |
- * | @c topic  | CycloneDDS topic name; formed from @c host + @c "/" + @c path             |
- * | @c domain | DDS Domain ID (@c ?domain=, default from @c VLINK_DDS_DOMAIN env var)     |
- * | @c depth  | DDS history depth override; 0 keeps the selected QoS history depth        |
- * | @c qos    | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
+ * | Component | Description                                                                  |
+ * | --------- | ---------------------------------------------------------------------------- |
+ * | @c topic  | CycloneDDS topic name, assembled from the URL host plus path                 |
+ * | @c domain | DDS Domain ID (@c ?domain=); falls back to the @c VLINK_DDS_DOMAIN env var   |
+ * | @c depth  | Optional history-depth override; @c 0 keeps the depth of the selected QoS    |
+ * | @c qos    | Named QoS profile previously registered via @c register_qos()                |
  *
- * @par QoS Registration
+ * @par Backend-Specific Options
+ *
+ * | Option                | Purpose                                            | Default   |
+ * | --------------------- | -------------------------------------------------- | --------- |
+ * | Domain ID             | Isolates discovery traffic between deployments     | 0         |
+ * | History depth         | Per-instance KeepLast retention                    | from QoS  |
+ * | Response topic suffix | Auto-derived RPC reply topic name                  | ___resp   |
+ *
+ * @par Example
  * @code
- *   vlink::Qos my_qos;
- *   my_qos.reliability.kind = vlink::Qos::Reliability::kReliable;
- *   vlink::DdscConf::register_qos("my_profile", my_qos);
+ *   vlink::Qos qos;
+ *   qos.reliability.kind = vlink::Qos::Reliability::kReliable;
+ *   vlink::DdscConf::register_qos("reliable_profile", qos);
  *
- *   vlink::Subscriber<MyMsg> sub("ddsc://my_topic?qos=my_profile");
+ *   auto pub = vlink::Publisher<MyMsg>::create_unique("ddsc://sensors/lidar?domain=7&qos=reliable_profile");
+ *   auto sub = vlink::Subscriber<MyMsg>::create_unique("ddsc://sensors/lidar?domain=7&qos=reliable_profile");
  * @endcode
  *
- * @note This header is compiled only when @c VLINK_SUPPORT_DDSC is defined.
- * @note Unlike @c DdsConf, @c DdscConf does not support @c register_topic() or
- *       extended QoS maps (@c qos_ext).
+ * @note Compiled only when @c VLINK_SUPPORT_DDSC is defined at build time.
+ * @note Unlike @c DdsConf, no external XML profile loading or @c register_topic() helper is exposed.
  */
 
 #pragma once
@@ -78,61 +90,63 @@ namespace vlink {
 
 /**
  * @struct DdscConf
- * @brief Configuration for the @c ddsc:// CycloneDDS transport.
+ * @brief Concrete @c Conf describing a CycloneDDS endpoint addressed by a @c ddsc:// URL.
  *
  * @details
- * Can be constructed directly or parsed from a URL string via @c Url.
+ * Carries the four parameters that fully identify a CycloneDDS DataReader or
+ * DataWriter: the topic name, the Domain ID, an optional history-depth override,
+ * and an optional named QoS profile.  Instances may be created either directly or
+ * via @c Url URL parsing inside the @c DdscFactory.
  */
 struct VLINK_EXPORT DdscConf final : public Conf {
-  std::string topic;  ///< CycloneDDS topic name (host + "/" + path from URL).
-  int32_t domain{0};  ///< DDS Domain Participant ID (non-negative).
-  int32_t depth{0};   ///< DDS history depth override; 0 keeps the selected QoS history depth.
-  std::string qos;    ///< Named QoS profile key registered via @c register_qos().
+  std::string topic;  ///< CycloneDDS topic name (URL host concatenated with the path).
+  int32_t domain{0};  ///< DDS Domain ID participated in by readers and writers (non-negative).
+  int32_t depth{0};   ///< Optional history-depth override; @c 0 keeps the QoS-selected depth.
+  std::string qos;    ///< Key of a named QoS profile registered through @c register_qos().
 
   /**
-   * @brief Constructs a @c DdscConf with explicit parameters.
+   * @brief Builds a @c DdscConf from its four logical fields.
    *
    * @param _topic   CycloneDDS topic name.
-   * @param _domain  Domain ID; default 0.
-   * @param _depth   History depth override; default 0.
+   * @param _domain  Domain ID; defaults to @c 0.
+   * @param _depth   History-depth override; defaults to @c 0 (use QoS depth).
    * @param _qos     Named QoS profile key; empty by default.
    */
   explicit DdscConf(const std::string& _topic, int32_t _domain = 0, int32_t _depth = 0, const std::string& _qos = "");
 
   /**
-   * @brief Returns @c true if all fields equal those of @p conf.
+   * @brief Component-wise equality on @c topic, @c domain, @c depth and @c qos.
    *
-   * @param conf  Configuration to compare.
-   * @return      @c true if @c topic, @c domain, @c depth, and @c qos all match.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when every field of @c *this matches @p conf.
    */
   [[nodiscard]] bool operator==(const DdscConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c true if any field differs from @p conf.
+   * @brief Logical negation of @c operator==.
    *
-   * @param conf  Configuration to compare.
-   * @return      Logical negation of @c operator==.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when any field differs from @p conf.
    */
   [[nodiscard]] bool operator!=(const DdscConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c TransportType::kDdsc identifying this transport.
+   * @brief Reports this object's transport tag.
    *
    * @return @c TransportType::kDdsc.
    */
   [[nodiscard]] TransportType get_transport_type() const override;
 
   /**
-   * @brief Registers a named QoS profile for use by @c ddsc:// nodes.
+   * @brief Registers a named QoS profile that nodes may select through @c ?qos= in the URL.
    *
    * @details
-   * The @p name is associated with the @p qos object and can be referenced in URL
-   * query strings as @c ?qos=name.  Names that conflict with reserved keys
-   * (@c part, @c topic, @c pub, @c sub, @c writer, @c reader, @c depth) or that
-   * are already registered cause a fatal log and are rejected.
+   * Profile names share a global namespace.  Names that collide with DDS-reserved
+   * tokens (@c part, @c topic, @c pub, @c sub, @c writer, @c reader, @c depth) or
+   * with an already registered profile abort with a fatal log entry.
    *
-   * @param name  Unique profile name; must not be one of the reserved keys.
-   * @param qos   @c Qos object describing the quality-of-service settings.
+   * @param name  Unique profile key; must not collide with any reserved token.
+   * @param qos   The @c Qos value to associate with @p name.
    */
   static void register_qos(const std::string& name, const Qos& qos);
 

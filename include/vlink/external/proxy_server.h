@@ -23,95 +23,105 @@
 
 /**
  * @file proxy_server.h
- * @brief VLink proxy server daemon -- singleton per process.
+ * @brief Daemon-side half of the VLink proxy subsystem -- one server per process.
  *
  * @details
- * @c ProxyServer is the server-side half of the VLink proxy subsystem.  It
- * inherits from @c MessageLoop and runs an event loop that:
+ * @c ProxyServer is the in-process daemon that mediates between the VLink core (publishers,
+ * subscribers, setters, getters on the local DDS domain) and one or more @c ProxyAPI clients.
+ * It derives from @c MessageLoop, so once @c async_run() is called all scheduled work,
+ * timers, and asynchronous relays run inside the inherited loop's worker thread.
  *
- * -# Hosts a @c DiscoveryViewer to enumerate all active publishers and
- *    subscribers on the DDS domain.
- * -# Accepts @c Control messages from @c ProxyAPI clients via a
- *    security-authenticated DDS channel.
- * -# Broadcasts a 1-second @c Time heartbeat carrying CPU/memory usage,
- *    version string, hostname, and wall-clock / boot-time.
- * -# Publishes per-topic statistics (@c freq, @c rate, @c loss, @c latency)
- *    once per second via a security-authenticated @c InfoList channel.
- * -# Relays raw message bytes from discovered publishers/setters to connected
- *    @c ProxyAPI listeners when operating in non-direct observe, record, or
- *    auto modes.  In direct mode, data publishers/subscribers are created by
- *    @c ProxyAPI and the server remains on the control/discovery path.
- *    Setter endpoints are observed with getter semantics to preserve field
- *    last-value delivery.
- * -# Optionally manages an embedded Iceoryx RouDi daemon when
- *    @c Config::use_iox is @c true.
- * -# Loads and manages @c RunablePluginInterface shared-library plugins
- *    from @c Config::runnable_list.
+ * Behaviourally the server is responsible for the following duties:
+ *
+ * -# Hosts an internal @c DiscoveryViewer that enumerates every active publisher and
+ *    subscriber on the DDS domain.
+ * -# Accepts @c Control messages from @c ProxyAPI clients over a security-authenticated
+ *    DDS channel and dispatches them to the discovery layer.
+ * -# Broadcasts a 1-second @c Time heartbeat carrying CPU/memory usage, the VLink version
+ *    string, hostname, machine ID, and wall-clock plus boot-time.
+ * -# Publishes per-topic statistics -- @c freq, @c rate, @c loss, @c latency -- once per
+ *    second through a security-authenticated @c InfoList channel.
+ * -# Relays raw payload bytes from observed publishers and setters back to connected
+ *    @c ProxyAPI listeners.  In direct mode the data pubs/subs are created by the API
+ *    side and the server stays exclusively on the control/discovery path; setter
+ *    endpoints are observed with getter semantics so field last-value delivery is
+ *    preserved.
+ * -# Optionally launches an embedded Iceoryx RouDi daemon when @c Config::use_iox is
+ *    @c true.
+ * -# Loads @c RunablePluginInterface shared-library plugins listed in
+ *    @c Config::runnable_list at construction and drives their lifecycle from the
+ *    inherited @c MessageLoop callbacks.
  *
  * @par Singleton Constraint
- * Only one @c ProxyServer may be constructed per operating-system process.
- * A second construction attempt logs a fatal message and throws before any
- * server channels are initialised; constructing multiple instances in one
- * process is unsupported.
+ * Only one @c ProxyServer may exist per operating-system process.  A second
+ * construction logs a fatal message and throws before any DDS channels are wired up;
+ * running multiple servers in the same process is not supported and not safe.
  *
- * @par Communication Architecture
+ * @par Architecture Diagram
  * @code
- *  ProxyAPI (kController)
- *       |--- HandshakeCli RPC -> [DDS secure] -> HandshakeSrv -->-|  (issues token)
- *       |<------------------ token <----------------|
- *       |--- ControlPub --> [DDS secure] --> ControlSub ---|  (token-stamped controls)
- *       |                                           v
- *       |                               ProxyServer (this)
- *       |                                           |
- *       |<-- TimeSub <--- [DDS secure] <--- TimePub -------|  (token echoed in heartbeat)
- *       |<-- InfoSub <--- [DDS secure] <--- InfoPub -------|
- *       |<-- DataSub <--- [DDS/SHM] <- DataPub -----|
+ *  +-----------------------+              +---------------------+
+ *  | ProxyAPI (Controller) |              | ProxyAPI (Listener) |
+ *  +-----------+-----------+              +----------+----------+
+ *              |                                     |
+ *              |  HandshakeCli  ---[DDS secure]---> HandshakeSrv (issues token)
+ *              |<--------------- token --------------|
+ *              |  ControlPub    ---[DDS secure]---> ControlSub  (token-stamped)
+ *              v                                     v
+ *  +-------------------------------------------------------------+
+ *  |                       ProxyServer (this)                    |
+ *  |  +-------------------+   +-------------------------------+  |
+ *  |  | DiscoveryViewer   |   | Heartbeat / Info / Data path |   |
+ *  |  +-------------------+   +-------------------------------+  |
+ *  |       ^                          |          |               |
+ *  +-------|--------------------------|----------|---------------+
+ *          |                          v          v
+ *     [VLink core nodes]         TimePub /   InfoPub  ---[DDS secure]--->
+ *                                DataPub               ---[DDS / SHM]--->
  * @endcode
  *
  * @par Authentication Token
- * The server generates a 128-bit hex session token at construction via
- * @c vlink::Uuid::random_hex() and exposes it through @c get_token().  The
- * token is a process-lifetime protocol nonce, not a long-term cryptographic
- * key.  Clients obtain it by invoking the handshake RPC over the
- * security-authenticated DDS channel; subsequent Control messages without a
- * matching token are dropped server-side.  Restarting the server invalidates
- * all previously-issued tokens; clients re-handshake after a same-identity
- * token mismatch heartbeat, an identity-mismatch heartbeat that also carries a
- * different token, or a local reset before accepting heartbeats or publishing
- * further controls.
+ * At construction the server generates a 128-bit hex session token via
+ * @c vlink::Uuid::random_hex() and exposes it through @c get_token().  The token is a
+ * process-lifetime protocol nonce, @b not a long-term cryptographic key.  Clients fetch
+ * it by invoking the handshake RPC over the security-authenticated DDS channel;
+ * subsequent @c Control messages without a matching token are dropped server-side.
+ * Restarting the server invalidates every previously-issued token.  Clients re-handshake
+ * after a same-identity token mismatch heartbeat, an identity-mismatch heartbeat that
+ * also carries a different token, or a local reset, before they will accept further
+ * heartbeats or publish new controls.
  *
  * @par Runnable Plugin Lifecycle
- * Plugins listed in @c Config::runnable_list are loaded in the constructor.
- * When the MessageLoop starts (@c on_begin) each plugin's @c on_init() and
- * @c async_run() are called.  When the loop stops (@c on_end) each plugin's
- * @c on_deinit(), @c quit(), and @c wait_for_quit() are called in order.
+ * Plugins named in @c Config::runnable_list are loaded inside the constructor.  When
+ * the inherited @c MessageLoop starts (@c on_begin), each plugin's @c on_init() and
+ * @c async_run() are invoked in list order.  On loop stop (@c on_end) each plugin's
+ * @c on_deinit(), @c quit(), and @c wait_for_quit() are invoked in the same order.
  *
  * @par Environment Variables
- * - @c VLINK_INTRA_BIND -- when set (any value), the server subscribes to
- *   @c intra:// topics in addition to DDS/SHM, enabling in-process observation.
+ * | Variable             | Meaning                                                       |
+ * | -------------------- | ------------------------------------------------------------- |
+ * | @c VLINK_INTRA_BIND  | When set to any value, also subscribe to @c intra:// topics.  |
  *
- * @par Usage Example
+ * @par Example
  * @code
  * vlink::ProxyServer::Config cfg;
- * cfg.dds_impl    = "dds";
- * cfg.domain_id   = 0;
- * cfg.reliable    = false;
- * cfg.async       = true;
- * cfg.use_iox     = false;
+ * cfg.dds_impl  = "dds";
+ * cfg.domain_id = 0;
+ * cfg.reliable  = false;
+ * cfg.async     = true;
+ * cfg.use_iox   = false;
  *
  * vlink::ProxyServer server(cfg);
- * server.async_run();      // start event loop in a background thread
+ * server.async_run();          // start the inherited MessageLoop in a background thread
  * // ... application runs ...
  * server.quit(true);
  * server.wait_for_quit();
  * @endcode
  *
  * @note
- * - The constructor must be called on the main thread before any @c ProxyAPI
- *   clients connect on the same domain.
- * - @c ProxyServer must be destroyed before the process exits; the destructor
- *   stops all timers, waits for the DiscoveryViewer, and releases every DDS
- *   handle in a deterministic order to avoid dangling callbacks.
+ * - Construction must happen on the main thread, before any @c ProxyAPI client connects
+ *   on the same domain.
+ * - Destruction stops every timer, joins the @c DiscoveryViewer, and releases each DDS
+ *   handle in a deterministic order so no dangling callback can fire after teardown.
  */
 
 #pragma once
@@ -140,120 +150,117 @@ namespace vlink {
 
 /**
  * @class ProxyServer
- * @brief VLink proxy server daemon backed by a MessageLoop.
+ * @brief In-process VLink proxy daemon backed by a @c MessageLoop.
  *
  * @details
- * Manages DDS/SHM proxy channels, a @c DiscoveryViewer, heartbeat/info timers,
- * and optional runnable plugins.  Construction starts the internal
- * @c DiscoveryViewer loop and its timers.  Only one instance may exist per
- * process.  Use @c async_run() (inherited from @c MessageLoop) to start the
- * server's own event loop for async forwarding and plugin lifecycle callbacks.
+ * Owns the discovery layer, the handshake/control/time/info DDS channels, the data
+ * relay path, and any embedded Iceoryx daemon or runnable plugins.  Construction
+ * starts the @c DiscoveryViewer plus its 1-second heartbeat and statistics timers,
+ * but it does @b not start the server's own inherited loop.  Call @c async_run()
+ * (or @c run()) on the @c MessageLoop base to enable asynchronous relays and the
+ * runnable-plugin lifecycle hooks.  Only one instance is allowed per process.
  */
 class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
  public:
   /**
    * @struct Config
-   * @brief Construction-time configuration for @c ProxyServer.
+   * @brief Construction-time configuration aggregate for @c ProxyServer.
    *
    * @details
-   * The fields @c reliable, @c enable_tcp, and @c direct are broadcast in every
-   * @c Time heartbeat so that connecting @c ProxyAPI clients can verify
-   * compatibility.  Mismatches result in the client reporting an error and
-   * refusing to connect.
+   * Every @c reliable, @c enable_tcp, and @c direct flag is echoed inside each @c Time
+   * heartbeat, so connecting @c ProxyAPI clients can verify wire-compatibility and
+   * refuse to attach when their own configuration would deviate.
    *
-   * @par Field Summary
-   *
-   * | Field                   | Default  | Description                                                           |
-   * | ----------------------- | -------- | --------------------------------------------------------------------- |
-   * | async                   | false    | Publish data on the MessageLoop thread; false = inline on subscriber. |
-   * | reliable                | false    | Use reliable DDS QoS for data channels.                               |
-   * | enable_tcp              | false    | Use TCP transport for data channels.                                  |
-   * | direct                  | false    | Use SHM (Iceoryx) instead of DDS for data forwarding.                 |
-   * | native_mode             | false    | Restrict all DDS traffic to 127.0.0.1 (loopback).                     |
-   * | domain_id               | 0        | DDS domain ID shared with all clients.                                |
-   * | buf_size                | 0        | DDS socket buffer size in bytes; 0 = built-in default.                |
-   * | mtu_size                | 0        | DDS MTU size in bytes; 0 = built-in default.                          |
-   * | max_packet_size         | 0        | Max relayed message size in MiB; see note below.                      |
-   * | security_key            | ""       | Security key for DDS control channels; empty = default security slot. |
-   * | bind_ip                 | ""       | Bind DDS sockets to this IP; empty = any interface.                   |
-   * | peer_ip                 | ""       | Unicast peer IP for DDS discovery; empty = multicast.                 |
-   * | dds_impl                | "dds"    | DDS implementation: "dds", "ddsc", "ddsr", etc.                       |
-   * | use_iox                 | false    | Launch an embedded Iceoryx RouDi daemon at startup.                   |
-   * | iox_monitoring          | true     | Enable Iceoryx introspection/monitoring.                              |
-   * | iox_strategy            | 1        | Iceoryx memory strategy index passed to ShmConf::init_roudi().        |
-   * | iox_config              | ""       | Path to a custom Iceoryx TOML configuration file; empty = default.    |
-   * | runnable_version_major  | 1        | Required major version for loaded runnable plugins.                   |
-   * | runnable_version_minor  | 0        | Required minor version for loaded runnable plugins.                   |
-   * | runnable_prefix         | ""       | Library name prefix for plugin shared objects.                        |
-   * | runnable_list           | {}       | Names of runnable plugins (@c RunablePluginInterface in the API).     |
+   * | Field                      | Default | Description                                                       |
+   * | -------------------------- | ------- | ----------------------------------------------------------------- |
+   * | @c async                   | false   | Forward data on the MessageLoop thread; false = inline relay.     |
+   * | @c reliable                | false   | Use reliable DDS QoS for data channels.                           |
+   * | @c enable_tcp              | false   | Use TCP transport for data channels.                              |
+   * | @c direct                  | false   | Use SHM (Iceoryx) instead of DDS for data forwarding.             |
+   * | @c native_mode             | false   | Restrict all DDS traffic to 127.0.0.1 (loopback).                 |
+   * | @c domain_id               | 0       | DDS domain ID shared with all clients.                            |
+   * | @c buf_size                | 0       | DDS socket send/receive buffer in bytes; 0 = built-in default.    |
+   * | @c mtu_size                | 0       | DDS MTU size in bytes; 0 = built-in default.                      |
+   * | @c max_packet_size         | 0       | Maximum relayed payload in MiB; see note below.                   |
+   * | @c security_key            | ""      | Security key for control channels; empty = default slot.          |
+   * | @c bind_ip                 | ""      | Bind DDS sockets to this IP; empty = any interface.               |
+   * | @c peer_ip                 | ""      | Unicast peer IP for discovery; empty = multicast.                 |
+   * | @c dds_impl                | "dds"   | DDS implementation: "dds", "ddsc", "ddsr", etc.                   |
+   * | @c use_iox                 | false   | Launch an embedded Iceoryx RouDi daemon at startup.               |
+   * | @c iox_monitoring          | true    | Enable Iceoryx introspection/monitoring.                          |
+   * | @c iox_strategy            | 1       | Iceoryx memory strategy index passed to @c ShmConf::init_roudi(). |
+   * | @c iox_config              | ""      | Path to a custom Iceoryx TOML; empty = default.                   |
+   * | @c runnable_version_major  | 1       | Required major ABI version for runnable plugins.                  |
+   * | @c runnable_version_minor  | 0       | Required minor ABI version for runnable plugins.                  |
+   * | @c runnable_prefix         | ""      | Library filename prefix for plugin discovery.                     |
+   * | @c runnable_list           | {}      | Ordered names of @c RunablePluginInterface plugins to load.       |
    *
    * @note
-   * @c max_packet_size is interpreted in MiB.  The default value of @c 0 drops
-   * every non-empty message (no special-case in the implementation); set a
-   * positive value to forward larger packets.  The @c vlink-proxy CLI defaults
-   * this to @c 4.0.
+   * @c max_packet_size is interpreted in MiB.  The default value @c 0 drops every
+   * non-empty message -- there is no special case in the implementation.  Set it to
+   * a positive number to forward larger packets.  The @c vlink-proxy CLI defaults
+   * this field to @c 4.0.
    */
   struct Config final {
-    bool async{false};        ///< Async data forwarding on the MessageLoop thread.
-    bool reliable{false};     ///< Use reliable DDS QoS; must match all client configs.
+    bool async{false};        ///< Forward data asynchronously on the MessageLoop thread.
+    bool reliable{false};     ///< Use reliable DDS QoS; must match every client.
     bool enable_tcp{false};   ///< Use TCP transport for DDS data channels.
-    bool direct{false};       ///< Use ProxyAPI local SHM channels for data.
-    bool native_mode{false};  ///< Restrict all DDS traffic to loopback (127.0.0.1).
+    bool direct{false};       ///< Use ProxyAPI-managed local SHM channels for data.
+    bool native_mode{false};  ///< Restrict every DDS endpoint to loopback (127.0.0.1).
     int domain_id{0};         ///< DDS domain ID.
-    uint32_t buf_size{0};     ///< DDS socket send/receive buffer in bytes; 0 = default.
+    uint32_t buf_size{0};     ///< DDS socket buffer in bytes; 0 = default.
     uint32_t mtu_size{0};     ///< DDS fragment MTU in bytes; 0 = default.
     double max_packet_size{
         0};  ///< Maximum relayed payload in MiB; 0 drops every non-empty message (set > 0 to forward).
     std::string security_key;                ///< Security key; empty = default security slot.
-    std::string bind_ip;                     ///< Local IP to bind DDS sockets; empty = any.
+    std::string bind_ip;                     ///< Local IP for DDS sockets; empty = any.
     std::string peer_ip;                     ///< Peer unicast IP for DDS; empty = multicast.
-    std::string dds_impl{"dds"};             ///< DDS implementation transport.
-    bool use_iox{false};                     ///< Initialise embedded Iceoryx RouDi daemon.
-    bool iox_monitoring{true};               ///< Enable Iceoryx introspection monitoring.
-    int iox_strategy{1};                     ///< Iceoryx memory allocation strategy.
-    std::string iox_config;                  ///< Path to Iceoryx TOML config file; empty = default.
-    uint16_t runnable_version_major{1};      ///< Required major ABI version for runnable plugins.
-    uint16_t runnable_version_minor{0};      ///< Required minor ABI version for runnable plugins.
-    std::string runnable_prefix;             ///< Library filename prefix for plugin discovery.
-    std::vector<std::string> runnable_list;  ///< Ordered list of plugin names to load on startup.
+    std::string dds_impl{"dds"};             ///< DDS implementation transport identifier.
+    bool use_iox{false};                     ///< Launch an embedded Iceoryx RouDi.
+    bool iox_monitoring{true};               ///< Enable Iceoryx introspection.
+    int iox_strategy{1};                     ///< Iceoryx memory allocation strategy index.
+    std::string iox_config;                  ///< Iceoryx TOML config path; empty = default.
+    uint16_t runnable_version_major{1};      ///< Required major ABI version for plugins.
+    uint16_t runnable_version_minor{0};      ///< Required minor ABI version for plugins.
+    std::string runnable_prefix;             ///< Plugin library filename prefix.
+    std::vector<std::string> runnable_list;  ///< Ordered plugin names to load on startup.
   };
 
   /**
-   * @brief Constructs a @c ProxyServer and initialises all proxy subsystems.
+   * @brief Constructs a @c ProxyServer and brings every proxy subsystem online.
    *
    * @details
-   * Performs the following steps in order:
-   * -# Checks the process-global singleton guard; logs a fatal message and
-   *    throws if another instance already exists.
+   * The constructor performs the following steps in order:
+   *
+   * -# Acquires the process-global singleton guard; on contention it logs a fatal
+   *    message and throws before touching any DDS handle.
    * -# Reads the @c VLINK_INTRA_BIND environment variable.
-   * -# If @c config.use_iox is @c true, calls @c init_shm_roudi() to start
-   *    an embedded Iceoryx RouDi process.
-   * -# Calls @c init_server() to create all DDS/SHM channels, subscribe to
-   *    @c Control messages, and start the 1-second @c time_timer and
-   *    @c info_timer on the @c DiscoveryViewer's loop.
-   * -# Calls @c init_runnable() to load all plugins listed in
-   *    @c config.runnable_list.
+   * -# When @c config.use_iox is @c true, calls @c init_shm_roudi() to spin up an
+   *    embedded Iceoryx RouDi process.
+   * -# Calls @c init_server() to create the handshake, control, time, info, and data
+   *    channels, subscribe to @c Control, and start the heartbeat plus statistics
+   *    timers on the @c DiscoveryViewer's loop.
+   * -# Calls @c init_runnable() to load every plugin listed in @c config.runnable_list.
    *
-   * @param config  Server configuration.  See @c Config for field details.
+   * The inherited @c MessageLoop is @b not started here -- call @c async_run() or
+   * @c run() explicitly when asynchronous relays and plugin lifecycle hooks must run.
    *
-   * @note The constructor starts the @c DiscoveryViewer loop and the heartbeat
-   *       / info timers, but it does not start the server's own
-   *       @c MessageLoop.  Call @c async_run() or @c run() separately for
-   *       async forwarding and runnable-plugin lifecycle callbacks.
+   * @param config  Server configuration.  See @c Config for per-field semantics.
+   *
+   * @note A second @c ProxyServer in the same process is unsupported and the
+   *       constructor throws.
    */
   explicit ProxyServer(const Config& config);
 
   /**
-   * @brief Destructor.
+   * @brief Destroys the @c ProxyServer in a deterministic shutdown order.
    *
    * @details
-   * Requests the MessageLoop to stop, waits for the loop, stops the proxy
-   * timers, waits for the @c DiscoveryViewer, and releases DDS/SHM handles in
-   * a deterministic teardown sequence.  Runnable plugins receive
-   * @c on_deinit(), @c quit(), and @c wait_for_quit() from @c on_end() when the
-   * loop has been started; the destructor then releases the held plugin
-   * objects.  The process-global singleton guard remains set for the process
-   * lifetime.
+   * Requests the inherited @c MessageLoop to stop, waits for it, then stops the proxy
+   * timers, joins the @c DiscoveryViewer, and releases each DDS/SHM handle.  When the
+   * loop has been started, runnable plugins receive @c on_deinit(), @c quit(), and
+   * @c wait_for_quit() from @c on_end() before the destructor drops them.  The
+   * process-global singleton guard remains set for the rest of the process lifetime.
    */
   ~ProxyServer() override;
 
@@ -261,15 +268,18 @@ class VLINK_PROXY_SERVER_EXPORT ProxyServer : public MessageLoop {
    * @brief Returns the authentication token issued by this server.
    *
    * @details
-   * When @c VLINK_PROXY_ENABLE_HANDSHAKE is non-zero (default), the token is generated
-   * once at construction via @c vlink::Uuid::random_hex() and stays constant for the
-   * server's lifetime.  Clients learn it by invoking the security-authenticated
-   * handshake RPC; the server then validates that every incoming @c Control carries the
-   * same token and echoes the token plus server identity inside each @c Time heartbeat
-   * so clients can detect server restarts and identity mismatches.  When the macro is
-   * 0 the token is empty and validation is disabled (handshake channel is not created).
+   * When @c VLINK_PROXY_ENABLE_HANDSHAKE is non-zero (the default), the token is
+   * generated once at construction via @c vlink::Uuid::random_hex() and remains
+   * constant for the server's lifetime.  Clients learn it through the
+   * security-authenticated handshake RPC.  The server then validates the token on
+   * every inbound @c Control and echoes it (alongside the server identity) inside
+   * every @c Time heartbeat so clients can detect both server restarts and identity
+   * mismatches.  When the macro is @c 0, the token is empty, validation is disabled,
+   * and the handshake channel is not created.
    *
-   * @return Hex-encoded token string, or empty when @c VLINK_PROXY_ENABLE_HANDSHAKE is 0.
+   * @return Hex-encoded token string, or empty when handshake is compiled out.
+   *
+   * @note Thread-safe; the returned string is a copy.
    */
   [[nodiscard]] std::string get_token() const;
 

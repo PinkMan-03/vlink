@@ -23,50 +23,62 @@
 
 /**
  * @file cancellation.h
- * @brief Cooperative cancellation primitives shared by VLink async building blocks.
+ * @brief Cooperative one-shot cancellation primitives shared by VLink async building blocks.
  *
  * @details
- * VLink cooperative cancellation is modelled as a producer/observer pair built on
- * a refcounted internal state.  Work-producing code owns a @c CancellationSource
- * and signals cancellation via @c request_cancel(); work-consuming code holds
- * (lightweight, copyable) @c CancellationToken instances obtained from
- * @c CancellationSource::token() and polls them or attaches callbacks.
+ * Cancellation is split into a writable @c CancellationSource owned by the work producer, one
+ * or more read-only @c CancellationToken observers held by workers, and per-callback
+ * @c CancellationRegistration handles used to unsubscribe pending callbacks.  All three share
+ * a refcounted internal state allocated on the producer side.
  *
- * The three public types in this header are:
+ * @par Role table
  *
- * | Type                        | Role                                          | Copy / Move semantics |
- * | --------------------------- | --------------------------------------------- | --------------------- |
- * | @c CancellationSource       | Mutable owner; signals cancellation           | Implicit shared state |
- * | @c CancellationToken        | Read-only observer; poll or callback          | Copyable; shareable   |
- * | @c CancellationRegistration | RAII slot for one fired-callback subscription | Move-only             |
+ * | Type                          | Role                                  | Copy / Move         |
+ * | ----------------------------- | ------------------------------------- | ------------------- |
+ * | @c CancellationSource         | Mutator; signals cancellation         | Implicit (refcount) |
+ * | @c CancellationToken          | Observer; poll / throw / subscribe    | Copyable            |
+ * | @c CancellationRegistration   | RAII slot for one subscribed callback | Move-only           |
  *
- * @c vlink::Exception::OperationCancelled is re-exported through @c "./exception.h" and is @b not
- * redefined here.  Use it as the canonical thrown type when an operation observes a cancellation
- * request mid-flight.
+ * @par State diagram
+ *
+ * @verbatim
+ *   +------------+   request_cancel()    +---------------+   no-ops on further calls
+ *   |  active    | --------------------> |  cancelled    | -------------------------+
+ *   |  (default) |                       |  (terminal)   |                          |
+ *   +------------+                       +---------------+                          |
+ *      ^   ^                                ^                                       |
+ *      |   |  is_cancellation_requested()=false                                     |
+ *      |   |  throw_if_cancellation_requested()=no-op                               |
+ *      |   |                                                                        v
+ *      |   +-- new tokens via token() share the same state ------------------ read-only
+ *      |
+ *      +------ register_callback() inserts a slot; fires synchronously on transition
+ * @endverbatim
+ *
+ * Cancellation is one-shot.  After the first successful @c request_cancel the state is
+ * terminal; subsequent requests return @c false and never re-invoke callbacks.  The cancelled
+ * type re-exported as @c vlink::Exception::OperationCancelled is the canonical thrown type at
+ * structured cancellation points.
  *
  * @par Lock ordering
- * The cancellation source's internal state mutex is released before fired
- * callbacks are invoked, so user callbacks may freely cancel sibling sources or
- * register additional callbacks.  The state mutex is never held across user
- * code.
+ * Internal mutexes are released before user callbacks fire, so callbacks may freely cancel
+ * sibling sources or register more callbacks without self-deadlock.
  *
  * @par Example
  * @code
- * vlink::CancellationSource source;
- * auto token = source.token();
+ *   vlink::CancellationSource source;
+ *   auto token = source.token();
  *
- * auto registration = token.register_callback([] {
- *   // runs once, on the thread that calls request_cancel() (or inline if
- *   // cancellation was already requested at registration time)
- * });
+ *   auto reg = token.register_callback([] {
+ *     // Runs once on the cancelling thread, or inline if already cancelled.
+ *   });
  *
- * // Worker thread cooperatively polls:
- * while (!token.is_cancellation_requested()) {
- *   token.throw_if_cancellation_requested();  // throws OperationCancelled
- *   do_unit_of_work();
- * }
+ *   while (!token.is_cancellation_requested()) {
+ *     token.throw_if_cancellation_requested();
+ *     run_work_unit();
+ *   }
  *
- * source.request_cancel();
+ *   source.request_cancel();
  * @endcode
  */
 
@@ -84,18 +96,13 @@ class CancellationToken;
 
 /**
  * @class CancellationRegistration
- * @brief RAII subscription returned when registering a cancellation callback.
+ * @brief Move-only RAII handle that represents one subscribed cancellation callback.
  *
  * @details
- * A @c CancellationRegistration owns exactly one callback slot inside the
- * cancellation source's state.  Destroying or @c reset()-ing the registration
- * removes the callback if cancellation has not fired yet; if cancellation has
- * already fired, the slot is already gone and the registration becomes a no-op
- * sink.
- *
- * The type is move-only: the slot identity must not be aliased.  @c reset() is
- * idempotent — calling it on an empty or already-reset registration is a no-op
- * and is safe to call any number of times.
+ * Each registration owns exactly one slot inside the source's state.  Destroying or @c reset-ing
+ * the handle detaches the callback if it has not yet fired; once the source has cancelled the
+ * slot is consumed automatically and the handle becomes a benign no-op sink.  The type is
+ * deliberately move-only to keep slot identity unique.
  */
 class VLINK_EXPORT CancellationRegistration final {
  public:
@@ -105,39 +112,37 @@ class VLINK_EXPORT CancellationRegistration final {
   CancellationRegistration() noexcept;
 
   /**
-   * @brief Unregisters the callback if it has not yet fired or been removed.
+   * @brief Destructor; detaches the owned callback when cancellation has not yet fired.
    */
   ~CancellationRegistration();
 
   /**
-   * @brief Move-constructs from @p other, transferring slot ownership.
+   * @brief Move constructor; transfers slot ownership and leaves @p other empty.
    *
-   * @param other Source registration; left in the empty state.
+   * @param other  Source registration emptied by the move.
    */
   CancellationRegistration(CancellationRegistration&& other) noexcept;
 
   /**
-   * @brief Move-assigns from @p other, releasing any currently owned slot first.
+   * @brief Move assignment; detaches any current slot then adopts @p other 's slot.
    *
-   * @param other Source registration; left in the empty state.
+   * @param other  Source registration emptied by the move.
    * @return Reference to @c *this.
    */
   CancellationRegistration& operator=(CancellationRegistration&& other) noexcept;
 
   /**
-   * @brief Unregisters the callback and resets this object to the empty state.
+   * @brief Detaches the owned callback and resets to the empty state.
    *
    * @details
-   * Idempotent: safe to call on an empty registration or to call multiple
-   * times in a row.  After @c reset() returns, @c valid() reports @c false.
+   * Idempotent.  Safe to call on an empty or already-reset registration.
    */
   void reset() noexcept;
 
   /**
-   * @brief Returns @c true if this object currently owns a live callback slot.
+   * @brief Reports whether the registration still owns an attached callback slot.
    *
-   * @return @c true if a callback slot is still attached to a non-cancelled
-   *         source; @c false otherwise.
+   * @return @c true when the slot is live and the source has not yet cancelled.
    */
   [[nodiscard]] bool valid() const noexcept;
 
@@ -157,81 +162,56 @@ class VLINK_EXPORT CancellationRegistration final {
 
 /**
  * @class CancellationToken
- * @brief Read-only handle used by work items to observe cooperative cancellation.
+ * @brief Lightweight observer of a @c CancellationSource shared across worker threads.
  *
  * @details
- * A @c CancellationToken is a lightweight, shared, read-only view into a
- * @c CancellationSource.  Tokens are cheap to copy and safe to pass across
- * threads; many tokens may simultaneously observe the same source.  A
- * default-constructed token is invalid (@c valid() returns @c false) and never
- * reports cancellation.
- *
- * Consumers typically either poll @c is_cancellation_requested() at safe
- * points, call @c throw_if_cancellation_requested() at structured cancellation
- * points, or attach a one-shot callback via @c register_callback().
+ * Tokens are cheap to copy and safe to hand to any thread; many tokens may observe the same
+ * source concurrently.  A default-constructed token is invalid -- it never reports cancellation
+ * and never accepts callbacks.  Workers typically poll @c is_cancellation_requested at safe
+ * points, call @c throw_if_cancellation_requested at structured points, or install a one-shot
+ * callback via @c register_callback.
  */
 class VLINK_EXPORT CancellationToken final {
  public:
   /**
-   * @brief Constructs an invalid token that is not bound to any source.
+   * @brief Constructs an invalid token not bound to any source.
    */
   CancellationToken() noexcept;
 
   /**
-   * @brief Returns @c true if this token is bound to a @c CancellationSource.
+   * @brief Reports whether the token observes a live cancellation source.
    *
-   * @return @c true if the token observes a live source; @c false for a
-   *         default-constructed token.
+   * @return @c true when the token was minted from a @c CancellationSource.
    */
   [[nodiscard]] bool valid() const noexcept;
 
   /**
-   * @brief Returns @c true if cancellation has been requested on the source.
+   * @brief Returns @c true once the bound source has been cancelled.
    *
-   * @return @c true if the bound source's @c request_cancel() has been called;
-   *         @c false for an invalid token or an as-yet-uncancelled source.
+   * @return @c true after the source's @c request_cancel has succeeded.
    */
   [[nodiscard]] bool is_cancellation_requested() const noexcept;
 
   /**
-   * @brief Registers a callback to run when cancellation is requested.
+   * @brief Subscribes a one-shot callback to fire when the source is cancelled.
    *
    * @details
-   * If cancellation has not yet been requested, @p callback is stored in the
-   * source and will be invoked at most once on the thread that later calls
-   * @c CancellationSource::request_cancel().  The returned
-   * @c CancellationRegistration owns the slot and may be used to unregister
-   * the callback before it fires.
+   * When cancellation has not yet been requested the callback is stored in the source and fires
+   * once on the thread that later calls @c CancellationSource::request_cancel.  When
+   * cancellation already happened the callback runs synchronously inside this call and the
+   * returned registration is empty.  Exceptions escaping the callback are caught and logged
+   * via @c CLOG_E; they never propagate to the registering or cancelling thread.
    *
-   * If cancellation was already requested when @c register_callback is called,
-   * the callback is invoked synchronously by this thread before returning, and
-   * the returned registration is empty (invalid).
-   *
-   * Callbacks always run with no internal cancellation locks held, so callback
-   * code may freely query the token, cancel sibling sources, or register
-   * additional callbacks without risk of self-deadlock.
-   *
-   * @param callback Move-only nullary functor to invoke on cancellation.  An
-   *                 empty (null) @p callback is silently ignored and yields an
-   *                 empty registration.
-   * @return RAII registration that, while alive, may be used to unregister the
-   *         callback; empty if the token is invalid, @p callback is empty, or
-   *         cancellation had already fired.
-   * @note Exceptions escaping the callback are caught and logged via
-   *       @c CLOG_E; they are never propagated to @c request_cancel() or to
-   *       the registering thread.
+   * @param callback  Move-only nullary functor; an empty callback is silently ignored.
+   * @return RAII registration for the subscription, or an empty handle when cancellation had
+   *         already fired or the token / callback was invalid.
    */
   CancellationRegistration register_callback(MoveFunction<void()>&& callback) const;
 
   /**
-   * @brief Throws @c OperationCancelled if cancellation has been requested.
+   * @brief Throws @c vlink::Exception::OperationCancelled when cancellation has been requested.
    *
-   * @details
-   * Convenience structured cancellation point.  Has no effect on an invalid
-   * token or an as-yet-uncancelled source.
-   *
-   * @throws vlink::Exception::OperationCancelled if @c is_cancellation_requested() is
-   *         @c true.
+   * @throws vlink::Exception::OperationCancelled if @c is_cancellation_requested() is @c true.
    */
   void throw_if_cancellation_requested() const;
 
@@ -247,62 +227,45 @@ class VLINK_EXPORT CancellationToken final {
 
 /**
  * @class CancellationSource
- * @brief Mutable owner that mints observer tokens and signals cooperative cancellation.
+ * @brief Mutator that mints observer tokens and signals one-shot cancellation.
  *
  * @details
- * @c CancellationSource is the writable end of the cancellation primitive.
- * The underlying cancellation state is held through a refcounted handle, so
- * the type is implicitly copyable and movable: copies / moves yield additional
- * handles to the same state, all of which can observe and fire the same
- * cancellation.  @c token() is the cheap canonical way to fan out observers,
- * and multiple tokens may be alive at once, all observing the same source.
- *
- * Cancellation is one-shot: the first @c request_cancel() transitions the
- * source to the cancelled state and fires registered callbacks; subsequent
- * calls are no-ops and return @c false.
+ * Holds a refcounted handle to the cancellation state; copies and moves share that state, so
+ * any copy can mint tokens or request cancellation against the same one-shot transition.
+ * @c token returns a cheap observer; @c request_cancel performs the transition exactly once and
+ * fires every subscribed callback.
  */
 class VLINK_EXPORT CancellationSource final {
  public:
   /**
-   * @brief Constructs a fresh, uncancelled source with empty callback set.
+   * @brief Constructs an uncancelled source with no subscribed callbacks.
    */
   CancellationSource();
 
   /**
-   * @brief Returns a lightweight observer token bound to this source.
+   * @brief Returns a fresh observer token bound to this source.
    *
-   * @details
-   * Cheap to call repeatedly; the returned token shares the source's state via
-   * a refcounted handle.  The caller may freely copy the token and hand it to
-   * other threads.
-   *
-   * @return A valid @c CancellationToken observing this source.
+   * @return Valid @c CancellationToken sharing the source's state.
    */
   [[nodiscard]] CancellationToken token() const noexcept;
 
   /**
-   * @brief Returns @c true if cancellation has been requested on this source.
+   * @brief Returns @c true once @c request_cancel has succeeded on this source.
    *
-   * @return @c true once @c request_cancel() has succeeded; @c false until
-   *         then.
+   * @return @c true after the one-shot transition has completed.
    */
   [[nodiscard]] bool is_cancellation_requested() const noexcept;
 
   /**
-   * @brief Requests cancellation and fires registered callbacks exactly once.
+   * @brief Performs the one-shot active -> cancelled transition and fires registered callbacks.
    *
    * @details
-   * Transitions the source from not-cancelled to cancelled atomically and
-   * invokes every callback that was registered at the moment of the
-   * transition.  Callbacks are invoked on the calling thread after the
-   * internal state mutex has been released, so they may safely re-enter the
-   * cancellation API.
+   * Acquires the internal state mutex, swaps the cancellation flag, releases the mutex, then
+   * runs every callback that was attached at the moment of the transition.  Exceptions thrown
+   * by callbacks are caught and logged.
    *
-   * @return @c true if this call performed the not-cancelled -> cancelled
-   *         transition; @c false if cancellation had already been requested
-   *         by a previous call.
-   * @note Exceptions thrown by callbacks are caught and logged; they are
-   *       never propagated out of @c request_cancel().
+   * @return @c true when this call performed the transition; @c false when a previous call had
+   *         already cancelled the source.
    */
   bool request_cancel() const;
 

@@ -23,47 +23,60 @@
 
 /**
  * @file intra_conf.h
- * @brief Transport configuration for the @c intra:// in-process messaging backend.
+ * @brief Transport configuration for the @c intra:// in-process / zero-copy transport.
  *
  * @details
- * @c IntraConf configures the in-process message queue transport, which delivers
- * messages between publishers and subscribers running in the same OS process.
- * Regular message types still use the normal @c Serializer path; the intra
- * @c IntraDataType shared-pointer special case can bypass serialization and
- * forward the pointer zero-copy.
+ * @c IntraConf binds the @c intra:// URL scheme to VLink's in-process message bus.
+ * Publishers and subscribers that share the same OS process exchange messages
+ * directly through an in-memory queue without crossing kernel or network
+ * boundaries.  When the payload is an @c IntraDataType (a shared-pointer wrapper
+ * around the message), serialisation is bypassed entirely and the pointer is
+ * handed off zero-copy; all other types take the normal @c Serializer path.
+ *
+ * @par Zero-Copy Hand-off Path
+ * @code
+ *   Publisher                        MessageBus                        Subscriber
+ *   ---------                        ----------                        ----------
+ *   IntraDataType<T>  ----enqueue->  ring buffer (shared_ptr only) ->  IntraDataType<T>
+ *   pod / proto / etc --serialize->  Bytes ------------------------->  deserialize -> T
+ * @endcode
  *
  * @par Supported Node Types
- * @c intra:// supports all six node types: @c kPublisher, @c kSubscriber,
- * @c kServer, @c kClient, @c kSetter, and @c kGetter.
+ *
+ * | Publisher | Subscriber | Server | Client | Getter | Setter |
+ * | :-------: | :--------: | :----: | :----: | :----: | :----: |
+ * | yes       | yes        | yes    | yes    | yes    | yes    |
  *
  * @par URL Format
  * @code
- *   intra://<address>[?event=<event_name>[&pipeline=<id>]][#<type>]
+ *   intra://<address>[?event=<name>&pipeline=<id>][#<type>]
  * @endcode
  *
- * | Component          | Description                                            |
- * | ------------------ | ------------------------------------------------------ |
- * | @c address         | Topic name; formed from @c host + @c "/" + @c path     |
- * | @c event           | Optional secondary filter string (@c ?event=)          |
- * | @c pipeline        | Queue-mode pipeline ID (@c ?pipeline=id, default 0)    |
- * | @c type            | Delivery mode: @c "queue" or @c "direct" (fragment)    |
+ * | Component   | Description                                                              |
+ * | ----------- | ------------------------------------------------------------------------ |
+ * | @c address  | In-process topic name (URL host concatenated with path); not empty       |
+ * | @c event    | Optional secondary event filter (@c ?event=)                             |
+ * | @c pipeline | Queue-mode pipeline ID (@c ?pipeline=); @c 0 selects the default pipe    |
+ * | @c type     | URL fragment; @c "queue" (buffered) or @c "direct" (inline dispatch)     |
+ *
+ * @par Delivery Modes
+ *
+ * | Mode       | Wakeup latency | Threading                       | Use case                  |
+ * | ---------- | -------------- | ------------------------------- | ------------------------- |
+ * | @c queue   | Bounded        | Subscriber loop drains the bus  | Default; decoupled timing |
+ * | @c direct  | Synchronous    | Caller thread invokes callback  | Hot loops, low latency    |
  *
  * @par Example
  * @code
- *   // In-process pub/sub (queue mode, default):
- *   vlink::Publisher<MyMsg> pub("intra://my_topic");
- *   vlink::Subscriber<MyMsg> sub("intra://my_topic");
- *
- *   // Direct delivery (bypasses queue):
- *   vlink::Publisher<MyMsg> pub("intra://my_topic#direct");
- *
- *   // With secondary event filter and queue-mode pipeline ID:
- *   vlink::Publisher<MyMsg> pub("intra://my_service?event=my_event&pipeline=4");
+ *   auto pub  = vlink::Publisher<MyMsg>::create_unique("intra://sensors/imu");
+ *   auto sub  = vlink::Subscriber<MyMsg>::create_unique("intra://sensors/imu");
+ *   auto fast = vlink::Publisher<MyMsg>::create_unique("intra://control/cmd#direct");
+ *   auto pipe = vlink::Publisher<MyMsg>::create_unique("intra://svc?event=ev&pipeline=4");
  * @endcode
  *
- * @note This header is compiled only when @c VLINK_SUPPORT_INTRA is defined.
- * @note The @c address string must not be empty.
- * @note @c is_valid() also requires @c type to be either @c "queue" or @c "direct".
+ * @note Compiled only when @c VLINK_SUPPORT_INTRA is defined.
+ * @note @c address must not be empty; @c is_valid() additionally requires @c type
+ *       to be either @c "queue" or @c "direct".
  */
 
 #pragma once
@@ -79,49 +92,48 @@ namespace vlink {
 
 /**
  * @struct IntraConf
- * @brief Configuration for the @c intra:// in-process transport.
+ * @brief Concrete @c Conf describing an in-process endpoint addressed by an @c intra:// URL.
  *
  * @details
- * Can be constructed directly or parsed from a URL string via @c Url.
- * When parsed from a URL, @c address is derived from the host and path components,
+ * Fields map one-to-one onto the URL components: @c address from host plus path,
  * @c event from @c ?event=, @c pipeline from @c ?pipeline=, and @c type from the
- * URL fragment (@c #queue or @c #direct).
+ * URL fragment (@c "queue" or @c "direct").
  */
 struct VLINK_EXPORT IntraConf final : public Conf {
-  std::string address;        ///< Topic address (host + "/" + path from URL); must not be empty.
+  std::string address;        ///< In-process topic address (URL host concatenated with path); must not be empty.
   std::string event;          ///< Optional secondary event filter string.
-  int32_t pipeline{0};        ///< Queue-mode pipeline ID; 0 selects the default pipeline.
-  std::string type{"queue"};  ///< Delivery mode: @c "queue" (buffered) or @c "direct" (bypass queue).
+  int32_t pipeline{0};        ///< Queue-mode pipeline identifier; @c 0 selects the default pipe.
+  std::string type{"queue"};  ///< Delivery mode; @c "queue" (buffered) or @c "direct" (inline dispatch).
 
   /**
-   * @brief Constructs an @c IntraConf with explicit parameters.
+   * @brief Builds an @c IntraConf from its four logical fields.
    *
    * @param _address   Topic address string; must not be empty.
    * @param _event     Optional secondary event filter; empty by default.
-   * @param _pipeline  Queue-mode pipeline ID; default 0.
-   * @param _type      Delivery mode: @c "queue" or @c "direct"; default @c "queue".
+   * @param _pipeline  Queue-mode pipeline ID; defaults to @c 0.
+   * @param _type      Delivery mode; @c "queue" or @c "direct"; defaults to @c "queue".
    */
   explicit IntraConf(const std::string& _address, const std::string& _event = "", int _pipeline = 0,
                      const std::string& _type = "queue");
 
   /**
-   * @brief Returns @c true if all fields of this configuration are equal to @p conf.
+   * @brief Component-wise equality on all configuration fields.
    *
-   * @param conf  Configuration to compare.
-   * @return      @c true if @c address, @c event, @c pipeline, and @c type all match.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when @c address, @c event, @c pipeline and @c type all match.
    */
   [[nodiscard]] bool operator==(const IntraConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c true if any field differs from @p conf.
+   * @brief Logical negation of @c operator==.
    *
-   * @param conf  Configuration to compare.
-   * @return      Logical negation of @c operator==.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when any field differs from @p conf.
    */
   [[nodiscard]] bool operator!=(const IntraConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c TransportType::kIntra identifying this transport.
+   * @brief Reports this object's transport tag.
    *
    * @return @c TransportType::kIntra.
    */

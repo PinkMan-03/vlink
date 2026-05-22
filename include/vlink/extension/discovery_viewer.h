@@ -23,38 +23,46 @@
 
 /**
  * @file discovery_viewer.h
- * @brief Real-time view of all active VLink endpoints discovered on the current host or network.
+ * @brief Live aggregator of VLink endpoint announcements emitted by @c DiscoveryReporter.
  *
  * @details
- * @c DiscoveryViewer subscribes to @c DiscoveryReporter broadcasts and maintains a live
- * list of all known VLink processes and their endpoints.  It is used by the @c vlink-cli
- * tool and by monitoring applications.
+ * @c DiscoveryViewer is the listening counterpart of @c DiscoveryReporter.  It joins the
+ * discovery UDP multicast group, decodes incoming announcements, and maintains an
+ * in-memory snapshot of every URL/process currently advertised on the host or network.
+ * It powers @c vlink-cli, dashboards and any custom monitoring tool that needs a live
+ * topology view.
  *
- * Each entry in the @c Info list describes one topic URL and the set of processes that
- * publish or subscribe to it.  Entries are sorted for stable display.
+ * Filter modes select which announcements survive into the snapshot:
  *
- * @par Filter modes
- * | FilterType       | Shows                                                       |
- * | ---------------- | ----------------------------------------------------------- |
- * | kFilterNone      | All discovered endpoints                                    |
- * | kFilterAvailable | All endpoints except local-transport URLs from remote hosts |
- * | kFilterNative    | Only endpoints reported by the same host                    |
+ * | Value               | Description                                                                  |
+ * | ------------------- | ---------------------------------------------------------------------------- |
+ * | @c kFilterNone      | Keep every announcement regardless of origin                                 |
+ * | @c kFilterAvailable | Drop remote announcements for local-only URL schemes (@c intra, @c shm, ...) |
+ * | @c kFilterNative    | Keep only announcements emitted by the same host as the viewer               |
  *
- * @par Usage
+ * Viewer interaction:
+ *
+ * @verbatim
+ *   DiscoveryReporter --(UDP multicast)--> +----------------+    Callback(info_list)
+ *                                          |    Viewer      | ---------------------> user code
+ *   Heartbeat timeout         ----+--->    |  (MessageLoop) | <--- get_info_list()
+ *   process_offline()         ----+--->    +----------------+
+ * @endverbatim
+ *
+ * @par Example
  * @code
  * vlink::DiscoveryViewer viewer(vlink::DiscoveryViewer::kFilterAvailable);
  * viewer.register_callback([](const std::vector<vlink::DiscoveryViewer::Info>& list) {
- *     for (auto& info : list) {
- *         VLOG_I("URL: ", info.url, " type: ", info.type);
- *     }
+ *   for (const auto& entry : list) {
+ *     VLOG_I("url=", entry.url, " ser=", entry.ser_type,
+ *            " hosts=", entry.process_list.size());
+ *   }
  * });
  * viewer.async_run();
  * @endcode
  *
- * @note
- * - The callback is invoked on the viewer's event loop thread.
- * - Use @c global_get() to share one viewer across the application.
- * - Endpoints that do not send a heartbeat within a timeout are removed automatically.
+ * @note The callback runs on the viewer's @c MessageLoop thread; copy the snapshot if it
+ * needs to outlive the call.  Endpoints whose heartbeat lapses are pruned automatically.
  */
 
 #pragma once
@@ -73,172 +81,171 @@ namespace vlink {
 
 /**
  * @class DiscoveryViewer
- * @brief Background @c MessageLoop that aggregates live VLink endpoint discovery data.
+ * @brief @c MessageLoop-based aggregator of live VLink endpoint announcements.
+ *
+ * @details
+ * Construct with the desired filter and start with @c async_run().  The viewer
+ * continuously rebuilds an @c Info list and notifies the registered callback every time
+ * the topology changes.
  */
 class VLINK_EXPORT DiscoveryViewer : public MessageLoop {
  public:
   /**
-   * @brief Controls which endpoints are included in the discovery view.
+   * @brief Selects which announcements contribute to the live snapshot.
    *
-   * | Value            | Meaning                                              |
-   * | ---------------- | ---------------------------------------------------- |
-   * | kFilterNone      | All discovered endpoints                             |
-   * | kFilterAvailable | All endpoints except local-transport URLs from remote hosts |
-   * | kFilterNative    | Endpoints reported by the same host only             |
+   * | Value             | Effect                                                                |
+   * | ----------------- | --------------------------------------------------------------------- |
+   * | kFilterNone       | All announcements visible                                             |
+   * | kFilterAvailable  | Drop remote announcements for local-only URL schemes                  |
+   * | kFilterNative     | Keep only announcements from the same host                            |
    */
   enum FilterType : uint8_t {
-    kFilterNone = 0,       ///< Show all endpoints.
-    kFilterAvailable = 1,  ///< Hide remote reports for local-only URL schemes.
-    kFilterNative = 2,     ///< Show only same-host reports.
+    kFilterNone = 0,       ///< No filtering applied.
+    kFilterAvailable = 1,  ///< Drop remote announcements for local-only URL schemes.
+    kFilterNative = 2,     ///< Keep only same-host announcements.
   };
 
   /**
    * @struct Process
-   * @brief Information about one process that hosts a VLink endpoint.
+   * @brief Identity of a process that hosts at least one endpoint for a URL.
    */
   struct VLINK_EXPORT Process final {
-    uint32_t type{0};     ///< ImplType bitmask of all communication types in this process.
-    std::string host;     ///< Hostname of the process.
-    uint32_t pid{0};      ///< Process ID.
-    std::string name;     ///< Process name.
-    std::string ip;       ///< IP address of the process host.
-    double profiler{-1};  ///< CPU utilisation reported by the process (-1 if unavailable).
+    uint32_t type{0};     ///< Bitmask of @c ImplType kinds advertised by this process.
+    std::string host;     ///< Host name of the process.
+    uint32_t pid{0};      ///< Process identifier.
+    std::string name;     ///< Process or application name.
+    std::string ip;       ///< IP address of the host.
+    double profiler{-1};  ///< Most recent CPU usage sample (-1 when unavailable).
 
     /**
-     * @brief Sorts processes for stable display.
+     * @brief Defines a stable ordering between two process descriptors.
      *
      * @details
-     * Sort order is type, host, IP, process name, then PID.
+     * Sort key is type, then host, IP, name and finally PID.
      *
-     * @param target  Right-hand side.
-     * @return @c true if @c *this should sort before @p target.
+     * @param target Right-hand operand.
+     * @return @c true when @c *this should appear before @p target.
      */
     bool operator<(const Process& target) const noexcept;
   };
 
   /**
    * @struct Info
-   * @brief Aggregated discovery entry for one VLink URL.
+   * @brief One row of the discovery snapshot, describing a URL and its publishers/subscribers.
    *
    * @details
-   * Holds the URL, communication type bitmask, serialisation type, coarse schema family,
-   * and the list of processes that have registered an endpoint for this URL.
+   * Each row aggregates the communication kinds, serialisation type, schema family and
+   * the list of processes that have announced a matching endpoint.
    */
   struct VLINK_EXPORT Info final {
-    int sort_index{-1};                            ///< Stable sort key (assigned by the viewer).
-    uint32_t type{0};                              ///< ImplType bitmask.
-    std::string url;                               ///< Full VLink URL string.
-    std::string ser_type;                          ///< Serialisation type (e.g., "demo.proto.PointCloud").
-    SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse schema family derived from discovery metadata.
-    std::vector<Process> process_list;             ///< Processes hosting this endpoint.
+    int sort_index{-1};                            ///< Stable sort key assigned internally by the viewer.
+    uint32_t type{0};                              ///< Bitmask of @c ImplType kinds for this URL.
+    std::string url;                               ///< Fully-qualified VLink URL.
+    std::string ser_type;                          ///< Serialisation type name announced for this URL.
+    SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse schema family derived from announcements.
+    std::vector<Process> process_list;             ///< Processes currently hosting this URL.
 
     /**
-     * @brief Sorts entries for stable display.
+     * @brief Defines a stable ordering between two snapshot rows.
      *
      * @details
-     * Sort order is type, sort_index, URL, schema family, serialisation type,
-     * then process list.
+     * Sort key is type, then sort_index, URL, schema family, serialisation type and
+     * finally the process list.
      *
-     * @param target  Right-hand side.
-     * @return @c true if @c *this should sort before @p target.
+     * @param target Right-hand operand.
+     * @return @c true when @c *this should appear before @p target.
      */
     bool operator<(const Info& target) const noexcept;
   };
 
   /**
-   * @brief Callback fired whenever the discovery information is updated.
+   * @brief Callback signature delivered whenever the snapshot changes.
    *
    * @details
-   * Invoked on the viewer's event loop thread.  The vector is a snapshot of the
-   * current live endpoint list.
+   * Invoked on the viewer's @c MessageLoop thread with the freshly built list.
    */
   using Callback = Function<void(const std::vector<Info>& info_list)>;
 
   /**
-   * @brief Converts a discovery endpoint-role token to the corresponding @c ImplType value.
+   * @brief Translates a discovery role token to the corresponding @c ImplType bit.
    *
-   * @param str  Discovery role token: @c "Ser", @c "Cli", @c "Pub", @c "Sub", @c "Set", or @c "Get".
-   * @return Corresponding @c ImplType, or 0 if unknown.
+   * @param str Role token: @c "Ser", @c "Cli", @c "Pub", @c "Sub", @c "Set" or @c "Get".
+   * @return Matching @c ImplType, or 0 when the token is not recognised.
    */
   [[nodiscard]] static ImplType convert_type(std::string_view str);
 
   /**
-   * @brief Returns a display string for an @c ImplType bitmask.
+   * @brief Formats an @c ImplType bitmask as a human-readable label.
    *
-   * @param type  ImplType bitmask.
-   * @return Human-readable type string.
+   * @param type ImplType bitmask.
+   * @return Display string suitable for tooling output.
    */
   [[nodiscard]] static std::string convert_type_to_view(uint32_t type);
 
   /**
-   * @brief Returns a combined type-and-process display string.
+   * @brief Formats an @c ImplType bitmask together with its process list.
    *
-   * @param type          ImplType bitmask.
-   * @param process_list  List of processes to include in the display.
+   * @param type         ImplType bitmask.
+   * @param process_list Processes to include in the display.
    * @return Combined display string.
    */
   [[nodiscard]] static std::string convert_type_to_view(uint32_t type, const std::vector<Process>& process_list);
 
   /**
    * @brief Returns the UDP multicast/broadcast address used by the discovery subsystem.
-   *
-   * @return Discovery listen address string.
    */
   [[nodiscard]] static std::string get_listen_address();
 
   /**
-   * @brief Returns the process-global @c DiscoveryViewer singleton.
+   * @brief Returns the process-global viewer, created on first call with @c kFilterNone.
    *
-   * @details
-   * Created with @c kFilterNone on first call.  The singleton is destroyed on process exit.
-   *
-   * @return Raw pointer to the global @c DiscoveryViewer.
+   * @return Raw pointer to the global viewer.
    */
   static DiscoveryViewer* global_get();
 
   /**
-   * @brief Constructs a @c DiscoveryViewer with the given filter type.
+   * @brief Builds the viewer with the requested filter mode.
    *
-   * @param type  Controls which endpoints are included.  Default: @c kFilterNone.
+   * @param type Filter selecting which announcements survive (default: @c kFilterNone).
    */
   explicit DiscoveryViewer(FilterType type = kFilterNone);
 
   /**
-   * @brief Destructor -- stops the viewer loop.
+   * @brief Stops the viewer loop and releases resources.
    */
   ~DiscoveryViewer() override;
 
   /**
-   * @brief Registers the callback invoked when the endpoint list changes.
+   * @brief Registers the callback notified on every snapshot change.
    *
    * @details
-   * Replaces any previously registered callback.  The callback is invoked on the
-   * viewer's loop thread.
+   * Replaces any previously installed callback; only the most recent registration
+   * remains effective.
    *
-   * @param callback  Function receiving the updated @c Info list.
+   * @param callback Function invoked with the new @c Info list.
    */
   void register_callback(Callback&& callback);
 
   /**
-   * @brief Returns a snapshot of the current discovery information.
+   * @brief Returns a copy of the live snapshot at the moment of the call.
    *
-   * @return Copy of the live @c Info list at the time of the call.
+   * @return Vector of @c Info rows.
    */
   [[nodiscard]] std::vector<Info> get_info_list();
 
   /**
-   * @brief Returns the serialisation type string for a given URL.
+   * @brief Resolves the announced serialisation type for @p url.
    *
-   * @param url  Topic URL to look up.
-   * @return Serialisation type (e.g., @c "demo.proto.PointCloud"), or empty if not known.
+   * @param url Topic URL.
+   * @return Announced serialisation type, or an empty string when unknown.
    */
   [[nodiscard]] std::string get_ser_type(const std::string& url) const;
 
   /**
-   * @brief Returns the coarse schema family for a given URL.
+   * @brief Resolves the announced coarse schema family for @p url.
    *
-   * @param url  Topic URL to look up.
-   * @return Schema family, or @c SchemaType::kUnknown if not known.
+   * @param url Topic URL.
+   * @return @c SchemaType, or @c SchemaType::kUnknown when unavailable.
    */
   [[nodiscard]] SchemaType get_schema_type(const std::string& url) const;
 

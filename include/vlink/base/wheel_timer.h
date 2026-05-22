@@ -23,48 +23,57 @@
 
 /**
  * @file wheel_timer.h
- * @brief Hash-wheel timer for managing large numbers of concurrent timeouts efficiently.
+ * @brief Hashed timing wheel for managing very large pools of concurrent timeouts.
  *
  * @details
- * @c WheelTimer implements a hashed timing wheel -- a classic data structure for O(1) timer
- * insertion, removal and expiry checking.  It is appropriate when hundreds to hundreds of
- * thousands of independent timeouts must be tracked simultaneously, such as in a session
- * manager or a connection-pool keep-alive system.
+ * @c vlink::WheelTimer implements the classic hashed-timing-wheel data structure that
+ * provides O(1) insertion, O(1) removal and O(k) per-tick expiry processing, where @c k
+ * is the number of timers in the current slot.  It scales comfortably to tens or hundreds
+ * of thousands of independent timeouts (for example, a session manager or a connection
+ * keep-alive supervisor).
  *
- * Algorithm:
- * - The wheel contains @c slots evenly-spaced time buckets.
- * - Each tick advances the wheel by one slot; the advance period is @c interval_ms.
- * - Timeouts longer than @c slots * @c interval_ms are stored with a round counter and
- *   skipped until the counter reaches zero.
- * - Adding a timer is O(1).  Removal is O(1) via the internal key-to-slot index.
- * - Expiry detection per tick is O(k) where k is the number of handlers in the current slot.
+ * Wheel layout for a wheel with @c S slots advancing every @c interval_ms milliseconds:
+ *
+ * @verbatim
+ *                        cursor
+ *                          v
+ *   +-----+-----+-----+-----+-----+-----+-----+-----+ ... +-----+
+ *   |  0  |  1  |  2  |  3  |  4  |  5  |  6  |  7  | ... | S-1 |
+ *   +-----+-----+-----+--+--+-----+-----+--+--+-----+ ... +-----+
+ *                        |                 |
+ *               handler list:     handler list:
+ *                 - {key, round=0, cb}     - {key, round=2, cb}
+ *                 - {key, round=1, cb}
+ * @endverbatim
+ *
+ * Timers with timeouts longer than @c S @c * @c interval_ms wrap around using a round
+ * counter that is decremented on every cursor pass.  Removal is O(1) via a key-to-slot
+ * map maintained alongside the wheel.
  *
  * Lifecycle:
  * -# Construct with @c WheelTimer(slots, interval_ms).
- * -# Call @c start() to launch the background worker thread.
- * -# Add timers with @c add(); store the returned @c Key for later removal.
- * -# Call @c stop() to terminate the background thread.
+ * -# Call @c start() to launch the worker thread.
+ * -# Insert timers via @c add(); keep the returned @c Key for later removal.
+ * -# Call @c stop() to terminate the worker thread.
  *
  * @note
- * - Expired callbacks are invoked from the internal worker thread.  Use thread-safe
- *   structures or post results to a @c MessageLoop inside the callback.
- * - @c set_catchup_limit() controls how many missed slots are processed in one tick
- *   to prevent a long stall from causing a burst of expired callbacks.
+ * - Expiry callbacks run on the wheel's worker thread; marshal results back through a
+ *   @c MessageLoop or a lock when shared state is involved.
+ * - @c set_catchup_limit() bounds how many missed slots are processed per tick to keep
+ *   a single iteration from blocking for too long after a system sleep.
  *
  * @par Example
  * @code
- * // 256 slots, 10 ms per slot -> max 2.56 s without wrapping; higher durations use rounds.
  * vlink::WheelTimer wheel(256, 10);
  * wheel.start();
  *
  * auto key = wheel.add(1000, [](vlink::WheelTimer::Key k) {
- *   // fired after ~1000 ms
+ *   (void)k;
  * });
  *
- * // Repeating every 500 ms:
- * auto repeat_key = wheel.add(500, [](vlink::WheelTimer::Key k) {}, 500);
+ * auto repeat_key = wheel.add(500, [](vlink::WheelTimer::Key k) { (void)k; }, 500);
  *
- * wheel.remove(key);  // cancel before expiry
+ * wheel.remove(key);
  * wheel.stop();
  * @endcode
  */
@@ -81,134 +90,129 @@ namespace vlink {
 
 /**
  * @class WheelTimer
- * @brief O(1) hash-wheel timer backed by a fixed-size circular slot array.
+ * @brief O(1) hashed-timing-wheel scheduler backed by an internal worker thread.
  *
  * @details
- * Runs its own internal background thread to advance the wheel on each @c interval_ms tick.
+ * Owns a fixed-size slot array and advances a cursor every @c interval_ms milliseconds.
  */
 class VLINK_EXPORT WheelTimer {
  public:
   /**
-   * @brief Opaque handle returned by @c add() and used to @c remove() a timer.
+   * @brief Opaque handle returned by @c add() and accepted by @c remove().
    */
   using Key = int64_t;
 
   /**
-   * @brief Callback invoked when a timer expires.
+   * @brief Callback signature invoked when a timer expires.
    *
    * @details
-   * The @c Key parameter allows a single lambda to manage multiple timers.
+   * The @c Key argument lets a single lambda manage multiple timers.
    */
   using Callback = Function<void(Key)>;
 
   /**
-   * @brief Constructs the wheel timer.
+   * @brief Constructs the wheel with the given resolution and capacity.
    *
    * @details
-   * Creates the internal slot array.  Both @p slots and @p interval_ms must be
-   * greater than zero; invalid values log a fatal error and throw.  Call
-   * @c start() to begin advancing the wheel.
+   * Both @p slots and @p interval_ms must be greater than zero; invalid values log a
+   * fatal error and throw.  Call @c start() to begin advancing the wheel.
    *
-   * @param slots        Number of time buckets in the wheel.  Higher values reduce the
-   *                     number of round counters needed for long timeouts.
-   * @param interval_ms  Duration of one slot in milliseconds.  Resolution of all timers.
+   * @param slots        Number of buckets in the wheel.  Larger values shorten the
+   *                     round counter for long timeouts.
+   * @param interval_ms  Tick duration in milliseconds; sets the resolution of every timer.
    */
   explicit WheelTimer(uint32_t slots, uint32_t interval_ms);
 
   /**
-   * @brief Destructor.  Calls @c stop() if the wheel is still running.
+   * @brief Destructor.  Calls @c stop() when the wheel is still running.
    */
   ~WheelTimer();
 
   /**
-   * @brief Starts the internal background thread and begins advancing the wheel.
+   * @brief Starts the worker thread and begins advancing the wheel cursor.
    */
   void start();
 
   /**
-   * @brief Stops the wheel and joins the background thread.
+   * @brief Stops the wheel and joins the worker thread.
    *
    * @details
-   * Pending timers are not fired after @c stop() returns.
+   * Pending timers do not fire after @c stop() returns.
    */
   void stop();
 
   /**
-   * @brief Temporarily suspends the wheel without terminating the background thread.
+   * @brief Temporarily suspends timer dispatch without joining the worker thread.
    *
    * @details
-   * Timers will not fire while paused.  The background thread remains alive.
-   * Call @c resume() to continue normal operation.
+   * The worker remains alive but the cursor stops advancing.  Use @c resume() to
+   * continue.
    */
   void pause();
 
   /**
-   * @brief Resumes a paused wheel.
-   *
-   * @details
-   * If the wheel is not paused, this is a no-op.
+   * @brief Resumes a paused wheel; a no-op when not paused.
    */
   void resume();
 
   /**
-   * @brief Wakes the internal worker thread if it is sleeping between ticks.
+   * @brief Wakes the worker thread early when it is sleeping between ticks.
    *
    * @details
-   * Useful for triggering an immediate tick after adding a very short timeout.
+   * Useful after inserting a very short timeout that should fire immediately.
    */
   void wakeup();
 
   /**
-   * @brief Returns @c true if the wheel is currently running (started and not stopped).
+   * @brief Reports whether the wheel is currently running.
    *
-   * @return @c true if running.
+   * @return @c true between @c start() and @c stop().
    */
   [[nodiscard]] bool is_running() const;
 
   /**
-   * @brief Adds a new timer to the wheel.
+   * @brief Inserts a new timer into the wheel.
    *
    * @details
-   * The callback will be invoked from the wheel's internal thread after @p timeout_ms
-   * milliseconds.  If @p repeat_ms > 0, the timer is automatically re-added with the
-   * @p repeat_ms interval each time it fires.
+   * The callback runs on the worker thread after @p timeout_ms milliseconds.  When
+   * @p repeat_ms is non-zero the timer is re-armed at every expiry with @p repeat_ms as
+   * the next timeout.
    *
-   * @param timeout_ms  Initial delay in milliseconds (rounded up to the nearest slot).
-   * @param callback    Function to call on expiry.  Receives the timer's @c Key as argument.
-   * @param repeat_ms   Re-fire interval in milliseconds.  0 = one-shot.  Default: 0.
-   * @return A unique @c Key identifying this timer entry, or -1 on invalid input
-   *         or key allocation failure.
+   * @param timeout_ms  Initial delay in milliseconds (rounded up to a slot boundary).
+   * @param callback    Function invoked on expiry.
+   * @param repeat_ms   Re-arm interval in milliseconds; @c 0 selects one-shot.  Default: @c 0.
+   * @return Unique key identifying this timer entry, or @c -1 on invalid input or key
+   *         allocation failure.
    */
   Key add(uint32_t timeout_ms, Callback&& callback, uint32_t repeat_ms = 0);
 
   /**
-   * @brief Removes a timer before it fires.
+   * @brief Removes a timer before its callback runs.
    *
    * @param key  Key returned by @c add().
-   * @return @c true if the timer was found and removed; @c false if already expired or invalid.
+   * @return @c true when the timer existed and was removed.
    */
   bool remove(Key key);
 
   /**
-   * @brief Returns the estimated remaining time for a timer.
+   * @brief Returns the approximate remaining time before a timer fires.
    *
    * @details
-   * The returned value is approximate due to discretisation to slot boundaries.
+   * The value is rounded to the wheel's tick resolution.
    *
    * @param key  Key returned by @c add().
-   * @return Estimated remaining time in milliseconds, or 0 if the key is not found.
+   * @return Estimated remaining time in milliseconds, or @c 0 when @p key is unknown.
    */
   [[nodiscard]] uint32_t get_remaining_time(Key key) const;
 
   /**
-   * @brief Sets the maximum number of missed slots processed in a single tick.
+   * @brief Caps the number of catch-up slots processed in a single tick iteration.
    *
    * @details
-   * If the wheel falls behind (e.g., due to system sleep), it may have many slots to
-   * catch up.  This limit prevents a single tick from blocking for too long by capping
-   * the number of catch-up slots processed per iteration.  Default is unlimited.
+   * Prevents a single tick from blocking the worker for an unbounded duration when the
+   * wheel falls behind (for example, after the system wakes from sleep).
    *
-   * @param max_slots_to_catch_up  Maximum slots to process per tick cycle.
+   * @param max_slots_to_catch_up  Maximum slots processed per tick cycle.
    */
   void set_catchup_limit(uint32_t max_slots_to_catch_up);
 

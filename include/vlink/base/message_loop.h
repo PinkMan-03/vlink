@@ -23,67 +23,73 @@
 
 /**
  * @file message_loop.h
- * @brief Single-threaded event loop with three queue types, timer management and task scheduling.
+ * @brief Single-threaded task dispatcher with three queue backends, timers and scheduling envelopes.
  *
  * @details
- * @c MessageLoop is the primary task dispatcher in VLink.  It owns a task queue and an
- * associated timer registry.  Tasks posted via @c post_task() are executed serially on
- * the loop's thread.  Timers registered with @c Timer::attach() fire their callbacks as
- * regular queue tasks.
+ * @c MessageLoop is VLink's serial task executor.  It owns a bounded task queue and the timer
+ * registry attached to it; tasks posted from any thread execute in order on the loop's own
+ * thread.  Three queue implementations are available; the choice is fixed at construction.
  *
- * Queue types:
+ * @par Dispatch mode table
  *
- * | Type             | Backend                       | Cap   | Notes                       |
- * | ---------------- | ----------------------------- | ----- | --------------------------- |
- * | @c kNormalType   | mutex + std::deque (or pmr)   | 10000 | default; FIFO               |
- * | @c kLockfreeType | MpmcQueue (lock-free MPMC)    | 10000 | lowest contention overhead  |
- * | @c kPriorityType | two pmr/std priority_queue    | 10000 | split droppable / protected |
+ * | Queue type        | Backend                              | Capacity | Properties                  |
+ * | ----------------- | ------------------------------------ | -------- | --------------------------- |
+ * | @c kNormalType    | @c mutex @c + @c std::deque (or pmr) |   10000  | FIFO, lock-based (default)  |
+ * | @c kLockfreeType  | @c MpmcQueue<Callback>               |   10000  | Lock-free MPMC              |
+ * | @c kPriorityType  | Two pmr priority queues              |   10000  | Droppable / protected split |
  *
- * Dispatch strategies (control behaviour when the task queue is FULL on push;
- * idle dispatch is always cv-based, independent of strategy):
+ * Back-pressure on a full queue is selected by @c Strategy: @c kOptimizationStrategy retries
+ * up to ten times with 1 ms sleeps before dropping an eligible task, @c kPopStrategy drops
+ * immediately, @c kBlockStrategy retries indefinitely.  Idle dispatch is always condition-variable
+ * driven and independent of @c Strategy.
  *
- * | Strategy                | Behaviour when push hits the cap                                        |
- * | ------------------------ | ---------------------------------------------------------------------- |
- * | @c kOptimizationStrategy | Retry up to 10 times with 1 ms sleep each; then drop one eligible task |
- * | @c kPopStrategy          | Drop one eligible task immediately and push the new task               |
- * | @c kBlockStrategy        | Retry indefinitely with 1 ms sleep until space is available            |
+ * @par Lifecycle diagram
  *
- * Run modes:
- * - @c run() -- blocks the calling thread until @c quit() is called.
- * - @c async_run() -- launches a new background thread and returns immediately.
- * - @c spin() -- alias for @c run() (blocks the calling thread until @c quit() is called).
- * - @c spin_once() -- processes one batch of pending tasks on the calling thread (optionally blocking);
- *   suitable for integration into an existing event loop.
+ * @verbatim
+ *                          run() / async_run()
+ *   +--------+                        |
+ *   |  idle  | ----- async_run -----> | spawn thread
+ *   +--------+                        |
+ *      ^                              v
+ *      |                          +--------+
+ *      |   wait_for_quit          | active |  <-- post_task / exec_task
+ *      |       (joined)           +--------+
+ *      |                              |
+ *      |                       quit() | quit(true)
+ *      |                              v
+ *      |                          +--------+
+ *      +------- on_end() -------- | drain  | -- pending tasks --> dropped
+ *                                 +--------+
+ * @endverbatim
  *
- * Task execution with scheduling:
- * @c exec_task() wraps a callback in a @c Schedule::Config (delay, priority, timeouts) and
- * posts it.  It returns a @c Schedule::Status or @c Schedule::RetStatus that can be chained
- * with @c on_then / @c on_else / @c on_catch / @c on_schedule_timeout callbacks.
+ * @par Priority levels
  *
- * @note
- * - Maximum task queue depth is 10000 (@c kMaxTaskSize).  When the queue is at
- *   capacity, the configured @c Strategy decides between drop, retry-then-drop
- *   or block-forever; only @c post_task callers using @c TaskOverflowPolicy::kReject
- *   (via @c post_task_handle) get an immediate failure, in which case the @c bool
- *   return is @c false and the returned @c TaskHandle reports @c kRejected.
- * - Maximum active timer count is 100 (@c kMaxTimerSize).
- * - @c invoke_task() dispatches a callable and returns a @c std::future for the result.
- *   Blocking on the future from the same thread as the loop will deadlock.
+ * | Symbol                  | Value | Notes                          |
+ * | ----------------------- | ----- | ------------------------------ |
+ * | @c kNoPriority          | 0     | FIFO sentinel                  |
+ * | @c kLowestPriority      | 1     | Lowest real priority           |
+ * | @c kTimerPriority       | 50    | Reserved for timer callbacks   |
+ * | @c kNormalPriority      | 100   | Default user-task priority     |
+ * | @c kHighestPriority     | 65535 | Highest priority               |
  *
  * @par Example
  * @code
- * vlink::MessageLoop loop;
- * loop.async_run();
+ *   vlink::MessageLoop loop;
+ *   loop.async_run();
  *
- * loop.post_task([] { do_work(); });
+ *   loop.post_task([] { do_work(); });
+ *   loop.post_task_with_priority([] { urgent(); }, vlink::MessageLoop::kHighestPriority);
  *
- * // Blocking invoke from another thread:
- * auto fut = loop.invoke_task([]() -> int { return compute(); });
- * int result = fut.get();  // waits for the loop to process the task
+ *   auto fut = loop.invoke_task([]() -> int { return compute(); });
+ *   int result = fut.get();   // wait from a different thread
  *
- * loop.quit();
- * loop.wait_for_quit();
+ *   loop.quit();
+ *   loop.wait_for_quit();
  * @endcode
+ *
+ * @note Maximum queue depth is @c 10000 (@c kMaxTaskSize) and maximum timer count is @c 100
+ *       (@c kMaxTimerSize).  Blocking @c .get() on the future returned by @c invoke_task from
+ *       inside the loop thread deadlocks; always call it from another thread.
  */
 
 #pragma once
@@ -110,27 +116,16 @@ namespace detail {
 
 /**
  * @struct MessageLoopAliveState
- * @brief Lifetime flag shared between a @c MessageLoop and external observers.
+ * @brief Refcounted lifetime gate shared between a @c MessageLoop and cross-thread observers.
  *
  * @details
- * @c MessageLoopAliveState is a tiny refcounted block published via
- * @c MessageLoop::get_alive_state() and used by coroutine adapters (and similar
- * cross-thread bridges) that need to check whether the loop they are about to
- * resume on is still alive without keeping the @c MessageLoop itself pinned.
+ * Coroutine adapters and similar bridges that want to post a continuation back onto a loop
+ * must verify the loop is still alive.  This struct exposes a mutex and a boolean flag; the
+ * destructor of @c MessageLoop flips @c alive to @c false under @c mtx as its very first step,
+ * so a caller that holds @c mtx and observes @c alive @c == @c true is guaranteed the loop is
+ * still safe to touch.
  *
- * The contract is:
- *  - @c alive starts at @c true on construction.
- *  - @c MessageLoop sets @c alive to @c false under @c mtx as the very first
- *    step of its destructor, before any other teardown.
- *  - Observers acquire @c mtx, re-check @c alive, and only touch the loop
- *    (e.g. @c post_task) while still holding the lock.
- *
- * Holding @c mtx therefore guarantees the @c MessageLoop has not yet entered
- * destruction; releasing @c mtx without observing @c alive @c == @c false also
- * guarantees the next destructor step is still pending.
- *
- * @note Internal type.  Not intended for direct user code; obtain it via
- *       @c MessageLoop::get_alive_state().
+ * @note Internal helper; obtain via @c MessageLoop::get_alive_state.
  */
 struct MessageLoopAliveState final {
   std::mutex mtx;                ///< Serialises destruction against observers.
@@ -141,11 +136,13 @@ struct MessageLoopAliveState final {
 
 /**
  * @class MessageLoop
- * @brief Single-threaded serial task dispatcher with integrated timer support.
+ * @brief Serial task dispatcher with selectable queue backend and bounded timer registry.
  *
  * @details
- * All tasks and timer callbacks run on a single thread.  Thread-safe posting of
- * tasks is allowed from any thread via @c post_task().
+ * Owns a thread that pulls tasks from a bounded queue and fires timer callbacks.  Other threads
+ * may post via @c post_task, @c post_task_with_priority, @c invoke_task or @c exec_task from
+ * any context.  The class is the building block of @c MultiLoop and the engine target of
+ * @c GraphTask::execute.
  */
 class VLINK_EXPORT MessageLoop {
  public:
@@ -153,82 +150,71 @@ class VLINK_EXPORT MessageLoop {
    * @brief Callback type for tasks and event handlers.
    *
    * @details
-   * Move-only (`MoveFunction<void()>`).  Posting and storage paths only
-   * require move semantics; using a move-only wrapper allows targets such as
-   * @c std::packaged_task and lambdas with @c std::unique_ptr captures to be
-   * scheduled directly without a @c std::shared_ptr trampoline.
+   * Move-only so move-only targets such as @c std::packaged_task or lambdas holding
+   * @c std::unique_ptr can be posted directly without a shared trampoline.
    */
   using Callback = MoveFunction<void()>;
 
   /**
-   * @brief Queue implementation type.
-   *
-   * @details
-   * Selects the internal task queue algorithm.  See class documentation for a comparison table.
+   * @brief Internal queue implementation type.
    */
   enum Type : uint8_t {
-    kNormalType = 0,    ///< Mutex-protected FIFO queue (default)
-    kLockfreeType = 1,  ///< Lock-free MPMC queue
-    kPriorityType = 2,  ///< Priority-ordered queue
+    kNormalType = 0,    ///< Mutex-protected FIFO queue (default).
+    kLockfreeType = 1,  ///< Lock-free MPMC queue.
+    kPriorityType = 2,  ///< Priority-ordered queue with droppable / protected split.
   };
 
   /**
-   * @brief Push-side back-pressure strategy applied when the bounded queue is full.
+   * @brief Back-pressure strategy applied when the bounded queue is at capacity.
    *
    * @details
-   * Idle dispatch is unconditionally driven by a condition variable; this enum only
-   * affects how @c post_task / @c invoke_task react when the queue has reached its
-   * capacity.  See the class documentation for a comparison table.
+   * Idle dispatch is unconditionally cv-driven; this enum only affects the push side.
    */
   enum Strategy : uint8_t {
-    kOptimizationStrategy = 0,  ///< Balance: when full, retry; after 10 retries drop one eligible task and push.
-    kPopStrategy = 1,           ///< When full, drop one eligible task immediately and push the new task.
-    kBlockStrategy = 2,         ///< When full, retry indefinitely with 1 ms sleep between attempts.
+    kOptimizationStrategy = 0,  ///< Retry up to ten times, then drop one eligible task and push.
+    kPopStrategy = 1,           ///< Drop one eligible task immediately and push.
+    kBlockStrategy = 2,         ///< Retry indefinitely until space appears.
   };
 
   /**
-   * @brief Pre-defined task priority levels for @c kPriorityType loops.
-   *
-   * @details
-   * Higher numeric values are dispatched first.  Custom priority values may be used
-   * between @c kLowestPriority and @c kHighestPriority.
+   * @brief Built-in priority levels for @c kPriorityType loops; higher values dispatch first.
    */
   enum Priority : uint16_t {
-    kNoPriority = 0,                                         ///< No priority (FIFO order)
-    kLowestPriority = 1,                                     ///< Lowest real priority
-    kTimerPriority = 50,                                     ///< Used internally for timer callbacks
-    kNormalPriority = 100,                                   ///< Default task priority
-    kHighestPriority = std::numeric_limits<uint16_t>::max()  ///< Highest available priority
+    kNoPriority = 0,                                         ///< FIFO sentinel.
+    kLowestPriority = 1,                                     ///< Lowest real priority.
+    kTimerPriority = 50,                                     ///< Reserved for timer callbacks.
+    kNormalPriority = 100,                                   ///< Default user-task priority.
+    kHighestPriority = std::numeric_limits<uint16_t>::max()  ///< Highest priority.
   };
 
   /**
-   * @brief Constructs a @c MessageLoop with @c kNormalType queue.
+   * @brief Constructs a loop with the default @c kNormalType queue.
    */
   MessageLoop();
 
   /**
-   * @brief Constructs a @c MessageLoop with the specified queue type.
+   * @brief Constructs a loop with the given queue type.
    *
-   * @param type  Queue implementation to use.
+   * @param type  Queue implementation.
    */
   explicit MessageLoop(Type type);
 
   /**
-   * @brief Destructor.  Requests quit and waits for the background thread if needed.
+   * @brief Destructor; requests quit and joins the dispatcher thread if needed.
    */
   virtual ~MessageLoop();
 
   /**
-   * @brief Sets a human-readable name for this loop (visible in profiling tools).
+   * @brief Sets a human-readable name visible to profiling tools.
    *
-   * @param name  Name string.
+   * @param name  Loop name.
    */
   void set_name(const std::string& name);
 
   /**
-   * @brief Returns the name set via @c set_name().
+   * @brief Returns the loop name set via @c set_name.
    *
-   * @return Reference to the name string.
+   * @return Reference to the stored name.
    */
   [[nodiscard]] const std::string& get_name() const;
 
@@ -240,93 +226,76 @@ class VLINK_EXPORT MessageLoop {
   [[nodiscard]] Type get_type() const;
 
   /**
-   * @brief Returns the current push-side back-pressure strategy.
+   * @brief Returns the active back-pressure strategy.
    *
    * @return Current strategy.
    */
   [[nodiscard]] Strategy get_strategy() const;
 
   /**
-   * @brief Changes the push-side back-pressure strategy.
+   * @brief Replaces the back-pressure strategy.
    *
-   * @param strategy  New strategy.  Takes effect on subsequent queue-full posts.
+   * @param strategy  New strategy; takes effect on the next full-queue push.
    */
   void set_strategy(Strategy strategy);
 
   /**
-   * @brief Registers a callback invoked once when the loop thread starts.
+   * @brief Registers a callback fired once at loop thread startup.
    *
    * @details
-   * Register before @c run() or @c async_run().  Registrations attempted after
-   * the loop has started are ignored and do not replace the active handler.
+   * Must be registered before @c run / @c async_run; later calls are ignored.
    *
-   * @param callback  Called from the loop thread before the first task is processed.
+   * @param callback  Startup handler.
    */
   void register_begin_handler(Callback&& callback);
 
   /**
-   * @brief Registers a callback invoked once when the loop thread exits.
+   * @brief Registers a callback fired once when the loop thread exits.
    *
    * @details
-   * Register before @c run() or @c async_run().  Registrations attempted after
-   * the loop has started are ignored and do not replace the active handler.
+   * Must be registered before @c run / @c async_run; later calls are ignored.
    *
-   * @param callback  Called from the loop thread after the last task has been processed.
+   * @param callback  Shutdown handler.
    */
   void register_end_handler(Callback&& callback);
 
   /**
-   * @brief Registers a callback invoked each time the task queue becomes empty.
+   * @brief Registers a callback fired every time the queue becomes empty.
    *
    * @details
-   * Register before @c run() or @c async_run().  Registrations attempted after
-   * the loop has started are ignored and do not replace the active handler.
+   * Must be registered before @c run / @c async_run; later calls are ignored.
    *
-   * @param callback  Called from the loop thread on each idle cycle.
+   * @param callback  Idle handler.
    */
   void register_idle_handler(Callback&& callback);
 
   /**
-   * @brief Runs the message loop on the calling thread (blocking).
+   * @brief Runs the loop on the calling thread until @c quit is requested.
    *
-   * @details
-   * Processes tasks and fires timers until @c quit() is called.
-   *
-   * @return @c true if the loop ran and exited normally; @c false if already running.
+   * @return @c true after a normal exit; @c false when the loop is already running.
    */
   bool run();
 
   /**
-   * @brief Starts the message loop on a new background thread (non-blocking).
+   * @brief Starts the loop on a new background thread.
    *
-   * @details
-   * Returns immediately.  The background thread runs until @c quit() is called.
-   *
-   * @return @c true if the thread was started; @c false if already running.
+   * @return @c true when the thread was started; @c false when the loop is already running.
    */
   bool async_run();
 
   /**
-   * @brief Alias for @c run().  Runs the loop on the calling thread (blocking).
+   * @brief Alias of @c run blocking the calling thread.
    *
-   * @details
-   * Equivalent to calling @c run().  Blocks the calling thread until @c quit() is called.
-   *
-   * @return Same return value as @c run().
+   * @return Same return value as @c run.
    */
   bool spin();
 
   /**
-   * @brief Processes one batch of pending tasks and timers.
+   * @brief Processes one batch of pending tasks and timers on the calling thread.
    *
-   * @details
-   * Intended for integration into an existing event loop.
-   *
-   * @param block  If @c true and the queue is empty, blocks until a task arrives.
-   *               If @c false, returns immediately if the queue is empty.  Default: @c true.
-   * @return @c true after a normal processing cycle.
-   *         @c false if the loop has been signalled to quit, or if the call was made from
-   *         a thread other than the loop thread (when one has already been bound by @c run/async_run).
+   * @param block  When @c true (default) blocks if the queue is empty; when @c false returns immediately.
+   * @return @c true after a normal processing cycle; @c false when quitting or the call came from a
+   *         thread that does not own the loop and is unrelated to @c run / @c async_run.
    */
   bool spin_once(bool block = true);
 
@@ -334,239 +303,168 @@ class VLINK_EXPORT MessageLoop {
    * @brief Requests the loop to exit.
    *
    * @details
-   * Sets an internal quit flag that the dispatcher checks between iterations.
-   * Behaviour is **per-batch**, not per-task:
-   *  - With @p force @c == @c false (default), the loop finishes the current
-   *    batch of already-dequeued tasks (the snapshot it is currently iterating)
-   *    and then exits.  Tasks posted after this call are rejected.
-   *  - With @p force @c == @c true, the dispatcher additionally aborts the
-   *    in-flight batch and drops the remaining tasks in that batch.
+   * With @p force @c == @c false the current batch finishes and the loop exits afterwards.  With
+   * @p force @c == @c true the in-flight batch is also aborted.  Tasks queued after the request
+   * are rejected.  Returns @c false when @c quit had already been called (only meaningful when
+   * @p force is @c false).
    *
-   * If a graceful drain of *everything currently queued* is required, prefer
-   * @c wait_for_idle() before @c quit().  Returns @c false if the loop is not
-   * running or @c quit() has already been called (only when @p force is
-   * @c false).
-   *
-   * @param force  If @c true, also discard the in-flight batch.  Default: @c false.
-   * @return @c true if the quit signal was accepted.
+   * @param force  When @c true, also discards the in-flight batch.  Default: @c false.
+   * @return @c true when the quit signal was accepted.
    */
   bool quit(bool force = false);
 
   /**
-   * @brief Waits until the loop has fully exited (after @c quit() was called).
+   * @brief Waits until the loop has fully exited.
    *
-   * @param ms     Maximum wait time in milliseconds.  @c Timer::kInfinite for unlimited.  Default: @c kInfinite.
-   * @param check  If @c true, reject calls made from the loop's own thread to
-   *               avoid self-deadlock.  Default: @c true.
-   * @return @c true if the loop exited within the timeout.
+   * @param ms     Maximum wait in milliseconds; @c Timer::kInfinite means no limit.
+   * @param check  When @c true (default) rejects calls from the loop's own thread.
+   * @return @c true if the loop exited before the timeout.
    */
   bool wait_for_quit(int ms = Timer::kInfinite, bool check = true);
 
   /**
-   * @brief Posts a task to the queue for execution on the loop thread.
+   * @brief Posts a task for execution on the loop thread.
    *
    * @details
-   * Thread-safe.  Returns @c false if the loop has been signalled to quit, or if
-   * the configured overflow handling cannot make room for the new task.  When the
-   * queue is at the cap (@c kMaxTaskSize) the behaviour follows the configured
-   * @c Strategy (drop an eligible task immediately, retry-then-drop, or retry
-   * indefinitely).
+   * Thread-safe.  Returns @c false when the loop is quitting or the configured @c Strategy
+   * cannot make room for the new task.
    *
-   * On @c kPriorityType loops, tasks posted without an explicit priority use
-   * @c kNormalPriority.
-   *
-   * @note Drop-policy semantics:
-   *  - @c kNormalType and @c kPriorityType queues honour @c TaskDropPolicy::kProtected
-   *    on a per-task basis: protected tasks are never selected as overflow drop
-   *    victims, and if every task currently in the queue is protected the post
-   *    fails and returns @c false.
-   *  - @c kLockfreeType queues do not track per-task drop policy; overflow drop
-   *    simply removes one queued task regardless of how it was submitted.
-   *
-   * @param callback  Task to execute.
-   * @return @c true if the task was eventually enqueued (possibly after dropping
-   *         an eligible task or blocking); @c false if the loop is quitting or
-   *         no eligible task could be dropped to make room.
+   * @param callback  Task to post.
+   * @return @c true when the task was enqueued.
    */
   bool post_task(Callback&& callback);
 
   /**
-   * @brief Posts a tracked task to the queue and returns a @c TaskHandle.
+   * @brief Tracked variant of @c post_task returning a @c TaskHandle.
    *
-   * @details
-   * Tracked counterpart of @c post_task().  The returned @c TaskHandle can be
-   * used to wait for completion, request cooperative cancellation through the
-   * task's @c CancellationToken, and observe whether the task was eventually
-   * rejected (queue closed, no droppable victim available) or dropped before
-   * execution.
-   *
-   * @param callback  Task to execute.
-   * @param options   Optional overflow, drop and cancellation policy.  See
-   *                  @c PostTaskOptions for defaults.
-   * @return Handle associated with the posted task.  The handle remains valid
-   *         even if the post is rejected — query its state to find out.
+   * @param callback  Task to post.
+   * @param options   Optional overflow / drop / cancellation policy.
+   * @return Handle bound to the posted task; valid even when posting was rejected.
    */
   [[nodiscard]] TaskHandle post_task_handle(Callback&& callback, const PostTaskOptions& options = {});
 
   /**
-   * @brief Posts a task with an explicit priority (requires @c kPriorityType loop).
+   * @brief Posts a task with an explicit priority on a @c kPriorityType loop.
    *
    * @details
-   * Tasks with higher priority values are dispatched before lower-priority tasks.
-   * Only @c kPriorityType loops honour @p priority; calling this on a
-   * @c kNormalType or @c kLockfreeType loop is rejected and returns @c false.
-   * Overflow behaviour and drop-policy semantics are the same as @c post_task().
+   * Higher @p priority values dispatch first.  Non-priority loops reject the call and return
+   * @c false.
    *
-   * @param callback  Task to execute.
-   * @param priority  Dispatch priority; higher runs first.  Use one of the
-   *                  @c Priority enumerators or any value in
-   *                  @c [kLowestPriority, kHighestPriority].
-   * @return @c true if enqueued successfully; @c false on a non-priority loop,
-   *         if the loop is quitting, or if no eligible task could be dropped.
+   * @param callback  Task to post.
+   * @param priority  Dispatch priority in @c [kLowestPriority, @c kHighestPriority].
+   * @return @c true when the task was enqueued.
    */
   bool post_task_with_priority(Callback&& callback, uint16_t priority);
 
   /**
-   * @brief Posts a tracked task with an explicit priority and returns a @c TaskHandle.
+   * @brief Tracked variant of @c post_task_with_priority returning a @c TaskHandle.
    *
-   * @details
-   * Tracked counterpart of @c post_task_with_priority().  Requires a
-   * @c kPriorityType loop; on other loop types the post is rejected and the
-   * returned handle reports rejection.  See @c post_task_handle() for the
-   * general semantics of the returned handle.
-   *
-   * @param callback  Task to execute.
-   * @param priority  Dispatch priority; higher values run first.
-   * @param options   Optional overflow, drop and cancellation policy.  See
-   *                  @c PostTaskOptions for defaults.
-   * @return Handle associated with the posted task.
+   * @param callback  Task to post.
+   * @param priority  Dispatch priority.
+   * @param options   Optional overflow / drop / cancellation policy.
+   * @return Handle bound to the posted task.
    */
   [[nodiscard]] TaskHandle post_task_with_priority_handle(Callback&& callback, uint16_t priority,
                                                           const PostTaskOptions& options = {});
 
   /**
-   * @brief Posts a scheduled task and returns a @c Schedule::Status for chaining callbacks.
+   * @brief Posts a scheduled @c void-returning callable and returns a chainable @c Schedule::Status.
    *
    * @details
-   * This overload is for callbacks returning @c void.
-   * The @c Schedule::Config can specify a delay, priority, schedule timeout and execution timeout.
-   * Chain @c on_schedule_timeout, @c on_execution_timeout or @c on_catch on the returned status.
+   * @c Schedule::Config carries the delay, priority and timeout fields.  The returned status
+   * supports @c on_then / @c on_else / @c on_catch / @c on_schedule_timeout chaining.
    *
-   * @tparam CallbackT  Callable type returning @c void.
-   * @param config    Scheduling configuration.
-   * @param callback  Callable to execute.
-   * @return @c Schedule::Status for chaining.
+   * @tparam CallbackT  Callable returning @c void.
+   * @param config    Scheduling envelope.
+   * @param callback  Callable to schedule.
+   * @return Chainable status object.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename CallbackT, typename = std::enable_if_t<!std::is_convertible_v<CallbackT, Schedule::RetCallback>>>
   Schedule::Status exec_task(const Schedule::Config& config, CallbackT&& callback);
 
   /**
-   * @brief Posts a scheduled task and returns a @c Schedule::RetStatus for chaining callbacks.
+   * @brief Posts a scheduled @c bool-returning callable and returns a chainable @c Schedule::RetStatus.
    *
    * @details
-   * This overload is for callbacks returning @c bool.  Chain @c on_then (fires if @c true)
-   * and @c on_else (fires if @c false) on the returned status.
+   * @c on_then fires when the callable returns @c true; @c on_else fires when it returns @c false.
    *
-   * @tparam CallbackT  Callable type returning @c bool.
-   * @param config    Scheduling configuration.
-   * @param callback  Callable to execute.
-   * @return @c Schedule::RetStatus for chaining.
+   * @tparam CallbackT  Callable returning @c bool.
+   * @param config    Scheduling envelope.
+   * @param callback  Callable to schedule.
+   * @return Chainable status object.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename CallbackT, typename = std::enable_if_t<std::is_convertible_v<CallbackT, Schedule::RetCallback>>>
   Schedule::RetStatus exec_task(const Schedule::Config& config, CallbackT&& callback);
 
   /**
-   * @brief Wakes the loop thread if it is blocked in its idle @c cv.wait.
+   * @brief Wakes the loop thread if it is suspended in its idle wait.
    *
    * @details
-   * Coalesces concurrent calls: only the first call after the loop last cleared
-   * its wakeup-pending flag actually grabs the wait mutex and notifies.  Useful
-   * when external state (other than queue insertion) has changed and the loop
-   * should re-evaluate its idle predicate.
+   * Concurrent calls coalesce; only the first one after the previous wakeup actually signals.
    *
-   * @return @c true if a wakeup signal is pending for the loop (either sent by
-   *         this call or already pending from a prior call); @c false if the
-   *         loop is not running.
+   * @return @c true when a wakeup is pending (newly issued or already in flight).
    */
   bool wakeup();
 
   /**
-   * @brief Re-creates the lock-free queue, clearing all queued tasks and bookkeeping.
+   * @brief Recreates the lock-free queue, clearing all queued tasks and counters.
    *
    * @details
-   * Only applicable to @c kLockfreeType loops.  Re-emplaces the underlying
-   * @c MpmcQueue (so the @c head_ / @c tail_ cursors and the
-   * @c lockfree_task_count counter are reset to zero) and clears the deferred
-   * @c lockfree_needs_reset flag.
-   *
-   * @note The loop **must be stopped** (i.e. @c is_running() returning @c false)
-   *       before calling this function; calls made while the loop is running
-   *       are logged at error level and silently skipped.  On non-lockfree
-   *       loops the call is a no-op.
+   * Applies only to @c kLockfreeType loops; on other types the call is a no-op.  Must be invoked
+   * while the loop is stopped; calls made while it is running are logged and skipped.
    */
   void reset_lockfree_capacity();
 
   /**
-   * @brief Returns @c true if the loop is currently running (started and not quit).
+   * @brief Reports whether the loop is currently running.
    *
-   * @return @c true if the loop is active.
+   * @return @c true between a successful start and the corresponding @c quit.
    */
   [[nodiscard]] bool is_running() const;
 
   /**
-   * @brief Returns @c true if @c quit() has been called and the loop is winding down.
+   * @brief Reports whether @c quit has been requested and the loop is winding down.
    *
-   * @return @c true if the loop is in the process of quitting.
+   * @return @c true once @c quit has been observed.
    */
   [[nodiscard]] bool is_ready_to_quit() const;
 
   /**
-   * @brief Returns @c true if the loop is currently executing a task.
+   * @brief Reports whether the loop is currently executing a task.
    *
-   * @return @c true if a task callback is in progress on the loop thread.
+   * @return @c true while a callback is on the call stack inside the loop.
    */
   [[nodiscard]] bool is_busy() const;
 
   /**
-   * @brief Returns the number of tasks currently in the queue.
+   * @brief Returns the current pending task count.
    *
-   * @return Pending task count.
+   * @return Number of tasks waiting in the queue.
    */
   [[nodiscard]] size_t get_task_count() const;
 
   /**
-   * @brief Waits until the task queue is drained.
+   * @brief Waits until the loop has drained its queue and is not executing a task.
    *
-   * @details
-   * "Idle" means: the loop is not currently executing a task and the task
-   * queue is empty.  If the loop has not yet been started — i.e. neither
-   * @c run() nor @c async_run() has been called (or the loop has already
-   * exited) — only the empty-queue condition is required; tasks queued
-   * before the first start still keep the loop non-idle and cause this
-   * function to wait (or time out).
-   *
-   * @param ms     Maximum wait time in milliseconds.  @c Timer::kInfinite for unlimited.  Default: @c kInfinite.
-   * @param check  If @c true, also reject calls made from the loop's own
-   *               thread (which would deadlock).  Default: @c true.
-   * @return @c true if the loop reached the idle state within @p ms;
-   *         @c false on timeout or if @p check is @c true and the call was
-   *         made from the loop thread.
+   * @param ms     Maximum wait in milliseconds; @c Timer::kInfinite means no limit.
+   * @param check  When @c true (default) rejects calls from the loop's own thread.
+   * @return @c true when the idle condition was reached within @p ms.
    */
   virtual bool wait_for_idle(int ms = Timer::kInfinite, bool check = true);
 
   /**
    * @brief Returns the maximum queue depth.
    *
-   * @return @c kMaxTaskSize (10000) by default.
+   * @return @c kMaxTaskSize (@c 10000) by default.
    */
   [[nodiscard]] virtual size_t get_max_task_count() const;
 
   /**
-   * @brief Returns the maximum number of timers that can be attached to this loop.
+   * @brief Returns the maximum number of timers that can be attached.
    *
-   * @return @c kMaxTimerSize (100) by default.
+   * @return @c kMaxTimerSize (@c 100) by default.
    */
   [[nodiscard]] virtual size_t get_max_timer_count() const;
 
@@ -574,42 +472,33 @@ class VLINK_EXPORT MessageLoop {
    * @brief Returns the maximum allowed task execution time in milliseconds.
    *
    * @details
-   * When a task exceeds this duration, @c on_task_timeout() is called.
-   * Returns 0 to disable timeout checking.
+   * Tasks exceeding this duration trigger @c on_task_timeout.  Zero disables the check.
    *
-   * @return Maximum execution time in ms.
+   * @return Maximum execution time in milliseconds.
    */
   [[nodiscard]] virtual uint32_t get_max_elapsed_time() const;
 
   /**
-   * @brief Returns @c true if the calling thread is the same as the loop thread.
+   * @brief Reports whether the calling thread is owned by this loop.
    *
    * @details
-   * Used internally to detect if a task is calling back into the loop synchronously.
-   * For @c MultiLoop, returns @c true for the dispatcher thread and worker threads.
+   * Detects callbacks that re-enter the loop synchronously.  For @c MultiLoop this also covers
+   * worker threads of the underlying pool.
    *
-   * @return @c true if called from the loop's own thread.
+   * @return @c true when called from a thread belonging to this loop.
    */
   [[nodiscard]] virtual bool is_in_same_thread() const;
 
   /**
-   * @brief Returns the shared lifetime flag used by coroutine adapters.
+   * @brief Returns the shared lifetime flag used by cross-thread bridges.
    *
    * @details
-   * The returned @c MessageLoopAliveState outlives this @c MessageLoop: its
-   * @c alive member is flipped to @c false under @c mtx as the very first step
-   * of the destructor (see @c MessageLoopAliveState).  Adapters that need to
-   * post a continuation back to this loop from another thread should:
+   * The returned @c MessageLoopAliveState outlives this loop; its @c alive member flips to
+   * @c false under @c mtx as the very first step of the destructor.  Adapters that need to post
+   * continuations back to this loop should lock @c mtx, re-check @c alive, and only call back
+   * while still holding the lock.
    *
-   *  1. Capture the @c shared_ptr returned here (cheap, refcounted).
-   *  2. On the resumer thread, lock @c MessageLoopAliveState::mtx, re-check
-   *     @c alive, and only call back into the loop while still holding the
-   *     lock.
-   *
-   * @return Shared handle to this loop's lifetime flag; never null while the
-   *         loop object itself is alive.
-   * @note Internal API for coroutine adapters and similar cross-thread bridges.
-   *       Application code should not need to call this directly.
+   * @return Shared handle; never null while the loop object is alive.
    */
   [[nodiscard]] std::shared_ptr<detail::MessageLoopAliveState> get_alive_state() const;
 
@@ -617,39 +506,31 @@ class VLINK_EXPORT MessageLoop {
    * @brief Dispatches a callable to the loop thread and returns a @c std::future for the result.
    *
    * @details
-   * Thread-safe.  The future becomes ready after the callable is executed on the loop thread.
+   * Thread-safe.  When posting fails the returned future becomes ready with
+   * @c std::future_error / @c broken_promise.
    *
-   * @warning Do not call @c .get() on the future from the same thread as the loop; doing so will
-   *          deadlock.
+   * @warning Do not call @c .get() on the future from the loop's own thread; doing so deadlocks.
    *
    * @tparam FunctionT  Callable type.
    * @tparam ArgsT      Argument types.
    * @tparam ResultT    Return type (deduced).
    * @param function  Callable to dispatch.
-   * @param args      Arguments forwarded to the callable.
-   * @return @c std::future<ResultT> that becomes ready when the task completes.
-   *         If posting fails, the returned future becomes ready with
-   *         @c std::future_error / @c broken_promise.
+   * @param args      Arguments forwarded to @p function.
+   * @return Future that becomes ready after the callable completes.
    */
   template <class FunctionT, class... ArgsT, typename ResultT = std::invoke_result_t<FunctionT, ArgsT...>>
   [[nodiscard]] std::future<ResultT> invoke_task(FunctionT&& function, ArgsT&&... args);
 
   /**
-   * @brief Dispatches a callable with an explicit priority and returns a @c std::future.
-   *
-   * @details
-   * Same as @c invoke_task() but the task is enqueued at @p priority level.
-   * Requires a @c kPriorityType loop; on other loop types posting fails and
-   * the returned future becomes ready with @c std::future_error /
-   * @c broken_promise.
+   * @brief Priority variant of @c invoke_task; requires a @c kPriorityType loop.
    *
    * @tparam FunctionT  Callable type.
    * @tparam ArgsT      Argument types.
    * @tparam ResultT    Return type (deduced).
    * @param function  Callable to dispatch.
    * @param priority  Dispatch priority.
-   * @param args      Arguments forwarded to the callable.
-   * @return @c std::future<ResultT>.
+   * @param args      Arguments forwarded to @p function.
+   * @return Future that becomes ready after the callable completes.
    */
   template <class FunctionT, class... ArgsT, typename ResultT = std::invoke_result_t<FunctionT, ArgsT...>>
   [[nodiscard]] std::future<ResultT> invoke_task_with_priority(FunctionT&& function, uint16_t priority,
@@ -657,53 +538,47 @@ class VLINK_EXPORT MessageLoop {
 
  protected:
   /**
-   * @brief Called from the loop thread just before the first task is processed.
+   * @brief Hook invoked once on the loop thread before the first task runs.
    *
    * @details
-   * Override in subclasses to perform per-thread initialisation.
+   * Subclasses override to perform per-thread initialisation.
    */
   virtual void on_begin();
 
   /**
-   * @brief Called from the loop thread just after the last task has been processed.
+   * @brief Hook invoked once on the loop thread after the last task runs.
    *
    * @details
-   * Override in subclasses to perform per-thread cleanup.
+   * Subclasses override to perform per-thread cleanup.
    */
   virtual void on_end();
 
   /**
-   * @brief Called from the loop thread each time the queue becomes empty.
+   * @brief Hook invoked on the loop thread each time the queue becomes empty.
    *
    * @details
-   * Override in subclasses to perform idle work (e.g., statistics updates).
+   * Subclasses override to perform idle bookkeeping.
    */
   virtual void on_idle();
 
   /**
-   * @brief Dispatches a single ready task on the loop thread.
+   * @brief Dispatches a ready task on the loop thread.
    *
    * @details
-   * The default implementation invokes @p callback directly (after optionally checking
-   * elapsed-time and forwarding overruns to @c on_task_timeout).  Subclasses override
-   * this to wrap or redirect dispatch -- e.g. @c MultiLoop posts the callback to an
-   * internal @c ThreadPool instead of running it inline.  An override that does not
-   * forward to the base implementation must arrange for @p callback to be invoked
-   * itself, or the task will be silently dropped.
+   * The default implementation invokes @p callback inline.  Subclasses such as @c MultiLoop
+   * override to redirect the call to a worker pool; overrides that do not forward must invoke
+   * @p callback themselves or the task is silently dropped.
    *
-   * @param callback    The task to dispatch.
-   * @param start_time  Millisecond steady_clock timestamp captured when the task was
-   *                    enqueued (0 if elapsed-time tracking is disabled).
+   * @param callback    Task to dispatch.
+   * @param start_time  Millisecond @c steady_clock timestamp captured at enqueue time, or @c 0
+   *                    when elapsed tracking is disabled.
    */
   virtual void on_task_changed(Callback&& callback, uint32_t start_time);
 
   /**
-   * @brief Called when a task's execution time exceeds @c get_max_elapsed_time().
+   * @brief Hook invoked when a task exceeds @c get_max_elapsed_time().
    *
-   * @details
-   * Override to log or handle slow tasks.
-   *
-   * @param callback      The task that timed out.
+   * @param callback      Task that timed out.
    * @param elapsed_time  Actual execution time in milliseconds.
    */
   virtual void on_task_timeout(Callback&& callback, uint32_t elapsed_time);
@@ -820,7 +695,6 @@ inline std::future<ResultT> MessageLoop::invoke_task(FunctionT&& function, ArgsT
     auto res = task.get_future();
 
     if VUNLIKELY (!post_task([task = std::move(task)]() mutable { task(); })) {
-      // Destroying the unposted packaged_task makes the returned future ready with broken_promise.
     }
 
     return res;
@@ -847,7 +721,6 @@ inline std::future<ResultT> MessageLoop::invoke_task_with_priority(FunctionT&& f
     auto res = task.get_future();
 
     if VUNLIKELY (!post_task_with_priority([task = std::move(task)]() mutable { task(); }, priority)) {
-      // Destroying the unposted packaged_task makes the returned future ready with broken_promise.
     }
 
     return res;

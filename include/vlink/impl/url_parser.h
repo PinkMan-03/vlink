@@ -23,13 +23,14 @@
 
 /**
  * @file url_parser.h
- * @brief RFC-compliant URL/URI parser used internally by the VLink transport layer.
+ * @brief Strict subset of an RFC 3986 URL parser used by the VLink transport layer.
  *
  * @details
- * @c UrlParser decomposes a URL string into its constituent components following a
- * strict subset of RFC 3986.  It is used by @c Url to extract the URI scheme
- * (which VLink treats as the transport prefix), host, path, and query parameters
- * from VLink topic addresses such as:
+ * This is an internal implementation header used by @c Protocol and the
+ * URL-driven transport routing path; application code does not interact with
+ * it directly.  @c UrlParser decomposes a VLink topic URL into the parts that
+ * @c Url needs to select a transport @c Conf and to configure the resulting
+ * @c NodeImpl.  Typical inputs look like:
  *
  * @code
  *   dds://my_domain/vehicle/speed?domain_id=1&qos=best_effort
@@ -37,30 +38,59 @@
  *   someip://127.0.0.1:30490/my_service?instance_id=1
  * @endcode
  *
- * @par Supported URL Components
- * | Component  | Example                     | Description                                       |
- * | ---------- | --------------------------- | ------------------------------------------------- |
- * | transport  | @c dds                      | URI scheme / VLink transport prefix before @c :// |
- * | content    | @c //host/path              | Full content portion after the scheme             |
- * | username   | @c user                     | Optional credential before host                   |
- * | password   | @c pass                     | Optional credential after @c :                    |
- * | host       | @c 127.0.0.1                | Hostname or IP address                            |
- * | port       | @c 30490                    | TCP/UDP port number                               |
- * | path       | @c vehicle/speed            | Topic path; leading slash stored separately       |
- * | query      | @c domain_id=1&qos=...      | Raw query string after @c ?                       |
- * | fragment   | @c section1                 | Fragment identifier after @c #                    |
+ * @par URL grammar
+ * | Component  | Example                  | Description                                       |
+ * | ---------- | ------------------------ | ------------------------------------------------- |
+ * | transport  | @c dds                   | URI scheme / VLink transport prefix before @c :// |
+ * | content    | @c //host/path           | Full content portion after the scheme separator   |
+ * | username   | @c user                  | Optional credential before host                   |
+ * | password   | @c pass                  | Optional credential after @c :                    |
+ * | host       | @c 127.0.0.1             | Hostname or IP address                            |
+ * | port       | @c 30490                 | TCP / UDP port number                             |
+ * | path       | @c vehicle/speed         | Topic path; leading slash stored separately       |
+ * | query      | @c domain_id=1&qos=...   | Raw query string after @c ?                       |
+ * | fragment   | @c section1              | Fragment identifier after @c #                    |
  *
- * @par Query Dictionary
- * The query string is automatically split into a @c std::map<string,string> using
- * either @c & (default) or @c ; as the key-value pair separator.  Values are
- * split on the first @c = character.
+ * @par Parser outputs
+ * | Accessor                        | Resulting type                              |
+ * | ------------------------------- | ------------------------------------------- |
+ * | @c get_transport() const        | @c const std::string&                       |
+ * | @c get_category() const         | @c Category                                 |
+ * | @c get_content() const          | @c const std::string& (non-hierarchical)    |
+ * | @c get_username() const         | @c const std::string& (hierarchical)        |
+ * | @c get_password() const         | @c const std::string& (hierarchical)        |
+ * | @c get_host() const             | @c const std::string& (hierarchical)        |
+ * | @c get_port() const             | @c int64_t (hierarchical)                   |
+ * | @c get_path() const             | @c const std::string& (hierarchical)        |
+ * | @c get_query() const            | @c const std::string&                       |
+ * | @c get_query_dictionary() const | @c const std::map<std::string,std::string>& |
+ * | @c get_fragment() const         | @c const std::string&                       |
+ * | @c to_string() const            | @c std::string (reconstructed URL)          |
+ *
+ * @par Query dictionary
+ * The raw query string is split into a @c std::map<std::string,std::string>
+ * using either @c & (default) or @c ; as the key/value pair separator.  Each
+ * token is split on the first @c = character; keys without a value become
+ * empty strings.
  *
  * @par Category
- * - @c kHierarchical -- standard @c scheme://authority/path?query#fragment syntax.
- * - @c kNonHierarchical -- opaque @c scheme:content syntax (e.g. @c mailto:user(at)host).
+ * - @c kHierarchical: standard @c scheme://authority/path?query#fragment URL.
+ * - @c kNonHierarchical: opaque @c scheme:content form (e.g. @c mailto:user(at)host).
  *
- * @note @c UrlParser is a value type; it parses the URL at construction time and
- *       provides read-only accessors for each extracted component.
+ * @par Example
+ * @code
+ * vlink::UrlParser parser("dds://10.0.0.1:7400/cars/1?qos=best_effort#stats");
+ *
+ * parser.get_transport();         // "dds"
+ * parser.get_host();              // "10.0.0.1"
+ * parser.get_port();              // 7400
+ * parser.get_path();              // "cars/1"
+ * parser.get_query_dictionary();  // {"qos" -> "best_effort"}
+ * parser.get_fragment();          // "stats"
+ * @endcode
+ *
+ * @note @c UrlParser is a value type; parsing happens once during construction
+ *       and accessors return references valid for the lifetime of the object.
  */
 
 #pragma once
@@ -75,32 +105,31 @@ namespace vlink {
 
 /**
  * @class UrlParser
- * @brief Immutable RFC-3986 URL parser.
+ * @brief Immutable URL decomposition used by the VLink transport router.
  *
  * @details
- * Parses the input URL string once at construction time.  All accessor methods
- * are @c const and return references to internally stored strings; the lifetime
- * of the returned references is tied to the lifetime of the @c UrlParser object.
- * For hierarchical URLs, the stored path does not include the leading @c /
- * marker; rootedness is tracked separately so @c to_string() can reconstruct it.
+ * Parses the input URL once at construction and exposes each component through
+ * @c const accessors.  For hierarchical URLs the stored path drops the leading
+ * @c / marker; the rootedness flag is preserved separately so @c to_string()
+ * can reconstruct an equivalent representation.
  */
 class VLINK_EXPORT UrlParser final {
  public:
   /**
    * @enum Category
-   * @brief Distinguishes hierarchical and non-hierarchical URL forms.
+   * @brief Distinguishes hierarchical and non-hierarchical URI forms.
    */
   enum class Category : uint8_t {
-    kHierarchical = 0,     ///< Standard @c scheme://authority/path form (most VLink transports).
-    kNonHierarchical = 1,  ///< Opaque @c scheme:content form (e.g. @c mailto:).
+    kHierarchical = 0,     ///< Standard @c scheme://authority/path layout (most VLink transports).
+    kNonHierarchical = 1,  ///< Opaque @c scheme:content layout (e.g. @c mailto:).
   };
 
   /**
    * @enum Component
-   * @brief Identifies individual URL components for the components-map constructor.
+   * @brief Component identifiers accepted by the explicit-components constructor.
    */
   enum class Component : uint8_t {
-    kTransport = 0,  ///< URI scheme / VLink transport prefix (e.g. @c dds, @c intra).
+    kTransport = 0,  ///< URI scheme / VLink transport prefix.
     kContent = 1,    ///< Full content string after the scheme separator.
     kUsername = 2,   ///< Optional authentication username.
     kPassword = 3,   ///< Optional authentication password.
@@ -113,7 +142,7 @@ class VLINK_EXPORT UrlParser final {
 
   /**
    * @enum Separator
-   * @brief Query-string key-value pair delimiter.
+   * @brief Selectable separator used to break the query string into key/value pairs.
    */
   enum class Separator : uint8_t {
     kAmpersand = 0,  ///< @c & separator (default; @c key=val&key2=val2).
@@ -121,80 +150,76 @@ class VLINK_EXPORT UrlParser final {
   };
 
   /**
-   * @brief Constructs a parser by parsing the given C-string URL.
+   * @brief Parses @p str as a null-terminated URL string.
    *
-   * @param str        Null-terminated URL string to parse.
-   * @param category   Hierarchical or non-hierarchical form; default hierarchical.
-   * @param separator  Query key-value delimiter; default ampersand (@c &).
+   * @param str        URL string to parse.
+   * @param category   Hierarchical or non-hierarchical layout; default hierarchical.
+   * @param separator  Query-pair separator; default @c &.
    */
   explicit UrlParser(const char* str, Category category = Category::kHierarchical,
                      Separator separator = Separator::kAmpersand);
 
   /**
-   * @brief Constructs a parser by parsing the given @c std::string URL.
+   * @brief Parses @p str as an @c std::string URL.
    *
    * @param str        URL string to parse.
-   * @param category   Hierarchical or non-hierarchical form; default hierarchical.
-   * @param separator  Query key-value delimiter; default ampersand (@c &).
+   * @param category   Hierarchical or non-hierarchical layout; default hierarchical.
+   * @param separator  Query-pair separator; default @c &.
    */
   explicit UrlParser(const std::string& str, Category category = Category::kHierarchical,
                      Separator separator = Separator::kAmpersand);
 
   /**
-   * @brief Constructs a URL from an explicit component map.
+   * @brief Builds a parser directly from an explicit component map.
    *
    * @details
-   * Builds the internal state from a pre-decomposed set of components rather than
-   * parsing a raw URL string.  Useful when constructing a modified URL from an
-   * existing @c UrlParser instance.
+   * Useful for constructing a URL from a previously decomposed set of fields
+   * instead of parsing a raw string.
    *
-   * @param components  Map of @c Component to string value for each component present.
-   * @param category    Hierarchical or non-hierarchical form.
-   * @param rooted      @c true if the path begins with @c / (hierarchical URLs only).
-   * @param separator   Query key-value delimiter; default ampersand.
+   * @param components  Map of @c Component to value for every present component.
+   * @param category    Hierarchical or non-hierarchical layout.
+   * @param rooted      @c true when the path starts with @c / (hierarchical URLs).
+   * @param separator   Query-pair separator; default @c &.
    *
-   * @throws Exception::RuntimeError if @p category is @c Category::kHierarchical and
-   *         @c Component::kPath is absent from @p components (an empty path must still
-   *         be present as an explicit key), or if @p category is
-   *         @c Category::kNonHierarchical and @c Component::kContent is absent.
+   * @throws Exception::RuntimeError when @p category is @c Category::kHierarchical
+   *         and @c Component::kPath is missing, or when @p category is
+   *         @c Category::kNonHierarchical and @c Component::kContent is missing.
    */
   explicit UrlParser(const std::map<Component, std::string>& components, Category category, bool rooted,
                      Separator separator = Separator::kAmpersand);
 
   /**
-   * @brief Constructs a parser by copying @p other and overriding specific components.
+   * @brief Builds a parser by copying @p other and overriding selected components.
    *
    * @details
-   * Copies all components from @p other, then replaces those present in
-   * @p replacements.  Equivalent to creating a modified copy of an existing URL.
+   * Equivalent to producing a modified copy of an existing URL.
    *
-   * @param other         Source @c UrlParser to copy from.
-   * @param replacements  Components to override in the copy.
+   * @param other         Source parser.
+   * @param replacements  Components that override the corresponding entries in @p other.
    */
   explicit UrlParser(const UrlParser& other, const std::map<Component, std::string>& replacements);
 
   /**
-   * @brief Returns the transport string parsed from the URL (e.g. @c "dds", @c "intra").
+   * @brief Returns the parsed transport string (e.g. @c "dds" or @c "intra").
    *
-   * @return Reference to the parsed transport component; empty if not present.
+   * @return Reference to the transport component; empty when absent.
    */
   [[nodiscard]] const std::string& get_transport() const;
 
   /**
-   * @brief Returns the URL category (hierarchical or non-hierarchical).
+   * @brief Returns the URL category supplied at construction time.
    *
-   * @return The @c Category value supplied at construction.
+   * @return Either @c Category::kHierarchical or @c Category::kNonHierarchical.
    */
   [[nodiscard]] Category get_category() const;
 
   /**
-   * @brief Returns the full content portion of the URL (after the scheme separator).
+   * @brief Returns the full content portion of a non-hierarchical URL.
    *
    * @details
-   * Valid only for @c Category::kNonHierarchical; calling this on a
-   * hierarchical URL throws @c Exception::RuntimeError.
+   * Calling this method on a hierarchical URL throws @c Exception::RuntimeError.
    *
-   * @return Reference to the parsed content string.
+   * @return Reference to the content string.
    */
   [[nodiscard]] const std::string& get_content() const;
 
@@ -202,10 +227,9 @@ class VLINK_EXPORT UrlParser final {
    * @brief Returns the authentication username component.
    *
    * @details
-   * Valid only for @c Category::kHierarchical; calling this on a
-   * non-hierarchical URL throws @c Exception::RuntimeError.
+   * Valid only for hierarchical URLs; otherwise throws @c Exception::RuntimeError.
    *
-   * @return Reference to the parsed username; empty if not present.
+   * @return Reference to the username; empty when absent.
    */
   [[nodiscard]] const std::string& get_username() const;
 
@@ -213,10 +237,9 @@ class VLINK_EXPORT UrlParser final {
    * @brief Returns the authentication password component.
    *
    * @details
-   * Valid only for @c Category::kHierarchical; calling this on a
-   * non-hierarchical URL throws @c Exception::RuntimeError.
+   * Valid only for hierarchical URLs; otherwise throws @c Exception::RuntimeError.
    *
-   * @return Reference to the parsed password; empty if not present.
+   * @return Reference to the password; empty when absent.
    */
   [[nodiscard]] const std::string& get_password() const;
 
@@ -224,21 +247,19 @@ class VLINK_EXPORT UrlParser final {
    * @brief Returns the host component (hostname or IP address).
    *
    * @details
-   * Valid only for @c Category::kHierarchical; calling this on a
-   * non-hierarchical URL throws @c Exception::RuntimeError.
+   * Valid only for hierarchical URLs; otherwise throws @c Exception::RuntimeError.
    *
-   * @return Reference to the parsed host string; empty if not present.
+   * @return Reference to the host string; empty when absent.
    */
   [[nodiscard]] const std::string& get_host() const;
 
   /**
-   * @brief Returns the port number, or @c 0 if no port was specified.
+   * @brief Returns the port number, or @c 0 when no port was specified.
    *
    * @details
-   * Valid only for @c Category::kHierarchical; calling this on a
-   * non-hierarchical URL throws @c Exception::RuntimeError.
+   * Valid only for hierarchical URLs; otherwise throws @c Exception::RuntimeError.
    *
-   * @return Parsed port as @c int64_t; @c 0 if absent.
+   * @return Parsed port as @c int64_t; @c 0 when absent.
    */
   [[nodiscard]] int64_t get_port() const;
 
@@ -246,51 +267,49 @@ class VLINK_EXPORT UrlParser final {
    * @brief Returns the path component of the URL.
    *
    * @details
-   * Valid only for @c Category::kHierarchical; calling this on a
-   * non-hierarchical URL throws @c Exception::RuntimeError.  The returned path
-   * omits the leading @c / for rooted hierarchical URLs; rootedness is preserved
-   * internally for reconstruction by @c to_string().
+   * Valid only for hierarchical URLs; otherwise throws @c Exception::RuntimeError.
+   * The returned string omits the leading @c / for rooted hierarchical URLs;
+   * the rootedness flag is retained internally and emitted again by
+   * @c to_string().
    *
-   * @return Reference to the parsed path string without the leading root slash;
-   *         empty if not present.
+   * @return Reference to the path; empty when absent.
    */
   [[nodiscard]] const std::string& get_path() const;
 
   /**
-   * @brief Returns the raw query string (without the leading @c ? character).
+   * @brief Returns the raw query string (without the leading @c ?).
    *
-   * @return Reference to the raw query; empty if no query was present.
+   * @return Reference to the raw query; empty when no query was present.
    */
   [[nodiscard]] const std::string& get_query() const;
 
   /**
-   * @brief Returns the parsed query string as a key-value dictionary.
+   * @brief Returns the parsed query string as a key/value dictionary.
    *
    * @details
    * Built by splitting the raw query on the configured @c Separator and then
-   * splitting each token on the first @c = character.  Keys without a @c =
-   * are stored with an empty-string value.
+   * splitting each token on the first @c = character.  Keys without a value
+   * appear with an empty string.
    *
-   * @return Reference to the @c std::map<string,string> query dictionary.
+   * @return Reference to the query dictionary.
    */
   [[nodiscard]] const std::map<std::string, std::string>& get_query_dictionary() const;
 
   /**
-   * @brief Returns the fragment identifier component (without the leading @c #).
+   * @brief Returns the fragment identifier (without the leading @c #).
    *
-   * @return Reference to the parsed fragment; empty if not present.
+   * @return Reference to the fragment; empty when absent.
    */
   [[nodiscard]] const std::string& get_fragment() const;
 
   /**
-   * @brief Reconstructs the URL string from parsed components.
+   * @brief Reconstructs the URL string from the parsed components.
    *
    * @details
-   * Re-assembles the parsed URI from stored components.  Hierarchical URLs are
-   * emitted as @c scheme://authority/path?query#fragment when authority content
-   * was present, while non-hierarchical URLs are emitted as
+   * Hierarchical URLs are reassembled as @c scheme://authority/path?query#fragment
+   * when an authority is present; non-hierarchical URLs as
    * @c scheme:content?query#fragment.  The output may differ from the original
-   * input if equivalent components were represented differently.
+   * input when equivalent components were originally written differently.
    *
    * @return Reconstructed URL string.
    */

@@ -23,49 +23,56 @@
 
 /**
  * @file terminal_stream.h
- * @brief Buffered, thread-safe stdout stream with TTY detection and ANSI support.
+ * @brief Lock-protected buffered stdout writer with TTY detection and ANSI escape support.
  *
  * @details
- * Provides @c TerminalStream, a process-singleton output stream backed by a
- * 1-MiB internal buffer that writes to @c stdout via direct POSIX @c write() /
- * Win32 @c _write() calls, bypassing @c std::cout / stdio buffering and locale
- * overhead.  Designed for hot-path logging where @c iostream is too expensive.
+ * @c TerminalStream is a process singleton that funnels formatted output straight into a
+ * one-megabyte internal buffer and emits it through raw @c write() / @c _write() syscalls.
+ * It exists because @c std::cout's locale conversion, hidden allocations, and per-character
+ * mutex traffic dominate the cost of hot-path logging in the VLink runtime.
  *
- * @par Buffering model
- * - Writes are appended to a fixed-size internal buffer (default @c kDefaultBufferSize = 1 MiB).
- * - When the buffer is full (or @c flush() / a flushing manipulator is invoked), the
- *   accumulated bytes are written in one or more @c write() syscalls.
- * - A single write whose length is >= buffer size flushes the existing buffer first,
- *   writes directly to stdout, and buffers any unwritten suffix if the direct write
- *   only partially completes.
+ * @par Stream modes
+ *
+ * | Mode               | Trigger                                       | Behaviour                                    |
+ * | ------------------ | --------------------------------------------- | -------------------------------------------- |
+ * | Buffered append    | write fits in remaining buffer space          | append to buffer, no syscall                 |
+ * | Auto flush         | buffer fills or @c endl is used               | drain buffer with @c write() / @c _write()   |
+ * | Direct passthrough | single write >= @c kDefaultBufferSize         | flush buffer first, then write directly      |
+ * | Manual flush       | @c flush() or @c flush_manip invoked          | drain buffer (and @c tcdrain on POSIX TTYs)  |
+ *
+ * @par ANSI colour cheat-sheet (foreground)
+ *
+ * | Sequence        | Effect                 |   | Sequence        | Effect                       |
+ * | --------------- | ---------------------- | - | --------------- | ---------------------------- |
+ * | @c "\x1b[0m"    | reset all attributes   |   | @c "\x1b[37m"   | white                        |
+ * | @c "\x1b[1m"    | bold / bright          |   | @c "\x1b[90m"   | bright black (grey)          |
+ * | @c "\x1b[30m"   | black                  |   | @c "\x1b[91m"   | bright red                   |
+ * | @c "\x1b[31m"   | red                    |   | @c "\x1b[92m"   | bright green                 |
+ * | @c "\x1b[32m"   | green                  |   | @c "\x1b[93m"   | bright yellow                |
+ * | @c "\x1b[33m"   | yellow                 |   | @c "\x1b[94m"   | bright blue                  |
+ * | @c "\x1b[34m"   | blue                   |   | @c "\x1b[95m"   | bright magenta               |
+ * | @c "\x1b[35m"   | magenta                |   | @c "\x1b[96m"   | bright cyan                  |
+ * | @c "\x1b[36m"   | cyan                   |   | @c "\x1b[97m"   | bright white                 |
+ *
+ * Background colours follow the same pattern shifted by 10 (@c "\x1b[40m" -> @c "\x1b[47m").
+ * Always gate colour emission behind @c is_tty() so redirected output stays clean.
  *
  * @par Thread safety
- * Every public method takes the same internal @c std::mutex, so concurrent
- * writes from multiple threads do not interleave within a single @c << call.
- * Note that long chains like @c (stream << a << b << c) acquire and release
- * the mutex per @c << operation, so other threads may interleave between them
- * unless callers wrap the chain in an external lock.
- *
- * @par TTY detection and ANSI
- * @c init() detects whether @c stdout is connected to a terminal and, on
- * Windows, enables virtual-terminal processing so ANSI colour escape codes
- * are interpreted.  Call @c init() once at program start before relying on
- * @c is_tty() or before emitting colour codes.
- *
- * @par Singleton access
- * @c TerminalStream::get() returns the per-process singleton.  The convenience
- * macro @c VLINK_TERM_OUT expands to @c vlink::TerminalStream::get().
+ * Every public method takes the same internal mutex, so a single @c operator<< call cannot
+ * interleave with another thread's call.  Chained writes (@c ts << a << b) acquire the mutex
+ * per token; wrap the chain in an external lock if cross-token atomicity is required.
  *
  * @par Example
  * @code
- * vlink::TerminalStream::get().init();
+ *   auto& ts = vlink::TerminalStream::get();
+ *   ts.init();
  *
- * VLINK_TERM_OUT << "hello " << 42 << " " << 3.14 << vlink::TerminalStream::endl;
- *
- * // Equivalent:
- * auto& ts = vlink::TerminalStream::get();
- * ts << "x=" << static_cast<long long>(123456789) << '\n';
- * ts.flush();
+ *   if (ts.is_tty()) {
+ *     ts << "\x1b[32m[OK]\x1b[0m  ";
+ *   } else {
+ *     ts << "[OK]  ";
+ *   }
+ *   ts << "boot in " << 12.3 << " ms" << vlink::TerminalStream::endl;
  * @endcode
  */
 
@@ -85,109 +92,62 @@ namespace vlink {
 
 /**
  * @class TerminalStream
- * @brief Singleton buffered stdout writer with thread-safety and TTY detection.
+ * @brief Process-wide buffered stdout writer with TTY detection, ANSI support, and a 1 MiB ring.
  *
  * @details
- * Obtain the singleton with @c TerminalStream::get() (or the @c VLINK_TERM_OUT
- * macro).  Copy and move are deleted -- the class is non-instantiable outside
- * of the singleton path.
- *
- * Internally holds:
- * - A fixed-size @c std::vector<char> buffer (@c kDefaultBufferSize bytes by default).
- * - A write cursor @c write_pos_ into the buffer.
- * - A @c std::mutex guarding the buffer and cursor.
- * - Two @c std::atomic_bool flags: @c initialized_ (set by @c init()) and @c is_tty_
- *   (set when @c init() detects a TTY).
- * - The underlying file descriptor (stdout by default).
+ * Construction is hidden behind @c get(); copy and move are disabled.  Internally the class
+ * keeps the buffer, write cursor, file descriptor, and an atomic TTY flag set by @c init().
  */
 class VLINK_EXPORT TerminalStream final {
  public:
   /**
-   * @brief Default internal buffer size (1 MiB).
+   * @brief Default capacity of the internal buffer (1 MiB).
    *
    * @details
-   * Writes shorter than this fit into the buffer and are batched until @c flush() / a
-   * flushing manipulator runs or the buffer fills up.  Writes longer than this bypass
-   * the buffer and go directly to @c stdout.
+   * Writes smaller than this accumulate in the buffer until @c flush() / a flushing manipulator
+   * fires or the buffer fills.  Writes at or above this threshold bypass the buffer.
    */
   static constexpr size_t kDefaultBufferSize{1024 * 1024 * 1};
 
   /**
-   * @brief Type alias for stream manipulator functions.
-   *
-   * @details
-   * Any free / static function with signature
-   * @c TerminalStream& fn(TerminalStream&) may be passed to @c operator<<.
-   * Built-in manipulators include @c TerminalStream::endl and
-   * @c TerminalStream::flush_manip.
+   * @brief Function-pointer type accepted by @c operator<<(ManipType) for custom manipulators.
    */
   using ManipType = TerminalStream& (*)(TerminalStream&);
 
   /**
-   * @brief Returns the process-global @c TerminalStream singleton.
-   *
-   * @details
-   * The singleton is constructed on first call (Meyers singleton).  Its
-   * destructor runs at program exit and flushes any unwritten buffered
-   * data to @c stdout.  Safe to call concurrently.
+   * @brief Returns the process-wide singleton, building it on the first call.
    *
    * @return Reference to the singleton instance.
    */
   static TerminalStream& get() noexcept;
 
   /**
-   * @brief Stream manipulator that appends a newline and flushes the buffer.
+   * @brief Manipulator that appends a newline byte and flushes the buffer.
    *
-   * @details
-   * Equivalent to writing @c "\n" followed by @c flush().  Used with
-   * @c operator<<(ManipType) to terminate a line and force immediate output.
-   *
-   * @par Example
-   * @code
-   * stream << "ready" << TerminalStream::endl;
-   * @endcode
-   *
-   * @param stream  The @c TerminalStream to write to.
+   * @param stream  Stream to write to.
    * @return Reference to @p stream for chaining.
    */
   static TerminalStream& endl(TerminalStream& stream) noexcept;
 
   /**
-   * @brief Stream manipulator that flushes the buffer without appending a newline.
+   * @brief Manipulator that flushes the buffer without appending any byte.
    *
-   * @details
-   * Forces immediate write of all currently buffered bytes to @c stdout.
-   * Unlike @c endl, no newline is added.
-   *
-   * @par Example
-   * @code
-   * stream << "[progress] " << TerminalStream::flush_manip;
-   * @endcode
-   *
-   * @param stream  The @c TerminalStream to flush.
+   * @param stream  Stream to flush.
    * @return Reference to @p stream for chaining.
    */
   static TerminalStream& flush_manip(TerminalStream& stream) noexcept;
 
   /**
-   * @brief Constructs the stream with a @c kDefaultBufferSize internal buffer.
+   * @brief Constructs the stream with a @c kDefaultBufferSize buffer and platform stdout fd.
    *
    * @details
-   * Allocates 1 MiB for the buffer up-front; no further allocation occurs
-   * during normal operation.  The file descriptor is initialised to the
-   * platform's @c stdout fd (@c STDOUT_FILENO on POSIX, @c _fileno(stdout)
-   * on Windows).  @c init() must be called separately to detect TTY status
-   * and to enable Windows ANSI processing.
+   * No syscalls run at construction time; @c init() detects TTY status and enables Windows
+   * virtual-terminal processing when invoked separately.
    */
   TerminalStream() noexcept;
 
   /**
-   * @brief Destructor -- flushes any remaining buffered data to stdout.
-   *
-   * @details
-   * Acquires the internal mutex and calls the unlocked flush path so any
-   * pending bytes are written out before the process exits.  Called
-   * automatically at program shutdown for the singleton instance.
+   * @brief Flushes any pending bytes and releases internal storage.
    */
   ~TerminalStream() noexcept;
 
@@ -200,117 +160,64 @@ class VLINK_EXPORT TerminalStream final {
   TerminalStream& operator=(TerminalStream&&) noexcept = delete;
 
   /**
-   * @brief Initialises the stream: detects the file descriptor and TTY status.
+   * @brief Detects the platform stdout descriptor, TTY status, and enables Windows ANSI handling.
    *
    * @details
-   * Performs three actions, guarded by an atomic flag so only the first call
-   * has effect:
-   * - Sets @c fd_ to the platform stdout descriptor.
-   * - On Windows, fetches @c STD_OUTPUT_HANDLE and enables the
-   *   @c ENABLE_VIRTUAL_TERMINAL_PROCESSING console mode so ANSI escape codes
-   *   (colours, cursor movement) are interpreted by the console host.
-   * - Caches @c isatty() result in @c is_tty_ for fast queries.
-   *
-   * Idempotent: second and later calls return immediately without re-running
-   * setup.  Safe to call from multiple threads concurrently; only one thread
-   * will execute the body.
-   *
-   * Must be called once before relying on @c is_tty() or emitting ANSI
-   * sequences on Windows.  Plain ASCII writes work without calling @c init().
+   * Idempotent and thread-safe; only the first call performs work.  Call once early in
+   * @c main() before relying on @c is_tty() or emitting ANSI escape sequences on Windows.
    */
   void init() noexcept;
 
   /**
-   * @brief Returns @c true if stdout is connected to a terminal (TTY).
+   * @brief Reports whether stdout was a terminal when @c init() ran.
    *
-   * @details
-   * Reads the cached @c is_tty_ flag set by @c init().  Returns @c false if
-   * @c init() has not been called yet.  Useful to gate colour / cursor
-   * escape sequences (e.g. only emit @c "\x1b[31m" when output is a terminal,
-   * not a redirected file).
-   *
-   * @return @c true if stdout was a TTY at the time @c init() ran.
+   * @return @c true when @c init() saw a TTY; @c false otherwise.
    */
   [[nodiscard]] bool is_tty() const noexcept;
 
   /**
-   * @brief Returns @c true if @c init() has been called.
+   * @brief Reports whether @c init() has been invoked.
    *
-   * @details
-   * Reads the @c initialized_ flag.  Useful to lazy-initialise in code paths
-   * that may be reached before any explicit @c init() call.
-   *
-   * @return @c true after the first successful @c init() call; @c false otherwise.
+   * @return @c true once @c init() completes for the first time.
    */
   [[nodiscard]] bool is_initialized() const noexcept;
 
   /**
-   * @brief Flushes all buffered data to stdout immediately.
+   * @brief Drains every buffered byte to stdout immediately.
    *
    * @details
-   * Acquires the internal mutex and forwards to the unlocked flush path:
-   * - Writes the buffered bytes to @c stdout using @c write() / @c _write()
-   *   in a loop until either all bytes are written or @c write() returns
-   *   <= 0.
-   * - Resets the internal write cursor to 0 on full success.  If only part of
-   *   the buffer was written, the unwritten bytes remain buffered.
-   * - On non-Windows TTY outputs, additionally calls @c tcdrain() so that
-   *   the kernel-level terminal output queue is drained before returning.
-   *   This produces the strongest "user can see it now" guarantee on POSIX.
-   *
-   * @note Safe to call concurrently; the internal mutex serialises with
-   *       active writers.  Blocking time is proportional to the number of
-   *       bytes pending and (on TTYs) the terminal's drain latency.
+   * On POSIX TTYs the call additionally invokes @c tcdrain() so the kernel queue is empty
+   * before returning, providing a strong "user can see it now" guarantee.
    */
   void flush();
 
   /**
-   * @brief Writes a raw byte array of @p len bytes to the buffer.
+   * @brief Appends a raw byte array verbatim to the buffer.
    *
-   * @details
-   * Bypasses any character-class formatting (no escaping, no NUL termination
-   * stripping).  The @p data bytes are appended verbatim and may contain
-   * arbitrary binary values, including embedded NULs.
-   *
-   * Internally, if @p len is >= the buffer size, the current buffer is flushed
-   * first and the data is written directly to @c stdout in one or more @c write()
-   * calls.  If the direct write only partially completes, the unwritten suffix is
-   * buffered for a later @c flush(); otherwise the bytes are appended to the buffer.
-   *
-   * @param data  Pointer to the bytes to write.  Must be valid for at least
-   *              @p len bytes; not retained beyond the call.
-   * @param len   Number of bytes to write.  Zero is a no-op.
+   * @param data  Pointer to @p len bytes; not retained beyond the call.
+   * @param len   Number of bytes to append; @c 0 is a no-op.
    * @return Reference to @c *this for chaining.
    */
   TerminalStream& write_raw(const char* data, size_t len) noexcept;
 
   /**
-   * @brief Writes a single character to the buffer.
+   * @brief Appends a single character to the buffer.
    *
-   * @param c  The character to append.
+   * @param c  Character to append.
    * @return Reference to @c *this for chaining.
    */
   TerminalStream& operator<<(char c) noexcept;
 
   /**
-   * @brief Writes a NUL-terminated C string to the buffer.
+   * @brief Appends the bytes of a NUL-terminated C string (NUL excluded).
    *
-   * @details
-   * Calls @c std::strlen on @p str to determine length, then appends the
-   * bytes (excluding the trailing NUL).  Passing @c nullptr is a no-op --
-   * no fault is raised.
-   *
-   * @param str  NUL-terminated source string, or @c nullptr.
+   * @param str  Source string or @c nullptr (no-op).
    * @return Reference to @c *this for chaining.
    */
   TerminalStream& operator<<(const char* str) noexcept;
 
   /**
-   * @brief Writes a @c std::string to the buffer.
-   *
-   * @details
-   * Appends @c str.size() bytes from @c str.data().  Empty strings are a no-op.
-   * Embedded NULs in the string are written verbatim.
+   * @brief Appends the bytes of @p str verbatim, including embedded NULs.
    *
    * @param str  Source string.
    * @return Reference to @c *this for chaining.
@@ -318,11 +225,7 @@ class VLINK_EXPORT TerminalStream final {
   TerminalStream& operator<<(const std::string& str) noexcept;
 
   /**
-   * @brief Writes a @c std::string_view to the buffer.
-   *
-   * @details
-   * Appends @c str.size() bytes from @c str.data().  Empty views are a no-op.
-   * Embedded NULs in the view are written verbatim.
+   * @brief Appends the bytes of @p str verbatim, including embedded NULs.
    *
    * @param str  Source view.
    * @return Reference to @c *this for chaining.
@@ -330,7 +233,7 @@ class VLINK_EXPORT TerminalStream final {
   TerminalStream& operator<<(std::string_view str) noexcept;
 
   /**
-   * @brief Writes the literal @c "true" or @c "false".
+   * @brief Appends the literal @c "true" or @c "false".
    *
    * @param value  Boolean to print.
    * @return Reference to @c *this for chaining.
@@ -339,13 +242,7 @@ class VLINK_EXPORT TerminalStream final {
 
   /**
    * @name Integer overloads
-   * @brief Formats and writes the decimal representation of @p value.
-   *
-   * @details
-   * Negative values are prefixed with @c '-'.  The minimum value of each
-   * signed type (e.g. @c INT_MIN, @c LLONG_MIN) is handled correctly without
-   * undefined behaviour.  All overloads forward to a non-template helper that
-   * promotes the input to @c long long / @c unsigned long long internally.
+   * @brief Format a signed or unsigned integer as decimal and append it.
    *
    * @param value  Integer to print.
    * @return Reference to @c *this for chaining.
@@ -362,12 +259,7 @@ class VLINK_EXPORT TerminalStream final {
   /** @} */
 
   /**
-   * @brief Writes a @c float using @c snprintf with the @c "%g" format.
-   *
-   * @details
-   * The value is promoted to @c double before formatting.  Output uses the
-   * shortest of decimal or scientific notation per @c %g semantics.  No
-   * precision specifier; the system default precision is used.
+   * @brief Formats a @c float through @c snprintf with the @c "%g" format.
    *
    * @param value  Float to print.
    * @return Reference to @c *this for chaining.
@@ -375,7 +267,7 @@ class VLINK_EXPORT TerminalStream final {
   TerminalStream& operator<<(float value) noexcept;
 
   /**
-   * @brief Writes a @c double using @c snprintf with the @c "%g" format.
+   * @brief Formats a @c double through @c snprintf with the @c "%g" format.
    *
    * @param value  Double to print.
    * @return Reference to @c *this for chaining.
@@ -383,7 +275,7 @@ class VLINK_EXPORT TerminalStream final {
   TerminalStream& operator<<(double value) noexcept;
 
   /**
-   * @brief Writes a @c long double using @c snprintf with the @c "%Lg" format.
+   * @brief Formats a @c long @c double through @c snprintf with the @c "%Lg" format.
    *
    * @param value  Long double to print.
    * @return Reference to @c *this for chaining.
@@ -391,13 +283,7 @@ class VLINK_EXPORT TerminalStream final {
   TerminalStream& operator<<(long double value) noexcept;  // NOLINT(google-runtime-float)
 
   /**
-   * @brief Writes a pointer address using @c snprintf with the @c "%p" format.
-   *
-   * @details
-   * Output format is implementation-defined; typically a hexadecimal address
-   * with an @c "0x" prefix on POSIX, or upper-case hex with no prefix on
-   * MSVC.  @c nullptr is rendered as the platform's @c %p representation of
-   * a null pointer.
+   * @brief Formats a pointer using @c snprintf with the @c "%p" format.
    *
    * @param ptr  Pointer to format.
    * @return Reference to @c *this for chaining.
@@ -405,30 +291,19 @@ class VLINK_EXPORT TerminalStream final {
   TerminalStream& operator<<(const void* ptr) noexcept;
 
   /**
-   * @brief Applies a @c ManipType manipulator function to the stream.
+   * @brief Applies a custom or built-in @c ManipType manipulator to the stream.
    *
-   * @details
-   * The manipulator is invoked with @c *this as argument.  Built-in
-   * manipulators are @c TerminalStream::endl (newline + flush) and
-   * @c TerminalStream::flush_manip (flush only).  User code may pass any
-   * static or free function with signature
-   * @c TerminalStream& fn(TerminalStream&).
-   *
-   * @param manip  Function pointer to invoke with @c *this.
-   * @return The reference returned by @p manip (normally @c *this).
+   * @param manip  Function pointer invoked with @c *this.
+   * @return Whatever @p manip returns, normally a reference to @c *this.
    */
   TerminalStream& operator<<(ManipType manip) noexcept;
 
   /**
-   * @brief Accepts @c std::endl and similar @c std::ostream manipulators.
+   * @brief Accepts @c std::endl and similar standard manipulators.
    *
    * @details
-   * This overload exists so users can write @c stream << std::endl without a
-   * compilation error.  The standard manipulator's behaviour cannot be
-   * invoked on a non-@c std::ostream object, so this overload simply writes
-   * a newline (@c "\n") and flushes the buffer -- the same effect as
-   * @c TerminalStream::endl.  The function pointer parameter itself is
-   * ignored.
+   * Standard manipulators expect a @c std::ostream; this overload ignores the function
+   * pointer and emits a newline followed by a flush, matching @c TerminalStream::endl.
    *
    * @return Reference to @c *this for chaining.
    */

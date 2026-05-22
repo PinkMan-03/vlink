@@ -23,45 +23,74 @@
 
 /**
  * @file bag_writer.h
- * @brief Abstract base class for VLink bag file recording with split, compression and global writer support.
+ * @brief Abstract VLink bag recorder with split, compression, schema embedding and a global hook.
  *
  * @details
- * @c BagWriter is an abstract @c MessageLoop-based recorder that captures VLink messages
- * (URL + serialisation type + payload) to a bag file.  Concrete implementations are
- * @c VDBWriter (SQLite-backed) and @c VCAPWriter (MCAP-format).
+ * @c BagWriter is the polymorphic base for VLink offline recording.  It exposes a
+ * non-blocking @c push() entry point that enqueues serialised messages onto a private
+ * @c MessageLoop, which then persists them through the concrete backend.  Two backends
+ * ship with VLink:
  *
- * Key features:
- * - Asynchronous recording via the inherited @c MessageLoop queue.
- * - Pluggable compression selectors: database bags currently use LZAV for @c kCompressAuto / @c kCompressLzav,
- *   and MCAP bags use Zstd for @c kCompressAuto / @c kCompressZstd when Zstd support is compiled in.
- * - File splitting by size or by time, with optional time-stamped names.
- * - WAL (Write-Ahead Log) mode for crash resilience.
- * - Global singleton writer activated by the @c VLINK_BAG_PATH environment variable.
- * - Schema embedding for offline introspection.
+ * - @c VDBWriter for SQLite-backed @c .vdb / @c .vdbx containers; default codec is LZAV
+ *   for @c kCompressAuto and @c kCompressLzav selectors.
+ * - @c VCAPWriter for MCAP-format @c .vcap / @c .vcapx containers; @c kCompressAuto and
+ *   @c kCompressZstd select Zstandard when Zstd support is compiled in.
  *
- * @par Creating a writer
+ * Writer state machine:
+ *
+ * @verbatim
+ *                async_run()                push()              flush()/dtor
+ *   +---------+ ----------> +-----------+ ---------> +---------+ ----------> +---------+
+ *   |  Open   |             |  Running  | <--------- | Pending |             |  Closed |
+ *   +---------+             +-----------+   ack      +---------+             +---------+
+ *                                ^                                              ^
+ *                                |                                              |
+ *                                +--- split_by_size / split_by_time -- rotate --+
+ * @endverbatim
+ *
+ * On-disk layout produced by the writers:
+ *
+ * @verbatim
+ *   +---------+----------------+---------------+----------------+--------+
+ *   | Header  |  URL index     |  Schema index | Message stream | Footer |
+ *   +---------+----------------+---------------+----------------+--------+
+ *      tag        url_metas       schema_data       payloads      finalisation
+ *      app
+ *      timezone
+ * @endverbatim
+ *
+ * Feature highlights:
+ * - Asynchronous record path with optional synchronous @c immediate writes.
+ * - File splitting by byte size and/or by wall-clock interval.
+ * - Optional WAL mode for SQLite crash resilience.
+ * - URL-level loss reporting via @c set_url_loss().
+ * - Schema embedding through @c push_schema() for offline introspection.
+ * - Process-global writer triggered by the @c VLINK_BAG_PATH environment variable.
+ *
+ * @par Example
  * @code
- * auto writer = vlink::BagWriter::create("/data/log.vdb");
+ * vlink::BagWriter::Config cfg;
+ * cfg.compress      = vlink::BagWriter::kCompressAuto;
+ * cfg.split_by_size = 1024LL * 1024LL * 512;            // 512 MiB per split
+ *
+ * auto writer = vlink::BagWriter::create("/data/drive_log.vdb", cfg);
  * writer->async_run();
- * writer->push("dds://my/topic", "demo.proto.PointCloud", vlink::SchemaType::kProtobuf,
- *              vlink::ActionType::kPublish, data);
+ * writer->push("dds://camera/front", "demo.proto.Image",
+ *              vlink::SchemaType::kProtobuf, vlink::ActionType::kPublish, bytes);
  * @endcode
  *
  * @par Global writer
  * @code
- * // Set VLINK_BAG_PATH=/data/log.vdb before launching the process.
- * // Then retrieve the global instance anywhere:
- * auto* gw = vlink::BagWriter::global_get();
- * if (gw) {
- *     gw->push("intra://my/topic", "raw", vlink::SchemaType::kRaw, vlink::ActionType::kPublish, data);
+ * // Set VLINK_BAG_PATH=/data/global.vdb before process launch.
+ * if (auto* gw = vlink::BagWriter::global_get(); gw != nullptr) {
+ *   gw->push("intra://debug", "raw", vlink::SchemaType::kRaw,
+ *            vlink::ActionType::kPublish, bytes);
  * }
  * @endcode
  *
- * @note
- * - @c create() selects the concrete implementation based on the file extension
- *   (@c .vdb / @c .vdbx -> VDBWriter, @c .vcap / @c .vcapx -> VCAPWriter).
- * - @c push() is thread-safe and non-blocking; recording is done on the loop thread.
- * - The @c immediate flag bypasses the task queue and writes synchronously (use with care).
+ * @note @c push() is thread-safe.  @c immediate=true bypasses the queue and writes on the
+ * caller's thread; this should be reserved for finalisation or test code because it
+ * can block long enough to violate real-time deadlines.
  */
 
 #pragma once
@@ -85,233 +114,218 @@ class SchemaPluginInterface;
 
 /**
  * @class BagWriter
- * @brief Abstract asynchronous message recorder backed by a @c MessageLoop event queue.
+ * @brief Asynchronous VLink message recorder built on top of @c MessageLoop.
  *
  * @details
- * Must be constructed via @c create() (for managed lifetime) or directly (for custom ownership).
- * After construction call @c async_run() to start the recording loop, then use @c push() to
- * record messages.
+ * Construct via @c create() (or directly) and call @c async_run() to start the recording
+ * thread, then push messages with @c push().  Concrete subclasses implement every virtual
+ * persistence operation; the base class owns the shared bookkeeping and the loop wiring.
  */
 class VLINK_EXPORT BagWriter : public MessageLoop {
  public:
   /**
-   * @brief Compression selector applied by backends that support it.
+   * @brief Compression codec selector understood by the writer backends.
    *
-   * | Kind            | Algorithm    | Notes                                   |
-   * | --------------- | ------------ | --------------------------------------- |
-   * | kCompressNone   | No compress  | Raw bytes stored as-is                  |
-   * | kCompressAuto   | Auto select  | Uses the backend default codec          |
-   * | kCompressZstd   | Zstandard    | Used by MCAP when Zstd is available     |
-   * | kCompressLz4    | LZ4          | Reserved selector                       |
-   * | kCompressLzav   | LZAV         | Used by database bags                   |
+   * | Value           | Algorithm | Notes                                                  |
+   * | --------------- | --------- | ------------------------------------------------------ |
+   * | kCompressNone   | none      | Payloads stored as raw bytes                           |
+   * | kCompressAuto   | backend   | Uses the backend default (LZAV for VDB, Zstd for MCAP) |
+   * | kCompressZstd   | Zstandard | Active for MCAP when Zstd support is available         |
+   * | kCompressLz4    | LZ4       | Reserved selector; not currently used by built-ins     |
+   * | kCompressLzav   | LZAV      | Active for SQLite-backed VDB recordings                |
    */
   enum CompressType : uint8_t {
-    kCompressNone = 0,  ///< No compression.
-    kCompressAuto = 1,  ///< Automatic algorithm selection.
-    kCompressZstd = 2,  ///< Zstandard compression.
-    kCompressLz4 = 3,   ///< Reserved selector; built-in writers do not currently use LZ4.
-    kCompressLzav = 4,  ///< LZAV built-in compression.
+    kCompressNone = 0,  ///< Store payloads uncompressed.
+    kCompressAuto = 1,  ///< Defer codec choice to the active backend.
+    kCompressZstd = 2,  ///< Force Zstandard codec where supported.
+    kCompressLz4 = 3,   ///< Reserved selector; no built-in writer emits LZ4 today.
+    kCompressLzav = 4,  ///< Force LZAV codec where supported.
   };
 
   /**
    * @struct Config
-   * @brief Configuration for recording behaviour, splitting, compression, and limits.
+   * @brief Recording behaviour, split policy and resource budgets.
    *
    * @details
-   * All size fields are in bytes; all time fields are in milliseconds unless noted otherwise.
+   * Sizes are expressed in bytes and durations in milliseconds unless explicitly stated.
    */
   struct Config final {
-    std::string tag_name;                                      ///< Optional tag name stored in the bag header.
-    CompressType compress{CompressType::kCompressNone};        ///< Compression selector.
-    bool wal_mode{false};                                      ///< Enable SQLite WAL mode for crash resilience.
-    bool enable_limit{false};                                  ///< Database writer: delete oldest rows when limits hit.
-    bool split_name_by_time{false};                            ///< Append timestamp to split file names.
-    bool sync_mode{false};                                     ///< Database writer: disable periodic cache flush timer.
-    bool optimize_on_exit{false};                              ///< Run VACUUM/optimise on file close.
-    int64_t max_row_count{5'000'000'000LL};                    ///< Database row limit; delete old rows or fail writes.
-    int64_t max_bytes_size{1024LL * 1024LL * 1024LL * 512LL};  ///< Database byte limit; delete old rows or fail writes.
-    int64_t split_by_size{1024LL * 1024LL * 1024LL * 1LL};     ///< Split file when it reaches this size (bytes).
-    int64_t split_by_time{0};                                  ///< Split file every N milliseconds.  0 = disabled.
-    int64_t begin_time{0};                                     ///< Split-time baseline (ms) used with split_by_time.
-    int64_t cache_size{1024LL * 1024LL * 4};                  ///< Database commit threshold or MCAP chunk size (bytes).
-    int64_t compress_start_size{128};                         ///< Minimum payload size (bytes) to compress.
-    int64_t compress_level{3};                                ///< Compression level (codec-specific).
-    int64_t max_task_depth{20000};                            ///< Max pending write tasks in the queue.
-    int64_t max_memory_size{1024LL * 1024LL * 1024LL * 2LL};  ///< Max in-memory cache size (bytes).
-    int64_t start_timestamp{0};                               ///< Override the bag start timestamp (ms since epoch).
-    std::unordered_set<std::string> ignore_compress_urls;     ///< URLs whose payloads are never compressed.
+    std::string tag_name;                                      ///< Optional tag stored in the bag header.
+    CompressType compress{CompressType::kCompressNone};        ///< Compression codec selector.
+    bool wal_mode{false};                                      ///< Enable SQLite WAL for crash resilience.
+    bool enable_limit{false};                                  ///< When true, evict oldest rows at the row/byte limit.
+    bool split_name_by_time{false};                            ///< Append a timestamp suffix to split filenames.
+    bool sync_mode{false};                                     ///< Disable periodic cache-flush timer for VDB writes.
+    bool optimize_on_exit{false};                              ///< Run VACUUM/OPTIMIZE while closing the file.
+    int64_t max_row_count{5'000'000'000LL};                    ///< SQLite row cap; either evicts or fails new writes.
+    int64_t max_bytes_size{1024LL * 1024LL * 1024LL * 512LL};  ///< SQLite byte cap; either evicts or fails new writes.
+    int64_t split_by_size{1024LL * 1024LL * 1024LL * 1LL};     ///< Split threshold in bytes (0 disables).
+    int64_t split_by_time{0};                                  ///< Split interval in milliseconds (0 disables).
+    int64_t begin_time{0};                                     ///< Anchor (ms) used by time-based splits.
+    int64_t cache_size{1024LL * 1024LL * 4};                   ///< VDB commit chunk / MCAP chunk size in bytes.
+    int64_t compress_start_size{128};                          ///< Minimum payload size eligible for compression.
+    int64_t compress_level{3};                                 ///< Codec-specific compression level.
+    int64_t max_task_depth{20000};                             ///< Maximum pending writes in the loop queue.
+    int64_t max_memory_size{1024LL * 1024LL * 1024LL * 2LL};   ///< Maximum in-memory cache size in bytes.
+    int64_t start_timestamp{0};                                ///< Override for the wall-clock start timestamp (ms).
+    std::unordered_set<std::string> ignore_compress_urls;      ///< URLs whose payloads must never be compressed.
 
     Config() {}  // NOLINT(modernize-use-equals-default)
   };
 
   /**
-   * @brief Callback fired when a split occurs.
+   * @brief Notification fired when the writer rotates to a new split file.
    *
    * @details
-   * Called with the zero-based split index and the path of the newly created file.
-   * The @c before parameter of @c register_split_callback() controls whether the
-   * callback fires before or after the new file is opened.
+   * Called with the zero-based split index and the new file path.  The @c before flag of
+   * @c register_split_callback() chooses whether the hook runs before or after the
+   * rotation is committed.
    */
   using SplitCallback = MoveFunction<void(int split_index, const std::string& split_filename)>;
 
   /**
-   * @brief Callback that resolves a serialisation type string to a @c SchemaData.
+   * @brief Schema resolver used by the writer when a previously unseen URL is recorded.
    *
    * @details
-   * When a new URL with an unknown @c ser_type appears, this callback is invoked to
-   * retrieve the corresponding schema for embedding in the bag. The extra
-   * @c schema_type hint lets callers distinguish schema families that share
-   * the same concrete type name.
+   * The writer passes the requested serialisation type together with a coarse schema
+   * family hint so that families sharing a single type name (e.g. Protobuf vs Arrow) can
+   * still be disambiguated.
    */
   using SchemaCallback = MoveFunction<SchemaData(const std::string& ser_type, SchemaType schema_type)>;
 
   /**
-   * @brief System clock type used for file-name timestamp generation.
+   * @brief System clock alias used when formatting timestamps into split file names.
    */
   using SystemClock = std::chrono::time_point<std::chrono::system_clock, std::chrono::milliseconds>;
 
   /**
-   * @brief Creates a concrete @c BagWriter instance for @p path.
+   * @brief Builds the concrete writer matching the extension of @p path.
    *
    * @details
-   * Selects the implementation based on the file extension:
-   * - @c .vdb / @c .vdbx -- @c VDBWriter (SQLite)
-   * - @c .vcap / @c .vcapx -- @c VCAPWriter (MCAP format)
-   * - unknown suffixes return @c nullptr
-   * The returned writer has not yet started its event loop; call @c async_run().
+   * Suffix dispatch: @c .vdb / @c .vdbx select @c VDBWriter, @c .vcap / @c .vcapx select
+   * @c VCAPWriter; other suffixes return @c nullptr.  The returned writer is open but
+   * idle until @c async_run() starts its loop.
    *
-   * @param path    Output file path.
-   * @param config  Recording configuration.  Defaults to @c Config{}.
-   * @return Shared pointer to the new writer.
+   * @param path   Output file path.
+   * @param config Recording configuration.
+   * @return Shared pointer to the new writer, or @c nullptr on unsupported suffix.
    */
   [[nodiscard]] static std::shared_ptr<BagWriter> create(const std::string& path, const Config& config = {});
 
   /**
-   * @brief Returns an existing writer for @p path, or creates and starts a new one.
+   * @brief Returns the cached writer for @p path, lazily creating and starting one.
    *
    * @details
-   * Searches the global writer registry.  If a writer matching @p path is alive,
-   * returns a shared pointer to it.  Otherwise creates a new writer for @p path,
-   * calls @c async_run() on it, registers it in the global registry, and returns it.
-   * The same suffix rules as @c create() apply; unsupported suffixes return
-   * @c nullptr and are not registered.
-   * The writer is automatically removed from the registry when the last shared
-   * pointer to it is released.
+   * Looks up the process-wide writer registry.  When no entry exists, a writer is built
+   * by @c create(), its loop is started with @c async_run(), and it is registered for
+   * reuse.  The registry releases the entry automatically when the last shared owner
+   * goes away.  Unsupported suffixes return @c nullptr and are not registered.
    *
-   * @param path  Output file path.
-   * @return Shared pointer to the writer, or @c nullptr for unsupported suffixes.
+   * @param path Output file path.
+   * @return Shared pointer to a started writer, or @c nullptr on unsupported suffix.
    */
   [[nodiscard]] static std::shared_ptr<BagWriter> filter_get(const std::string& path);
 
   /**
-   * @brief Returns the process-global @c BagWriter activated by the @c VLINK_BAG_PATH environment variable.
+   * @brief Returns the singleton writer driven by the @c VLINK_BAG_PATH environment variable.
    *
    * @details
-   * The global writer is created automatically on first access if @c VLINK_BAG_PATH is set.
-   * Returns @c nullptr if the environment variable is not set or has an
-   * unsupported bag suffix.
+   * On first call, the writer is created from @c VLINK_BAG_PATH and started.  Returns
+   * @c nullptr when the environment variable is absent or carries an unsupported suffix.
    *
    * @return Raw pointer to the global writer, or @c nullptr.
    */
   static BagWriter* global_get();
 
   /**
-   * @brief Constructs a @c BagWriter for @p path with the given @p config.
+   * @brief Constructs the base writer and opens the output file.
    *
    * @details
-   * Opens or creates the output file.  Must call @c async_run() before writing.
+   * The recording loop is not yet running; call @c async_run() before any @c push().
    *
-   * @param path    Output file path.
-   * @param config  Recording configuration.
+   * @param path   Output file path.
+   * @param config Recording configuration.
    */
   explicit BagWriter(const std::string& path, const Config& config = {});
 
   /**
-   * @brief Destructor -- stops the recording loop and flushes pending writes.
+   * @brief Halts the loop, flushes pending writes and closes the file.
    */
   virtual ~BagWriter();  // NOLINT(modernize-use-override)
 
   /**
-   * @brief Registers a callback invoked when a file split occurs.
+   * @brief Installs a hook fired around split rotation.
    *
-   * @param callback  Called with (split_index, new_filename) on each split.
-   * @param before    If @c true, the callback fires before the new file is opened;
-   *                  if @c false, it fires after.
+   * @param callback Receives the new split index and the new file path.
+   * @param before   When true, the hook fires before the new file is opened; otherwise after.
    */
   virtual void register_split_callback(SplitCallback&& callback, bool before) = 0;
 
   /**
-   * @brief Registers a callback that resolves serialisation type strings to @c SchemaData.
+   * @brief Installs the resolver invoked when an unseen serialisation type is recorded.
    *
-   * @details
-   * Called when a @c push() introduces a URL with an unknown @c ser_type.
-   *
-   * @param callback  Function mapping ser_type string to @c SchemaData.
+   * @param callback Function mapping (ser_type, schema_type) to @c SchemaData.
    */
   virtual void register_schema_callback(SchemaCallback&& callback) = 0;
 
   /**
-   * @brief Embeds a @c SchemaData into the bag for later offline introspection.
+   * @brief Embeds a schema descriptor into the bag for downstream introspection.
    *
-   * @param schema_data  Schema descriptor to store.
-   * @param immediate    If @c true, merges synchronously; otherwise enqueues.
-   * @return             @c false only when the immediate merge fails.
+   * @param schema_data Schema descriptor to persist.
+   * @param immediate   When true, performs a synchronous merge on the caller's thread.
+   * @return @c false only when an immediate merge fails; queued merges always return @c true.
    */
   virtual bool push_schema(const SchemaData& schema_data, bool immediate = false) = 0;
 
   /**
-   * @brief Records one message to the bag.
+   * @brief Records a single message to the bag.
    *
    * @details
-   * The message is enqueued on the recording loop and written asynchronously.
-   * If @p microseconds_timestamp is @c nullptr, the writer's elapsed timer is used.
+   * Enqueues a write task onto the recording loop; the actual disk write happens on the
+   * loop thread.  When @p microseconds_timestamp is @c nullptr, the writer assigns a
+   * recording-relative timestamp from its elapsed clock.
    *
-   * @param url                    VLink URL of the topic (e.g., @c "dds://my/topic").
-   * @param ser_type               Serialisation type string (e.g., @c "demo.proto.PointCloud", @c "raw").
+   * @param url                    VLink URL identifying the topic.
+   * @param ser_type               Serialisation type name (e.g. Protobuf message name).
    * @param schema_type            Coarse schema family for the payload.
-   * @param action_type            Action type (@c kPublish, @c kRequest, etc.).
-   * @param data                   Serialized payload bytes.
-   * @param microseconds_timestamp Optional pointer to a custom recording-relative timestamp (microseconds).
-   * @param immediate              If @c true, writes synchronously bypassing the queue.
-   * @return Message timestamp in microseconds, or a negative value on error.
+   * @param action_type            Recorded action kind.
+   * @param data                   Serialised payload bytes.
+   * @param microseconds_timestamp Optional caller-supplied timestamp in microseconds.
+   * @param immediate              When true, bypasses the queue and writes synchronously.
+   * @return Assigned timestamp in microseconds, or a negative value on failure.
    */
   virtual int64_t push(const std::string& url, const std::string& ser_type, SchemaType schema_type,
                        ActionType action_type, const Bytes& data, int64_t* microseconds_timestamp = nullptr,
                        bool immediate = false) = 0;
 
   /**
-   * @brief Returns the backend dumping flag.
-   *
-   * @return Current value of the concrete backend's dumping flag.
+   * @brief Returns the backend-specific "dump in progress" flag.
    */
   [[nodiscard]] virtual bool is_dumping() const = 0;
 
   /**
-   * @brief Returns @c true if the writer is in split-file mode.
+   * @brief Returns whether split mode is currently in effect.
    *
-   * @return @c true when @c Config::split_by_size or @c Config::split_by_time is non-zero.
+   * @return @c true when either @c split_by_size or @c split_by_time is non-zero.
    */
   [[nodiscard]] virtual bool is_split_mode() const = 0;
 
   /**
-   * @brief Returns the zero-based index of the current split file.
+   * @brief Returns the zero-based index of the active split file.
    *
-   * @details
-   * Returns 0 if split mode is not active.
-   *
-   * @return Current split file index.
+   * @return Active split index, or 0 outside split mode.
    */
   [[nodiscard]] virtual int get_split_index() const = 0;
 
   /**
-   * @brief Sets the expected message loss ratio for a given URL.
+   * @brief Records the expected loss ratio for @p url as bag metadata.
    *
    * @details
-   * Stored as metadata in the bag.  Used for post-processing diagnostics to
-   * distinguish intentional drops from unexpected loss.
+   * Loss values feed offline diagnostics so that intentional drops can be distinguished
+   * from unexpected loss.
    *
-   * @param url   Topic URL.
-   * @param loss  Loss ratio.  Values greater than 1.0 are stored as -1.
+   * @param url  Topic URL.
+   * @param loss Loss ratio; values greater than 1.0 are normalised to -1.
    */
   virtual void set_url_loss(const std::string& url, double loss) = 0;
 

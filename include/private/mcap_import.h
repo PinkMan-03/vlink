@@ -21,6 +21,25 @@
  * limitations under the License.
  */
 
+/**
+ * @file mcap_import.h
+ * @brief Private aggregation header that pulls in the MCAP reader / writer headers.
+ *
+ * @details
+ * The MCAP C++ library is heavyweight and exposes a wide surface of templates that we do not
+ * want to leak into public VLink headers.  This private, non-installed file centralises the
+ * @c <mcap/reader.hpp> and @c <mcap/writer.hpp> inclusions and applies compile-time toggles
+ * that match the VLink build configuration:
+ *
+ * | Macro                       | Behaviour                                                     |
+ * | --------------------------- | ------------------------------------------------------------- |
+ * | @c VLINK_ENABLE_ZSTD        | When unset, defines @c MCAP_COMPRESSION_NO_ZSTD               |
+ * | @c MCAP_COMPRESSION_NO_LZ4  | Always defined; LZ4 is unsupported across VLink platforms     |
+ *
+ * Only the bag implementation files (@c bag_writer.cc, @c bag_reader.cc and friends) should
+ * include this header; do not add it to any public VLink header.
+ */
+
 #pragma once
 
 #ifndef VLINK_ENABLE_ZSTD

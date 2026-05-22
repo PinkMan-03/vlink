@@ -35,7 +35,6 @@
 
 namespace vlink {
 
-// Server<ReqT, RespT>
 template <typename ReqT, typename RespT, SecurityType SecT>
 inline typename Server<ReqT, RespT, SecT>::UniquePtr Server<ReqT, RespT, SecT>::create_unique(
     const std::string& url_str, InitType type) {
@@ -346,7 +345,6 @@ inline bool Server<ReqT, RespT, SecT>::reply_bytes(uint64_t req_id, const Bytes&
   }
 }
 
-// SecurityServer<ReqT, RespT>
 template <typename ReqT, typename RespT>
 template <typename SecurityConfigT>
 inline typename SecurityServer<ReqT, RespT>::UniquePtr SecurityServer<ReqT, RespT>::create_unique(

@@ -23,43 +23,82 @@
 
 /**
  * @file audio_frame.h
- * @brief Zero-copy audio frame container for VLink transport.
+ * @brief Zero-copy audio frame container carrying one PCM or codec-encoded packet.
  *
  * @details
- * @c AudioFrame carries one audio frame -- uncompressed PCM or compressed
- * codec output -- together with a @c Header for sequencing and timestamping.
- * It is the canonical conduit for microphone capture, text-to-speech output,
- * voice-command pipelines, and in-vehicle infotainment audio streams.  The
- * struct is exactly 128 bytes on 64-bit platforms.
+ * @c AudioFrame is the canonical conduit for in-vehicle and embedded audio
+ * pipelines: microphone capture, in-cabin voice command, TTS playback, alarm
+ * tones, and intercom routing.  Each frame carries one acquisition window of
+ * audio together with sample-format metadata (sample rate, channels, bit
+ * depth, layout, codec hint, language tag), a capture timestamp, the
+ * advertised frame duration, plus a 40-byte @c Header for sequencing and
+ * dual-timestamp latency measurement.
  *
- * @par Sample formats
- * | Value         | Description                          |
- * | ------------- | ------------------------------------ |
- * | kFormatPcmS16 | Signed 16-bit PCM                    |
- * | kFormatPcmS24 | Signed 24-bit PCM (packed in 3 bytes)|
- * | kFormatPcmS32 | Signed 32-bit PCM                    |
- * | kFormatPcmF32 | IEEE-754 single-precision PCM        |
- * | kFormatPcmU8  | Unsigned 8-bit PCM                   |
- * | kFormatOpus   | Opus-encoded                         |
- * | kFormatAac    | AAC-encoded                          |
- * | kFormatMp3    | MP3-encoded                          |
- * | kFormatFlac   | FLAC-encoded                         |
+ * @par Audio formats
+ * | Enum             | Encoding                 | Typical bit depth | Compression |
+ * | ---------------- | ------------------------ | ----------------- | ----------- |
+ * | @c kFormatPcmS16 | Signed linear PCM        | 16                | None        |
+ * | @c kFormatPcmS24 | Signed linear PCM packed | 24                | None        |
+ * | @c kFormatPcmS32 | Signed linear PCM        | 32                | None        |
+ * | @c kFormatPcmF32 | IEEE-754 float PCM       | 32                | None        |
+ * | @c kFormatPcmU8  | Unsigned linear PCM      | 8                 | None        |
+ * | @c kFormatOpus   | Opus                     | N/A               | Lossy       |
+ * | @c kFormatAac    | AAC                      | N/A               | Lossy       |
+ * | @c kFormatMp3    | MP3                      | N/A               | Lossy       |
+ * | @c kFormatFlac   | FLAC                     | N/A               | Lossless    |
  *
- * @par Channel layouts
- * | Value             | Description                                |
- * | ----------------- | ------------------------------------------ |
- * | kLayoutInterleaved| Channels interleaved per sample            |
- * | kLayoutPlanar     | Channels stored in separate plane regions  |
+ * Common sample rates: 8 kHz / 16 kHz / 32 kHz / 44.1 kHz / 48 kHz / 96 kHz.
+ * Channel layouts: @c kLayoutInterleaved (L R L R ...) or @c kLayoutPlanar
+ * (separate per-channel planes).
  *
- * @par Binary wire format
+ * @par Wire format
+ * @c AudioFrame is POD; @c memcpy of the struct snapshot plus the audio buffer
+ * forms the wire payload.  The @c sizeof value is locked by @c static_assert
+ * and forms a permanent contract: @c vlink::zerocopy::* containers have NO
+ * forward and NO backward binary compatibility -- every field, including
+ * reserved bytes, is part of the wire contract.
  * @code
- * [ magic_begin (4) | AudioFrame struct (128) | audio bytes (N) | magic_end (4) ]
+ * static_assert(sizeof(AudioFrame) == 128, "Sizeof must be 128 bytes.");
  * @endcode
- * The struct block is a raw snapshot of the 64-bit ABI layout used by this
- * library; receivers must parse it through @c operator<< and must not treat
- * embedded pointer/ownership fields as portable wire values.
  *
- * @par Usage
+ * @par Memory layout
+ * @code
+ * Offset  Size  Field
+ * ------  ----  --------------------------
+ *      0    40  Header   header
+ *     40     8  uint8_t* data_
+ *     48     8  size_t   size_
+ *     56     8  uint64_t update_time_ns_
+ *     64     8  uint64_t duration_ns_
+ *     72    16  char     codec_[16]
+ *     88     8  char     language_[8]
+ *     96     4  uint32_t channel_
+ *    100     4  uint32_t freq_
+ *    104     4  uint32_t sample_rate_
+ *    108     4  uint32_t num_samples_
+ *    112     4  uint32_t bitrate_
+ *    116     2  uint16_t num_channels_
+ *    118     2  uint16_t bit_depth_
+ *    120     1  Format   format_
+ *    121     1  Layout   layout_
+ *    122     1  bool     is_owner_
+ *    123     1  uint8_t  reserved8_
+ *    124     4  uint32_t reserved32_
+ * ------  ----  --------------------------
+ *  Total   128  bytes (alignas 8)
+ *
+ * Wire envelope:
+ * [ magic_begin (4) | AudioFrame struct (128) | audio bytes (size_) | magic_end (4) ]
+ * @endcode
+ *
+ * @par Reserved bytes
+ * @c reserved8_ and @c reserved32_ are exposed through the @c get_reserved* helpers.
+ * They travel through the wire format and are deliberately preserved by
+ * @c clear() and the copy/move helpers.  They MUST NOT be repurposed by
+ * application code: a future library revision may bind them to real fields,
+ * which would silently break peers that abused the slot.
+ *
+ * @par Example
  * @code
  * vlink::zerocopy::AudioFrame frame;
  * frame.set_sample_rate(48000);
@@ -70,13 +109,10 @@
  * frame.set_layout(vlink::zerocopy::AudioFrame::kLayoutInterleaved);
  * frame.set_codec("PCM");
  * frame.create(960 * 2 * sizeof(int16_t));
- * @endcode
  *
- * @note
- * - 32-bit architectures emit a compile-time warning and are not supported.
- * - After @c operator<<, the data pointer references memory inside the
- *   source @c Bytes.  The @c Bytes must outlive the @c AudioFrame.
- * - @c fill_data is an alias for @c deep_copy(uint8_t*, size_t).
+ * vlink::Bytes wire;
+ * frame >> wire;
+ * @endcode
  */
 
 #pragma once
@@ -93,318 +129,411 @@ namespace zerocopy {
 
 /**
  * @struct AudioFrame
- * @brief Zero-copy audio frame with sample-format metadata and Header.
+ * @brief 128-byte POD container holding one audio packet with full sample-format metadata.
  *
  * @details
- * Carries one complete audio frame (raw PCM or compressed codec payload)
- * along with sample rate, channel count, bit depth, codec hint, language
- * tag, capture timestamp, and frame duration.  The struct size is fixed at
- * 128 bytes on 64-bit targets with a 5-byte reserved tail.
+ * The struct size is locked at 128 bytes on 64-bit targets via @c static_assert;
+ * 32-bit toolchains emit a compile-time warning.  The struct embeds a @c Header
+ * prefix and exposes both PCM-specific (sample rate, channels, bit depth) and
+ * codec-specific (codec name, bitrate) metadata.
  */
 struct VLINK_EXPORT_AND_ALIGNED(8) AudioFrame final {
   /**
-   * @brief Sample / codec encoding format of the audio payload.
+   * @brief Encoded sample format of the audio payload.
    */
   enum Format : uint8_t {
-    kFormatUnknown = 0,  ///< Unknown or uninitialised format.
+    kFormatUnknown = 0,  ///< Uninitialised / unspecified format.
 
     kFormatPcmS16 = 1,  ///< Signed 16-bit linear PCM.
-    kFormatPcmS24 = 2,  ///< Signed 24-bit linear PCM (3 bytes per sample).
+    kFormatPcmS24 = 2,  ///< Signed 24-bit linear PCM packed into 3 bytes.
     kFormatPcmS32 = 3,  ///< Signed 32-bit linear PCM.
     kFormatPcmF32 = 4,  ///< IEEE-754 single-precision linear PCM.
     kFormatPcmU8 = 5,   ///< Unsigned 8-bit linear PCM.
 
-    kFormatOpus = 100,  ///< Opus-encoded payload.
-    kFormatAac = 101,   ///< AAC-encoded payload.
-    kFormatMp3 = 102,   ///< MP3-encoded payload.
-    kFormatFlac = 103,  ///< FLAC-encoded payload.
+    kFormatOpus = 100,  ///< Opus codec payload.
+    kFormatAac = 101,   ///< AAC codec payload.
+    kFormatMp3 = 102,   ///< MP3 codec payload.
+    kFormatFlac = 103,  ///< FLAC codec payload.
   };
 
   /**
-   * @brief Channel data layout.
+   * @brief Arrangement of multi-channel samples within the payload buffer.
    */
   enum Layout : uint8_t {
-    kLayoutUnknown = 0,      ///< Unknown / uninitialised layout.
-    kLayoutInterleaved = 1,  ///< Samples interleaved across channels (L,R,L,R,...).
-    kLayoutPlanar = 2,       ///< Channels stored in separate contiguous planes.
+    kLayoutUnknown = 0,      ///< Uninitialised / unspecified layout.
+    kLayoutInterleaved = 1,  ///< Channels interleaved per-sample (L R L R ...).
+    kLayoutPlanar = 2,       ///< Channels stored in consecutive contiguous planes.
   };
 
   /**
-   * @brief Default constructor.
-   *
-   * @details
-   * Verifies via @c static_assert that the struct is exactly 128 bytes on
-   * 64-bit platforms.  32-bit architectures emit a compile-time warning.
+   * @brief Default-constructs an empty frame and asserts the 128-byte contract.
    */
   AudioFrame() noexcept;
 
   /**
-   * @brief Destructor -- frees the owned audio buffer if @c is_owner() is @c true.
+   * @brief Frees the owned audio buffer when @c is_owner() is @c true.
    */
   ~AudioFrame() noexcept;
 
   /**
-   * @brief Copy constructor -- performs a deep copy of @p target.
+   * @brief Deep-copies @p target into a freshly allocated frame.
+   *
+   * @param target Source frame to clone.
    */
   AudioFrame(const AudioFrame& target) noexcept;
 
   /**
-   * @brief Move constructor -- transfers ownership from @p target.
+   * @brief Steals @p target's allocation and metadata; @p target ends empty.
+   *
+   * @param target Source frame moved from.
    */
   AudioFrame(AudioFrame&& target) noexcept;
 
   /**
-   * @brief Copy-assignment operator -- deep-copies @p target.
+   * @brief Deep-copy-assigns @p target; self-assignment is a no-op.
+   *
+   * @param target Source frame to clone.
+   * @return Reference to @c *this.
    */
   AudioFrame& operator=(const AudioFrame& target) noexcept;
 
   /**
-   * @brief Move-assignment operator -- transfers ownership from @p target.
+   * @brief Move-assigns @p target; self-assignment is a no-op.
+   *
+   * @param target Source frame moved from.
+   * @return Reference to @c *this.
    */
   AudioFrame& operator=(AudioFrame&& target) noexcept;
 
   /**
-   * @brief Deserialises an @c AudioFrame from a @c Bytes wire buffer (zero-copy).
+   * @brief Deserialises an @c AudioFrame from @p bytes with zero-copy borrowing semantics.
+   *
+   * @param bytes Wire buffer previously produced by @c operator>>.
+   * @return @c true on success; @c false on magic mismatch or size mismatch.
    */
   bool operator<<(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Serialises this @c AudioFrame into a @c Bytes wire buffer.
+   * @brief Serialises the struct snapshot plus audio bytes into @p bytes.
+   *
+   * @param bytes Output buffer; resized automatically when too small.
+   * @return Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
 
   /**
-   * @brief Checks whether @p bytes contains a valid @c AudioFrame wire buffer.
+   * @brief Validates that @p bytes carries a well-formed @c AudioFrame envelope.
+   *
+   * @param bytes Wire buffer to inspect.
+   * @return @c true when the magic sentinels match and the minimum length holds.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Returns the total serialised byte count for this frame.
+   * @brief Total bytes that @c operator>> would write for this frame.
+   *
+   * @return @c sizeof(magic_begin) + @c sizeof(AudioFrame) + @c size() + @c sizeof(magic_end).
    */
   [[nodiscard]] size_t get_serialized_size() const noexcept;
 
   /**
-   * @brief Returns @c true when the audio buffer is present and non-empty.
+   * @brief Whether the audio buffer pointer is non-null and its size is positive.
+   *
+   * @return @c true when the frame holds usable audio data.
    */
   [[nodiscard]] bool is_valid() const noexcept;
 
   /**
-   * @brief Borrows the audio buffer from @p target without copying.
+   * @brief Borrows @p target's audio buffer without copying.
+   *
+   * @param target Source frame whose buffer must outlive @c *this.
+   * @return @c false on self-borrow, otherwise @c true.
    */
   bool shallow_copy(const AudioFrame& target) noexcept;
 
   /**
-   * @brief Deep-copies the audio buffer from @p target.
+   * @brief Allocates (or reuses) an owned buffer and copies @p target's audio.
+   *
+   * @param target Source frame to clone.
+   * @return @c false on self-copy, otherwise @c true.
    */
   bool deep_copy(const AudioFrame& target) noexcept;
 
   /**
-   * @brief Transfers ownership from @p target.
+   * @brief Transfers ownership from @p target; @p target ends empty.
+   *
+   * @param target Source frame moved from.
+   * @return @c false on self-move, otherwise @c true.
    */
   bool move_copy(AudioFrame& target) noexcept;
 
   /**
-   * @brief Allocates an owned audio buffer of @p size bytes.
+   * @brief Allocates an uninitialised owned audio buffer of @p size bytes.
+   *
+   * @param size Byte count; must be non-zero.
+   * @return @c false when @p size is zero, otherwise @c true.
    */
   bool create(size_t size) noexcept;
 
   /**
-   * @brief Releases owned resources and resets metadata and @c header.
-   *
-   * @details
-   * Reserved fields are left unchanged.
+   * @brief Releases the owned buffer (if any) and resets metadata except reserved fields.
    */
   void clear() noexcept;
 
   /**
-   * @brief Borrows an external raw audio pointer without copying.
+   * @brief Borrows an externally owned audio buffer without copying.
+   *
+   * @param data Non-null source pointer that must outlive @c *this.
+   * @param size Buffer length in bytes; must be non-zero.
+   * @return @c false on invalid arguments or unchanged pointer, otherwise @c true.
    */
   bool shallow_copy(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Deep-copies audio data from a raw pointer.
+   * @brief Copies @p size bytes from @p data into an owned buffer.
+   *
+   * @param data Non-null source pointer.
+   * @param size Number of bytes to copy; must be non-zero.
+   * @return @c false on invalid arguments or aliasing, otherwise @c true.
    */
   bool deep_copy(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Alias for @c deep_copy(uint8_t*, size_t).
+   * @brief Compatibility alias for @c deep_copy(uint8_t*, size_t).
+   *
+   * @param data Source pointer.
+   * @param size Number of bytes.
+   * @return Result of the delegated @c deep_copy call.
    */
   bool fill_data(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Returns the capture state timestamp in nanoseconds since epoch.
+   * @brief Capture-side timestamp in nanoseconds.
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint64_t update_time_ns() const noexcept;
 
   /**
-   * @brief Returns the frame duration in nanoseconds.
+   * @brief Advertised frame duration in nanoseconds.
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint64_t duration_ns() const noexcept;
 
   /**
-   * @brief Returns the codec name (e.g. @c "PCM", @c "OPUS", @c "AAC").
+   * @brief Codec hint string (e.g. @c "PCM", @c "OPUS").
+   *
+   * @return Non-owning view into the embedded buffer.
    */
   [[nodiscard]] std::string_view codec() const noexcept;
 
   /**
-   * @brief Returns the language tag (e.g. @c "en", @c "zh") for STT context.
+   * @brief Language tag used by speech-to-text consumers (e.g. @c "en", @c "zh").
+   *
+   * @return Non-owning view into the embedded buffer.
    */
   [[nodiscard]] std::string_view language() const noexcept;
 
   /**
-   * @brief Returns the microphone / sensor channel identifier.
+   * @brief Microphone / sensor channel identifier.
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint32_t channel() const noexcept;
 
   /**
-   * @brief Returns the nominal publish frequency in Hz.
+   * @brief Nominal publish frequency in Hz.
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint32_t freq() const noexcept;
 
   /**
-   * @brief Returns the sample rate in Hz.
+   * @brief PCM sample rate in Hz (e.g. 48 000).
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint32_t sample_rate() const noexcept;
 
   /**
-   * @brief Returns the number of samples per channel.
+   * @brief Number of samples per channel within the buffer.
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint32_t num_samples() const noexcept;
 
   /**
-   * @brief Returns the compressed bitrate in bps (0 if uncompressed).
+   * @brief Compressed bitrate in bits per second (zero for uncompressed PCM).
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint32_t bitrate() const noexcept;
 
   /**
-   * @brief Returns the channel count (1 = mono, 2 = stereo, ...).
+   * @brief Channel count (1 = mono, 2 = stereo, ...).
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint16_t num_channels() const noexcept;
 
   /**
-   * @brief Returns the bit depth per PCM sample (16, 24, 32...).
+   * @brief Bit depth per PCM sample (16, 24, 32, ...).
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint16_t bit_depth() const noexcept;
 
   /**
-   * @brief Returns the sample / codec encoding format.
+   * @brief Encoded sample format tag.
+   *
+   * @return @c Format enum value.
    */
   [[nodiscard]] Format format() const noexcept;
 
   /**
-   * @brief Returns the channel data layout.
+   * @brief Multi-channel layout tag.
+   *
+   * @return @c Layout enum value.
    */
   [[nodiscard]] Layout layout() const noexcept;
 
   /**
-   * @brief Returns a read-only pointer to the audio buffer.
+   * @brief Read-only pointer to the audio bytes.
+   *
+   * @return Pointer to payload start.
    */
   [[nodiscard]] const uint8_t* data() const noexcept;
 
   /**
-   * @brief Returns the audio buffer size in bytes.
+   * @brief Audio buffer size in bytes.
+   *
+   * @return Byte count.
    */
   [[nodiscard]] size_t size() const noexcept;
 
   /**
-   * @brief Returns @c true if this object owns its audio buffer.
+   * @brief Whether this frame owns its audio buffer.
+   *
+   * @return @c true when the destructor would free the buffer.
    */
   [[nodiscard]] bool is_owner() const noexcept;
 
   /**
-   * @brief Sets the capture state timestamp in nanoseconds since epoch.
+   * @brief Stores the capture-side timestamp.
+   *
+   * @param update_time_ns Timestamp in nanoseconds.
    */
   void set_update_time_ns(uint64_t update_time_ns) noexcept;
 
   /**
-   * @brief Sets the frame duration in nanoseconds.
+   * @brief Stores the advertised frame duration.
+   *
+   * @param duration_ns Duration in nanoseconds.
    */
   void set_duration_ns(uint64_t duration_ns) noexcept;
 
   /**
-   * @brief Sets the codec name (truncated to fit @c sizeof(codec) - 1).
+   * @brief Stores the codec hint, truncated to @c sizeof(codec) - 1 bytes.
+   *
+   * @param codec Codec label.
    */
   void set_codec(std::string_view codec) noexcept;
 
   /**
-   * @brief Sets the language tag (truncated to fit @c sizeof(language) - 1).
+   * @brief Stores the language tag, truncated to @c sizeof(language) - 1 bytes.
+   *
+   * @param language Language identifier.
    */
   void set_language(std::string_view language) noexcept;
 
   /**
-   * @brief Sets the microphone / sensor channel identifier.
+   * @brief Stores the microphone / sensor channel identifier.
+   *
+   * @param channel Channel id.
    */
   void set_channel(uint32_t channel) noexcept;
 
   /**
-   * @brief Sets the nominal publish frequency in Hz.
+   * @brief Stores the nominal publish frequency.
+   *
+   * @param freq Frequency in Hz.
    */
   void set_freq(uint32_t freq) noexcept;
 
   /**
-   * @brief Sets the sample rate in Hz.
+   * @brief Stores the PCM sample rate.
+   *
+   * @param sample_rate Sample rate in Hz.
    */
   void set_sample_rate(uint32_t sample_rate) noexcept;
 
   /**
-   * @brief Sets the number of samples per channel.
+   * @brief Stores the number of samples per channel.
+   *
+   * @param num_samples Sample count.
    */
   void set_num_samples(uint32_t num_samples) noexcept;
 
   /**
-   * @brief Sets the compressed bitrate in bps (0 if uncompressed).
+   * @brief Stores the compressed bitrate.
+   *
+   * @param bitrate Bitrate in bits per second.
    */
   void set_bitrate(uint32_t bitrate) noexcept;
 
   /**
-   * @brief Sets the channel count.
+   * @brief Stores the channel count.
+   *
+   * @param num_channels Channel count.
    */
   void set_num_channels(uint16_t num_channels) noexcept;
 
   /**
-   * @brief Sets the bit depth per PCM sample.
+   * @brief Stores the PCM bit depth.
+   *
+   * @param bit_depth Bit depth.
    */
   void set_bit_depth(uint16_t bit_depth) noexcept;
 
   /**
-   * @brief Sets the sample / codec encoding format.
+   * @brief Stores the sample format tag.
+   *
+   * @param format @c Format enum value.
    */
   void set_format(Format format) noexcept;
 
   /**
-   * @brief Sets the channel data layout.
+   * @brief Stores the channel layout tag.
+   *
+   * @param layout @c Layout enum value.
    */
   void set_layout(Layout layout) noexcept;
 
   /**
-   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   * @brief Mutable accessor for the primary 32-bit reserved slot (compatibility alias).
    *
-   * @details
-   * Compatibility alias for @c get_reserved32().  Reserved fields are left
-   * unchanged by @c clear() and the copy/move helpers, and are included in the
-   * binary wire format.
-   *
-   * @return Mutable reference to the primary 32-bit reserved field.
+   * @return Reference to @c reserved32_.
    */
   uint32_t& get_reserved() noexcept { return reserved32_; }
 
   /**
-   * @brief Returns a mutable reference to the 8-bit reserved field.
+   * @brief Mutable accessor for the 8-bit reserved slot.
    *
-   * @return Mutable reference to the 8-bit reserved field.
+   * @return Reference to @c reserved8_.
    */
   uint8_t& get_reserved8() noexcept { return reserved8_; }
 
   /**
-   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   * @brief Mutable accessor for the primary 32-bit reserved slot.
    *
-   * @return Mutable reference to the primary 32-bit reserved field.
+   * @return Reference to @c reserved32_.
    */
   uint32_t& get_reserved32() noexcept { return reserved32_; }
 
-  Header header;  ///< Sequencing and timestamp metadata for this frame.
+  Header header;  ///< Sequencing and timestamp metadata prefix.
 
-  static constexpr bool kZerocopyTypes{true};  ///< Internal marker for VLink zero-copy type traits.
+  static constexpr bool kZerocopyTypes{true};  ///< Marker probed by the VLink type-trait machinery.
 
  private:
   uint8_t* data_{nullptr};

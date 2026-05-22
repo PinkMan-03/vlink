@@ -23,20 +23,35 @@
 
 /**
  * @file schema_plugin_interface.h
- * @brief Runtime schema plugin interface for Protobuf and FlatBuffers metadata loading.
+ * @brief Abstract contract for runtime Protobuf / FlatBuffers schema discovery plugins.
  *
  * @details
- * @c SchemaPluginInterface provides a unified runtime schema registry for
- * Protobuf and FlatBuffers. It keeps explicit Protobuf-only reflection hooks
- * used by @c cli/eproto and the webviz converters, and adds generic schema
- * listing plus FlatBuffers parser creation so the same plugin
- * can serve:
+ * @c SchemaPluginInterface is the plugin-side contract shared between VLink and any out-of-tree
+ * shared library that supplies serialisation metadata for runtime introspection.  Plugins are
+ * loaded by @c SchemaPluginManager through the generic @c Plugin loader and surface a uniform
+ * lookup API regardless of whether the underlying metadata lives in a linked Protobuf descriptor
+ * pool, in @c flatc-generated BFBS blobs, or in some bespoke registry.
  *
- * 1. Protobuf @c FileDescriptorSet blobs.
- * 2. FlatBuffers BFBS blobs.
- * 3. Mixed schema registries for MCAP/bag embedding.
- * 4. Reusable FlatBuffers parsers for @c cli/efbs and other runtime tooling.
+ * | Capability                | Method                              | Returns when missing    |
+ * | ------------------------- | ----------------------------------- | ----------------------- |
+ * | Version probe             | @c get_version_info()               | populated info          |
+ * | Generic schema lookup     | @c search_schema()                  | name-only @c SchemaData |
+ * | Bulk enumeration          | @c get_all_schemas()                | empty vector            |
+ * | Protobuf descriptor       | @c search_protobuf_descriptor()     | @c nullptr              |
+ * | Protobuf dynamic message  | @c create_protobuf_message()        | @c nullptr              |
+ * | FlatBuffers BFBS schema   | @c search_flatbuffers_schema()      | @c nullptr              |
+ * | FlatBuffers parser        | @c create_flatbuffers_parser()      | @c nullptr              |
  *
+ * @par Plugin lifecycle
+ * @code
+ *   load .so  -->  factory ctor  -->  search/get_all  -->  create_message/parser  -->  dtor
+ *                       |                                                                ^
+ *                       v                                                                |
+ *                  caches built lazily under an internal mutex of the implementation ----+
+ * @endcode
+ *
+ * Concrete plugins normally derive from @c SchemaPluginBase, which already implements every
+ * method against a linked Protobuf descriptor pool plus the process-local FlatBuffers registry.
  */
 
 #pragma once
@@ -51,18 +66,14 @@ namespace vlink {
 
 /**
  * @class SchemaPluginInterface
- * @brief Abstract interface for runtime schema lookup and dynamic object creation.
+ * @brief Polymorphic contract for runtime schema lookup and dynamic message construction.
  *
  * @details
- * Loaded as a dynamic plugin via @c Plugin::load<SchemaPluginInterface>().
- * @c SchemaPluginManager provides a convenient singleton accessor.
- *
- * The interface intentionally exposes both generic schema APIs and encoding-specific
- * runtime hooks:
- * - Generic APIs such as @c search_schema() and @c get_all_schemas() are used by
- *   bag/database/MCAP embedding logic.
- * - Protobuf-specific hooks are consumed by @c cli/eproto and webviz protobuf decoders.
- * - FlatBuffers-specific hooks are consumed by @c cli/efbs and runtime BFBS-based decoders.
+ * Instances are obtained through @c Plugin::load<SchemaPluginInterface>() or, more commonly,
+ * via the @c SchemaPluginManager singleton.  Opaque @c void* aliases keep the contract free
+ * of Protobuf and FlatBuffers headers so that downstream binaries that do not link those
+ * libraries can still consume the interface; callers that statically link the matching
+ * library are expected to @c reinterpret_cast back to the concrete pointer type.
  */
 class SchemaPluginInterface {
   VLINK_PLUGIN_REGISTER(SchemaPluginInterface)
@@ -74,128 +85,115 @@ class SchemaPluginInterface {
 
  public:
   /**
-   * @brief Opaque pointer type for a @c google::protobuf::Descriptor.
+   * @brief Opaque alias for a @c google::protobuf::Descriptor pointer.
    *
    * @details
-   * Callers that know the concrete plugin implementation may cast this to
-   * @c google::protobuf::Descriptor* directly.
+   * Callers that statically link Protobuf may cast this back to
+   * @c google::protobuf::Descriptor* and use the full reflection API.
    */
   using ProtobufDescriptorPtr = void*;
 
   /**
-   * @brief Opaque pointer type for a @c google::protobuf::Message instance.
+   * @brief Opaque alias for a @c google::protobuf::Message pointer.
    *
    * @details
-   * Callers may cast this to @c google::protobuf::Message* for dynamic access.
+   * The lifetime of the underlying message is owned by the plugin; callers must
+   * not @c delete the returned pointer.
    */
   using ProtobufMessagePtr = void*;
 
   /**
-   * @brief Opaque pointer type for a FlatBuffers @c reflection::Schema instance.
-   *
-   * @details
-   * Callers that include FlatBuffers reflection headers may cast this to
-   * @c reflection::Schema* directly.
+   * @brief Opaque alias for a @c reflection::Schema pointer (FlatBuffers BFBS).
    */
   using FlatbuffersSchemaPtr = void*;
 
   /**
-   * @brief Opaque pointer type for a runtime FlatBuffers @c Parser instance.
-   *
-   * @details
-   * Callers may cast this to @c flatbuffers::Parser* when FlatBuffers headers are available.
+   * @brief Opaque alias for a @c flatbuffers::Parser pointer pre-loaded with a root type.
    */
   using FlatbuffersParserPtr = void*;
 
   /**
    * @struct VersionInfo
-   * @brief Plugin version and build metadata.
+   * @brief Build provenance reported by a concrete plugin implementation.
+   *
+   * @details
+   * Provides enough metadata for diagnostic logging and version pinning when a process
+   * needs to assert that loaded plugins match the running binary.
    */
   struct VersionInfo final {
-    std::string name;       ///< Plugin display name.
-    std::string version;    ///< Semantic version string.
-    std::string timestamp;  ///< Build timestamp.
-    std::string tag;        ///< Source control tag.
-    std::string commit_id;  ///< Source control commit hash.
+    std::string name;       ///< Human-readable plugin identifier.
+    std::string version;    ///< Semantic version string such as @c "2.0.0".
+    std::string timestamp;  ///< ISO-8601 build timestamp captured at compile time.
+    std::string tag;        ///< Optional source-control tag tied to the binary.
+    std::string commit_id;  ///< Optional source-control commit hash.
   };
 
   /**
-   * @brief Returns version and build metadata for this plugin.
+   * @brief Reports the plugin's version and build identity.
    *
-   * @return @c VersionInfo with name, version, timestamp, tag, and commit ID.
+   * @return Populated @c VersionInfo describing the loaded plugin binary.
    */
   [[nodiscard]] virtual VersionInfo get_version_info() const = 0;
 
   /**
-   * @brief Finds one schema constrained by schema family.
+   * @brief Resolves a single schema record by name, optionally restricted to one family.
    *
    * @details
-   * Callers that already know the expected schema family (for example derived from
-   * compile-time traits or discovery metadata) should supply @p schema_type to
-   * skip family-agnostic probing. Passing @c SchemaType::kUnknown still performs
-   * a best-effort lookup across every registered family.
+   * When @p schema_type is @c SchemaType::kUnknown the plugin probes every supported family
+   * and returns the unique match; ambiguous names yield an empty record.  Supplying a concrete
+   * @c SchemaType selects the matching backend directly and skips the probing.
    *
-   * @param name         Serialization type / message type name.
-   * @param schema_type  Coarse schema family hint, or @c SchemaType::kUnknown for
-   *                     family-agnostic lookup.
-   * @return Matching @c SchemaData, or an empty/name-only schema when not found.
+   * @param name         Serialisation type name or fully qualified message name.
+   * @param schema_type  Family hint, or @c SchemaType::kUnknown for family-agnostic lookup.
+   * @return Matching @c SchemaData on success, or a name-only record on miss.
    */
   [[nodiscard]] virtual SchemaData search_schema(const std::string& name,
                                                  SchemaType schema_type = SchemaType::kUnknown) = 0;
 
   /**
-   * @brief Returns all imported or cached schemas filtered by schema family.
+   * @brief Enumerates every schema known to the plugin, optionally filtered by family.
    *
-   * @param schema_type  Schema family to filter on; @c SchemaType::kUnknown returns
-   *                     every cached schema.
-   * @return List of schemas belonging to @p schema_type.
+   * @param schema_type  Family filter, or @c SchemaType::kUnknown to return all families.
+   * @return Snapshot vector of @c SchemaData entries owned by the caller.
    */
   [[nodiscard]] virtual std::vector<SchemaData> get_all_schemas(SchemaType schema_type = SchemaType::kUnknown) = 0;
 
   /**
-   * @brief Looks up a Protobuf descriptor by fully-qualified message name.
+   * @brief Returns the Protobuf descriptor for a fully qualified message name.
    *
-   * @details
-   * For non-Protobuf types this returns @c nullptr.
-   *
-   * @param name  Fully-qualified Protobuf message type name.
-   * @return Opaque @c Descriptor pointer, or @c nullptr if not found.
+   * @param name  Fully qualified Protobuf message name (e.g. @c "demo.proto.PointCloud").
+   * @return Opaque @c Descriptor pointer, or @c nullptr when the name is unknown.
    */
   [[nodiscard]] virtual ProtobufDescriptorPtr search_protobuf_descriptor(const std::string& name) = 0;
 
   /**
-   * @brief Creates or returns a cached Protobuf dynamic message instance for the named type.
+   * @brief Returns a cached dynamic @c Message instance for the given Protobuf type.
    *
    * @details
-   * For non-Protobuf types this returns @c nullptr.
+   * The instance is owned by the plugin; callers may copy from it but must not delete it.
    *
-   * @param name  Fully-qualified Protobuf message type name.
-   * @return Opaque @c Message pointer, or @c nullptr if not found.
+   * @param name  Fully qualified Protobuf message name.
+   * @return Opaque @c Message pointer, or @c nullptr when the name is unknown.
    */
   [[nodiscard]] virtual ProtobufMessagePtr create_protobuf_message(const std::string& name) = 0;
 
   /**
-   * @brief Looks up a FlatBuffers binary-schema reflection handle by type name.
+   * @brief Returns a verified BFBS reflection schema handle for a FlatBuffers root type.
    *
-   * @details
-   * The returned handle points at the BFBS-backed @c reflection::Schema for the
-   * requested root type. For non-FlatBuffers types this returns @c nullptr.
-   *
-   * @param name  Fully-qualified FlatBuffers root type name.
-   * @return Opaque BFBS reflection schema handle, or @c nullptr if not found.
+   * @param name  Fully qualified FlatBuffers root type name.
+   * @return Opaque @c reflection::Schema pointer, or @c nullptr when the name is unknown.
    */
   [[nodiscard]] virtual FlatbuffersSchemaPtr search_flatbuffers_schema(const std::string& name) = 0;
 
   /**
-   * @brief Creates a FlatBuffers parser preloaded with the named schema.
+   * @brief Returns a freshly built @c flatbuffers::Parser pre-loaded with the requested root.
    *
    * @details
-   * The returned parser is backed by the plugin lifetime and already contains
-   * the BFBS schema plus the requested root type. Each successful call returns
-   * a distinct parser instance. For non-FlatBuffers types this returns @c nullptr.
+   * Each successful call returns a distinct parser instance whose lifetime is owned by
+   * the plugin.  This avoids cross-thread parser reuse, which is unsafe.
    *
-   * @param name  Fully-qualified FlatBuffers root type name.
-   * @return Opaque runtime parser handle, or @c nullptr if not found.
+   * @param name  Fully qualified FlatBuffers root type name.
+   * @return Opaque parser pointer, or @c nullptr when the name is unknown.
    */
   [[nodiscard]] virtual FlatbuffersParserPtr create_flatbuffers_parser(const std::string& name) = 0;
 

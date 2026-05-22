@@ -23,54 +23,71 @@
 
 /**
  * @file raw_data.h
- * @brief Generic zero-copy raw-byte data container for VLink transport.
+ * @brief Generic zero-copy byte-buffer container with a @c Header prefix.
  *
  * @details
- * @c RawData wraps an untyped byte buffer together with a @c Header for
- * sequencing and timestamping.  It is the simplest zero-copy container in
- * VLink and serves as a building block when the payload format is opaque or
- * application-defined.
+ * @c RawData is the most lightweight container in the @c vlink::zerocopy
+ * family.  It pairs an opaque payload (any application-defined byte blob:
+ * Protobuf wire bytes, FlatBuffer tables, compressed frames, encrypted CAN
+ * snapshots, ...) with a 40-byte @c Header so that consumers can sequence and
+ * time-stamp the payload without parsing it.  Use @c RawData whenever the
+ * payload schema is opaque to VLink, or when a higher-level layer wraps its
+ * own framing on top.
  *
- * The struct is exactly 64 bytes on 64-bit platforms (verified via
- * @c static_assert).  Three ownership modes allow callers to manage memory
- * without extra copies wherever possible:
+ * | Ownership mode | How to create                       | Frees on destruction  |
+ * | -------------- | ----------------------------------- | --------------------- |
+ * | Owned          | @c create(size)                     | Yes                   |
+ * | Borrowed       | @c shallow_copy(ptr, size)          | No                    |
+ * | Deserialised   | @c operator<<(bytes)                | No (borrows @c bytes) |
  *
- * | Mode               | Created by                     | Owns memory |
- * | ------------------ | ------------------------------ | ----------- |
- * | Owned              | @c create(size)                | Yes         |
- * | Shallow (borrow)   | @c shallow_copy(ptr, size)     | No          |
- * | Deserialised       | @c operator<<(bytes)           | No          |
- *
- * @par Binary wire format
+ * @par Wire format
+ * @c RawData is POD; the canonical serialiser is @c memcpy().  The @c sizeof
+ * value is locked by @c static_assert and forms a permanent binary contract:
+ * VLink zero-copy containers have NO forward and NO backward compatibility
+ * across versions, and every field including the @c reserved slot is part of
+ * that contract.
  * @code
- * [ magic_begin (4) | RawData struct (64) | payload bytes (N) | magic_end (4) ]
+ * static_assert(sizeof(RawData) == 64, "Sizeof must be 64 bytes.");
  * @endcode
- * Magic numbers allow the receiver to detect data corruption before
- * @c memcpy-ing the struct header.  The struct block is a raw snapshot of the
- * 64-bit ABI layout used by this library; receivers must parse it through
- * @c operator<< and must not treat embedded pointer/ownership fields as
- * portable wire values.
  *
- * @par Usage
+ * @par Memory layout
+ * @code
+ * Offset  Size  Field
+ * ------  -----  --------------------------------
+ *      0     40  Header header
+ *     40      8  uint8_t* data_
+ *     48      8  size_t   size_
+ *     56      1  bool     is_owner_
+ *     57      1  (padding)
+ *     58      2  uint16_t reserved_buf_
+ *     60      4  (tail padding to align(8))
+ * ------  -----  --------------------------------
+ *  Total     64  bytes (alignas 8)
+ *
+ * Wire envelope:
+ * [ magic_begin (4) | RawData struct (64) | payload (size_) | magic_end (4) ]
+ * @endcode
+ *
+ * @par Reserved bytes
+ * @c reserved_buf_ travels through the wire format unchanged.  It is exposed
+ * via @c reserved_buf() so applications can stash a flag or minor sub-type id
+ * without inflating the struct, but the slot must not be redefined later --
+ * doing so would silently break any peer that still expects the old meaning.
+ *
+ * @par Example
  * @code
  * vlink::zerocopy::RawData rd;
- * rd.header.seq = 1;
- * rd.header.time_pub = get_time_ns();
- * rd.create(1024);
- * std::memcpy(const_cast<uint8_t*>(rd.data()), src_buf, 1024);
+ * rd.header.seq      = ++seq;
+ * rd.header.time_pub = vlink::time_ns();
+ * rd.create(payload.size());
+ * std::memcpy(const_cast<uint8_t*>(rd.data()), payload.data(), payload.size());
  *
  * vlink::Bytes wire;
- * rd >> wire;                  // serialise to Bytes
+ * rd >> wire;
  *
- * vlink::zerocopy::RawData rd2;
- * rd2 << wire;                 // deserialise from Bytes (zero-copy, borrows wire)
+ * vlink::zerocopy::RawData rx;
+ * rx << wire;
  * @endcode
- *
- * @note
- * - 32-bit architectures emit a compile-time warning and are not supported.
- * - After @c operator<<, the internal data pointer references memory inside
- *   the source @c Bytes object.  The @c Bytes must outlive the @c RawData.
- * - @c fill_data is an alias for @c deep_copy(uint8_t*, size_t).
  */
 
 #pragma once
@@ -86,275 +103,194 @@ namespace zerocopy {
 
 /**
  * @struct RawData
- * @brief Generic zero-copy raw-byte data container with Header metadata.
+ * @brief 64-byte POD container that wraps an opaque byte payload with a @c Header prefix.
  *
  * @details
- * Manages an untyped byte payload together with a @c Header for sequencing
- * and timestamping.  The struct size is fixed at 64 bytes on 64-bit targets.
- * Copies of the struct are either shallow (borrow the data pointer) or deep
- * (allocate and copy).  The move constructor and move-assignment transfer
- * ownership from the source without allocation.
+ * The struct is locked at 64 bytes on 64-bit targets via @c static_assert;
+ * 32-bit toolchains emit a build-time warning because the embedded pointer
+ * and size widths shift the layout.  The wire envelope uses magic-number
+ * sentinels to detect truncation and corruption before @c memcpy of the
+ * struct header.
  */
 struct VLINK_EXPORT_AND_ALIGNED(8) RawData final {
   /**
-   * @brief Default constructor.
-   *
-   * @details
-   * Verifies via @c static_assert that the struct is exactly 64 bytes on
-   * 64-bit platforms.  32-bit architectures emit a compile-time warning.
+   * @brief Default-constructs an empty container and verifies the sizeof contract.
    */
   RawData() noexcept;
 
   /**
-   * @brief Destructor.
-   *
-   * @details
-   * Frees the owned data buffer if @c is_owner() is @c true.
+   * @brief Releases the owned buffer when @c is_owner() is @c true.
    */
   ~RawData() noexcept;
 
   /**
-   * @brief Copy constructor.
+   * @brief Deep-copies the payload of @p target into a freshly allocated owned buffer.
    *
-   * @details
-   * Performs a deep copy of @p target, allocating a new buffer and copying
-   * the payload.
-   *
-   * @param target Source to copy from.
+   * @param target Source container to clone.
    */
   RawData(const RawData& target) noexcept;
 
   /**
-   * @brief Move constructor.
+   * @brief Steals @p target's ownership and metadata; @p target is left empty.
    *
-   * @details
-   * Transfers ownership from @p target.  After the call @p target is empty
-   * and no longer owns any buffer.
-   *
-   * @param target Source to move from.
+   * @param target Source container moved from.
    */
   RawData(RawData&& target) noexcept;
 
   /**
-   * @brief Copy-assignment operator.
+   * @brief Deep-copy-assigns from @p target; self-assignment is a no-op.
    *
-   * @details
-   * Deep-copies @p target into @c *this.  Self-assignment is a no-op.
-   *
-   * @param target Source to copy from.
-   * @return        Reference to @c *this.
+   * @param target Source container to clone.
+   * @return Reference to @c *this.
    */
   RawData& operator=(const RawData& target) noexcept;
 
   /**
-   * @brief Move-assignment operator.
+   * @brief Move-assigns @p target's resources into @c *this; self-assignment is a no-op.
    *
-   * @details
-   * Transfers ownership from @p target into @c *this.  Self-assignment is a
-   * no-op.  After the call @p target is empty.
-   *
-   * @param target Source to move from.
-   * @return        Reference to @c *this.
+   * @param target Source container moved from.
+   * @return Reference to @c *this.
    */
   RawData& operator=(RawData&& target) noexcept;
 
   /**
-   * @brief Deserialises a @c RawData from a @c Bytes wire buffer.
+   * @brief Deserialises a @c RawData from @p bytes using zero-copy borrowing semantics.
    *
    * @details
-   * Validates the magic-number envelope, then @c memcpy's the raw struct
-   * snapshot from the buffer.  The internal data pointer is set to point
-   * directly into @p bytes (zero-copy, @c is_owner() == false).  The caller
-   * must ensure @p bytes outlives this @c RawData.
+   * Validates the magic-number envelope and total length, then borrows the
+   * payload pointer from @p bytes.  The caller must keep @p bytes alive for as
+   * long as this @c RawData is used.
    *
-   * @param bytes Serialised buffer produced by @c operator>>.
-   * @return       @c true on success, @c false if the buffer is invalid or
-   *               the total size does not match @c get_serialized_size().
+   * @param bytes Wire buffer previously produced by @c operator>>.
+   * @return @c true on success; @c false on magic mismatch or size mismatch.
    */
   bool operator<<(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Serialises this @c RawData into a @c Bytes wire buffer.
+   * @brief Serialises the struct snapshot plus payload into @p bytes.
    *
-   * @details
-   * Writes the magic-number envelope, this object's raw struct snapshot, and
-   * the payload into @p bytes.  If @p bytes is the wrong size it is reallocated
-   * automatically.
-   *
-   * @param bytes Output buffer (resized if necessary).
-   * @return       Always @c true.
+   * @param bytes Output buffer; resized automatically when too small.
+   * @return Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
 
   /**
-   * @brief Checks whether @p bytes contains a valid @c RawData wire format.
+   * @brief Validates that @p bytes carries a well-formed @c RawData envelope.
    *
-   * @details
-   * Verifies that the buffer is large enough and that both the begin and end
-   * magic numbers match the expected constants.
-   *
-   * @param bytes Buffer to check.
-   * @return       @c true if the magic numbers are present and the minimum
-   *               size constraint is satisfied.
+   * @param bytes Buffer to inspect.
+   * @return @c true when the magic sentinels match and the minimum length holds.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Returns the total serialised byte count for this @c RawData.
+   * @brief Total bytes that @c operator>> would write for this container.
    *
-   * @details
-   * Computed as: @code sizeof(magic_begin) + sizeof(RawData) + size() + sizeof(magic_end) @endcode
-   *
-   * @return Total number of bytes that @c operator>> will write.
+   * @return @c sizeof(magic_begin) + @c sizeof(RawData) + @c size() + @c sizeof(magic_end).
    */
   [[nodiscard]] size_t get_serialized_size() const noexcept;
 
   /**
-   * @brief Returns @c true if the data pointer is non-null and the size is non-zero.
+   * @brief Whether the payload pointer is non-null and the byte size is positive.
    *
-   * @return @c true when there is a valid payload available.
+   * @return @c true when the container holds usable data.
    */
   [[nodiscard]] bool is_valid() const noexcept;
 
   /**
-   * @brief Borrows (shallow-copies) the payload from another @c RawData.
+   * @brief Borrows @p target's payload pointer without copying.
    *
-   * @details
-   * Sets the internal pointer to the same buffer as @p target without
-   * copying data.  @c is_owner() becomes @c false.  The source must outlive
-   * this object.  Any previously owned buffer is freed first.
-   *
-   * @param target Source to borrow from.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source container whose buffer must outlive @c *this.
+   * @return @c false on self-borrow, otherwise @c true.
    */
   bool shallow_copy(const RawData& target) noexcept;
 
   /**
-   * @brief Deep-copies the payload from another @c RawData.
+   * @brief Allocates (or reuses) an owned buffer and copies @p target's payload.
    *
-   * @details
-   * Allocates a new buffer and copies the payload from @p target.  If @c *this
-   * already owns a buffer of the same size, the data is copied in-place without
-   * reallocation.
-   *
-   * @param target Source to copy from.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source container to clone.
+   * @return @c false on self-copy, otherwise @c true.
    */
   bool deep_copy(const RawData& target) noexcept;
 
   /**
-   * @brief Transfers ownership from another @c RawData.
+   * @brief Transfers ownership from @p target; @p target becomes empty.
    *
-   * @details
-   * Equivalent to a move operation implemented as a member function.  After
-   * the call @p target is empty and @c is_owner() on @p target is @c false.
-   *
-   * @param target Source to move from.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source container moved from.
+   * @return @c false on self-move, otherwise @c true.
    */
   bool move_copy(RawData& target) noexcept;
 
   /**
-   * @brief Allocates an owned buffer of @p size bytes.
+   * @brief Allocates an uninitialised owned buffer of @p size bytes.
    *
-   * @details
-   * Any previously owned buffer is freed before the new allocation.  The
-   * new buffer content is uninitialised.
-   *
-   * @param size Number of bytes to allocate.  Must be non-zero.
-   * @return      @c false if @p size is zero, otherwise @c true.
+   * @param size Byte count; must be non-zero.
+   * @return @c false when @p size is zero, otherwise @c true.
    */
   bool create(size_t size) noexcept;
 
   /**
-   * @brief Releases all resources and resets all fields to zero.
-   *
-   * @details
-   * Frees the owned buffer if @c is_owner() is @c true.  The @c Header is
-   * also zeroed.
+   * @brief Releases the owned buffer (if any) and zeroes the @c Header.
    */
   void clear() noexcept;
 
   /**
-   * @brief Borrows a raw pointer without copying.
+   * @brief Borrows an externally owned raw byte buffer without copying.
    *
-   * @details
-   * Sets the internal pointer to @p data without allocating.  Any previously
-   * owned buffer is freed.  The caller is responsible for the lifetime of
-   * @p data.
-   *
-   * @param data Pointer to the data to borrow.  Must be non-null.
-   * @param size Size of the data in bytes.  Must be non-zero.
-   * @return      @c false if @p data is null, @p size is zero, or @p data
-   *              already equals the current internal pointer.
+   * @param data Non-null source pointer that must outlive @c *this.
+   * @param size Buffer length in bytes; must be non-zero.
+   * @return @c false on invalid arguments or unchanged pointer, otherwise @c true.
    */
   bool shallow_copy(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Copies data from a raw pointer into an owned buffer.
+   * @brief Copies @p size bytes from @p data into an owned buffer (allocating as needed).
    *
-   * @details
-   * If @c *this already owns a buffer of the same @p size the data is copied
-   * in-place; otherwise a new buffer is allocated first via @c create().
-   *
-   * @param data Source data pointer.  Must be non-null.
-   * @param size Number of bytes to copy.  Must be non-zero.
-   * @return      @c false if @p data is null, @p size is zero, this object
-   *              claims ownership but has no buffer, or @p data already equals
-   *              the current internal pointer; otherwise @c true.
+   * @param data Non-null source pointer.
+   * @param size Number of bytes to copy; must be non-zero.
+   * @return @c false on invalid arguments or aliasing, otherwise @c true.
    */
   bool deep_copy(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Alias for @c deep_copy(uint8_t*, size_t).
+   * @brief Compatibility alias for @c deep_copy(uint8_t*, size_t).
    *
-   * @param data Source data pointer.
+   * @param data Source pointer.
    * @param size Number of bytes.
-   * @return      Result of the underlying @c deep_copy call.
+   * @return Result of the delegated @c deep_copy call.
    */
   bool fill_data(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Returns a mutable reference to the 16-bit user-reserved field.
+   * @brief Mutable accessor for the 16-bit user-reserved field carried in the wire format.
    *
-   * @details
-   * This field travels through serialisation and can be used by the application
-   * for flags or minor sub-type identification without extending the struct.
-   *
-   * @return Mutable reference to @c reserved_buf_.
+   * @return Reference to @c reserved_buf_.
    */
   [[nodiscard]] uint16_t& reserved_buf() noexcept;
 
   /**
-   * @brief Returns a read-only pointer to the payload bytes.
+   * @brief Read-only pointer to the payload bytes.
    *
-   * @return Pointer to the payload.  Empty deserialised payloads may still
-   *         hold a non-null borrowed pointer; use @c size() / @c is_valid() to
-   *         test for usable payload bytes.
+   * @return Pointer to payload start; may be non-null with @c size() == 0 for empty deserialised frames.
    */
   [[nodiscard]] const uint8_t* data() const noexcept;
 
   /**
-   * @brief Returns the payload size in bytes.
+   * @brief Payload size in bytes (0 when empty).
    *
-   * @return Number of payload bytes, or 0 if the object is empty.
+   * @return Byte count.
    */
   [[nodiscard]] size_t size() const noexcept;
 
   /**
-   * @brief Returns @c true if this object owns its data buffer.
+   * @brief Whether this container currently owns its buffer.
    *
-   * @details
-   * An owned buffer is freed in the destructor.  Non-owned buffers (created by
-   * @c shallow_copy or @c operator<<) are never freed.
-   *
-   * @return @c true when memory ownership is held.
+   * @return @c true when the destructor would free the buffer.
    */
   [[nodiscard]] bool is_owner() const noexcept;
 
-  Header header;  ///< Sequencing and timestamp metadata for this data packet.
+  Header header;  ///< Sequencing and timestamp metadata prefix.
 
-  static constexpr bool kZerocopyTypes{true};  ///< Internal marker for VLink zero-copy type traits.
+  static constexpr bool kZerocopyTypes{true};  ///< Marker probed by the VLink type-trait machinery.
 
  private:
   uint8_t* data_{nullptr};

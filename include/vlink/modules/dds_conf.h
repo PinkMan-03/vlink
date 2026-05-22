@@ -23,67 +23,82 @@
 
 /**
  * @file dds_conf.h
- * @brief Transport configuration for the @c dds:// Fast-DDS RTPS backend.
+ * @brief Transport configuration for the @c dds:// eProsima Fast-DDS / Fast-RTPS transport.
  *
  * @details
- * @c DdsConf configures the eProsima Fast-DDS (Fast-RTPS) transport, which provides
- * standards-compliant DDS pub/sub and RPC over Ethernet.  It is the primary
- * cross-machine transport in VLink and is suitable for both LAN and WAN deployments.
+ * @c DdsConf is the default cross-machine transport in VLink and binds the @c dds://
+ * URL scheme to the eProsima Fast-DDS implementation of the OMG DDS specification.
+ * It supports the full RTPS wire protocol over UDP/TCP and SHM, scales from a single
+ * LAN segment to wide-area deployments, and interoperates with any other compliant
+ * DDS vendor on the same Domain.  Pub/sub, RPC (request/response over DDS topics)
+ * and field-style state synchronisation are all routed through Fast-DDS DataReaders
+ * and DataWriters under the hood.
  *
  * @par Supported Node Types
- * @c dds:// supports all six node types: @c kPublisher, @c kSubscriber, @c kServer,
- * @c kClient, @c kSetter, and @c kGetter.
+ *
+ * | Publisher | Subscriber | Server | Client | Getter | Setter |
+ * | :-------: | :--------: | :----: | :----: | :----: | :----: |
+ * | yes       | yes        | yes    | yes    | yes    | yes    |
  *
  * @par URL Format
  * @code
- *   dds://<topic>[?domain=<N>&depth=<N>&qos=<name>]
+ *   dds://<topic>[?domain=<N>&depth=<N>&qos=<profile>]
  *   dds://<topic>[?domain=<N>&part=<v>&topic=<v>&pub=<v>&sub=<v>&writer=<v>&reader=<v>]
  * @endcode
  *
- * | Component  | Description                                                               |
- * | ---------- | ------------------------------------------------------------------------- |
- * | @c topic   | DDS topic name; formed from @c host + @c "/" + @c path                    |
- * | @c domain  | DDS Domain ID (@c ?domain=, default from @c VLINK_DDS_DOMAIN env var)     |
- * | @c depth   | DDS history depth override; 0 keeps the selected QoS history depth        |
- * | @c qos     | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
- * | @c qos_ext | Remaining query map after @c domain, @c depth, and @c qos are removed     |
+ * | Component  | Description                                                                  |
+ * | ---------- | ---------------------------------------------------------------------------- |
+ * | @c topic   | DDS topic name; URL host concatenated with the URL path                      |
+ * | @c domain  | DDS Domain ID (@c ?domain=); defaults from the @c VLINK_DDS_DOMAIN env var   |
+ * | @c depth   | Optional history-depth override; @c 0 keeps the QoS-selected depth           |
+ * | @c qos     | Named QoS profile registered with @c register_qos() (@c ?qos=)               |
+ * | @c qos_ext | Remaining query keys after @c domain, @c depth, @c qos have been removed     |
+ *
+ * @par Environment Variables
+ *
+ * | Variable           | Description                                                  | Default |
+ * | ------------------ | ------------------------------------------------------------ | ------- |
+ * | VLINK_DDS_DOMAIN   | Default DDS Domain ID when @c ?domain= is not present in URL | 0       |
  *
  * @par QoS Registration
- * Named QoS profiles must be registered before creating any @c dds:// nodes:
+ * Named profiles must be registered before any endpoint that references them is created.
+ * A typical reliable + transient-local profile for late-joining subscribers looks like:
  * @code
- *   vlink::Qos my_qos;
- *   my_qos.reliability.kind = vlink::Qos::Reliability::kReliable;
- *   my_qos.durability.kind  = vlink::Qos::Durability::kTransientLocal;
- *   vlink::DdsConf::register_qos("my_profile", my_qos);
- *
- *   vlink::Subscriber<MyMsg> sub("dds://my_topic?qos=my_profile");
+ *   vlink::Qos late_joiner;
+ *   late_joiner.reliability.kind = vlink::Qos::Reliability::kReliable;
+ *   late_joiner.durability.kind  = vlink::Qos::Durability::kTransientLocal;
+ *   late_joiner.history.kind     = vlink::Qos::History::kKeepLast;
+ *   late_joiner.history.depth    = 16;
+ *   vlink::DdsConf::register_qos("late_joiner", late_joiner);
  * @endcode
  *
- * @par Type Support Registration
- * For CDR-serialised types the DDS type support factory must be registered
- * before any publisher or subscriber is created on that topic:
+ * @par Type-Support Registration
+ * For CDR-serialised messages the Fast-DDS @c TopicDataType factory must be wired
+ * to the topic name before any endpoint is opened on that topic.  An optional
+ * response type can be registered at the same time for RPC topics; the helper
+ * automatically appends the @c "___resp" suffix.
  * @code
- *   // Register request type only (for pub/sub):
  *   vlink::DdsConf::register_topic<MyMsgPubSubType>("my_topic");
- *
- *   // Register request + response types (for RPC):
- *   vlink::DdsConf::register_topic<MyReqPubSubType, MyRespPubSubType>("my_rpc_topic");
- *
- *   // Register from a full URL:
+ *   vlink::DdsConf::register_topic<MyReqPubSubType, MyRespPubSubType>("my_rpc");
  *   vlink::DdsConf::register_url<MyMsgPubSubType>("dds://my_topic?domain=1");
  * @endcode
  *
- * @par Global QoS File
- * An XML QoS profile file can be loaded at startup so that DDS participants and
- * endpoints inherit profiles by name:
+ * @par Example
  * @code
  *   vlink::DdsConf::load_global_qos_file("/etc/vlink/dds_profile.xml");
+ *
+ *   vlink::Qos qos;
+ *   qos.reliability.kind = vlink::Qos::Reliability::kReliable;
+ *   qos.durability.kind  = vlink::Qos::Durability::kTransientLocal;
+ *   vlink::DdsConf::register_qos("reliable_tl", qos);
+ *
+ *   auto pub = vlink::Publisher<MyMsg>::create_unique("dds://state?domain=42&qos=reliable_tl");
+ *   auto sub = vlink::Subscriber<MyMsg>::create_unique("dds://state?domain=42&qos=reliable_tl");
  * @endcode
  *
- * @note This header is compiled only when @c VLINK_SUPPORT_DDS is defined.
- * @note @c qos and @c qos_ext are mutually exclusive; setting both causes
- *       @c is_valid() to return @c false.
- * @note Response topics are automatically registered with a @c "___resp" suffix.
+ * @note Compiled only when @c VLINK_SUPPORT_DDS is defined.
+ * @note @c qos and @c qos_ext are mutually exclusive; setting both forces @c is_valid() to @c false.
+ * @note RPC reply topics are derived by appending @c "___resp" to the topic name.
  */
 
 #pragma once
@@ -109,133 +124,133 @@ namespace vlink {
 
 /**
  * @struct DdsConf
- * @brief Configuration for the @c dds:// Fast-DDS RTPS transport.
+ * @brief Concrete @c Conf describing a Fast-DDS endpoint addressed by a @c dds:// URL.
  *
  * @details
- * Holds the DDS topic name, domain ID, history depth, and QoS settings.
- * Can be constructed directly or parsed from a URL string via @c Url.
+ * Captures the topic, Domain ID, history-depth override, and either a named QoS
+ * profile or a per-entity QoS property map.  Both constructors share the same
+ * @c topic and @c domain fields; the second constructor populates @c qos_ext
+ * instead of @c qos.
  */
 struct VLINK_EXPORT DdsConf final : public Conf {
-  std::string topic;  ///< DDS topic name (host + "/" + path from URL).
-  int32_t domain{0};  ///< DDS Domain Participant ID (non-negative).
-  int32_t depth{0};   ///< DDS history depth override; 0 keeps the selected QoS history depth.
-  std::string qos;    ///< Named QoS profile key registered via @c register_qos().
-  PropertiesMap
-      qos_ext;  ///< Query map after removing @c domain, @c depth, and @c qos; unknown keys are kept but warned.
+  std::string topic;      ///< Fast-DDS topic name (URL host concatenated with path).
+  int32_t domain{0};      ///< DDS Domain ID joined by the underlying DomainParticipant.
+  int32_t depth{0};       ///< History-depth override; @c 0 keeps the QoS-selected depth.
+  std::string qos;        ///< Named QoS profile key registered via @c register_qos().
+  PropertiesMap qos_ext;  ///< Per-entity property map; populated from query keys outside @c domain / @c depth / @c qos.
 
   /**
-   * @brief Constructs a @c DdsConf with topic, domain, depth, and named QoS.
+   * @brief Builds a @c DdsConf from topic, Domain, depth, and an optional named QoS profile.
    *
-   * @param _topic   DDS topic name.
-   * @param _domain  DDS domain ID; default 0.
-   * @param _depth   History depth override; default 0.
+   * @param _topic   Fast-DDS topic name.
+   * @param _domain  Domain ID; defaults to @c 0.
+   * @param _depth   History-depth override; defaults to @c 0 (use QoS depth).
    * @param _qos     Named QoS profile key; empty by default.
    */
   explicit DdsConf(const std::string& _topic, int32_t _domain = 0, int32_t _depth = 0, const std::string& _qos = "");
 
   /**
-   * @brief Constructs a @c DdsConf with topic, domain, and extended QoS map.
+   * @brief Builds a @c DdsConf from topic, Domain, and an explicit per-entity QoS map.
    *
    * @details
-   * Use this constructor when fine-grained per-entity QoS is required.
-   * @c qos and @c qos_ext are mutually exclusive; @c is_valid() returns @c false
-   * if both are non-empty.
+   * Use this overload when QoS must be assembled at runtime instead of being
+   * registered as a named profile.  Mutually exclusive with the @c qos field;
+   * @c is_valid() returns @c false if both are non-empty on the same instance.
    *
-   * @param _topic    DDS topic name.
-   * @param _domain   DDS domain ID.
-   * @param _qos_ext  Per-entity QoS properties map.
+   * @param _topic    Fast-DDS topic name.
+   * @param _domain   DDS Domain ID.
+   * @param _qos_ext  Property map carrying per-entity QoS overrides.
    */
   explicit DdsConf(const std::string& _topic, int32_t _domain, const PropertiesMap& _qos_ext);
 
   /**
-   * @brief Returns @c true if all fields equal those of @p conf.
+   * @brief Component-wise equality on all configuration fields.
    *
-   * @param conf  Configuration to compare.
-   * @return      @c true if @c topic, @c domain, @c depth, @c qos, and @c qos_ext all match.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when @c topic, @c domain, @c depth, @c qos and @c qos_ext all match.
    */
   [[nodiscard]] bool operator==(const DdsConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c true if any field differs from @p conf.
+   * @brief Logical negation of @c operator==.
    *
-   * @param conf  Configuration to compare.
-   * @return      Logical negation of @c operator==.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when any field differs from @p conf.
    */
   [[nodiscard]] bool operator!=(const DdsConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c TransportType::kDds identifying this transport.
+   * @brief Reports this object's transport tag.
    *
    * @return @c TransportType::kDds.
    */
   [[nodiscard]] TransportType get_transport_type() const override;
 
   /**
-   * @brief Returns the list of currently discovered DDS topics on the given domain.
+   * @brief Returns the topics currently discovered on the given DDS Domain.
    *
    * @details
-   * Queries the @c DdsFactory for live topic discovery information.  Each entry
-   * in the returned vector is a @c (topic_name, type_name) pair.
+   * Each entry is a @c (topic_name, type_name) pair captured from the
+   * @c DdsFactory discovery cache.  The result is a point-in-time snapshot and may
+   * be empty when discovery has not yet completed.
    *
-   * @param _domain  DDS domain ID to query.
+   * @param _domain  DDS Domain ID to query.
    * @return         Vector of @c (topic_name, type_name) tuples; may be empty.
    */
   [[nodiscard]] static std::vector<std::tuple<std::string, std::string>> get_discovered_topics(int32_t _domain);
 
   /**
-   * @brief Loads a Fast-DDS XML QoS profile file as the global default.
+   * @brief Loads a Fast-DDS XML QoS profile file as the process-wide default.
    *
    * @details
-   * Must be called before any @c dds:// participants are created.  The profiles
-   * defined in the file are available to all Fast-DDS endpoints in the process.
+   * Must be invoked before any @c dds:// participant is created; profile names
+   * declared in the file become available to all Fast-DDS endpoints in the process.
    *
-   * @param filepath  Absolute or relative path to the XML QoS profile file.
-   * @return          @c true if the file was loaded successfully; @c false otherwise.
+   * @param filepath  Absolute or relative path to a Fast-DDS XML profile file.
+   * @return          @c true when the file was loaded successfully, @c false otherwise.
    */
   static bool load_global_qos_file(const std::string& filepath);
 
   /**
-   * @brief Registers a Fast-DDS type support factory for a topic by name.
+   * @brief Registers a Fast-DDS @c TopicDataType factory for a topic name.
    *
    * @details
-   * Required for CDR-serialised (non-Protobuf) message types.  Must be called
-   * once per topic before any publisher or subscriber is created on that topic.
-   * An optional response type (@c TypeSupportRespT) can be registered simultaneously
-   * for RPC topics; it is stored under @c name + @c "___resp".
+   * Required for any CDR-serialised (non-Protobuf) message type.  Call once per
+   * topic before any endpoint is opened on it.  When @c TypeSupportRespT is not
+   * @c void, the response type is also registered under the topic name with a
+   * trailing @c "___resp" suffix.
    *
    * @tparam TypeSupportT      Fast-DDS @c TopicDataType subclass for the request/message type.
-   * @tparam TypeSupportRespT  Fast-DDS @c TopicDataType subclass for the response type;
-   *                           defaults to @c void (no response type registered).
-   * @param name               DDS topic name to associate the type support with.
+   * @tparam TypeSupportRespT  Fast-DDS @c TopicDataType subclass for the response type; @c void to skip.
+   * @param name               DDS topic name the factory is bound to.
    */
   template <typename TypeSupportT, typename TypeSupportRespT = void>
   static void register_topic(const std::string& name);
 
   /**
-   * @brief Registers a Fast-DDS type support factory for a topic derived from a URL.
+   * @brief Convenience wrapper that derives the topic name from a @c dds:// URL.
    *
    * @details
-   * Convenience wrapper that extracts the topic name from @p name using
-   * @c UrlParser and then calls @c register_topic<TypeSupportT, TypeSupportRespT>().
+   * Parses @p name with @c UrlParser, extracts the topic part, and forwards to
+   * @c register_topic<TypeSupportT, TypeSupportRespT>().
    *
-   * @tparam TypeSupportT      Type support for the request/message type.
-   * @tparam TypeSupportRespT  Type support for the response type; @c void if not needed.
-   * @param name               Full URL string (e.g. @c "dds://my_topic?domain=1").
+   * @tparam TypeSupportT      Fast-DDS @c TopicDataType subclass for the request type.
+   * @tparam TypeSupportRespT  Fast-DDS @c TopicDataType subclass for the response type; @c void to skip.
+   * @param name               Full URL string, for example @c "dds://my_topic?domain=1".
    */
   template <typename TypeSupportT, typename TypeSupportRespT = void>
   static void register_url(const std::string& name);
 
   /**
-   * @brief Registers a named QoS profile for use by @c dds:// nodes.
+   * @brief Registers a named QoS profile that endpoints may reference via @c ?qos=.
    *
    * @details
-   * The @p name is associated with the @p qos object and can then be referenced
-   * in URL query strings as @c ?qos=name.  Names that conflict with reserved
-   * DDS entity keys (@c part, @c topic, @c pub, @c sub, @c writer, @c reader, @c depth)
-   * or that are already registered cause a fatal log and are rejected.
+   * Profile names share a global namespace.  Collisions with DDS-reserved tokens
+   * (@c part, @c topic, @c pub, @c sub, @c writer, @c reader, @c depth) or with an
+   * already registered profile abort with a fatal log entry.
    *
-   * @param name  Unique profile name; must not be one of the reserved keys.
-   * @param qos   @c Qos object describing the quality-of-service settings.
+   * @param name  Unique profile key; must not collide with any reserved token.
+   * @param qos   @c Qos value associated with the key.
    */
   static void register_qos(const std::string& name, const Qos& qos);
 

@@ -23,47 +23,68 @@
 
 /**
  * @file multi_loop.h
- * @brief Multi-threaded event loop backed by a pool of worker threads sharing one task queue.
+ * @brief Multi-threaded variant of @c MessageLoop that forwards tasks to an internal @c ThreadPool.
  *
  * @details
- * @c MultiLoop extends @c MessageLoop with an internal @c ThreadPool of configurable worker threads.
- * The base @c MessageLoop dispatcher thread continues to dequeue tasks from the loop's queue,
- * but instead of running each task inline, it forwards the task to the internal @c ThreadPool
- * for execution on one of the worker threads.  This enables parallel task execution without
- * changing the posting API: callers still call @c post_task() and @c exec_task() exactly as
- * with a single-threaded @c MessageLoop.
+ * @c MultiLoop reuses every @c MessageLoop posting API but offloads execution to a pool of
+ * worker threads.  The dispatcher thread still dequeues tasks; instead of running each task
+ * inline it hands them to the worker pool through the @c on_task_changed hook.  Callers post
+ * via @c post_task / @c exec_task exactly as with a single-threaded loop.
  *
- * Differences from @c MessageLoop:
- * - Tasks may run concurrently on multiple worker threads; they are @b not serialised.
- * - @c is_in_same_thread() returns @c true if the caller is the dispatcher thread or one of
- *   the internal pool's worker threads.
- * - @c on_begin() / @c on_end() (overrides) are still invoked once on the dispatcher thread;
- *   they are used to construct and tear down the internal @c ThreadPool.
- * - The @c on_task_changed() override runs on the dispatcher thread and posts the task to
- *   the pool when possible; if the pool rejects the post (for example a zero-worker
- *   pool), the base @c MessageLoop::on_task_changed() runs inline on the dispatcher.
+ * @par Balancing strategies (delegated to the underlying @c ThreadPool)
  *
- * @note
- * - Shared state accessed inside task callbacks must be protected by its own synchronisation.
- * - Timers attached to a @c MultiLoop fire as queue tasks on the dispatcher and execute on a
- *   pool worker (non-deterministic which worker).
- * - The destructor is defaulted. Stop the loop before destruction with @c quit()
- *   and @c wait_for_quit(), or destroy it only after the dispatcher has already
- *   exited and @c on_end() has shut down the internal pool.
+ * | Strategy        | Behaviour                                                            |
+ * | --------------- | -------------------------------------------------------------------- |
+ * | Round-robin     | Dispatcher hands the next task to the next available worker          |
+ * | Least-loaded    | Dispatcher picks the worker with the smallest in-flight count        |
+ * | Hash            | Dispatcher pins tasks by hash key (used by ordered subscribers)      |
+ *
+ * @par Worker diagram
+ *
+ * @verbatim
+ *             post_task / exec_task
+ *                       |
+ *                       v
+ *      +---------------------------------+
+ *      |       MessageLoop queue         |
+ *      +----------------+----------------+
+ *                       |
+ *                       v
+ *      +---------------------------------+
+ *      |       dispatcher thread         |
+ *      +-------+--------+--------+-------+
+ *              |        |        |
+ *              v        v        v
+ *        +-------+  +-------+  +-------+
+ *        | Wkr 1 |  | Wkr 2 |  | Wkr N |
+ *        +-------+  +-------+  +-------+
+ * @endverbatim
+ *
+ * @par Differences vs @c MessageLoop
+ *  - Tasks may run concurrently on multiple worker threads; execution order is unspecified.
+ *  - @c is_in_same_thread returns @c true for the dispatcher and every worker thread.
+ *  - @c on_begin / @c on_end are still invoked once on the dispatcher; they construct and tear
+ *    down the internal pool.
+ *  - When the pool rejects a forwarded task (for example a zero-worker pool) the base
+ *    @c MessageLoop::on_task_changed runs the callback inline on the dispatcher.
  *
  * @par Example
  * @code
- * vlink::MultiLoop loop(4);  // 4 worker threads
- * loop.async_run();
+ *   vlink::MultiLoop loop(4);
+ *   loop.async_run();
  *
- * for (int i = 0; i < 100; ++i) {
- *   loop.post_task([i]() { process(i); });
- * }
+ *   for (int i = 0; i < 100; ++i) {
+ *     loop.post_task([i] { process(i); });
+ *   }
  *
- * loop.wait_for_idle();
- * loop.quit();
- * loop.wait_for_quit();
+ *   loop.wait_for_idle();
+ *   loop.quit();
+ *   loop.wait_for_quit();
  * @endcode
+ *
+ * @note Shared state touched inside callbacks must be protected externally.  Timers attached to
+ *       a @c MultiLoop fire as queue tasks; the dispatcher forwards them to a worker.  The
+ *       destructor is defaulted; always call @c quit and @c wait_for_quit before destruction.
  */
 
 #pragma once
@@ -76,85 +97,73 @@ namespace vlink {
 
 /**
  * @class MultiLoop
- * @brief Multi-threaded variant of @c MessageLoop running tasks on a worker-thread pool.
+ * @brief @c MessageLoop subclass that forwards every task to an internal @c ThreadPool.
  *
  * @details
- * Tasks posted to the @c MultiLoop go through the inherited @c MessageLoop queue and are
- * forwarded to an internal @c ThreadPool for execution.  Because pool workers run concurrently,
- * task @b execution order is @b not guaranteed even though dequeueing is FIFO.
+ * Inherits every posting API from @c MessageLoop.  The dispatcher pulls tasks from the queue in
+ * FIFO order; the worker pool runs them concurrently so execution order is not guaranteed even
+ * though enqueue order is.
  */
 class VLINK_EXPORT MultiLoop : public MessageLoop {
  public:
   /**
-   * @brief Constructs a @c MultiLoop with the default @c kNormalType queue and the requested worker count.
+   * @brief Constructs a @c MultiLoop with the default @c kNormalType queue and @p thread_num workers.
    *
-   * @param thread_num  Number of worker threads.  Default: 4.  A zero-worker
-   *                    pool rejects forwarded posts, so tasks fall back to the
-   *                    dispatcher thread.
+   * @param thread_num  Worker count.  Default: @c 4.  A zero-worker pool rejects forwarded posts,
+   *                    so tasks fall back to inline execution on the dispatcher.
    */
   explicit MultiLoop(size_t thread_num = 4U);
 
   /**
    * @brief Constructs a @c MultiLoop with a specific queue type.
    *
-   * @param thread_num  Number of worker threads.
-   * @param type        Queue implementation type (see @c MessageLoop::Type).
+   * @param thread_num  Worker count.
+   * @param type        Queue implementation type from @c MessageLoop::Type.
    */
   explicit MultiLoop(size_t thread_num, Type type);
 
   /**
-   * @brief Destructor.  Defaulted; callers must stop the loop before destruction.
+   * @brief Defaulted destructor.
    *
-   * @warning
-   * @c MessageLoop's destructor can request an emergency quit and join the
-   * dispatcher thread, but it runs after the @c MultiLoop sub-object and its
-   * members have been destroyed.  Do not rely on that path to call
-   * @c MultiLoop::on_end() or to tear down the internal @c ThreadPool.
-   * Always call @c quit() and @c wait_for_quit() before destruction, or destroy
-   * the loop only after it has exited on its own.
+   * @warning Call @c quit and @c wait_for_quit before destruction; the base
+   *          @c MessageLoop destructor runs after @c MultiLoop's members are already torn down
+   *          and cannot guarantee the worker pool is reset.
    */
   ~MultiLoop() override;
 
   /**
-   * @brief Returns @c true if the calling thread belongs to this loop.
+   * @brief Reports whether the calling thread belongs to this loop.
    *
-   * @return @c true if called from the dispatcher thread or any worker thread.
+   * @return @c true on the dispatcher or any worker thread of the internal pool.
    */
   [[nodiscard]] bool is_in_same_thread() const override;
 
   /**
-   * @brief Waits until both the dispatcher queue and worker pool forwarded tasks are idle.
+   * @brief Waits until both the dispatcher queue and the worker pool reach idle.
    *
-   * @param ms     Timeout in milliseconds, or @c Timer::kInfinite.
-   * @param check  When @c true, rejects calls from a thread owned by this loop.
-   * @return @c true if idle was reached before the timeout.
+   * @param ms     Maximum wait in milliseconds; @c Timer::kInfinite means no limit.
+   * @param check  When @c true, rejects calls from threads owned by this loop.
+   * @return @c true when both queues drained before the timeout.
    */
   bool wait_for_idle(int ms = Timer::kInfinite, bool check = true) override;
 
  protected:
   /**
-   * @brief Called once on the dispatcher thread when the loop starts; constructs the
-   *        internal @c ThreadPool.
+   * @brief Hook invoked once on the dispatcher when the loop starts; constructs the worker pool.
    */
   void on_begin() override;
 
   /**
-   * @brief Called once on the dispatcher thread when the loop exits; shuts down the
-   *        internal @c ThreadPool and joins all worker threads.
+   * @brief Hook invoked once on the dispatcher when the loop exits; shuts the worker pool down.
    */
   void on_end() override;
 
   /**
-   * @brief Called on the dispatcher thread before a task is forwarded to the worker pool.
+   * @brief Forwards a task to the internal pool, falling back to the inline base implementation
+   *        when the pool rejects the post.
    *
-   * @details
-   * Forwards @p callback (and @p start_time) onto the internal @c ThreadPool when
-   * the pool accepts the post.  If forwarding fails, falls back to the base
-   * @c MessageLoop::on_task_changed() on the dispatcher thread.
-   *
-   * @param callback    The task about to be executed.
-   * @param start_time  Millisecond steady_clock timestamp captured when the task was
-   *                    enqueued (0 if elapsed-time tracking is disabled).
+   * @param callback    Task to dispatch.
+   * @param start_time  Millisecond @c steady_clock timestamp captured at enqueue time.
    */
   void on_task_changed(Callback&& callback, uint32_t start_time) override;
 

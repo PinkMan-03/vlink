@@ -23,43 +23,64 @@
 
 /**
  * @file bag_reader.h
- * @brief Abstract base class for VLink bag file playback with time-based seeking and rate control.
+ * @brief Abstract player for VLink bag recordings with seek, loop and rate control.
  *
  * @details
- * @c BagReader is an abstract @c MessageLoop-based player that reads VLink bag files and
- * replays recorded messages through an @c OutputCallback.  Concrete implementations are
- * @c VDBReader (SQLite-backed) and @c VCAPReader (MCAP-format).
+ * @c BagReader is the polymorphic base for VLink offline log playback.  It owns a private
+ * @c MessageLoop thread, opens a bag file produced by @c BagWriter, and replays the stored
+ * messages back to user-supplied callbacks honouring their original timing.  Concrete
+ * subclasses provide format-specific I/O: @c VDBReader for the SQLite-backed @c .vdb
+ * container and @c VCAPReader for the MCAP-based @c .vcap container.  @c create() chooses
+ * the right one from the file suffix.
+ *
+ * Supported formats and behaviour summary:
+ *
+ * | Suffix              | Concrete reader | Storage    | Index source                    |
+ * | ------------------- | --------------- | ---------- | ------------------------------- |
+ * | @c .vdb / @c .vdbx  | @c VDBReader    | SQLite     | SQLite tables (elapsed/URL)     |
+ * | @c .vcap / @c .vcapx| @c VCAPReader   | MCAP       | MCAP summary + chunk index      |
+ *
+ * Internal playback state machine:
+ *
+ * @verbatim
+ *                     play(cfg)              pause()
+ *      +------------+ -------> +-----------+ -------> +----------+
+ *      |  kStopped  |          |  kPlaying |          |  kPaused |
+ *      +------------+ <------- +-----------+ <------- +----------+
+ *                    stop() /         resume() / pause_to_next()
+ *                  end-of-bag
+ * @endverbatim
  *
  * Playback features:
- * - Configurable playback rate (e.g., @c rate=2.0 for 2x speed).
- * - Loop playback via the @c times field (@c times <= 0 for endless loop; @c kInfinite = -1).
- * - Time-range filtering via @c begin_time and @c end_time.
- * - Jump-to-timestamp seeking with optional forced play.
- * - Per-URL output filtering via @c Config::filter_urls whitelist.
- * - Background integrity check, reindex, and fix operations via @c std::future.
- * - Plugin interface for custom URL/type mapping.
+ * - Rate multiplier, loop count and time-window filtering through @c Config.
+ * - @c jump() seeks to an arbitrary recording timestamp and may force-resume playback.
+ * - URL whitelist via @c Config::filter_urls applies after plugin URL remapping.
+ * - @c check() / @c reindex() / @c fix() run asynchronously and report their outcome
+ *   through @c std::future<bool>.
+ * - A bound @c BagReaderPluginInterface may rename URLs, override serialisation types
+ *   and intercept individual replayed messages.
  *
- * @par Playback example
+ * @par Example
  * @code
- * auto reader = vlink::BagReader::create("/data/log.vdb");
- * reader->register_output_callback([](int64_t ts, const std::string& url,
+ * auto reader = vlink::BagReader::create("/data/drive_log.vdb");
+ * reader->register_ready_callback([] { VLOG_I("bag ready"); });
+ * reader->register_output_callback([](int64_t us, const std::string& url,
  *                                     vlink::ActionType action, const vlink::Bytes& data) {
- *     VLOG_I("ts=", ts, " url=", url, " size=", data.size());
+ *     // replay each frame in real-time order
+ *     (void)action;
+ *     VLOG_I("us=", us, " url=", url, " bytes=", data.size());
  * });
  * reader->async_run();
  *
  * vlink::BagReader::Config cfg;
- * cfg.rate = 1.0;
- * cfg.times = vlink::BagReader::kInfinite;
+ * cfg.rate  = 2.0;                              // play at 2x speed
+ * cfg.times = vlink::BagReader::kInfinite;      // loop forever
  * reader->play(cfg);
  * @endcode
  *
- * @note
- * - Call @c async_run() before @c play().
- * - @c check(), @c reindex(), and @c fix() run on a background thread and return
- *   a @c std::future<bool> for result polling.
- * - The file format is auto-detected from the extension by @c create()
- *   (@c .vdb / @c .vdbx -> VDBReader, @c .vcap / @c .vcapx -> VCAPReader).
+ * @note Always call @c async_run() before @c play(); the loop thread must be alive to
+ * dispatch frames.  Output callback timestamps are in microseconds, while
+ * @c Config::begin_time and @c Config::end_time are expressed in milliseconds.
  */
 
 #pragma once
@@ -84,386 +105,377 @@ namespace vlink {
 
 /**
  * @class BagReader
- * @brief Abstract VLink bag file player with time control, seeking, and integrity tools.
+ * @brief Format-agnostic VLink bag player driven by an internal @c MessageLoop.
  *
  * @details
- * Inherits @c MessageLoop to drive playback on a dedicated thread.
- * Concrete subclasses (@c VDBReader, @c VCAPReader) implement format-specific I/O.
+ * Inherits @c MessageLoop so playback runs on a dedicated worker thread.  Construction
+ * opens the target file and parses its index, but no frames are emitted until
+ * @c async_run() starts the loop and @c play() supplies a @c Config.  All virtual
+ * operations are implemented by @c VDBReader and @c VCAPReader; the base class only
+ * carries shared plumbing (callback storage, plugin binding, URL filtering helpers).
  */
 class VLINK_EXPORT BagReader : public MessageLoop {
  public:
   /**
-   * @brief Sentinel value for the @c Config::times field to indicate endless loop playback.
+   * @brief Sentinel for @c Config::times that requests endless loop playback.
    */
   static constexpr int kInfinite{-1};
 
   /**
-   * @brief Playback state of the reader.
+   * @brief Coarse playback state observable through @c get_status().
    *
-   * | State    | Description                                   |
-   * | -------- | --------------------------------------------- |
-   * | kStopped  | Not playing; reset to beginning               |
-   * | kPaused  | Playback suspended; can be resumed            |
-   * | kPlaying | Actively delivering messages to the callback  |
+   * | Value     | Meaning                                                      |
+   * | --------- | ------------------------------------------------------------ |
+   * | kStopped  | No active session; position is reset to the start of the bag |
+   * | kPaused   | A play session is open but the dispatcher is suspended       |
+   * | kPlaying  | The dispatcher is actively delivering frames                 |
    */
   enum Status : uint8_t {
-    kStopped = 0,  ///< Stopped (not playing).
-    kPaused = 1,   ///< Paused mid-playback.
-    kPlaying = 2,  ///< Actively playing.
+    kStopped = 0,  ///< Idle; no playback in progress.
+    kPaused = 1,   ///< Playback temporarily suspended; position retained.
+    kPlaying = 2,  ///< Actively forwarding frames to the output callback.
   };
 
   /**
    * @struct Info
-   * @brief Metadata extracted from the bag file header and index.
+   * @brief Aggregated metadata extracted from the bag header, summary and URL index.
    *
    * @details
-   * Available after construction.  Contains file-level metadata and per-URL statistics.
+   * Populated when the reader opens the file and is stable thereafter unless a
+   * destructive operation such as @c reindex() or @c fix() rewrites the index.
    */
   struct Info final {
     /**
      * @struct UrlMeta
-     * @brief Per-URL statistics extracted from the bag index.
+     * @brief Per-URL accounting entry recorded inside @c Info::url_metas.
      */
     struct VLINK_EXPORT UrlMeta final {
-      bool valid{false};     ///< @c true if this UrlMeta was successfully populated.
-      int index{0};          ///< Numeric index of this URL in the bag's URL table.
-      std::string url;       ///< Full VLink URL string.
-      std::string url_type;  ///< Communication model type (e.g., "Event", "Method", "Field").
-      ActionType action_type{ActionType::kUnknownAction};  ///< Recorded action type when available.
-      std::string ser_type;  ///< Serialisation type string (e.g., "demo.proto.PointCloud", "raw").
-      SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse schema family associated with this URL.
-      size_t count{0};                               ///< Total number of messages recorded for this URL.
-      size_t size{0};                                ///< Total compressed bytes recorded for this URL.
-      double freq{0};                                ///< Average message frequency (Hz).
-      double loss{0};                                ///< Declared message loss ratio [0.0, 1.0].
+      bool valid{false};                                   ///< True when the entry is fully populated.
+      int index{0};                                        ///< Bag-local numeric URL identifier.
+      std::string url;                                     ///< Full VLink URL string.
+      std::string url_type;                                ///< Communication model: Event / Method / Field.
+      ActionType action_type{ActionType::kUnknownAction};  ///< Stored action when known.
+      std::string ser_type;                                ///< Serialisation type name.
+      SchemaType schema_type{SchemaType::kUnknown};        ///< Coarse schema family for this URL.
+      size_t count{0};                                     ///< Number of recorded messages.
+      size_t size{0};                                      ///< Total stored bytes (compressed when applicable).
+      double freq{0};                                      ///< Average publication frequency in Hertz.
+      double loss{0};                                      ///< Declared loss ratio in the range [0, 1].
 
       /**
-       * @brief Comparison operator for sorting UrlMeta entries.
+       * @brief Defines a stable ordering between two URL metadata entries.
        *
        * @details
-       * Sorts primarily by the URL's transport priority, then by URL string
-       * lexicographically, and finally by numeric index as a tie-breaker.
+       * Sort key is the URL transport priority first, then the URL string itself and
+       * finally the numeric index as a deterministic tie-breaker.
        *
-       * @param target  Right-hand side.
-       * @return @c true if @c *this should sort before @p target.
+       * @param target Right-hand operand.
+       * @return @c true when @c *this should appear before @p target.
        */
       bool operator<(const UrlMeta& target) const noexcept;
     };
 
-    std::string file_name;           ///< Absolute path to the bag file.
-    std::string tag_name;            ///< Tag name stored in the bag header.
+    std::string file_name;           ///< Absolute path to the opened bag file.
+    std::string tag_name;            ///< Free-form tag persisted in the header.
     std::string version;             ///< Bag format version string.
-    std::string storage_type;        ///< Storage backend (e.g., "sqlite", "mcap").
-    std::string compression_type;    ///< Compression algorithm used (e.g., "lzav", "zstd").
-    std::string time_accuracy;       ///< Timestamp resolution (e.g., "us", "ns").
+    std::string storage_type;        ///< Storage backend label (e.g. @c "sqlite", @c "mcap").
+    std::string compression_type;    ///< Default compression codec applied to payloads.
+    std::string time_accuracy;       ///< Timestamp resolution token (e.g. @c "us", @c "ns").
     std::string process_name;        ///< Name of the recording process.
-    std::string date_time;           ///< Recording start date/time string.
-    bool has_completed{false};       ///< @c true if the recording was cleanly finalized.
-    bool has_idx_elapsed{false};     ///< @c true if an elapsed-time index is present.
-    bool has_idx_url{false};         ///< @c true if a URL index is present.
-    bool has_schema{false};          ///< @c true if any schemas are embedded.
-    int32_t timezone{0};             ///< Timezone offset in minutes from UTC.
-    int64_t start_timestamp{0};      ///< Recording start timestamp (milliseconds since epoch).
-    int64_t blank_duration{0};       ///< Total blank (gap) duration (milliseconds).
-    int64_t total_duration{0};       ///< Total recording duration (milliseconds).
-    int64_t file_size{0};            ///< File size in bytes.
-    int64_t total_raw_size{0};       ///< Total uncompressed payload size (bytes).
-    int64_t message_count{0};        ///< Total number of messages across all URLs.
-    int64_t split_count{0};          ///< Number of file splits (0 if single file).
-    int64_t split_by_size{0};        ///< Split threshold by size (bytes).
-    int64_t split_by_time{0};        ///< Split threshold by time (milliseconds).
-    std::vector<UrlMeta> url_metas;  ///< Per-URL statistics, one entry per recorded topic.
+    std::string date_time;           ///< Human-readable recording start date and time.
+    bool has_completed{false};       ///< True when the recording was cleanly finalised.
+    bool has_idx_elapsed{false};     ///< True when an elapsed-time index is present.
+    bool has_idx_url{false};         ///< True when a URL index is present.
+    bool has_schema{false};          ///< True when at least one embedded schema is available.
+    int32_t timezone{0};             ///< Recording timezone offset in minutes from UTC.
+    int64_t start_timestamp{0};      ///< Wall-clock recording start (milliseconds since epoch).
+    int64_t blank_duration{0};       ///< Cumulative silent-gap duration in milliseconds.
+    int64_t total_duration{0};       ///< Total recording duration in milliseconds.
+    int64_t file_size{0};            ///< On-disk file size in bytes.
+    int64_t total_raw_size{0};       ///< Sum of uncompressed payload bytes.
+    int64_t message_count{0};        ///< Total recorded message count across every URL.
+    int64_t split_count{0};          ///< Number of split files (0 for a single-file bag).
+    int64_t split_by_size{0};        ///< Split threshold in bytes when split mode is active.
+    int64_t split_by_time{0};        ///< Split threshold in milliseconds when split mode is active.
+    std::vector<UrlMeta> url_metas;  ///< One entry per recorded URL.
   };
 
   /**
    * @struct Config
-   * @brief Playback configuration passed to @c play().
+   * @brief Playback parameters consumed by @c play().
    */
   struct Config final {
-    int64_t begin_time{0};                        ///< Playback start timestamp (ms).  0 = from beginning.
-    int64_t end_time{0};                          ///< Playback end timestamp (ms).  0 = until end.
-    int times{1};                                 ///< Number of loops.  Values <= 0 loop forever.
-    double rate{1.0};                             ///< Playback rate multiplier.  1.0 = real time.
-    bool skip_blank{false};                       ///< If @c true, skip silent gaps between messages.
-    int64_t force_delay{-1};                      ///< >0 fixed delay (ms), 0 no delay, <0 use timestamps.
-    bool auto_pause{false};                       ///< If @c true, pause automatically at each message.
-    bool auto_quit{false};                        ///< If @c true, quit the loop thread when playback ends.
-    std::unordered_set<std::string> filter_urls;  ///< Final playback URL whitelist.  Empty = all URLs.
+    int64_t begin_time{0};                        ///< Playback window start in milliseconds (0 means file start).
+    int64_t end_time{0};                          ///< Playback window end in milliseconds (0 means file end).
+    int times{1};                                 ///< Loop count; values <= 0 request endless loop playback.
+    double rate{1.0};                             ///< Speed multiplier relative to the recorded clock.
+    bool skip_blank{false};                       ///< When true, collapses long silent gaps between frames.
+    int64_t force_delay{-1};                      ///< >0 fixed delay (ms), 0 no delay, <0 use recorded timing.
+    bool auto_pause{false};                       ///< When true, pauses automatically after every emitted frame.
+    bool auto_quit{false};                        ///< When true, stops the loop thread at the end of playback.
+    std::unordered_set<std::string> filter_urls;  ///< Whitelist of playback URLs; empty means all URLs pass.
   };
 
   /**
-   * @brief Callback type fired for each replayed message.
+   * @brief Callback signature receiving one replayed message.
    *
    * @details
-   * Called on the BagReader's loop thread.  The @p data reference is valid only
-   * for the duration of the callback.
+   * Invoked on the reader's @c MessageLoop thread.  The @p data reference is only valid
+   * for the duration of the call; copy it if it needs to outlive the callback.
    *
-   * @note The timestamp delivered here is in **microseconds**, while
-   *       @c Config::begin_time and @c Config::end_time are expressed in
-   *       **milliseconds**.  Multiply @c begin_time / @c end_time by 1000 to
-   *       compare them directly against this value.
+   * @param microseconds_timestamp Frame timestamp relative to the recording start, in microseconds.
+   * @param url                    Fully-qualified VLink URL of the recorded topic.
+   * @param action_type            Recorded action kind (publish, request, response, ...).
+   * @param data                   Serialised payload bytes.
    *
-   * @param microseconds_timestamp    Message timestamp in microseconds.
-   * @param url          Topic URL string.
-   * @param action_type  Action type (kPublish, kRequest, etc.).
-   * @param data         Serialized message payload.
+   * @note Multiply @c Config::begin_time and @c Config::end_time by 1000 before comparing
+   *       them against @p microseconds_timestamp.
    */
   using OutputCallback = MoveFunction<void(int64_t microseconds_timestamp, const std::string& url,
                                            ActionType action_type, const Bytes& data)>;
 
   /**
-   * @brief Callback fired whenever the playback @c Status changes.
+   * @brief Callback fired on every transition of @c Status.
    *
-   * @param status  New playback status.
+   * @param status The new playback state.
    */
   using StatusCallback = MoveFunction<void(Status status)>;
 
   /**
-   * @brief Callback fired when the reader has opened the file and is ready to start playing.
+   * @brief Callback fired once after the bag has been opened and indexed.
    */
   using ReadyCallback = MoveFunction<void()>;
 
   /**
-   * @brief Callback fired when playback has finished (or was interrupted).
+   * @brief Callback fired when the current play session ends.
    *
-   * @param is_interrupted  @c true if @c stop() was called before natural end.
+   * @param is_interrupted True if termination was caused by @c stop(); false on natural end.
    */
   using FinishCallback = MoveFunction<void(bool is_interrupted)>;
 
   /**
-   * @brief Creates a concrete @c BagReader for @p path, selecting the implementation by extension.
+   * @brief Builds the concrete reader matching the extension of @p path.
    *
    * @details
-   * - @c .vdb / @c .vdbx -- @c VDBReader (SQLite)
-   * - @c .vcap / @c .vcapx -- @c VCAPReader (MCAP format)
-   * - unknown suffixes return @c nullptr
+   * Suffix dispatch: @c .vdb / @c .vdbx select @c VDBReader, @c .vcap / @c .vcapx select
+   * @c VCAPReader; any other suffix returns @c nullptr.
    *
-   * @param path        Path to the bag file.
-   * @param read_only   If @c true, open in read-only mode (no write operations).
-   * @param try_to_fix  If @c true, allows backend-specific recovery while opening
-   *                    (SQLite repair paths when available; MCAP fallback summary scan).
-   * @return Shared pointer to the new reader.
+   * @param path        Bag file path on disk.
+   * @param read_only   When true, opens the backend read-only and rejects mutating calls.
+   * @param try_to_fix  When true, allows backends to attempt a recovery pass while opening.
+   * @return Shared pointer to the freshly built reader, or @c nullptr for an unknown suffix.
    */
   [[nodiscard]] static std::shared_ptr<BagReader> create(const std::string& path, bool read_only = true,
                                                          bool try_to_fix = false);
 
   /**
-   * @brief Constructs the reader for @p path.
+   * @brief Constructs the base reader and stores construction-time options.
    *
-   * @param path        Path to the bag file.
-   * @param read_only   Open in read-only mode.
-   * @param try_to_fix  Allows backend-specific recovery while opening.
+   * @param path        Bag file path passed to the concrete subclass.
+   * @param read_only   When true, prevents the backend from acquiring write access.
+   * @param try_to_fix  When true, allows the subclass to run recovery while opening.
    */
   explicit BagReader(const std::string& path, bool read_only = true, bool try_to_fix = false);
 
   /**
-   * @brief Destructor -- stops playback and releases file resources.
+   * @brief Stops the loop, closes the file and releases backend resources.
    */
   virtual ~BagReader();  // NOLINT(modernize-use-override)
 
   /**
-   * @brief Attaches a @c BagReaderPluginInterface for custom URL/type conversion.
+   * @brief Attaches a custom URL/type/message rewrite plugin to this reader.
    *
    * @details
-   * The plugin's @c convert_url_meta() is called for each URL in the bag to allow
-   * remapping before messages are dispatched to @c OutputCallback.
+   * The plugin's @c convert_url_meta() runs once per URL discovered in the bag and may
+   * rename topics, override serialisation types or filter URLs out.  Its @c push() hook
+   * sees every replayed frame before it reaches @c OutputCallback.
    *
-   * @param plugin_interface  Plugin to bind.  May be @c nullptr to detach.
+   * @param plugin_interface Plugin instance, or @c nullptr to detach the current binding.
    */
   virtual void bind_plugin_interface(const std::shared_ptr<BagReaderPluginInterface>& plugin_interface);
 
   /**
-   * @brief Registers a callback fired whenever the playback status changes.
+   * @brief Installs a state-change observer.
    *
-   * @param status_callback  Callback receiving the new @c Status value.
+   * @param status_callback Function invoked with the new @c Status on every transition.
    */
   virtual void register_status_callback(StatusCallback&& status_callback);
 
   /**
-   * @brief Registers a callback fired when the reader is ready to start playing.
+   * @brief Installs the "open complete" observer.
    *
-   * @param ready_callback  Callback invoked once the file is open and parsed.
+   * @param ready_callback Function invoked once the bag is open and the index is parsed.
    */
   virtual void register_ready_callback(ReadyCallback&& ready_callback);
 
   /**
-   * @brief Registers a callback fired when playback ends or is interrupted.
+   * @brief Installs the "play session ended" observer.
    *
-   * @param finish_callback  Callback receiving @c is_interrupted flag.
+   * @param finish_callback Function invoked at the end of a play session.
    */
   virtual void register_finish_callback(FinishCallback&& finish_callback);
 
   /**
-   * @brief Registers the callback that receives replayed messages.
+   * @brief Installs the per-frame data sink.
    *
-   * @param output_callback  Called for each message during playback.
+   * @param output_callback Function called for every replayed message.
    */
   virtual void register_output_callback(OutputCallback&& output_callback);
 
   /**
-   * @brief Starts playback with the given @p config.
+   * @brief Starts (or restarts) a play session with the supplied configuration.
    *
    * @details
-   * Must be called after @c async_run().  The reader transitions to @c kPlaying.
+   * Transitions the reader into @c kPlaying.  Requires that @c async_run() has already
+   * been called so that the loop thread can dispatch frames.
    *
-   * @param config  Playback configuration.
+   * @param config Playback window, rate, loop count and URL filter.
    */
   virtual void play(const Config& config) = 0;
 
   /**
-   * @brief Stops playback and resets the reader to the beginning.
+   * @brief Aborts the active session and rewinds to the start of the bag.
    *
    * @details
-   * Transitions the reader to @c kStopped.  The @c FinishCallback is fired with
-   * @c is_interrupted = @c true.
+   * Drives the reader into @c kStopped and invokes the @c FinishCallback with
+   * @c is_interrupted set to true.
    */
   virtual void stop() = 0;
 
   /**
-   * @brief Pauses playback at the current position.
-   *
-   * @details Transitions from @c kPlaying to @c kPaused.
+   * @brief Suspends frame dispatch while preserving the current position.
    */
   virtual void pause() = 0;
 
   /**
-   * @brief Resumes a paused playback from the current position.
-   *
-   * @details Transitions from @c kPaused to @c kPlaying.
+   * @brief Resumes dispatch from the paused position.
    */
   virtual void resume() = 0;
 
   /**
-   * @brief Advances one message while paused, then pauses again.
-   *
-   * @details Useful for single-stepping through a bag in debug sessions.
+   * @brief Emits exactly one frame from the paused position, then pauses again.
    */
   virtual void pause_to_next() = 0;
 
   /**
-   * @brief Seeks to @p begin_time and resumes playback at @p rate with @p times loops.
+   * @brief Seeks playback to @p begin_time and applies updated rate and loop settings.
    *
-   * @param begin_time       Seek target timestamp in milliseconds (relative to recording start).
-   * @param rate             New playback rate multiplier.
-   * @param times            Number of loops after the jump.
-   * @param force_to_play    If @c true, forces play state even if currently paused.
+   * @param begin_time    Target recording timestamp in milliseconds.
+   * @param rate          New playback speed multiplier.
+   * @param times         Loop count to apply after the seek.
+   * @param force_to_play When true, transitions to @c kPlaying even if currently paused.
    */
   virtual void jump(int64_t begin_time, double rate, int times, bool force_to_play = false) = 0;
 
   /**
-   * @brief Verifies the integrity of the bag file asynchronously.
+   * @brief Runs an asynchronous integrity verification pass.
    *
-   * @return @c std::future<bool> that resolves to @c true if the file is intact.
+   * @return Future resolving to @c true when the bag is structurally intact.
    */
   virtual std::future<bool> check() = 0;
 
   /**
-   * @brief Rebuilds the index tables asynchronously when supported by the backend.
+   * @brief Rebuilds backend index tables in the background where supported.
    *
-   * @return @c std::future<bool> that resolves to @c true on success.
+   * @return Future resolving to @c true on success.
    */
   virtual std::future<bool> reindex() = 0;
 
   /**
-   * @brief Repairs a corrupt bag file asynchronously when supported by the backend.
+   * @brief Attempts to recover a corrupted bag in the background where supported.
    *
-   * @param rebuild  If @c true, rebuilds the entire index from scratch.
-   * @return @c std::future<bool> that resolves to @c true if repair succeeded.
+   * @param rebuild When true, also forces a full index rebuild.
+   * @return Future resolving to @c true when recovery succeeded.
    */
   virtual std::future<bool> fix(bool rebuild = false) = 0;
 
   /**
-   * @brief Updates the tag name stored in the bag's metadata.
+   * @brief Overwrites the human-readable tag stored in the bag header.
    *
-   * @param tag_name  New tag name string.
+   * @param tag_name New tag value.
    */
   virtual void tag(const std::string& tag_name) = 0;
 
   /**
-   * @brief Returns the current playback position as a recording timestamp.
+   * @brief Returns the timestamp targeted by the playback cursor.
    *
-   * @return Current message timestamp in milliseconds (recording time, relative to start).
+   * @return Current playback time in milliseconds, relative to the recording start.
    */
   [[nodiscard]] virtual int64_t get_timestamp() const = 0;
 
   /**
-   * @brief Returns the last actual playback timestamp reached by delivered data.
+   * @brief Returns the timestamp of the most recently emitted frame.
    *
-   * @return Last data timestamp in milliseconds relative to the recording start, or 0 when stopped.
+   * @return Real delivered timestamp in milliseconds, or 0 when no frame is in flight.
    */
   [[nodiscard]] virtual int64_t get_real_timestamp() const = 0;
 
   /**
-   * @brief Returns the current playback status.
+   * @brief Returns the current playback state.
    *
-   * @return One of @c kStopped, @c kPaused, or @c kPlaying.
+   * @return One of @c kStopped, @c kPaused or @c kPlaying.
    */
   [[nodiscard]] virtual Status get_status() const = 0;
 
   /**
-   * @brief Returns the bag file metadata and per-URL statistics.
+   * @brief Returns the cached header/summary metadata.
    *
-   * @return Const reference to the @c Info struct populated at open time.
+   * @return Constant reference to the @c Info populated at open time.
    */
   [[nodiscard]] virtual const Info& get_info() const = 0;
 
   /**
-   * @brief Scans the bag and returns all embedded schemas.
+   * @brief Scans the bag and collects every embedded schema descriptor.
    *
-   * @return Vector of @c SchemaData descriptors found in the bag.
+   * @return Vector of @c SchemaData entries.
    */
   [[nodiscard]] virtual std::vector<SchemaData> detect_schema() = 0;
 
   /**
-   * @brief Returns the serialisation type string for a given @p url.
+   * @brief Resolves the serialisation type associated with @p url.
    *
-   * @param url  Topic URL to look up.
-   * @return Serialisation type (e.g., @c "demo.proto.PointCloud"), or an empty string if unknown.
+   * @param url Fully-qualified URL to look up.
+   * @return Stored serialisation type, or an empty string when @p url is unknown.
    */
   [[nodiscard]] virtual std::string get_ser_type(const std::string& url) const = 0;
 
   /**
-   * @brief Returns the coarse schema family for a given @p url.
+   * @brief Resolves the schema family associated with @p url.
    *
-   * @param url  Topic URL to look up.
-   * @return Schema family, or @c SchemaType::kUnknown if unavailable.
+   * @param url Fully-qualified URL to look up.
+   * @return Coarse @c SchemaType, or @c SchemaType::kUnknown when unavailable.
    */
   [[nodiscard]] virtual SchemaType get_schema_type(const std::string& url) const = 0;
 
   /**
-   * @brief Returns @c true if the bag spans multiple split files.
-   *
-   * @return @c true when reading a split bag.
+   * @brief Returns whether the opened bag spans multiple split files.
    */
   [[nodiscard]] virtual bool is_split_mode() const = 0;
 
   /**
-   * @brief Returns the zero-based index of the current split file being read.
+   * @brief Returns the zero-based index of the split file currently being consumed.
    *
-   * @return Current split file index, or 0 for single-file bags.
+   * @return Active split index, or 0 for a single-file bag.
    */
   [[nodiscard]] virtual int get_split_index() const = 0;
 
   /**
-   * @brief Returns @c true if a jump-to-timestamp seek is currently in progress.
-   *
-   * @return @c true while seeking.
+   * @brief Returns whether a @c jump() seek is still in progress.
    */
   [[nodiscard]] virtual bool is_jumping() const = 0;
 
  protected:
   /**
-   * @brief Rebuilds URL metadata lookup maps after plugin remapping.
+   * @brief Rebuilds the URL-to-metadata lookup tables after plugin remapping.
    *
    * @details
-   * Reader implementations call this after copying the raw per-URL metadata
-   * and applying @c process_url_metas(), ensuring @c get_ser_type() and
-   * @c get_schema_type() both observe the current plugin view instead of stale
-   * pre-plugin entries.
+   * Concrete readers call this after applying @c process_url_metas() so that
+   * @c get_ser_type() and @c get_schema_type() observe the post-plugin view
+   * instead of stale pre-plugin entries.
    *
-   * @param url_metas         Remapped URL metadata list.
-   * @param ser_map           Output lookup map: URL -> serialisation type.
-   * @param schema_type_map   Output lookup map: URL -> coarse schema family.
+   * @param url_metas       Remapped URL metadata list.
+   * @param ser_map         Output map keyed by URL string holding the serialisation type.
+   * @param schema_type_map Output map keyed by URL string holding the schema family.
    */
   static void rebuild_url_meta_maps(const std::vector<Info::UrlMeta>& url_metas,
                                     std::unordered_map<std::string, std::string>& ser_map,
@@ -474,17 +486,17 @@ class VLINK_EXPORT BagReader : public MessageLoop {
   void process_url_metas(std::vector<Info::UrlMeta>& url_metas);
 
   /**
-   * @brief Converts a stored URL into the final playback URL after plugin metadata remapping.
+   * @brief Resolves the URL that will be exposed to the output callback for a stored URL.
    *
-   * @return @c false when the plugin excluded @p input_url from playback.
+   * @return @c false when the bound plugin asked to exclude @p input_url from playback.
    */
   [[nodiscard]] bool convert_playback_url(const std::string& input_url, std::string& output_url) const;
 
   /**
-   * @brief Returns whether a stored URL passes the final playback URL whitelist.
+   * @brief Tests a stored URL against the active playback URL whitelist.
    *
-   * If a @c BagReaderPluginInterface is bound, @p filter_urls matches URLs after
-   * @c convert_url_meta() remapping, not the stored bag URL.
+   * @details When a plugin is bound, @p filter_urls is matched against post-rewrite URLs
+   * rather than the raw bag URL.
    */
   [[nodiscard]] bool match_playback_url_filter(std::string_view input_url,
                                                const std::unordered_set<std::string>& filter_urls) const;

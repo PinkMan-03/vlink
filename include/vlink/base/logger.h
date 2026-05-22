@@ -23,67 +23,73 @@
 
 /**
  * @file logger.h
- * @brief Global singleton logger with stream, format, C-style and RAII stream entry points.
+ * @brief Singleton logger with stream / format / printf / RAII-stream entry points.
  *
  * @details
- * @c Logger is the central logging facility in VLink.  It is a singleton accessed via
- * @c Logger::get() and initialised once with @c Logger::init().  Log messages can be
- * written to a console sink and/or a file sink, each with an independently configured
- * minimum level.
+ * @c vlink::Logger is the central logging facility.  A single instance is constructed via
+ * @c Logger::init and reused for the rest of the process; each call routes through a console
+ * sink and an optional file sink whose minimum levels are independently configurable.
  *
- * Logging entry points:
+ * @par Entry point cheat sheet
  *
- * | Style                | Syntax                         | Notes                                          |
- * | -------------------- | ------------------------------ | ---------------------------------------------- |
- * | Stream style (LOG)   | @c VLOG_I("x=", x)            | Uses @c FastStream operator<<, zero allocation  |
- * | Format style (MLOG)  | @c MLOG_I("x={}", x)          | Uses VLink @c format::format_to_n               |
- * | C style (CLOG)       | @c CLOG_I("x=%d", x)          | Uses @c std::snprintf                           |
- * | RAII stream (SLOG)   | @c SLOG_I << "x=" << x        | WrapperStream, flushed on destruction           |
+ * | Style           | Macro family    | Backing API                   | Argument shape                  |
+ * | --------------- | --------------- | ----------------------------- | ------------------------------- |
+ * | Stream          | @c VLOG_x       | @c FastStream operator<<      | @c VLOG_I("x=", x, " y=", y)    |
+ * | Placeholder     | @c MLOG_x       | @c vlink::format::format_to_n | @c MLOG_W("x={} y={}", x, y)    |
+ * | printf          | @c CLOG_x       | @c std::snprintf              | @c CLOG_E("errno=%d", err)      |
+ * | RAII stream     | @c SLOG_x       | @c WrapperStream              | @c SLOG_D @c << "a=" @c << a    |
  *
- * Log levels:
+ * @par Severity ladder
  *
- * | Value | Name    | Use case                                   |
- * | ----- | ------- | ------------------------------------------ |
- * | 0     | kTrace  | Verbose internals                          |
- * | 1     | kDebug  | Developer diagnostics                      |
- * | 2     | kInfo   | Normal operational messages                |
- * | 3     | kWarn   | Unusual but recoverable conditions         |
- * | 4     | kError  | Errors that may affect operation           |
- * | 5     | kFatal  | Unrecoverable errors; throws RuntimeError  |
- * | 6     | kOff    | Disables all output                        |
+ * | Value | Name      | Use case                                  |
+ * | ----- | --------- | ----------------------------------------- |
+ * | 0     | @c kTrace | Verbose internals                         |
+ * | 1     | @c kDebug | Developer diagnostics                     |
+ * | 2     | @c kInfo  | Normal operational messages               |
+ * | 3     | @c kWarn  | Unusual but recoverable conditions        |
+ * | 4     | @c kError | Errors that may affect operation          |
+ * | 5     | @c kFatal | Unrecoverable; throws @c RuntimeError     |
+ * | 6     | @c kOff   | Disables the corresponding sink           |
  *
- * Detail annotation:
- * When the log level is >= @c kDetailLevel (default: @c kWarn), the macro automatically
- * prepends @c {filename:line} to the message to aid in debugging.
+ * @par ASCII priority diagram
  *
- * Compile-time filtering:
- * - Define @c VLINK_LOG_LEVEL=N to strip levels below @c N at compile time (zero overhead).
- * - Define @c VLINK_LOG_DETAIL_LEVEL=N to change the threshold at which file/line is shown.
- * - Define @c VLINK_LOG_DISABLE_SHORT to suppress the short @c VLOG_* aliases.
+ * @verbatim
+ *    higher severity  ->  kFatal  (throws)
+ *                         kError
+ *                         kWarn   <- kDetailLevel (default): adds {file:line}
+ *                         kInfo
+ *                         kDebug
+ *                         kTrace
+ *    lower severity   ->  kOff    (sink disabled)
+ * @endverbatim
  *
- * Backtrace support:
- * When enabled via @c enable_backtrace(n), the last @p n log messages are kept in a
- * ring buffer and can be flushed on demand with @c dump_backtrace().
+ * @par Compile-time gating
+ *  - @c VLINK_LOG_LEVEL @c =N strips levels below @c N at compile time (zero overhead).
+ *  - @c VLINK_LOG_DETAIL_LEVEL @c =N changes the level at which file/line is appended.
+ *  - @c VLINK_LOG_DISABLE_SHORT removes the @c VLOG_* / @c MLOG_* / @c CLOG_* / @c SLOG_* aliases.
  *
- * Backend support:
- * The logger dispatches to spdlog, quill, DLT (automotive), Android logcat, QNX slog2,
- * or kmsg depending on compile-time configuration.  Custom backends can be registered
- * with @c register_console_handler() / @c register_file_handler().
+ * @par Formatting cheat sheet
  *
- * @note
- * - @c kFatal logs flush the logger and then throw @c Exception::RuntimeError.
- * - The @c WrapperStream class is template-based; unused log levels are compiled away.
+ * | Need                              | Snippet                                                |
+ * | --------------------------------- | ------------------------------------------------------ |
+ * | Hex with 4 digits                 | @c VLOG_I(VLINK_LOG_HEX(4), value)                     |
+ * | Inline hex inside @c SLOG_*       | @c SLOG_I @c << VLINK_LOG_HEXSS(4) @c << value         |
+ * | Gate around expensive log args    | @c if @c (VLINK_LOG_IF_D) @c { ... @c }                |
  *
  * @par Example
  * @code
- * vlink::Logger::init("my_app", "/var/log/my_app.log");
- * vlink::Logger::set_console_level(vlink::Logger::kInfo);
+ *   vlink::Logger::init("my_app", "/var/log/my_app.log");
+ *   vlink::Logger::set_console_level(vlink::Logger::kInfo);
  *
- * VLOG_I("node started, id=", node_id);
- * MLOG_W("temperature is {} C", temp);
- * CLOG_E("errno=%d", errno);
- * SLOG_D << "values: " << a << " " << b;
+ *   VLOG_I("node started, id=", node_id);
+ *   MLOG_W("temperature is {} C", temp);
+ *   CLOG_E("errno=%d", errno);
+ *   SLOG_D << "values: " << a << " " << b;
  * @endcode
+ *
+ * @note @c kFatal messages call @c Logger::flush and then throw @c Exception::RuntimeError so
+ *       the application can perform a controlled shutdown.  Backends include spdlog, quill,
+ *       DLT, Android logcat, QNX slog2 and kmsg depending on build options.
  */
 
 #pragma once
@@ -107,61 +113,50 @@ namespace vlink {
 
 /**
  * @class Logger
- * @brief Global singleton logger supporting multiple logging entry points and configurable log levels.
+ * @brief Global singleton logger with four formatting styles and independently configurable sinks.
  *
  * @details
- * Construct the singleton with @c Logger::init() once at application startup.
- * Use the @c VLOG_*, @c MLOG_*, @c CLOG_* or @c SLOG_* macros for logging.
+ * Construct exactly once via @c Logger::init; subsequent calls reconfigure the existing instance.
+ * The console sink is always enabled; the file sink activates when @c log_path is non-empty.
+ * Logging entry points are macros that wrap the public @c print_* templates and forward a
+ * compile-time @c Level so the bodies disappear when the level is below @c kMinimumLevel.
  */
 class VLINK_EXPORT Logger final {
  public:
   /**
-   * @brief Output style selector (used internally by the print_* family).
+   * @brief Internal output style tag used by the @c print_* family.
    *
    * @details
-   * Determines how format arguments are converted to a string.
-   * Users interact with styles through macros rather than this enum directly.
+   * Callers normally interact with styles via macros; the enum is exposed for completeness.
    */
   enum Style : uint8_t {
-    kStreamStyle = 0,  ///< operator<< stream composition via FastStream
-    kFormatStyle = 1,  ///< Python-style {} placeholders via vlink::format
-    kCStyle = 2,       ///< printf-style %d/%s via std::snprintf
+    kStreamStyle = 0,  ///< Stream composition via @c FastStream operator<<.
+    kFormatStyle = 1,  ///< Brace placeholders via @c vlink::format.
+    kCStyle = 2,       ///< printf-style formatting via @c std::snprintf.
   };
 
   /**
-   * @brief Severity level for log messages.
+   * @brief Message severity level.
    *
    * @details
-   * Levels are ordered from least severe (kTrace) to most severe (kFatal).
-   * kOff disables the corresponding sink entirely.
-   *
-   * | Value | Name    | Meaning                                      |
-   * | ----- | ------- | -------------------------------------------- |
-   * | 0     | kTrace  | Verbose tracing                              |
-   * | 1     | kDebug  | Developer diagnostics                        |
-   * | 2     | kInfo   | Normal operational messages                  |
-   * | 3     | kWarn   | Unusual but recoverable conditions           |
-   * | 4     | kError  | Recoverable errors                           |
-   * | 5     | kFatal  | Throws RuntimeError after logging            |
-   * | 6     | kOff    | Disable sink                                 |
+   * Lower numerical values are less severe.  @c kOff is a sentinel that disables a sink.
    */
   enum Level : uint8_t {
-    kTrace = 0,
-    kDebug = 1,
-    kInfo = 2,
-    kWarn = 3,
-    kError = 4,
-    kFatal = 5,
-    kOff = 6,
+    kTrace = 0,  ///< Verbose tracing.
+    kDebug = 1,  ///< Developer diagnostics.
+    kInfo = 2,   ///< Normal operational message.
+    kWarn = 3,   ///< Recoverable but unusual condition.
+    kError = 4,  ///< Recoverable error.
+    kFatal = 5,  ///< Unrecoverable; throws @c Exception::RuntimeError.
+    kOff = 6,    ///< Disable sink.
   };
 
   /**
-   * @brief Compile-time minimum log level.
+   * @brief Compile-time minimum severity level; messages below this are stripped.
    *
    * @details
-   * Messages with level < @c kMinimumLevel are compiled away completely.
-   * Override by defining @c VLINK_LOG_LEVEL before including this header.
-   * Defaults to @c kTrace (all messages enabled).
+   * Override by defining @c VLINK_LOG_LEVEL before including this header.  Defaults to
+   * @c kTrace so every level is emitted by default.
    */
 #ifdef VLINK_LOG_LEVEL
   static constexpr uint8_t kMinimumLevel = VLINK_LOG_LEVEL;
@@ -170,12 +165,11 @@ class VLINK_EXPORT Logger final {
 #endif
 
   /**
-   * @brief Threshold above which file and line information is appended to messages.
+   * @brief Severity threshold at and above which @c {file:line} is prepended to messages.
    *
    * @details
-   * When the message level >= @c kDetailLevel, the macro prepends @c {file:line}
-   * to the log string.  Override by defining @c VLINK_LOG_DETAIL_LEVEL.
-   * Defaults to @c kWarn.
+   * Override by defining @c VLINK_LOG_DETAIL_LEVEL before including this header.  Defaults to
+   * @c kWarn.
    */
 #ifdef VLINK_LOG_DETAIL_LEVEL
   static constexpr uint8_t kDetailLevel = VLINK_LOG_DETAIL_LEVEL;
@@ -187,34 +181,33 @@ class VLINK_EXPORT Logger final {
    * @brief Size of the thread-local C-style format buffer in bytes.
    *
    * @details
-   * Used by @c print_c_style() and @c print_format_style().  Messages longer than
-   * @c kLocalBufferSize - 1 characters are silently truncated.
+   * Messages longer than @c kLocalBufferSize @c - @c 1 characters are silently truncated.
    */
   static constexpr int kLocalBufferSize = 4096;
 
   /**
-   * @brief Callback type for custom console or file log handlers.
+   * @brief Signature for custom console / file sink callbacks.
    *
    * @details
-   * Registered handlers are called synchronously from the logging thread.
-   * The @c std::string_view is valid only for the duration of the call.
+   * Invoked synchronously from the logging thread; the @c std::string_view is valid only for
+   * the duration of the call.
    */
   using Callback = MoveFunction<void(Level, std::string_view)>;
 
   /**
-   * @brief Carries the source file name and line number for detail annotation.
+   * @brief Carries the source file name and line number for the detail prefix.
    *
    * @details
-   * Created automatically by @c VLINK_LOG_GET_DETAIL when the message level is
-   * >= @c kDetailLevel.
+   * Built automatically by @c VLINK_LOG_GET_DETAIL when the message level reaches
+   * @c kDetailLevel.
    */
   using DetailInfo = std::pair<std::string_view, int>;
 
   /**
-   * @brief Sentinel type indicating that no file/line detail is attached.
+   * @brief Sentinel type indicating no detail prefix is attached.
    *
    * @details
-   * Used for levels below @c kDetailLevel to avoid capturing __FILE__ and __LINE__.
+   * Used to avoid capturing @c __FILE__ / @c __LINE__ for messages below @c kDetailLevel.
    */
   struct NoDetail {};
 
@@ -222,239 +215,194 @@ class VLINK_EXPORT Logger final {
    * @brief Initialises the logger singleton.
    *
    * @details
-   * Must be called before any log macros are invoked.  Safe to call multiple times;
-   * subsequent calls reconfigure the logger.  If @p log_path is non-empty, the file
-   * sink is opened at that path.
+   * Must be invoked before any logging macros.  Subsequent calls reconfigure the singleton.
+   * Provide a non-empty @p log_path to activate the file sink.
    *
-   * @param app_name  Application name embedded in log output.  Default: empty string.
-   * @param log_path  Absolute path for the log file.  Default: no file sink.
+   * @param app_name  Application name embedded in log output.  Default: empty.
+   * @param log_path  Absolute path for the file sink.  Default: empty (no file sink).
    */
   static void init(const std::string& app_name = "", const std::string& log_path = "") noexcept;
 
   /**
-   * @brief Returns the logger singleton instance.
+   * @brief Returns the global logger instance.
    *
-   * @details
-   * The singleton is created on first use.  It is safe to call @c get() from any thread
-   * after @c init() has been called.
-   *
-   * @return Reference to the global @c Logger instance.
+   * @return Reference to the singleton.
    */
   static Logger& get() noexcept;
 
   /**
-   * @brief Flushes all buffered log messages to the active sinks.
+   * @brief Flushes every active sink.
    *
    * @details
-   * Useful before abnormal termination to ensure messages are not lost.
-   * Called automatically for @c kFatal messages.
+   * Useful before abnormal termination.  Invoked automatically before a @c kFatal message
+   * throws.
    */
   static void flush() noexcept;
 
   /**
-   * @brief Registers a custom handler for console log output.
+   * @brief Installs a custom console sink callback replacing the built-in console writer.
    *
-   * @details
-   * When set, the provided callback is invoked instead of the built-in console
-   * sink.  Replaces any previously registered console handler.
-   *
-   * @param callback  Handler called with (level, message_view) for each log record.
+   * @param callback  Handler called with @c (level, @c message_view) for each record.
    */
   static void register_console_handler(Callback&& callback) noexcept;
 
   /**
-   * @brief Registers a custom handler for file log output.
+   * @brief Installs a custom file sink callback replacing the built-in file writer.
    *
-   * @details
-   * When set, the provided callback is invoked instead of the built-in file
-   * sink.  Replaces any previously registered file handler.
-   *
-   * @param callback  Handler called with (level, message_view) for each log record.
+   * @param callback  Handler called with @c (level, @c message_view) for each record.
    */
   static void register_file_handler(Callback&& callback) noexcept;
 
   /**
-   * @brief Sets the minimum level for the console sink.
+   * @brief Sets the minimum severity for the console sink; pass @c kOff to mute it.
    *
-   * @details
-   * Messages with level < @p level are not written to the console.
-   * Pass @c kOff to disable the console sink entirely.
-   *
-   * @param level  New minimum console output level.
+   * @param level  Minimum output level.
    */
   static void set_console_level(Level level) noexcept;
 
   /**
-   * @brief Sets the minimum level for the file sink.
+   * @brief Sets the minimum severity for the file sink; pass @c kOff to mute it.
    *
-   * @details
-   * Messages with level < @p level are not written to the log file.
-   * Pass @c kOff to disable the file sink entirely.
-   *
-   * @param level  New minimum file output level.
+   * @param level  Minimum output level.
    */
   static void set_file_level(Level level) noexcept;
 
   /**
-   * @brief Enables or disables ANSI colour/format codes in console output.
+   * @brief Enables or disables ANSI colour / formatting on the console sink.
    *
-   * @param enable  @c true to enable formatting codes (default), @c false for plain text.
+   * @param enable  @c true to keep ANSI escapes (default), @c false for plain text.
    */
   static void set_console_fmt_enable(bool enable) noexcept;
 
   /**
-   * @brief Returns the current minimum level for the console sink.
+   * @brief Returns the current console sink severity threshold.
    *
-   * @return Current console log level.
+   * @return Current level.
    */
   [[nodiscard]] static Level get_console_level() noexcept;
 
   /**
-   * @brief Returns the current minimum level for the file sink.
+   * @brief Returns the current file sink severity threshold.
    *
-   * @return Current file log level.
+   * @return Current level.
    */
   [[nodiscard]] static Level get_file_level() noexcept;
 
   /**
-   * @brief Returns whether ANSI colour/format codes are enabled for console output.
+   * @brief Returns whether ANSI colour codes are enabled on the console sink.
    *
-   * @return @c true if formatting is enabled.
+   * @return @c true when ANSI escapes are emitted.
    */
   [[nodiscard]] static bool get_console_fmt_enable() noexcept;
 
   /**
-   * @brief Sets @c std::ios_base format flags applied to stream-style messages.
+   * @brief Sets @c std::ios_base format flags applied to stream-style records.
    *
-   * @details
-   * The flags are applied to the thread-local @c FastStream before each message.
-   * For example, pass @c std::ios::hex to print integers in hexadecimal.
-   *
-   * @param flags  Format flags to set.
+   * @param flags  Stream format flags.
    */
   static void set_stream_flag(std::ios_base::fmtflags flags) noexcept;
 
   /**
-   * @brief Sets the floating-point precision for stream-style messages.
+   * @brief Sets the floating-point precision for stream-style records.
    *
-   * @param precision  Number of significant digits (or decimal places depending on format flag).
+   * @param precision  Precision passed to @c std::setprecision.
    */
   static void set_stream_precision(int precision) noexcept;
 
   /**
-   * @brief Sets the output field width for stream-style messages.
+   * @brief Sets the minimum field width for stream-style records.
    *
-   * @param width  Minimum field width in characters.
+   * @param width  Field width passed to @c std::setw.
    */
   static void set_stream_width(int width) noexcept;
 
   /**
-   * @brief Returns the @c std::ios_base format flags currently applied to stream output.
+   * @brief Returns the stream format flags currently applied to stream-style records.
    *
-   * @return Current stream format flags.
+   * @return Format flags.
    */
   [[nodiscard]] static std::ios_base::fmtflags get_stream_flag() noexcept;
 
   /**
-   * @brief Returns the floating-point precision currently used for stream output.
+   * @brief Returns the floating-point precision used for stream-style records.
    *
-   * @return Current precision value.
+   * @return Precision value.
    */
   [[nodiscard]] static int get_stream_precision() noexcept;
 
   /**
-   * @brief Returns the field width currently used for stream output.
+   * @brief Returns the field width used for stream-style records.
    *
-   * @return Current field width.
+   * @return Width value.
    */
   [[nodiscard]] static int get_stream_width() noexcept;
 
   /**
-   * @brief Enables a ring-buffer backtrace of the last @p size log messages.
+   * @brief Enables a ring-buffer backtrace of the most recent @p size records.
    *
-   * @details
-   * When enabled, the last @p size messages are retained in memory regardless of
-   * the current log level, and can be flushed with @c dump_backtrace().
-   *
-   * @param size  Number of messages to retain in the backtrace ring buffer.
+   * @param size  Capacity of the backtrace ring buffer.
    */
   static void enable_backtrace(size_t size) noexcept;
 
   /**
-   * @brief Disables backtrace collection and clears the ring buffer.
+   * @brief Disables backtrace capture and discards the ring buffer.
    */
   static void disable_backtrace() noexcept;
 
   /**
    * @brief Flushes the backtrace ring buffer to the active sinks.
-   *
-   * @details
-   * Emits all retained backtrace messages (if any) to the console and file sinks
-   * at their original log levels.  Useful just before an abort or fatal handler.
    */
   static void dump_backtrace() noexcept;
 
   /**
-   * @brief Returns @c true if the logger is currently busy writing a message.
+   * @brief Reports whether the logger is currently writing a record.
    *
-   * @details
-   * Useful for asynchronous backends to check whether the logger can accept more work.
-   *
-   * @return @c true if a write is in progress.
+   * @return @c true while a write is in progress.
    */
   [[nodiscard]] static bool is_busy() noexcept;
 
   /**
-   * @brief Returns @c true if a message at @p level would be written to at least one sink.
+   * @brief Reports whether a record at @p level would currently be emitted.
    *
    * @details
-   * Returns @c true iff @p level is >= the console sink level or >= the file sink level.
-   * Call this before constructing expensive log arguments to avoid unnecessary work.
+   * Use the result to gate expensive argument computation before a macro call.
    *
-   * @param level  Level to test.
-   * @return @c true if the message would be emitted.
+   * @param level  Severity level under test.
+   * @return @c true when the level passes either sink threshold.
    */
   [[nodiscard]] static bool is_writable(Level level) noexcept;
 
   /**
-   * @brief Extracts the file name component from a full path at compile time.
+   * @brief Strips a path down to its final filename component at compile time.
    *
-   * @details
-   * Searches for the last @c '/' or @c '\\' and returns the substring after it.
-   * Used by the @c VLINK_LOG_GET_DETAIL macro to trim __FILE__.
-   *
-   * @param path  Full source file path (typically @c __FILE__).
-   * @return @c string_view of just the filename portion.
+   * @param path  Source path, typically @c __FILE__.
+   * @return View covering the filename portion.
    */
   [[nodiscard]] static constexpr std::string_view extract_filename(std::string_view path) noexcept;
 
   /**
-   * @brief Logs using stream-style composition (operator<<).
+   * @brief Stream-style entry point (used by @c VLOG_* / @c print).
    *
    * @details
-   * Called by the @c VLOG_* macros.  Checks @c should_log() first; returns immediately
-   * if the level is disabled.  Uses a thread-local @c FastStream to avoid heap allocations.
+   * Returns immediately when @c should_log<LevelT>() is @c false.  Otherwise streams @p args
+   * into a thread-local @c FastStream and hands the resulting view to the sinks.
    *
-   * @tparam LevelT   Compile-time log level.
-   * @tparam DetailT  Either @c DetailInfo (with file/line) or @c NoDetail.
-   * @tparam ArgsT    Types of the stream arguments.
-   * @param detail    File/line info or @c NoDetail{}.
-   * @param args      Values streamed into the message via @c operator<<.
+   * @tparam LevelT   Compile-time severity.
+   * @tparam DetailT  Either @c DetailInfo or @c NoDetail.
+   * @tparam ArgsT    Stream argument types.
+   * @param detail    Source location info or @c NoDetail{}.
+   * @param args      Values to stream.
    */
   template <Level LevelT, typename DetailT, typename... ArgsT>
   static void print_stream_style(DetailT&& detail, ArgsT&&... args);
 
   /**
-   * @brief Logs using @c {} placeholder format style.
+   * @brief Placeholder-style entry point (used by @c MLOG_*).
    *
-   * @details
-   * Called by the @c MLOG_* macros.  Formats the message using @c format::format_to_n
-   * into a 4096-byte thread-local buffer.  Messages exceeding the buffer are truncated.
-   *
-   * @tparam LevelT   Compile-time log level.
+   * @tparam LevelT   Compile-time severity.
    * @tparam DetailT  Either @c DetailInfo or @c NoDetail.
-   * @tparam ArgsT    Types of the format arguments.
-   * @param detail    File/line info or @c NoDetail{}.
+   * @tparam ArgsT    Format argument types.
+   * @param detail    Source location info or @c NoDetail{}.
    * @param format    Format string with @c {} placeholders.
    * @param args      Format arguments.
    */
@@ -462,17 +410,13 @@ class VLINK_EXPORT Logger final {
   static void print_format_style(DetailT&& detail, format::format_string<ArgsT...> format, ArgsT&&... args);
 
   /**
-   * @brief Logs using C-style printf format string.
+   * @brief printf-style entry point (used by @c CLOG_*).
    *
-   * @details
-   * Called by the @c CLOG_* macros.  Formats using @c std::snprintf into a 4096-byte
-   * thread-local buffer.  Messages exceeding the buffer are truncated.
-   *
-   * @tparam LevelT   Compile-time log level.
+   * @tparam LevelT   Compile-time severity.
    * @tparam DetailT  Either @c DetailInfo or @c NoDetail.
-   * @tparam FormatT  Type of the format string (typically @c const char*).
-   * @tparam ArgsT    Types of the printf arguments.
-   * @param detail    File/line info or @c NoDetail{}.
+   * @tparam FormatT  Format string type, typically @c const @c char*.
+   * @tparam ArgsT    printf argument types.
+   * @param detail    Source location info or @c NoDetail{}.
    * @param format    printf-style format string.
    * @param args      printf arguments.
    */
@@ -480,38 +424,30 @@ class VLINK_EXPORT Logger final {
   static void print_c_style(DetailT&& detail, FormatT&& format, ArgsT&&... args);
 
   /**
-   * @brief Logs using stream style without file/line detail.
+   * @brief Convenience stream-style entry point without source location.
    *
-   * @details
-   * Convenience wrapper that passes @c NoDetail{} to @c print_stream_style.
-   *
-   * @tparam LevelT  Compile-time log level.
-   * @tparam ArgsT   Types of the stream arguments.
-   * @param args     Values to stream.
+   * @tparam LevelT  Compile-time severity.
+   * @tparam ArgsT   Stream argument types.
+   * @param args  Values to stream.
    */
   template <Level LevelT, typename... ArgsT>
   static void print(ArgsT&&... args);
 
   /**
    * @class WrapperStream
-   * @brief RAII stream wrapper that accumulates tokens and flushes on destruction.
+   * @brief RAII helper backing @c SLOG_*; collects tokens and flushes on destruction.
    *
    * @details
-   * Used by the @c SLOG_* macros to allow natural stream chaining.  The message is
-   * emitted when the temporary @c WrapperStream object goes out of scope.
-   * If the log level is disabled at compile time (@c kIsEnabled == false), all
-   * methods are compiled away and the object has zero runtime cost.
+   * When @c kIsEnabled is @c false at the chosen level the type and its methods compile to
+   * nothing, so disabled-level call sites have zero runtime overhead.
    *
-   * @tparam LevelT  Compile-time log level.
+   * @tparam LevelT  Compile-time severity level.
    */
   template <Logger::Level LevelT>
   class WrapperStream final {
    public:
     /**
-     * @brief Indicates whether this level is enabled at compile time.
-     *
-     * @details
-     * If @c false, all @c operator<< calls and the destructor flush are no-ops.
+     * @brief Static gate indicating whether the wrapper emits at the chosen level.
      */
     static constexpr bool kIsEnabled = (LevelT >= kMinimumLevel && LevelT < Logger::kOff);
 
@@ -661,8 +597,6 @@ inline void Logger::print_c_style([[maybe_unused]] DetailT&& detail, [[maybe_unu
   std::string_view log_view;
 
   if constexpr (sizeof...(ArgsT) == 0) {
-    // static_assert(Traits::ExpectFalse<DetailT>(), "VLINK_CLOG_* Format error.");
-
     auto& stream = get_local_stream();
 
     if constexpr (std::is_same_v<std::decay_t<DetailT>, DetailInfo>) {

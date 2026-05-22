@@ -23,51 +23,63 @@
 
 /**
  * @file zenoh_conf.h
- * @brief Transport configuration for the @c zenoh:// Zenoh protocol backend.
+ * @brief Transport configuration for the @c zenoh:// Eclipse Zenoh transport.
  *
  * @details
- * @c ZenohConf configures the Eclipse Zenoh transport, a protocol designed for
- * unified data management across robots, edge nodes, and cloud infrastructure.
- * Zenoh supports routed pub/sub and queryable patterns with optional peer-to-peer
- * connectivity.
+ * @c ZenohConf binds the @c zenoh:// URL scheme to Eclipse Zenoh, a unified data
+ * protocol that combines publish/subscribe, queryable storage, and computed query
+ * patterns under a single key-expression namespace.  Zenoh scales from constrained
+ * micro-controllers to cloud-side routers and is well suited to multi-site fleet
+ * and edge deployments.  Optional shared-memory acceleration lowers latency for
+ * large payloads exchanged between processes on the same host.
  *
  * @par Supported Node Types
- * @c zenoh:// supports all six node types: @c kPublisher, @c kSubscriber, @c kServer,
- * @c kClient, @c kSetter, and @c kGetter.
+ *
+ * | Publisher | Subscriber | Server | Client | Getter | Setter |
+ * | :-------: | :--------: | :----: | :----: | :----: | :----: |
+ * | yes       | yes        | yes    | yes    | yes    | yes    |
+ *
+ * @par Routing Modes
+ *
+ * | Mode      | Topology                                          | Typical use case               |
+ * | --------- | ------------------------------------------------- | ------------------------------ |
+ * | @c peer   | Fully meshed P2P between participants             | LAN with no router             |
+ * | @c client | Connects to a router as a leaf node               | Fleet edge connecting to cloud |
+ * | @c router | Forwards and stores data for connected clients    | Gateway / aggregation point    |
  *
  * @par URL Format
  * @code
- *   zenoh://<address>[?event=<name>&domain=<N>&qos=<name>&depth=<N>&shm=<bool>
+ *   zenoh://<address>[?event=<name>&domain=<N>&qos=<profile>&depth=<N>&shm=<bool>
  *                    &shm_mode=<lazy|init>&shm_size=<N>&shm_threshold=<N>
  *                    &shm_loan_threshold=<N>&shm_blocking=<bool>][#<fragment>]
  * @endcode
  *
- * | Component             | Description                                                               |
- * | --------------------- | ------------------------------------------------------------------------- |
- * | @c address            | Zenoh key expression; formed from @c host + @c "/" + @c path              |
- * | @c event              | Optional secondary event filter (@c ?event=)                              |
- * | @c domain             | Zenoh domain/session identifier (@c ?domain=, default from factory)       |
- * | @c qos                | Named QoS profile registered via @c register_qos() (@c ?qos=)             |
- * | @c depth              | Optional TX queue override; 0 uses selected QoS history depth             |
- * | @c shm                | Optional Zenoh shared-memory transport optimization enable (@c ?shm=)     |
- * | @c shm_mode           | Optional Zenoh SHM init mode: @c lazy or @c init                          |
- * | @c shm_size           | Optional SHM pool size; accepts bytes, K, M, or G suffixes                |
- * | @c shm_threshold      | Optional SHM optimization message-size threshold                          |
- * | @c shm_loan_threshold | Optional minimum size for VLink SHM loan buffers                          |
- * | @c shm_blocking       | Optional blocking allocation mode for @c loan()                           |
- * | @c fragment           | Optional transport hint or config fragment passed to the Zenoh session    |
+ * | Component             | Description                                                            |
+ * | --------------------- | ---------------------------------------------------------------------- |
+ * | @c address            | Zenoh key expression (URL host concatenated with path)                 |
+ * | @c event              | Optional secondary event filter (@c ?event=)                           |
+ * | @c domain             | Zenoh session/domain identifier (@c ?domain=); factory default applied |
+ * | @c qos                | Named QoS profile registered via @c register_qos()                     |
+ * | @c depth              | TX queue override; @c 0 uses the QoS-selected history depth            |
+ * | @c shm                | Enable Zenoh shared-memory acceleration (boolean)                      |
+ * | @c shm_mode           | Pool init strategy; @c lazy or @c init                                 |
+ * | @c shm_size           | SHM pool size; accepts bytes, K, M, or G suffixes                      |
+ * | @c shm_threshold      | Minimum payload size to switch the SHM path on                         |
+ * | @c shm_loan_threshold | Minimum size for VLink SHM loan buffers                                |
+ * | @c shm_blocking       | Whether @c loan() blocks when the pool is exhausted                    |
+ * | @c fragment           | Optional transport hint or session-config fragment                     |
  *
  * @par QoS Registration
  * @code
- *   vlink::Qos my_qos;
- *   my_qos.reliability.kind = vlink::Qos::Reliability::kReliable;
- *   vlink::ZenohConf::register_qos("my_profile", my_qos);
+ *   vlink::Qos qos;
+ *   qos.reliability.kind = vlink::Qos::Reliability::kReliable;
+ *   vlink::ZenohConf::register_qos("reliable", qos);
  *
- *   vlink::Publisher<MyMsg> pub("zenoh://vehicle/speed?qos=my_profile");
+ *   auto pub = vlink::Publisher<MyMsg>::create_unique("zenoh://vehicle/speed?qos=reliable");
  * @endcode
  *
- * @note This header is compiled only when @c VLINK_SUPPORT_ZENOH is defined.
- * @note @c is_valid() returns @c false if @c address is empty or @c domain is negative.
+ * @note Compiled only when @c VLINK_SUPPORT_ZENOH is defined.
+ * @note @c is_valid() returns @c false when @c address is empty or @c domain is negative.
  */
 
 #pragma once
@@ -87,80 +99,83 @@ namespace vlink {
 
 /**
  * @struct ZenohConf
- * @brief Configuration for the @c zenoh:// Zenoh transport.
+ * @brief Concrete @c Conf describing a Zenoh endpoint addressed by a @c zenoh:// URL.
  *
  * @details
- * Can be constructed directly or parsed from a URL string via @c Url.
+ * Stores the Zenoh key expression, an optional secondary event filter, the session
+ * domain identifier, an optional named QoS profile and depth override, plus the
+ * tunable SHM-acceleration knobs exposed through URL query keys.
  */
 struct VLINK_EXPORT ZenohConf final : public Conf {
-  std::string address;             ///< Zenoh key expression (host + "/" + path from URL).
+  std::string address;             ///< Zenoh key expression (URL host concatenated with path).
   std::string event;               ///< Optional secondary event filter string.
-  int32_t domain{0};               ///< Zenoh session/domain identifier (non-negative).
-  int32_t depth{0};                ///< Optional TX queue override; 0 means use selected QoS history depth.
+  int32_t domain{0};               ///< Zenoh session / domain identifier (non-negative).
+  int32_t depth{0};                ///< TX queue override; @c 0 uses the QoS-selected history depth.
   std::string qos;                 ///< Named QoS profile key registered via @c register_qos().
-  std::string fragment;            ///< Optional transport hint passed as the URL fragment.
-  std::string shm;                 ///< Optional SHM enable override from @c ?shm=.
-  std::string shm_mode;            ///< Optional SHM init mode (@c lazy or @c init).
-  std::string shm_size;            ///< Optional SHM transport pool size in bytes, K, M, or G.
-  std::string shm_threshold;       ///< Optional SHM transport optimization threshold.
+  std::string fragment;            ///< Optional transport hint or session-config fragment.
+  std::string shm;                 ///< Optional SHM acceleration enable (string boolean).
+  std::string shm_mode;            ///< Optional SHM pool init strategy; @c lazy or @c init.
+  std::string shm_size;            ///< Optional SHM pool size; accepts bytes, K, M, or G suffixes.
+  std::string shm_threshold;       ///< Optional minimum payload size before SHM path engages.
   std::string shm_loan_threshold;  ///< Optional minimum size for VLink SHM loan buffers.
-  std::string shm_blocking;        ///< Optional blocking allocation mode for @c loan().
+  std::string shm_blocking;        ///< Optional blocking behaviour for @c loan() when the pool is full.
 
   /**
-   * @brief Constructs a @c ZenohConf with explicit parameters.
+   * @brief Builds a @c ZenohConf from the URL's primary fields.
    *
    * @param _address   Zenoh key expression.
-   * @param _event     Optional event filter; empty by default.
-   * @param _domain    Domain identifier; default 0.
+   * @param _event     Optional secondary event filter; empty by default.
+   * @param _domain    Domain identifier; defaults to @c 0.
    * @param _qos       Named QoS profile key; empty by default.
-   * @param _fragment  Optional transport hint fragment; empty by default.
+   * @param _fragment  Optional transport-hint fragment; empty by default.
    */
   explicit ZenohConf(const std::string& _address, const std::string& _event = "", int32_t _domain = 0,
                      const std::string& _qos = "", const std::string& _fragment = "");
 
   /**
-   * @brief Returns @c true if all fields equal those of @p conf.
+   * @brief Component-wise equality on all configuration fields, including SHM tunables.
    *
-   * @param conf  Configuration to compare.
-   * @return      @c true if all fields (including @c depth and the @c shm* options) match.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when every field of @c *this matches @p conf.
    */
   [[nodiscard]] bool operator==(const ZenohConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c true if any field differs from @p conf.
+   * @brief Logical negation of @c operator==.
    *
-   * @param conf  Configuration to compare.
-   * @return      Logical negation of @c operator==.
+   * @param conf  Configuration to compare with.
+   * @return      @c true when any field differs from @p conf.
    */
   [[nodiscard]] bool operator!=(const ZenohConf& conf) const noexcept;
 
   /**
-   * @brief Returns @c TransportType::kZenoh identifying this transport.
+   * @brief Reports this object's transport tag.
    *
    * @return @c TransportType::kZenoh.
    */
   [[nodiscard]] TransportType get_transport_type() const override;
 
   /**
-   * @brief Adds URL-level Zenoh tuning options to a property map.
+   * @brief Copies non-empty Zenoh SHM tunables into a property map.
    *
    * @details
-   * This keeps URL query parameters and @c set_property("zenoh.*", ...) on the
-   * same factory path without expanding the factory object key shape.
+   * Lets URL-supplied @c shm* query keys and explicit @c set_property("zenoh.*", ...)
+   * calls share the same factory property path without enlarging the factory key set.
+   *
+   * @param properties  Destination property map; entries are added for each non-empty SHM field.
    */
   void append_properties(PropertiesMap& properties) const;
 
   /**
-   * @brief Registers a named QoS profile for use by @c zenoh:// nodes.
+   * @brief Registers a named QoS profile that endpoints may reference via @c ?qos=.
    *
    * @details
-   * The @p name is associated with the @p qos object and can be referenced in URL
-   * query strings as @c ?qos=name.  Names that conflict with reserved keys
-   * (@c part, @c topic, @c pub, @c sub, @c writer, @c reader) or that are already
-   * registered cause a fatal log and are rejected.
+   * Profile names share a global namespace.  Collisions with reserved tokens
+   * (@c part, @c topic, @c pub, @c sub, @c writer, @c reader) or with an
+   * already registered profile abort with a fatal log entry.
    *
-   * @param name  Unique profile name; must not be one of the reserved keys.
-   * @param qos   @c Qos object describing the quality-of-service settings.
+   * @param name  Unique profile key; must not collide with any reserved token.
+   * @param qos   @c Qos value associated with the key.
    */
   static void register_qos(const std::string& name, const Qos& qos);
 

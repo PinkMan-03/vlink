@@ -23,47 +23,42 @@
 
 /**
  * @file exception.h
- * @brief VLink-specific exception types wrapping the C++ standard exception hierarchy.
+ * @brief Thin @c final wrappers around the standard exception hierarchy used by VLink.
  *
  * @details
- * All VLink exception classes are thin @c final wrappers around the
- * corresponding standard exception base.  They are grouped inside the
- * @c vlink::Exception namespace to avoid naming conflicts with application
- * code.
+ * Each VLink exception type is a @c final subclass of the corresponding standard exception base
+ * and lives inside the @c vlink::Exception namespace to avoid clashing with application code.
+ * Constructors and @c what() are inherited verbatim; only @c OperationCancelled overrides
+ * @c what() with a fixed identifier string.
  *
- * The wrappers are header-only and inherit the constructors and @c what()
- * behavior of their standard exception bases, except
- * @c OperationCancelled which overrides @c what() inline with a fixed message.
+ * @par Class hierarchy
  *
- * The mapping between VLink exceptions and standard bases is:
- *
- * | VLink exception                | Standard base              | Typical usage                        |
- * | ------------------------------ | -------------------------- | ------------------------------------ |
- * | Exception::RuntimeError        | std::runtime_error         | General runtime failures (fatal log) |
- * | Exception::OutOfRange          | std::out_of_range          | Index or iterator out of valid range |
- * | Exception::InvalidArgument     | std::invalid_argument      | Bad function argument                |
- * | Exception::LogicError          | std::logic_error           | Violated precondition                |
- * | Exception::DomainError         | std::domain_error          | Value outside the function domain    |
- * | Exception::LengthError         | std::length_error          | Size exceeds implementation limit    |
- * | Exception::RangeError          | std::range_error           | Arithmetic range error               |
- * | Exception::OverflowError       | std::overflow_error        | Arithmetic overflow                  |
- * | Exception::UnderflowError      | std::underflow_error       | Arithmetic underflow                 |
- * | Exception::OperationCancelled  | std::exception             | Cooperative cancellation observed    |
+ * | VLink class                       | Standard base               | Typical usage                          |
+ * | --------------------------------- | --------------------------- | -------------------------------------- |
+ * | @c Exception::RuntimeError        | @c std::runtime_error       | Generic runtime failure (logger fatal) |
+ * | @c Exception::OutOfRange          | @c std::out_of_range        | Index or iterator out of bounds        |
+ * | @c Exception::InvalidArgument     | @c std::invalid_argument    | Bad function argument                  |
+ * | @c Exception::LogicError          | @c std::logic_error         | Violated precondition                  |
+ * | @c Exception::DomainError         | @c std::domain_error        | Value outside the function domain      |
+ * | @c Exception::LengthError         | @c std::length_error        | Exceeded implementation limit          |
+ * | @c Exception::RangeError          | @c std::range_error         | Arithmetic range error                 |
+ * | @c Exception::OverflowError       | @c std::overflow_error      | Arithmetic overflow                    |
+ * | @c Exception::UnderflowError      | @c std::underflow_error     | Arithmetic underflow                   |
+ * | @c Exception::OperationCancelled  | @c std::exception           | Cooperative cancellation observed      |
  *
  * @note
- * @c Exception::RuntimeError is the exception thrown by @c Logger when a
- * @c kFatal-level log message is emitted.  If a @c kFatal log occurs the
- * Logger flushes all pending output and then throws this exception, allowing
- * the application to catch it and perform a controlled shutdown.
+ * @c Logger throws @c Exception::RuntimeError whenever a @c kFatal message is emitted.  The
+ * logger flushes all sinks before throwing so the application can catch the exception and
+ * shut down cleanly.
  *
  * @par Example
  * @code
- * try {
- *   VLOG_F("Critical failure: ", reason);
- * } catch (const vlink::Exception::RuntimeError& e) {
- *   // perform cleanup before process exit
- *   std::cerr << e.what() << "\n";
- * }
+ *   try {
+ *     VLOG_F("Critical failure: ", reason);
+ *   } catch (const vlink::Exception::RuntimeError& e) {
+ *     std::cerr << e.what() << "\n";
+ *     shutdown_cleanup();
+ *   }
  * @endcode
  */
 
@@ -76,13 +71,13 @@ namespace vlink {
 
 /**
  * @namespace vlink::Exception
- * @brief Container namespace for all VLink exception types.
+ * @brief Container namespace for VLink exception types.
  */
 namespace Exception {  // NOLINT(readability-identifier-naming)
 
 /**
  * @class RuntimeError
- * @brief Indicates a general runtime failure.
+ * @brief Generic runtime failure; thrown by the logger on @c kFatal messages.
  */
 class RuntimeError final : public std::runtime_error {
  public:
@@ -91,7 +86,7 @@ class RuntimeError final : public std::runtime_error {
 
 /**
  * @class OutOfRange
- * @brief Indicates an index or iterator that is outside the valid range.
+ * @brief Indicates an index or iterator that is outside the legal range.
  */
 class OutOfRange final : public std::out_of_range {
  public:
@@ -118,7 +113,7 @@ class LogicError final : public std::logic_error {
 
 /**
  * @class DomainError
- * @brief Indicates that a value is outside the domain of a mathematical function.
+ * @brief Indicates a value outside the mathematical domain of a function.
  */
 class DomainError final : public std::domain_error {
  public:
@@ -127,7 +122,7 @@ class DomainError final : public std::domain_error {
 
 /**
  * @class LengthError
- * @brief Indicates an attempt to exceed the maximum allowable size or length.
+ * @brief Indicates an attempt to exceed an implementation size limit.
  */
 class LengthError final : public std::length_error {
  public:
@@ -163,15 +158,16 @@ class UnderflowError final : public std::underflow_error {
 
 /**
  * @class OperationCancelled
- * @brief Indicates that an operation observed a cooperative cancellation request.
+ * @brief Marker exception thrown when a cooperative cancellation request is observed.
  */
 class OperationCancelled final : public std::exception {
  public:
   using std::exception::exception;
 
   /**
-   * @brief Returns the explanatory cancellation message.
-   * @return Null-terminated explanatory string.
+   * @brief Returns a fixed explanatory message identifying the exception.
+   *
+   * @return Static null-terminated string.
    */
   [[nodiscard]] const char* what() const noexcept override { return "vlink operation cancelled"; }
 };

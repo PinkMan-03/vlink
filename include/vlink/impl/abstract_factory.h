@@ -23,49 +23,80 @@
 
 /**
  * @file abstract_factory.h
- * @brief Topic-keyed factory and multi-implementation callback registry for VLink nodes.
+ * @brief Topic-scoped registration store that fans transport callbacks across @c NodeImpl peers.
  *
  * @details
- * This header provides two cooperating templates used internally by every VLink
- * node type (Publisher, Subscriber, Client, Server, Setter, Getter) to multiplex
- * callbacks across multiple concurrent transport implementations sharing the same
- * logical topic:
+ * This is an internal implementation header used by the public VLink node templates
+ * (@c Publisher, @c Subscriber, @c Client, @c Server, @c Setter, @c Getter); it should not
+ * be included directly by application code.  The header introduces two co-operating
+ * class templates that let several @c NodeImpl instances bound to the same logical
+ * topic share one registration record:
  *
- * @par AbstractObject Template
- * A per-topic object that holds:
- * - A set of active @c NodeImpl* instances registered on this topic.
- * - Per-impl callback maps for all six callback types (server-connect, sub-connect,
- *   req/resp, msg, intra-msg, status).
- * - Traversal helpers that iterate over all registered callbacks while holding
- *   a @c std::recursive_mutex, with @c has_called() accounting that can ignore
- *   selected callbacks via @c ignore_called().
+ * - @c AbstractObject -- a per-topic record that owns the set of registered
+ *   @c NodeImpl pointers together with six callback dictionaries (server connect,
+ *   subscriber connect, request/response, serialised message, intra-process message
+ *   and transport status).
+ * - @c AbstractFactory -- a thread-safe map keyed on @c FilterT (commonly the
+ *   topic URL string) that lazily creates an @c AbstractObject for each key and
+ *   reuses it via a cached @c std::weak_ptr until the last owner releases it.
  *
- * @par AbstractFactory Template
- * A map-based factory keyed on @c FilterT (typically @c std::string topic name)
- * that creates and caches @c AbstractObject<FilterT> instances.  Objects are stored
- * as @c std::weak_ptr so they are automatically destroyed when no @c NodeImpl holds
- * a reference.
- *
- * @par Usage Model
+ * @par Registration flow
  * @code
- *   // All Publisher<T> nodes on "dds://my_topic" share one AbstractObject:
- *   auto obj = factory.get_object<MyObject>("dds://my_topic");
- *   obj->add_impl(impl_ptr);
- *   obj->register_msg_callback(impl_ptr, [](const Bytes& bytes) {
- *     // process the received bytes
- *   });
- *
- *   // When a message arrives, dispatch to all registered impls:
- *   obj->traverse_msg_callback([&](NodeImpl* impl, const NodeImpl::MsgCallback& cb) {
- *     cb(msg_data);
- *   });
+ *                    +----------------------+
+ *                    | AbstractFactory<K>   |
+ *                    |  map<K, weak_ptr<O>> |
+ *                    +----------+-----------+
+ *                               | get_object<O>(key)
+ *                               v
+ *                    +----------------------+
+ *                    |  AbstractObject<K>   |
+ *                    |  ImplList            |
+ *                    |  ConnectCallbackMap  |
+ *                    |  MsgCallbackMap ...  |
+ *                    +----------+-----------+
+ *                       ^       |   ^
+ *      add_impl(impl)   |       |   | register_msg_callback(impl, cb)
+ *      remove_impl(impl)|       |   |
+ *                       |       v
+ *                +------+--+   +-+--------+   +----------+
+ *                | NodeImpl|   | NodeImpl |   | NodeImpl |
+ *                +---------+   +----------+   +----------+
  * @endcode
  *
- * @note All public methods on @c AbstractObject are thread-safe; they acquire
- *       the internal @c std::recursive_mutex before modifying or reading state.
+ * @par Registry keys
+ * | Map field                       | Callback signature                                |
+ * | ------------------------------- | ------------------------------------------------- |
+ * | @c server_connect_callback_map_ | @c void(bool) -- server side peer presence change |
+ * | @c sub_connect_callback_map_    | @c void(bool) -- subscriber side presence change  |
+ * | @c req_resp_callback_map_       | @c void(uint64_t, const Bytes&, Bytes*)           |
+ * | @c msg_callback_map_            | @c void(const Bytes&)                             |
+ * | @c intra_msg_callback_map_      | @c void(const IntraData&)                         |
+ * | @c status_callback_map_         | @c void(const Status::BasePtr&)                   |
  *
- * @tparam FilterT  The key type used to look up objects in the factory
- *                  (e.g. @c std::string for topic URLs).
+ * @par Example
+ * @code
+ * struct TopicObject final : vlink::AbstractObject<std::string> {
+ *   using AbstractObject::AbstractObject;
+ * };
+ *
+ * vlink::AbstractFactory<std::string> factory;
+ *
+ * auto object = factory.get_object<TopicObject>("dds://my_topic");
+ * object->add_impl(impl);
+ * object->register_msg_callback(impl, [](const vlink::Bytes& bytes) {
+ *   // forward each delivery to the owning node
+ * });
+ *
+ * object->traverse_msg_callback([](vlink::NodeImpl*, const vlink::NodeImpl::MsgCallback& cb) {
+ *   cb(payload);
+ * });
+ * @endcode
+ *
+ * @note Every public @c AbstractObject method acquires the internal
+ *       @c std::recursive_mutex; callbacks invoked through @c traverse_*() execute
+ *       under that lock and may re-enter the same @c AbstractObject safely.
+ *
+ * @tparam FilterT Key type used to identify topics inside the factory map.
  */
 
 #pragma once
@@ -88,243 +119,233 @@ namespace vlink {
 
 /**
  * @class AbstractObject
- * @brief Per-topic registry of @c NodeImpl instances and their associated callbacks.
+ * @brief Topic-scoped fan-out store of @c NodeImpl peers and their callbacks.
  *
  * @details
- * Maintains an unordered set of active @c NodeImpl* pointers and six separate
- * callback maps (server-connect, subscriber-connect, req/resp, msg, intra-msg,
- * status).  All mutations and traversals are protected by a @c std::recursive_mutex
- * to allow safe use from multiple threads.
+ * Holds the active @c NodeImpl pointer set together with the six callback
+ * dictionaries documented at file scope and serialises mutation, traversal and
+ * accounting through a @c std::recursive_mutex.  The traversal helpers honour
+ * the @c ignore_called() escape hatch so that individual callbacks can opt out
+ * of the "any callback was invoked" accounting tracked by @c has_called().
  *
- * @tparam FilterT  Key type used by the owning @c AbstractFactory to look up this
- *                  object (typically a topic URL string).
+ * @tparam FilterT Key type used by the owning @c AbstractFactory for this object.
  */
 template <typename FilterT>
 class AbstractObject : public AbstractNode {
  public:
-  using ImplList = std::unordered_set<NodeImpl*>;  ///< Set of registered impl pointers.
+  using ImplList = std::unordered_set<NodeImpl*>;  ///< Set of currently registered @c NodeImpl peers.
 
-  using ConnectCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::ConnectCallback>;  ///< Per-impl connect callbacks.
+  using ConnectCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::ConnectCallback>;  ///< Connect handlers per impl.
   using ReqRespCallbackMap =
-      std::unordered_map<NodeImpl*, NodeImpl::ReqRespCallback>;                 ///< Per-impl req/resp callbacks.
-  using MsgCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::MsgCallback>;  ///< Per-impl message callbacks.
-  using IntraMsgCallbackMap =
-      std::unordered_map<NodeImpl*, NodeImpl::IntraMsgCallback>;                      ///< Per-impl intra-msg callbacks.
-  using StatusCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::StatusCallback>;  ///< Per-impl status callbacks.
+      std::unordered_map<NodeImpl*, NodeImpl::ReqRespCallback>;                 ///< Req/resp callbacks, keyed by impl.
+  using MsgCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::MsgCallback>;  ///< Message callbacks, keyed by impl.
+  using IntraMsgCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::IntraMsgCallback>;  ///< Intra-message callbacks.
+  using StatusCallbackMap = std::unordered_map<NodeImpl*, NodeImpl::StatusCallback>;  ///< Status callbacks per impl.
 
   using FindConnectCallback =
-      Function<void(NodeImpl*, const NodeImpl::ConnectCallback&)>;  ///< Traversal visitor for connect callbacks.
+      Function<void(NodeImpl*, const NodeImpl::ConnectCallback&)>;  ///< Visitor invoked for each connect entry.
   using FindReqRespCallback =
-      Function<void(NodeImpl*, const NodeImpl::ReqRespCallback&)>;  ///< Traversal visitor for req/resp callbacks.
+      Function<void(NodeImpl*, const NodeImpl::ReqRespCallback&)>;  ///< Visitor invoked for each req/resp entry.
   using FindMsgCallback =
-      Function<void(NodeImpl*, const NodeImpl::MsgCallback&)>;  ///< Traversal visitor for message callbacks.
+      Function<void(NodeImpl*, const NodeImpl::MsgCallback&)>;  ///< Visitor invoked for each message entry.
   using FindIntraMsgCallback =
-      Function<void(NodeImpl*, const NodeImpl::IntraMsgCallback&)>;  ///< Traversal visitor for intra-msg callbacks.
+      Function<void(NodeImpl*, const NodeImpl::IntraMsgCallback&)>;  ///< Visitor for each intra-message entry.
   using FindStatusCallback =
-      Function<void(NodeImpl*, const NodeImpl::StatusCallback&)>;  ///< Traversal visitor for status callbacks.
+      Function<void(NodeImpl*, const NodeImpl::StatusCallback&)>;  ///< Visitor invoked for each status entry.
 
   /**
-   * @brief Registers a @c NodeImpl instance with this topic object.
+   * @brief Registers @p impl as an active peer on this topic.
    *
    * @details
-   * Inserts @p impl into the active implementation set and updates the cached
-   * @c first_impl_ pointer.  Thread-safe.
+   * Inserts @p impl into @c impl_list_ and refreshes the cached @c first_impl_
+   * pointer to the latest registrant.  The operation is serialised against all
+   * other public methods.
    *
-   * @param impl  Non-owning pointer to the @c NodeImpl to register.
-   * @return      @c true if @p impl was newly inserted; @c false if it was already
-   *              present.
+   * @param impl  Non-owning peer pointer to track.
+   * @return @c true when the pointer was newly inserted; @c false when it was
+   *         already present.
    */
   bool add_impl(NodeImpl* impl);
 
   /**
-   * @brief Unregisters a @c NodeImpl instance and removes all its callbacks.
+   * @brief Removes @p impl from the peer set and forgets every associated callback.
    *
    * @details
-   * Erases @p impl from the active set and removes its entries from all six
-   * callback maps.  Thread-safe.
+   * Erases the pointer from @c impl_list_, reassigns @c first_impl_ if needed
+   * and drops the entry from all six callback dictionaries.  Thread-safe.
    *
-   * @param impl  Non-owning pointer to the @c NodeImpl to unregister.
-   * @return      @c true if @p impl was found and removed; @c false otherwise.
+   * @param impl  Peer pointer previously passed to @c add_impl().
+   * @return @c true if @p impl was found and removed; @c false otherwise.
    */
   bool remove_impl(NodeImpl* impl);
 
   /**
-   * @brief Returns the most recently added @c NodeImpl pointer.
+   * @brief Returns the most recently registered peer.
    *
    * @details
-   * The "first" impl is set to the last value passed to @c add_impl().  If the
-   * current first impl is removed via @c remove_impl(), it is reassigned to an
-   * arbitrary remaining impl, or @c nullptr if the set is empty.
+   * The "first" pointer follows the latest successful @c add_impl() call.  After
+   * a matching @c remove_impl() the cache is repopulated with an arbitrary
+   * remaining peer, or @c nullptr if the set has been drained.
    *
-   * @return Pointer to the most recently registered @c NodeImpl, or @c nullptr.
+   * @return Pointer to the current cached peer; @c nullptr when no peer is registered.
    */
   [[nodiscard]] NodeImpl* get_first_impl() const;
 
   /**
-   * @brief Returns @c true if @p impl is currently registered with this object.
+   * @brief Tests whether @p impl is currently part of the peer set.
    *
-   * @param impl  Pointer to check.
-   * @return      @c true if @p impl is in the active set; @c false otherwise.
+   * @param impl  Pointer to query.
+   * @return @c true when @p impl is registered, @c false otherwise.
    */
   [[nodiscard]] bool is_contains_impl(NodeImpl* impl) const;
 
   /**
-   * @brief Returns @c true if at least one @c NodeImpl is currently registered.
+   * @brief Indicates whether at least one peer has been registered.
    *
-   * @return @c true if the active implementation set is non-empty.
+   * @return @c true when @c impl_list_ is non-empty.
    */
   [[nodiscard]] bool has_impl() const;
 
   /**
-   * @brief Registers a server-side connect-change callback for @p impl.
+   * @brief Stores @p callback as the server-side connect handler for @p impl.
    *
-   * @details
-   * Stores the callback in the server-connect map keyed by @p impl.  A subsequent
-   * call to @c traverse_server_connect_callback() will invoke this callback.
-   *
-   * @param impl      The @c NodeImpl this callback belongs to.
-   * @param callback  Callable @c void(bool) invoked on client-presence changes.
-   * @return          @c true if the callback was inserted; @c false if one was
-   *                  already registered for @p impl.
+   * @param impl      Peer that owns @p callback.
+   * @param callback  Callable @c void(bool) invoked when a remote client comes or goes.
+   * @return @c true if the entry was inserted; @c false when one was already present.
    */
   bool register_server_connect_callback(NodeImpl* impl, NodeImpl::ConnectCallback&& callback);
 
   /**
-   * @brief Registers a subscriber-side connect-change callback for @p impl.
+   * @brief Stores @p callback as the subscriber-side connect handler for @p impl.
    *
-   * @details
-   * Stores the callback in the subscriber-connect map keyed by @p impl.
-   *
-   * @param impl      The @c NodeImpl this callback belongs to.
-   * @param callback  Callable @c void(bool) invoked on subscriber-presence changes.
-   * @return          @c true if the callback was inserted; @c false if already set.
+   * @param impl      Peer that owns @p callback.
+   * @param callback  Callable @c void(bool) invoked when a subscriber appears or disappears.
+   * @return @c true if the entry was inserted; @c false when one was already present.
    */
   bool register_sub_connect_callback(NodeImpl* impl, NodeImpl::ConnectCallback&& callback);
 
   /**
-   * @brief Registers a request/response callback for @p impl.
+   * @brief Stores @p callback as the request/response handler for @p impl.
    *
-   * @param impl      The @c NodeImpl this callback belongs to.
-   * @param callback  Callable invoked for each incoming RPC request.
-   * @return          @c true if inserted; @c false if already registered.
+   * @param impl      Peer that owns @p callback.
+   * @param callback  Callable invoked for every incoming RPC request.
+   * @return @c true on insertion; @c false when already registered.
    */
   bool register_req_resp_callback(NodeImpl* impl, NodeImpl::ReqRespCallback&& callback);
 
   /**
-   * @brief Registers a serialised-message receive callback for @p impl.
+   * @brief Stores @p callback as the serialised-message handler for @p impl.
    *
-   * @param impl      The @c NodeImpl this callback belongs to.
-   * @param callback  Callable @c void(const Bytes&) invoked on each message.
-   * @return          @c true if inserted; @c false if already registered.
+   * @param impl      Peer that owns @p callback.
+   * @param callback  Callable @c void(const Bytes&) invoked for every received message.
+   * @return @c true on insertion; @c false when already registered.
    */
   bool register_msg_callback(NodeImpl* impl, NodeImpl::MsgCallback&& callback);
 
   /**
-   * @brief Registers an in-process zero-copy message callback for @p impl.
+   * @brief Stores @p callback as the intra-process message handler for @p impl.
    *
-   * @param impl      The @c NodeImpl this callback belongs to.
-   * @param callback  Callable @c void(const IntraData&) invoked on each intra message.
-   * @return          @c true if inserted; @c false if already registered.
+   * @param impl      Peer that owns @p callback.
+   * @param callback  Callable @c void(const IntraData&) invoked for each in-process delivery.
+   * @return @c true on insertion; @c false when already registered.
    */
   bool register_intra_msg_callback(NodeImpl* impl, NodeImpl::IntraMsgCallback&& callback);
 
   /**
-   * @brief Registers a transport-status callback for @p impl.
+   * @brief Stores @p callback as the transport-status handler for @p impl.
    *
-   * @param impl      The @c NodeImpl this callback belongs to.
-   * @param callback  Callable invoked on transport status changes.
-   * @return          @c true if inserted; @c false if already registered.
+   * @param impl      Peer that owns @p callback.
+   * @param callback  Callable invoked when the transport reports a status change.
+   * @return @c true on insertion; @c false when already registered.
    */
   bool register_status_callback(NodeImpl* impl, NodeImpl::StatusCallback&& callback);
 
   /**
-   * @brief Returns @c true if no server-connect callbacks are registered.
+   * @brief Reports whether the server-connect dictionary is empty.
    *
-   * @return @c true when the server-connect callback map is empty.
+   * @return @c true when no server-connect callbacks are registered.
    */
   [[nodiscard]] bool server_connect_map_is_empty() const;
 
   /**
-   * @brief Returns @c true if no subscriber-connect callbacks are registered.
+   * @brief Reports whether the subscriber-connect dictionary is empty.
    *
-   * @return @c true when the subscriber-connect callback map is empty.
+   * @return @c true when no subscriber-connect callbacks are registered.
    */
   [[nodiscard]] bool sub_connect_map_is_empty() const;
 
   /**
-   * @brief Returns @c true if no request/response callbacks are registered.
+   * @brief Reports whether the request/response dictionary is empty.
    *
-   * @return @c true when the req/resp callback map is empty.
+   * @return @c true when no req/resp callbacks are registered.
    */
   [[nodiscard]] bool req_resp_map_is_empty() const;
 
   /**
-   * @brief Returns @c true if no message callbacks are registered.
+   * @brief Reports whether the serialised-message dictionary is empty.
    *
-   * @return @c true when the message callback map is empty.
+   * @return @c true when no message callbacks are registered.
    */
   [[nodiscard]] bool msg_map_is_empty() const;
 
   /**
-   * @brief Returns @c true if no in-process message callbacks are registered.
+   * @brief Reports whether the intra-process message dictionary is empty.
    *
-   * @return @c true when the intra-message callback map is empty.
+   * @return @c true when no intra-message callbacks are registered.
    */
   [[nodiscard]] bool intra_msg_map_is_empty() const;
 
   /**
-   * @brief Returns @c true if no status callbacks are registered.
+   * @brief Reports whether the transport-status dictionary is empty.
    *
-   * @return @c true when the status callback map is empty.
+   * @return @c true when no status callbacks are registered.
    */
   [[nodiscard]] bool status_map_is_empty() const;
 
   /**
-   * @brief Invokes @p callback for each registered server-connect callback.
+   * @brief Walks the server-connect dictionary and invokes @p callback for every entry.
    *
    * @details
-   * Iterates over all entries in the server-connect map while holding the mutex.
-   * The visitor receives the @c NodeImpl* and the stored @c ConnectCallback.
-   * A visitor can call @c ignore_called() to keep that particular callback from
-   * setting the @c has_called() flag; traversal still continues for remaining
-   * callbacks.
+   * Iteration is performed while holding the recursive mutex.  Individual visits
+   * may call @c ignore_called() to keep the current entry from setting the
+   * @c has_called() flag; iteration carries on regardless.
    *
-   * @param callback  Visitor called as @c callback(impl, stored_callback) for each entry.
+   * @param callback  Visitor receiving each peer pointer and its stored handler.
    */
   void traverse_server_connect_callback(const FindConnectCallback& callback);
 
   /**
-   * @brief Invokes @p callback for each registered subscriber-connect callback.
+   * @brief Walks the subscriber-connect dictionary and invokes @p callback for every entry.
    *
-   * @param callback  Visitor called for each subscriber-connect entry.
+   * @param callback  Visitor receiving each peer pointer and its stored handler.
    */
   void traverse_sub_connect_callback(const FindConnectCallback& callback);
 
   /**
-   * @brief Invokes @p callback for each registered request/response callback.
+   * @brief Walks the request/response dictionary and invokes @p callback for every entry.
    *
-   * @param callback  Visitor called for each req/resp entry.
+   * @param callback  Visitor receiving each peer pointer and its stored handler.
    */
   void traverse_req_resp_callback(const FindReqRespCallback& callback);
 
   /**
-   * @brief Invokes @p callback for each registered serialised-message callback.
+   * @brief Walks the serialised-message dictionary and invokes @p callback for every entry.
    *
-   * @param callback  Visitor called for each message callback entry.
+   * @param callback  Visitor receiving each peer pointer and its stored handler.
    */
   void traverse_msg_callback(const FindMsgCallback& callback);
 
   /**
-   * @brief Invokes @p callback for each registered in-process message callback.
+   * @brief Walks the intra-process dictionary and invokes @p callback for every entry.
    *
-   * @param callback  Visitor called for each intra-msg entry.
+   * @param callback  Visitor receiving each peer pointer and its stored handler.
    */
   void traverse_intra_msg_callback(const FindIntraMsgCallback& callback);
 
   /**
-   * @brief Invokes @p callback for each registered status callback.
+   * @brief Walks the transport-status dictionary and invokes @p callback for every entry.
    *
-   * @param callback  Visitor called for each status entry.
+   * @param callback  Visitor receiving each peer pointer and its stored handler.
    */
   void traverse_status_callback(const FindStatusCallback& callback);
 
@@ -358,18 +379,19 @@ class AbstractObject : public AbstractNode {
 
 /**
  * @class AbstractFactory
- * @brief Topic-keyed factory that creates and caches @c AbstractObject instances.
+ * @brief Lazily allocates and caches @c AbstractObject instances keyed by @c FilterT.
  *
  * @details
- * Maintains a @c std::map<FilterT, std::weak_ptr<Object>> so that multiple
- * @c NodeImpl instances sharing the same topic key reuse the same
- * @c AbstractObject.  Objects are reference-counted: the entry is automatically
- * removed from the map when the last @c shared_ptr to the object is destroyed,
- * preventing stale entries from accumulating.
+ * Holds a @c std::map<FilterT, std::weak_ptr<Object>> so that multiple node
+ * peers requesting the same key reuse the same registration record.  The
+ * returned @c std::shared_ptr carries a custom deleter that erases the map
+ * entry when the last owner releases the object, which keeps the lookup map
+ * free of stale @c weak_ptr slots.
  *
- * @note This class is not copy-constructible or copy-assignable.
+ * @note The factory itself is non-copyable and non-movable; share it through a
+ *       singleton or a per-transport static instance.
  *
- * @tparam FilterT  The key type used to identify topics (e.g. @c std::string).
+ * @tparam FilterT Topic-key type (typically @c std::string).
  */
 template <typename FilterT>
 class AbstractFactory {
@@ -379,42 +401,39 @@ class AbstractFactory {
 
  public:
   /**
-   * @brief Returns @c true if @p ptr is a live object tracked by this factory.
+   * @brief Tests whether @p ptr corresponds to a live object created by this factory.
    *
-   * @details
-   * Checks the internal set of raw pointers to verify that @p ptr points to an
-   * object that was created by this factory and has not yet been destroyed.
-   *
-   * @param ptr  Raw pointer to check.
-   * @return     @c true if the object is currently alive; @c false otherwise.
+   * @param ptr  Raw pointer to validate.
+   * @return @c true when the object is still alive in this factory; @c false otherwise.
    */
   [[nodiscard]] bool has_object(Object* ptr) const;
 
   /**
-   * @brief Retrieves or creates the @c AbstractObject for the given @p filter key.
+   * @brief Looks up or creates the @c ObjectT registered against @p filter.
    *
    * @details
-   * If an object already exists for @p filter and is still alive (the @c weak_ptr
-   * is valid), the existing @c shared_ptr is returned.  Otherwise a new
-   * @c ObjectT is heap-allocated, wrapped in a @c shared_ptr with a custom deleter
-   * that removes the entry from the internal map on destruction, and cached.
+   * If the cached @c weak_ptr is still valid, the existing instance is shared
+   * with the caller.  Otherwise a new @c ObjectT is allocated (outside the
+   * factory lock so its constructor can re-enter VLink safely), the resulting
+   * @c shared_ptr is given a deleter that removes the cache entry on
+   * destruction, and the value is stored back into the map.
    *
-   * @tparam ObjectT  Concrete subclass of @c AbstractObject<FilterT> to instantiate.
+   * @tparam ObjectT Concrete subclass of @c AbstractObject<FilterT> to allocate.
    *
-   * @param filter  Topic key used to look up or create the object.
-   * @return        A @c shared_ptr<ObjectT> for the given @p filter.
+   * @param filter  Key identifying the topic.
+   * @return Shared ownership handle for the cached object.
    */
   template <typename ObjectT>
   [[nodiscard]] std::shared_ptr<ObjectT> get_object(const FilterT& filter);
 
  protected:
   /**
-   * @brief Protected default constructor.
+   * @brief Constructs an empty factory.
    */
   AbstractFactory();
 
   /**
-   * @brief Protected virtual destructor.
+   * @brief Destroys the factory and releases the cache.
    */
   virtual ~AbstractFactory();
 
@@ -681,7 +700,6 @@ inline std::shared_ptr<ObjectT> AbstractFactory<FilterT>::get_object(const Filte
         it->second = obj;
         set_.emplace(obj_ptr);
       } else {
-        // Another thread inserted while we were unlocked; discard our object.
         delete obj_ptr;
       }
     }

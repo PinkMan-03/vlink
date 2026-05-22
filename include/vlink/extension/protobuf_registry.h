@@ -23,27 +23,47 @@
 
 /**
  * @file protobuf_registry.h
- * @brief Protobuf runtime include wrapper for schema-plugin support.
+ * @brief Header probe that enables Protobuf-backed schema-plugin code when available.
  *
  * @details
- * Protobuf does not need a custom VLink-side registry implementation because
- * generated message descriptors are already exposed through
- * @c google::protobuf::DescriptorPool::generated_pool().
+ * Unlike FlatBuffers, Protobuf already provides a process-wide registry of generated
+ * descriptors through @c google::protobuf::DescriptorPool::generated_pool(), so VLink
+ * does not need its own table for Protobuf schemas.  This header exists purely to:
  *
- * This header only centralizes the protobuf runtime includes and the feature
- * macro used by schema-plugin related code:
- * - @c VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF is defined when the required protobuf
- *   reflection headers are available in the current build environment.
+ * - Centralise the protobuf reflection includes used by the schema plugin.
+ * - Probe for protobuf availability and expose a feature macro to the rest of the
+ *   schema-plugin code.
  *
- * Keeping this probe in a dedicated header makes @c schema_plugin_base.h and
- * other schema-plugin code easier to read and keeps protobuf availability
- * checks consistent across the codebase.
+ * Registration API surface:
+ *
+ * | Source         | API used                                            | Notes                            |
+ * | -------------- | --------------------------------------------------- | -------------------------------- |
+ * | Generated code | @c DescriptorPool::generated_pool()                 | Populated by Protobuf at startup |
+ * | Schema plugin  | @c VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF (defined below) | Enables protobuf code paths      |
+ *
+ * @par Example
+ * @code
+ * #include <vlink/extension/protobuf_registry.h>
+ *
+ * #ifdef VLINK_HAS_SCHEMA_PLUGIN_PROTOBUF
+ * auto* pool = google::protobuf::DescriptorPool::generated_pool();
+ * if (auto* desc = pool->FindMessageTypeByName("demo.proto.PointCloud")) {
+ *   // ... reflectively walk the message ...
+ *   (void)desc;
+ * }
+ * #endif
+ * @endcode
  */
 
 #pragma once
 
 /**
- * @brief Enables protobuf-backed schema-plugin code when protobuf reflection is available.
+ * @brief Defined when the Protobuf reflection headers are visible in the build.
+ *
+ * @details
+ * The probe relies on @c __has_include to detect the protobuf installation.  When the
+ * macro is defined, dependent schema-plugin code may safely use protobuf descriptors,
+ * reflection and dynamic messages.
  */
 #if __has_include(<google/protobuf/dynamic_message.h>)
 #include <google/protobuf/descriptor.h>

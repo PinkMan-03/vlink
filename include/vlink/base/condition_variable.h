@@ -21,72 +21,64 @@
  * limitations under the License.
  */
 
-/*
- * ConditionVariable implementation to fix monotonic_clock.
- *
- * There is a problem with std::condition_variable in lower versions of gcc,
- * which actually uses std::chrono::system_clock instead of std::chrono::steady_clock.
- * Bug 41861 (DR887) - [DR887][C++0x] <condition_variable> does not use monotonic_clock
- *
- * Since new versions of gcc cannot be used, vlink::condition_variable can only be
- * manually implemented instead of C++11's std::condition_variable.
- *
- * This problem is mainly solved by using the POSIX function pthread_condattr_setclock to
- * set the attribute of the condition variable to CLOCK_MONOTONIC.
- */
-
 /**
  * @file condition_variable.h
- * @brief POSIX monotonic-clock condition variable replacing std::condition_variable.
+ * @brief Monotonic-clock condition variable replacement immune to system clock jumps.
  *
  * @details
- * On older versions of GCC (and some libc implementations) @c std::condition_variable
- * internally uses @c CLOCK_REALTIME for timed waits, which means that NTP adjustments
- * or system-clock changes can cause spurious wakeups or missed timeouts.  This header
- * provides @c vlink::ConditionVariable and @c vlink::ConditionVariableAny as drop-in
- * replacements that explicitly configure the underlying @c pthread_cond_t to use
- * @c CLOCK_MONOTONIC via @c pthread_condattr_setclock.
+ * Older libstdc++ implementations route every @c std::condition_variable timed wait through
+ * @c CLOCK_REALTIME, so an NTP step or manual date change can spuriously wake or starve waiters
+ * (GCC PR 41861 / DR 887).  On POSIX systems this header substitutes a hand-rolled
+ * @c vlink::ConditionVariable backed by a @c pthread_cond_t configured with
+ * @c pthread_condattr_setclock @c (..., @c CLOCK_MONOTONIC).  On Windows the bug does not apply
+ * and the names alias to the standard library types verbatim.
  *
- * On non-POSIX platforms (Windows) the types are aliased to their @c std:: counterparts
- * because that bug does not apply there.
+ * @par API surface vs @c std::condition_variable
  *
- * Type aliases for convenience:
- * @code
- * vlink::condition_variable      == vlink::ConditionVariable
- * vlink::condition_variable_any  == vlink::ConditionVariableAny
- * @endcode
+ * | Aspect            | @c std::condition_variable              | @c vlink::ConditionVariable                |
+ * | ----------------- | --------------------------------------- | ------------------------------------------ |
+ * | Backing clock     | @c CLOCK_REALTIME (libstdc++)           | @c CLOCK_MONOTONIC via @c pthread_condattr |
+ * | Timed waits       | Sensitive to wall clock jumps           | Immune to wall clock jumps                 |
+ * | Copy / move       | Deleted                                 | Deleted                                    |
+ * | Public methods    | wait / wait_for / wait_until / notify_* | Same signatures, same return types         |
+ * | Native handle     | @c pthread_cond_t*                      | @c pthread_cond_t*                         |
  *
- * The public API is identical to @c std::condition_variable and
- * @c std::condition_variable_any respectively, so existing code can
- * substitute the types without further changes.
+ * @par Wait / notify sequence
  *
- * @note
- * - On POSIX the @c ConditionVariable is backed by a raw @c pthread_cond_t
- *   initialised with @c CLOCK_MONOTONIC.  It is not copyable or movable.
- * - @c ConditionVariableAny uses a shared internal @c ConditionVariable plus
- *   a @c std::mutex, making it compatible with any @c BasicLockable type.
- * - The @c ceil() / @c ceil_impl() helper functions ensure that duration
- *   conversions always round up, preventing premature timeouts.
+ * @verbatim
+ *   producer thread                consumer thread
+ *   ---------------                 ---------------
+ *   lock(mtx)                       lock(mtx)
+ *   state = ready                   cv.wait(lock, predicate)
+ *   unlock(mtx)                       releases mtx, blocks
+ *   cv.notify_one()  ----------->     wakes; reacquires mtx
+ *                                     re-checks predicate
+ *                                     returns to caller
+ * @endverbatim
+ *
+ * Both @c ConditionVariable and @c ConditionVariableAny accept any @c std::chrono clock type;
+ * non-steady clock arguments are projected onto @c steady_clock at entry and re-checked at exit
+ * for timeout fidelity.  Convenience type aliases @c vlink::condition_variable and
+ * @c vlink::condition_variable_any are also exposed.
  *
  * @par Example
  * @code
- * std::mutex mtx;
- * vlink::ConditionVariable cv;
- * bool ready = false;
+ *   std::mutex mtx;
+ *   vlink::ConditionVariable cv;
+ *   bool ready = false;
  *
- * // Consumer thread:
- * {
- *   std::unique_lock lock(mtx);
- *   cv.wait_for(lock, std::chrono::milliseconds(200),
- *               [&]{ return ready; });
- * }
+ *   // Consumer:
+ *   {
+ *     std::unique_lock lock(mtx);
+ *     cv.wait_for(lock, std::chrono::milliseconds(200), [&] { return ready; });
+ *   }
  *
- * // Producer thread:
- * {
- *   std::lock_guard lock(mtx);
- *   ready = true;
- * }
- * cv.notify_one();
+ *   // Producer:
+ *   {
+ *     std::lock_guard lock(mtx);
+ *     ready = true;
+ *   }
+ *   cv.notify_one();
  * @endcode
  */
 
@@ -112,19 +104,18 @@ namespace vlink {
 
 /**
  * @class ConditionVariable
- * @brief POSIX monotonic-clock condition variable (pthread-backed).
+ * @brief pthread-backed condition variable using @c CLOCK_MONOTONIC for all timed waits.
  *
  * @details
- * Drop-in replacement for @c std::condition_variable that uses
- * @c CLOCK_MONOTONIC for all timed waits, ensuring correctness in the
- * presence of NTP adjustments.
- *
- * The interface mirrors @c std::condition_variable exactly.
+ * Provides the same public interface as @c std::condition_variable.  Internally owns a single
+ * @c pthread_cond_t configured at construction with @c pthread_condattr_setclock so the kernel
+ * uses the monotonic clock when timing out waiters; wall-clock arguments are projected onto the
+ * monotonic clock to preserve fidelity.
  */
 class VLINK_EXPORT ConditionVariable final {
  public:
   /**
-   * @brief The underlying native handle type.
+   * @brief Native handle type returned by @c native_handle.
    */
   using native_handle_type = pthread_cond_t*;
 
@@ -133,136 +124,126 @@ class VLINK_EXPORT ConditionVariable final {
   ConditionVariable& operator=(const ConditionVariable&) noexcept = delete;
 
   /**
-   * @brief Constructs and initialises the condition variable with CLOCK_MONOTONIC.
+   * @brief Constructs and initialises the underlying @c pthread_cond_t with @c CLOCK_MONOTONIC.
    */
   ConditionVariable() noexcept;
 
   /**
-   * @brief Destroys the condition variable.
+   * @brief Destroys the underlying @c pthread_cond_t.
    */
   ~ConditionVariable() noexcept;
 
   /**
-   * @brief Wakes one thread waiting on this condition variable.
+   * @brief Wakes a single thread currently blocked on this condition variable.
    */
   void notify_one() noexcept;
 
   /**
-   * @brief Wakes all threads waiting on this condition variable.
+   * @brief Wakes every thread currently blocked on this condition variable.
    */
   void notify_all() noexcept;
 
   /**
-   * @brief Atomically releases @p lock and waits for a notification.
+   * @brief Atomically releases @p lock and suspends until a notification arrives.
    *
-   * @param lock  A held @c unique_lock<mutex> that is released during the wait.
+   * @param lock  Held lock to release across the wait.
    */
   void wait(std::unique_lock<std::mutex>& lock) noexcept;
 
   /**
-   * @brief Waits until @p p returns @c true, using a spurious-wakeup loop.
+   * @brief Waits in a predicate loop until @p p reports @c true.
    *
-   * @tparam PredicateT  A callable returning @c bool with no arguments.
-   * @param lock  A held @c unique_lock<mutex>.
-   * @param p     Predicate checked after every wakeup.
+   * @tparam PredicateT  Nullary callable returning @c bool.
+   * @param lock  Held lock to release across the wait.
+   * @param p     Predicate evaluated on each wakeup.
    */
   template <typename PredicateT>
   void wait(std::unique_lock<std::mutex>& lock, PredicateT p) noexcept;
 
   /**
-   * @brief Waits until @p atime or notification, using @c steady_clock.
+   * @brief Steady-clock wait_until overload; the deadline is honoured directly.
    *
-   * @tparam DurationT  The duration type of the time point.
-   * @param lock   A held @c unique_lock<mutex>.
-   * @param atime  Absolute time point (steady_clock).
-   * @return @c cv_status::timeout if the deadline was reached, otherwise
-   *         @c cv_status::no_timeout.
+   * @tparam DurationT  Duration type of the time point.
+   * @param lock   Held lock to release across the wait.
+   * @param atime  Absolute steady-clock deadline.
+   * @return @c std::cv_status::timeout when the deadline passed, otherwise @c no_timeout.
    */
   template <typename DurationT>
   std::cv_status wait_until(std::unique_lock<std::mutex>& lock,
                             const std::chrono::time_point<std::chrono::steady_clock, DurationT>& atime) noexcept;
 
   /**
-   * @brief Waits until @p atime or notification, using @c system_clock.
+   * @brief System-clock wait_until overload; the deadline is projected onto steady-clock.
    *
-   * @details
-   * Internally converts the @c system_clock time point to the @c steady_clock
-   * equivalent to avoid NTP sensitivity.
-   *
-   * @tparam DurationT  The duration type of the time point.
-   * @param lock   A held @c unique_lock<mutex>.
-   * @param atime  Absolute time point (system_clock).
-   * @return @c cv_status::timeout or @c cv_status::no_timeout.
+   * @tparam DurationT  Duration type of the time point.
+   * @param lock   Held lock to release across the wait.
+   * @param atime  Absolute system-clock deadline.
+   * @return @c std::cv_status::timeout when the deadline passed, otherwise @c no_timeout.
    */
   template <typename DurationT>
   std::cv_status wait_until(std::unique_lock<std::mutex>& lock,
                             const std::chrono::time_point<std::chrono::system_clock, DurationT>& atime) noexcept;
 
   /**
-   * @brief Waits until @p atime or notification, for any clock type.
+   * @brief Generic clock wait_until overload; the deadline is projected onto steady-clock.
    *
-   * @details
-   * Converts the given clock time point to a @c steady_clock deadline at the
-   * moment of the call to eliminate clock drift during the wait.
-   *
-   * @tparam ClockT     The clock type.
-   * @tparam DurationT  The duration type of the time point.
-   * @param lock   A held @c unique_lock<mutex>.
-   * @param atime  Absolute time point in @c ClockT.
-   * @return @c cv_status::timeout or @c cv_status::no_timeout.
+   * @tparam ClockT     Clock type of the time point.
+   * @tparam DurationT  Duration type of the time point.
+   * @param lock   Held lock to release across the wait.
+   * @param atime  Absolute deadline in @c ClockT.
+   * @return @c std::cv_status::timeout or @c no_timeout.
    */
   template <typename ClockT, typename DurationT>
   std::cv_status wait_until(std::unique_lock<std::mutex>& lock,
                             const std::chrono::time_point<ClockT, DurationT>& atime) noexcept;
 
   /**
-   * @brief Waits until @p atime, a notification, or @p p returns @c true.
+   * @brief Predicate-driven wait_until that exits when @p p reports @c true or the deadline elapses.
    *
-   * @tparam ClockT     The clock type.
-   * @tparam DurationT  The duration type of the time point.
-   * @tparam PredicateT A callable returning @c bool.
-   * @param lock   A held @c unique_lock<mutex>.
+   * @tparam ClockT      Clock type of the deadline.
+   * @tparam DurationT   Duration type of the deadline.
+   * @tparam PredicateT  Nullary callable returning @c bool.
+   * @param lock   Held lock to release across the wait.
    * @param atime  Absolute deadline.
-   * @param p      Predicate checked after every wakeup.
-   * @return The final value of @p p when either the deadline passes or the
-   *         predicate becomes @c true.
+   * @param p      Predicate evaluated on each wakeup.
+   * @return Final value of @p p when the call returns.
    */
   template <typename ClockT, typename DurationT, typename PredicateT>
   bool wait_until(std::unique_lock<std::mutex>& lock, const std::chrono::time_point<ClockT, DurationT>& atime,
                   PredicateT p) noexcept;
 
   /**
-   * @brief Waits for at most @p rtime duration or until notified.
+   * @brief Relative wait_for overload anchored on the steady-clock.
    *
-   * @tparam RepT    The representation type of the duration.
-   * @tparam PeriodT The period of the duration.
-   * @param lock   A held @c unique_lock<mutex>.
+   * @tparam RepT     Duration representation.
+   * @tparam PeriodT  Duration period.
+   * @param lock   Held lock to release across the wait.
    * @param rtime  Maximum wait duration.
-   * @return @c cv_status::timeout or @c cv_status::no_timeout.
+   * @return @c std::cv_status::timeout or @c no_timeout.
    */
   template <typename RepT, typename PeriodT>
   std::cv_status wait_for(std::unique_lock<std::mutex>& lock,
                           const std::chrono::duration<RepT, PeriodT>& rtime) noexcept;
 
   /**
-   * @brief Waits for at most @p rtime or until @p p returns @c true.
+   * @brief Predicate-driven wait_for that exits when @p p reports @c true or @p rtime elapses.
    *
-   * @tparam RepT       The representation type of the duration.
-   * @tparam PeriodT    The period of the duration.
-   * @tparam PredicateT A callable returning @c bool.
-   * @param lock   A held @c unique_lock<mutex>.
+   * @tparam RepT       Duration representation.
+   * @tparam PeriodT    Duration period.
+   * @tparam PredicateT Nullary callable returning @c bool.
+   * @param lock   Held lock to release across the wait.
    * @param rtime  Maximum wait duration.
-   * @param p      Predicate checked after every wakeup.
-   * @return The final value of @p p.
+   * @param p      Predicate evaluated on each wakeup.
+   * @return Final value of @p p when the call returns.
    */
   template <typename RepT, typename PeriodT, typename PredicateT>
   bool wait_for(std::unique_lock<std::mutex>& lock, const std::chrono::duration<RepT, PeriodT>& rtime,
                 PredicateT p) noexcept;
 
   /**
-   * @brief Returns the native @c pthread_cond_t* handle.
+   * @brief Returns the underlying @c pthread_cond_t pointer.
    *
-   * @return Pointer to the internal @c pthread_cond_t.
+   * @return Pointer to the internal native condition variable.
    */
   [[nodiscard]] native_handle_type native_handle() noexcept;
 
@@ -281,19 +262,16 @@ class VLINK_EXPORT ConditionVariable final {
 
 /**
  * @class ConditionVariableAny
- * @brief POSIX monotonic-clock condition variable compatible with any @c BasicLockable.
+ * @brief Monotonic-clock condition variable accepting any @c BasicLockable.
  *
  * @details
- * Drop-in replacement for @c std::condition_variable_any that uses
- * @c CLOCK_MONOTONIC internally.  Accepts any lockable type (not just
- * @c std::unique_lock).
+ * Mirrors @c std::condition_variable_any while routing all timed waits through the same
+ * pthread-backed monotonic condition variable used by @c ConditionVariable.  An internal
+ * @c std::mutex pairs with the shared cv so arbitrary lockables can be unlocked across the
+ * wait and relocked on return.
  *
- * Internally uses a shared @c ConditionVariable wrapped in a @c std::mutex
- * to provide the @c BasicLockable compatibility layer.
- *
- * @note Behavior is unspecified if the destructor runs concurrently with any
- *       other member function (matches @c std::condition_variable_any's
- *       contract, see [thread.condition.condvarany]).
+ * @note Behaviour is unspecified if destruction races with any other member function (matches
+ *       @c std::condition_variable_any per @c [thread.condition.condvarany]).
  */
 class VLINK_EXPORT ConditionVariableAny final {
  public:
@@ -302,7 +280,7 @@ class VLINK_EXPORT ConditionVariableAny final {
   ConditionVariableAny& operator=(const ConditionVariableAny&) noexcept = delete;
 
   /**
-   * @brief Constructs and initialises the condition variable.
+   * @brief Constructs the shared state and underlying condition variable.
    */
   ConditionVariableAny() noexcept;
 
@@ -312,87 +290,87 @@ class VLINK_EXPORT ConditionVariableAny final {
   ~ConditionVariableAny() noexcept;
 
   /**
-   * @brief Wakes one thread waiting on this condition variable.
+   * @brief Wakes a single thread blocked on this condition variable.
    */
   void notify_one() noexcept;
 
   /**
-   * @brief Wakes all threads waiting on this condition variable.
+   * @brief Wakes every thread blocked on this condition variable.
    */
   void notify_all() noexcept;
 
   /**
-   * @brief Atomically releases @p lock and waits for a notification.
+   * @brief Atomically releases @p lock and suspends until a notification arrives.
    *
    * @tparam LockT  Any @c BasicLockable type.
-   * @param lock  The lock to release during the wait.
+   * @param lock  Held lock to release across the wait.
    */
   template <typename LockT>
   void wait(LockT& lock) noexcept;
 
   /**
-   * @brief Waits until @p p returns @c true, using a spurious-wakeup loop.
+   * @brief Predicate wait variant that loops until @p p returns @c true.
    *
-   * @tparam LockT      Any @c BasicLockable type.
-   * @tparam PredicateT A callable returning @c bool.
-   * @param lock  The lock to release during the wait.
-   * @param p     Predicate checked after every wakeup.
+   * @tparam LockT       Any @c BasicLockable type.
+   * @tparam PredicateT  Nullary callable returning @c bool.
+   * @param lock  Held lock to release across the wait.
+   * @param p     Predicate evaluated on each wakeup.
    */
   template <typename LockT, typename PredicateT>
   void wait(LockT& lock, PredicateT p) noexcept;
 
   /**
-   * @brief Waits until @p atime or notification.
+   * @brief Generic clock wait_until variant.
    *
    * @tparam LockT      Any @c BasicLockable type.
-   * @tparam ClockT     Clock type.
-   * @tparam DurationT  Duration type.
-   * @param lock   The lock to release during the wait.
+   * @tparam ClockT     Clock type of the deadline.
+   * @tparam DurationT  Duration type of the deadline.
+   * @param lock   Held lock to release across the wait.
    * @param atime  Absolute deadline.
-   * @return @c cv_status::timeout or @c cv_status::no_timeout.
+   * @return @c std::cv_status::timeout or @c no_timeout.
    */
   template <typename LockT, typename ClockT, typename DurationT>
   std::cv_status wait_until(LockT& lock, const std::chrono::time_point<ClockT, DurationT>& atime) noexcept;
 
   /**
-   * @brief Waits until @p atime, notification, or @p p returns @c true.
+   * @brief Predicate-driven wait_until variant.
    *
-   * @tparam LockT      Any @c BasicLockable type.
-   * @tparam ClockT     Clock type.
-   * @tparam DurationT  Duration type.
-   * @tparam PredicateT A callable returning @c bool.
-   * @param lock   The lock to release during the wait.
+   * @tparam LockT       Any @c BasicLockable type.
+   * @tparam ClockT      Clock type of the deadline.
+   * @tparam DurationT   Duration type of the deadline.
+   * @tparam PredicateT  Nullary callable returning @c bool.
+   * @param lock   Held lock to release across the wait.
    * @param atime  Absolute deadline.
-   * @param p      Predicate.
-   * @return The final value of @p p.
+   * @param p      Predicate evaluated on each wakeup.
+   * @return Final value of @p p when the call returns.
    */
   template <typename LockT, typename ClockT, typename DurationT, typename PredicateT>
   bool wait_until(LockT& lock, const std::chrono::time_point<ClockT, DurationT>& atime, PredicateT p) noexcept;
 
   /**
-   * @brief Waits for at most @p rtime or until notified.
+   * @brief Relative wait_for variant.
    *
-   * @tparam LockT   Any @c BasicLockable type.
-   * @tparam RepT    Duration representation type.
-   * @tparam PeriodT Duration period.
-   * @param lock   The lock to release during the wait.
+   * @tparam LockT    Any @c BasicLockable type.
+   * @tparam RepT     Duration representation.
+   * @tparam PeriodT  Duration period.
+   * @param lock   Held lock to release across the wait.
    * @param rtime  Maximum wait duration.
-   * @return @c cv_status::timeout or @c cv_status::no_timeout.
+   * @return @c std::cv_status::timeout or @c no_timeout.
    */
   template <typename LockT, typename RepT, typename PeriodT>
   std::cv_status wait_for(LockT& lock, const std::chrono::duration<RepT, PeriodT>& rtime) noexcept;
 
   /**
-   * @brief Waits for at most @p rtime or until @p p returns @c true.
+   * @brief Predicate-driven wait_for variant.
    *
-   * @tparam LockT      Any @c BasicLockable type.
-   * @tparam RepT       Duration representation type.
-   * @tparam PeriodT    Duration period.
-   * @tparam PredicateT A callable returning @c bool.
-   * @param lock   The lock to release during the wait.
+   * @tparam LockT       Any @c BasicLockable type.
+   * @tparam RepT        Duration representation.
+   * @tparam PeriodT     Duration period.
+   * @tparam PredicateT  Nullary callable returning @c bool.
+   * @param lock   Held lock to release across the wait.
    * @param rtime  Maximum wait duration.
-   * @param p      Predicate.
-   * @return The final value of @p p.
+   * @param p      Predicate evaluated on each wakeup.
+   * @return Final value of @p p when the call returns.
    */
   template <typename LockT, typename RepT, typename PeriodT, typename PredicateT>
   bool wait_for(LockT& lock, const std::chrono::duration<RepT, PeriodT>& rtime, PredicateT p) noexcept;
@@ -608,13 +586,13 @@ inline std::cv_status ConditionVariableAny::wait_until_impl(
 
 /**
  * @typedef condition_variable
- * @brief Alias for @c ConditionVariable (monotonic-clock based).
+ * @brief Snake-case alias for @c ConditionVariable.
  */
 using condition_variable = ConditionVariable;
 
 /**
  * @typedef condition_variable_any
- * @brief Alias for @c ConditionVariableAny (monotonic-clock based).
+ * @brief Snake-case alias for @c ConditionVariableAny.
  */
 using condition_variable_any = ConditionVariableAny;
 

@@ -23,77 +23,100 @@
 
 /**
  * @file vlink.h
- * @brief Umbrella header that exposes the complete VLink public communication API.
+ * @brief Single umbrella entry point for the public VLink communication SDK.
  *
  * @details
- * Including this single header is sufficient to access all six communication
- * primitives together with the message-loop dispatcher and common utility helpers.
- * No other VLink headers need to be included directly.
+ * Including @c <vlink/vlink.h> pulls in every primitive of the three VLink
+ * communication models together with the @c MessageLoop dispatcher and a small
+ * set of base utilities.  Application code should rarely need to include any
+ * other VLink header directly; transport-specific configuration types are
+ * brought in transitively through the primitive headers.
  *
- * @par Included APIs
- * | Header                  | Primitive(s)                    | Communication Model        |
- * | ----------------------- | ------------------------------- | -------------------------- |
- * | @c client.h             | @c Client\<ReqT,RespT\>         | Method -- caller side      |
- * | @c server.h             | @c Server\<ReqT,RespT\>         | Method -- handler side     |
- * | @c publisher.h          | @c Publisher\<MsgT\>            | Event -- message emitter   |
- * | @c subscriber.h         | @c Subscriber\<MsgT\>           | Event -- message receiver  |
- * | @c getter.h             | @c Getter\<ValueT\>             | Field -- value reader      |
- * | @c setter.h             | @c Setter\<ValueT\>             | Field -- value writer      |
- * | @c base/message_loop.h  | @c MessageLoop                  | Callback dispatcher        |
- * | @c base/utils.h         | utility functions               | General helpers            |
+ * @par Pulled-in Headers and Mapped Primitives
+ * | Header                  | Public Primitive(s)                | Model     | Role                       |
+ * | ----------------------- | ---------------------------------- | --------- | -------------------------- |
+ * | @c client.h             | @c Client\<ReqT,RespT\>            | Method    | RPC caller side            |
+ * | @c server.h             | @c Server\<ReqT,RespT\>            | Method    | RPC handler side           |
+ * | @c publisher.h          | @c Publisher\<MsgT\>               | Event     | Topic emitter              |
+ * | @c subscriber.h         | @c Subscriber\<MsgT\>              | Event     | Topic listener             |
+ * | @c getter.h             | @c Getter\<ValueT\>                | Field     | Latest-value reader        |
+ * | @c setter.h             | @c Setter\<ValueT\>                | Field     | Latest-value writer        |
+ * | @c base/message_loop.h  | @c MessageLoop                     | Dispatch  | Callback re-routing        |
+ * | @c base/utils.h         | @c sleep_for, env helpers, etc.    | Utilities | General-purpose helpers    |
  *
- * @par Transport Back-end Selection
- * Switch the underlying transport by changing only the transport prefix in the URL.
- * All API calls remain identical:
- *
- * @code
- * Publisher<MyMsg> pub("dds://vehicle/speed");   // DDS transport
- * Publisher<MyMsg> pub("shm://vehicle/speed");   // shared-memory transport
- * Publisher<MyMsg> pub("zenoh://vehicle/speed"); // Zenoh transport
- * @endcode
- *
+ * @par Three Communication Models Side-by-side
  * @verbatim
- *                 .-~~~~~~~~~-._       _.-~~~~~~~~~-.
- *             __.'              ~.   .~              `.__
- *           .'//                  \./                  \\`.
- *         .'//                     |                     \\`.
- *       .'// .-~"""""""~~~~-._     |     _,-~~~~"""""""~-. \\`.
- *     .'//.-"                 `-.  |  .-'                 "-.\\`.
- *   .'//______.============-..   \ | /   ..-============.______\\`.
- * .'______________________________\|/______________________________`.
+ *   +----------------------+   +-----------------------+   +-------------------------+
+ *   |     EVENT MODEL      |   |     METHOD MODEL      |   |       FIELD MODEL       |
+ *   |  (pub/sub stream)    |   |  (request/response)   |   |   (latest-value sync)   |
+ *   +----------------------+   +-----------------------+   +-------------------------+
+ *   |  Publisher<MsgT>     |   |  Client<Req,Resp>     |   |  Setter<ValueT>         |
+ *   |       |              |   |        |              |   |        |                |
+ *   |       v  publish()   |   |        v  invoke()    |   |        v  set()         |
+ *   |    transport         |   |     transport         |   |     transport           |
+ *   |       |              |   |        |              |   |   (retains latest)      |
+ *   |       v              |   |        v              |   |        |                |
+ *   |  Subscriber<MsgT>    |   |  Server<Req,Resp>     |   |        v                |
+ *   |   on each msg        |   |   handler fills resp  |   |  Getter<ValueT>         |
+ *   |                      |   |        |              |   |     get() / listen()    |
+ *   |                      |   |        v reply        |   |                         |
+ *   |                      |   |    Client receives    |   |                         |
+ *   +----------------------+   +-----------------------+   +-------------------------+
  * @endverbatim
  *
- * @par Quick-start Example
+ * @par Transport Selection via URL Prefix
+ * The transport back-end is selected by the URL scheme.  All API calls remain
+ * identical when the prefix is changed; this is the central design tenet of
+ * VLink.
+ *
+ * | Prefix         | Back-end                          | Typical use case                       |
+ * | -------------- | --------------------------------- | -------------------------------------- |
+ * | @c intra://    | In-process pub/sub                | Same-process zero-copy fan-out         |
+ * | @c shm://      | Iceoryx shared memory             | Inter-process zero-copy on one host    |
+ * | @c shm2://     | Native VLink shared memory        | Lightweight inter-process IPC          |
+ * | @c dds://      | FastDDS (CDR)                     | Standards-compliant DDS distribution   |
+ * | @c ddsc://     | CycloneDDS                        | CycloneDDS-based deployments           |
+ * | @c ddsr://     | RTI Connext DDS                   | RTI-licensed deployments               |
+ * | @c ddst://     | OpenDDS                           | OpenDDS-based deployments              |
+ * | @c zenoh://    | Eclipse Zenoh                     | Pub/sub-storage-query, edge to cloud   |
+ * | @c someip://   | SOME/IP                           | Automotive AUTOSAR adaptive services   |
+ * | @c fdbus://    | FDBus                             | Linux/Android service bus              |
+ * | @c qnx://      | QNX native IPC                    | QNX safety-critical platforms          |
+ * | @c mqtt://     | MQTT                              | Telemetry to cloud brokers             |
+ *
+ * @par Quick-start Example -- one process, three models
  * @code
  * #include <vlink/vlink.h>
- * using namespace vlink;
  *
- * // --- Event model ---
- * Subscriber<MyMsg> sub("dds://my_topic");
- * sub.listen([](const MyMsg& msg) { ... });
+ * // ---- Event model ---------------------------------------------------------
+ * vlink::Subscriber<MyMsg> sub("dds://vehicle/speed");
+ * sub.listen([](const MyMsg& msg) { handle_event(msg); });
  *
- * Publisher<MyMsg> pub("dds://my_topic");
- * pub.publish(MyMsg{});
+ * vlink::Publisher<MyMsg> pub("dds://vehicle/speed");
+ * pub.publish(MyMsg{100});
  *
- * // --- Method model (synchronous) ---
- * Server<Req, Resp> server("dds://my_service");
- * server.listen([](const Req& req, Resp& resp) { resp = ...; });
+ * // ---- Method model (synchronous RPC) -------------------------------------
+ * vlink::Server<Req, Resp> svr("dds://compute/sum");
+ * svr.listen([](const Req& q, Resp& r) { r.value = q.a + q.b; });
  *
- * Client<Req, Resp> client("dds://my_service");
- * Resp resp;
- * client.invoke(Req{}, resp);
+ * vlink::Client<Req, Resp> cli("dds://compute/sum");
+ * Resp r;
+ * if (cli.invoke(Req{1, 2}, r)) { use(r); }
  *
- * // --- Field model ---
- * Setter<int> setter("shm://my_field");
- * setter.set(42);
+ * // ---- Field model (latest-value sync) ------------------------------------
+ * vlink::Setter<int> setter("shm://vehicle/gear");
+ * setter.set(3);
  *
- * Getter<int> getter("shm://my_field");
- * auto val = getter.get();  // returns std::optional<int>
+ * vlink::Getter<int> getter("shm://vehicle/gear");
+ * if (auto gear = getter.get()) { use(*gear); }
  * @endcode
  *
- * @note To enable message security, replace the type with the security variant:
- *       @c SecurityPublisher\<T\>, @c SecuritySubscriber\<T\>, @c SecurityClient\<Req,Resp\>,
- *       @c SecurityServer\<Req,Resp\>, @c SecurityGetter\<T\>, @c SecuritySetter\<T\>.
+ * @note Each primitive has a @c Security* counterpart (@c SecurityPublisher,
+ *       @c SecuritySubscriber, @c SecurityClient, @c SecurityServer,
+ *       @c SecuritySetter, @c SecurityGetter) that transparently encrypts and
+ *       decrypts the payload using a @c Security::Config aggregate.
+ *
+ * @see publisher.h, subscriber.h, client.h, server.h, getter.h, setter.h
  */
 
 #pragma once

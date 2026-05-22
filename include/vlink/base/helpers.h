@@ -23,25 +23,34 @@
 
 /**
  * @file helpers.h
- * @brief String, number, hash and formatting utility functions.
+ * @brief Stateless string, number, hash and formatting helpers used throughout VLink.
  *
  * @details
- * The @c Helpers namespace groups portable, stateless helper functions used throughout
- * VLink for common tasks such as string splitting, type conversion, human-readable size
- * formatting, and compile-time string matching.
+ * Functions in this header are portable, allocation-free where possible, and never throw; bad
+ * input is reported via empty / default return values.  Encoding conversion routines fall back
+ * to a pass-through on POSIX where the input is assumed to already be UTF-8.
  *
- * @note
- * - All functions are @c noexcept; errors are indicated by default-constructed return values.
- * - Encoding conversion functions (@c string_local_to_utf8, @c string_utf8_to_local)
- *   use the Windows ANSI code page on Windows and return the input unchanged on POSIX.
+ * @par Helper categories
+ *
+ * | Category          | Representative entry points                                                                  |
+ * | ----------------- | -------------------------------------------------------------------------------------------- |
+ * | Number parsing    | @c to_int, @c to_long, @c double_to_string                                                   |
+ * | Hashing           | @c hash_combine, @c get_hash_code                                                            |
+ * | String editing    | @c replace_string, @c trim_string                                                            |
+ * | Wide / locale     | @c string_to_wstring, @c wstring_to_string, @c string_local_to_utf8, @c string_utf8_to_local |
+ * | Filesystem        | @c path_to_string                                                                            |
+ * | Splitting         | @c get_split_string, @c get_split_string_view, @c get_pair_string, @c get_pair_string_view   |
+ * | Field encoding    | @c escape_field, @c unescape_field                                                           |
+ * | Time formatting   | @c format_milliseconds, @c format_date, @c format_time_diff                                  |
+ * | Number formatting | @c format_hex_number, @c format_file_size, @c format_rate_size                               |
+ * | Date parsing      | @c convert_date_to_timestamp                                                                 |
+ * | Prefix / suffix   | @c has_startwith, @c has_endwith, @c contains_substring                                      |
  *
  * @par Example
  * @code
- * auto parts = vlink::Helpers::get_split_string("a,b,c", ',');
- * // parts == {"a", "b", "c"}
- *
- * std::string s = vlink::Helpers::format_file_size(1536);
- * // s == "1.50KB"
+ *   auto parts = vlink::Helpers::get_split_string("a,b,c", ',');   // {"a", "b", "c"}
+ *   std::string size = vlink::Helpers::format_file_size(1536);     // "1.50KB"
+ *   bool startsWith = vlink::Helpers::has_startwith("vlink://hello", "vlink://");
  * @endcode
  */
 
@@ -60,366 +69,302 @@ namespace vlink {
 
 /**
  * @namespace vlink::Helpers
- * @brief Stateless string, number, hash and formatting helper functions.
+ * @brief Stateless utility functions shared across VLink subsystems.
  */
 namespace Helpers {  // NOLINT(readability-identifier-naming)
 
 /**
- * @brief Converts a decimal string to @c int.
+ * @brief Parses a decimal integer string.
  *
- * @param str  Decimal integer string.
- * @param dv   Default value returned when conversion fails.  Default: 0.
- * @return Parsed integer, or @p dv on failure.
+ * @param str  Source string.
+ * @param dv   Default value returned on parse failure.  Default: @c 0.
+ * @return Parsed @c int or @p dv on failure.
  */
 [[nodiscard]] VLINK_EXPORT int to_int(const std::string& str, int dv = 0) noexcept;
 
 /**
- * @brief Converts a string to @c int64_t, optionally ignoring trailing characters.
+ * @brief Parses a 64-bit integer string with optional trailing-character allowance.
  *
  * @details
- * Parses via @c std::stoll with auto base detection (@c 0x prefix → hex,
- * leading @c 0 → octal, otherwise decimal).  Parsing always starts at index
- * @c 0; @p offset specifies how many @b trailing characters of @p str the
- * parser is allowed to leave unconsumed (e.g., to skip a unit suffix like
- * @c "100s" by passing @p offset @c = @c 1).  If the parser consumes a
- * different number of characters than @c str.size() @c - @p offset, the
- * function returns @p dv.
+ * Calls @c std::stoll with auto base detection (@c 0x -> hex, leading @c 0 -> octal, otherwise
+ * decimal).  Parsing always starts at index @c 0; @p offset is the number of trailing characters
+ * the parser may leave unconsumed (for example to skip a unit suffix such as @c "100s" with
+ * @p offset @c == @c 1).  Mismatched consumption returns @p dv.
  *
- * @param str     Integer string (decimal / @c 0x-hex / leading-@c 0-octal).
- * @param dv      Default value returned when conversion fails.  Default: 0.
- * @param offset  Number of @b trailing characters of @p str to ignore.
- *                Default: 0 (the whole string must be consumed).
- * @return Parsed 64-bit integer, or @p dv on failure.
+ * @param str     Source string.
+ * @param dv      Default value on failure.  Default: @c 0.
+ * @param offset  Number of trailing characters allowed to remain unconsumed.  Default: @c 0.
+ * @return Parsed @c int64_t or @p dv on failure.
  */
 [[nodiscard]] VLINK_EXPORT int64_t to_long(const std::string& str, int64_t dv = 0, int offset = 0) noexcept;
 
 /**
- * @brief Converts a @c double to a string with a specified number of decimal places.
+ * @brief Formats a @c double with the requested decimal precision.
  *
- * @param value      Value to convert.
- * @param precision  Number of decimal places.  Default: 2.
- * @return Formatted string representation.
+ * @param value      Source value.
+ * @param precision  Number of digits after the decimal point.  Default: @c 2.
+ * @return Decimal string representation.
  */
 [[nodiscard]] VLINK_EXPORT std::string double_to_string(double value, int precision = 2) noexcept;
 
 /**
- * @brief Combines two 64-bit hash values into one using a mixing function.
- *
- * @details
- * Based on a Murmur-inspired mix to spread entropy across both inputs.
- * Suitable for building composite hash keys.
+ * @brief Combines two 64-bit hash values into one via a Murmur-style mix.
  *
  * @param a  First hash value.
  * @param b  Second hash value.
- * @return Combined hash value.
+ * @return Mixed hash value.
  */
 [[nodiscard]] VLINK_EXPORT uint64_t hash_combine(uint64_t a, uint64_t b) noexcept;
 
 /**
- * @brief Replaces all occurrences of @p from in @p str with @p to in-place.
+ * @brief Replaces all occurrences of @p from in @p str with @p to in place.
  *
- * @param str   String to modify.
+ * @param str   String mutated in place.
  * @param from  Substring to search for.
  * @param to    Replacement substring.
  */
 VLINK_EXPORT void replace_string(std::string& str, const std::string& from, const std::string& to) noexcept;
 
 /**
- * @brief Strips leading and trailing whitespace from a string.
+ * @brief Returns @p str with leading and trailing whitespace removed.
  *
- * @param str  Input string.
+ * @param str  Source string.
  * @return Trimmed copy.
  */
 [[nodiscard]] VLINK_EXPORT std::string trim_string(const std::string& str) noexcept;
 
 /**
- * @brief Converts a UTF-8 @c std::string to a @c std::wstring.
+ * @brief Converts UTF-8 to a wide-character string.
  *
- * @param input  UTF-8 encoded string.
- * @return Wide-character string, or empty on failure.
+ * @param input  UTF-8 source.
+ * @return Wide-character result; empty on failure.
  */
 [[nodiscard]] VLINK_EXPORT std::wstring string_to_wstring(const std::string& input) noexcept;
 
 /**
- * @brief Converts a @c std::wstring to a UTF-8 @c std::string.
+ * @brief Converts a wide-character string to UTF-8.
  *
- * @param input  Wide-character string.
- * @return UTF-8 encoded string, or empty on failure.
+ * @param input  Wide source.
+ * @return UTF-8 result; empty on failure.
  */
 [[nodiscard]] VLINK_EXPORT std::string wstring_to_string(const std::wstring& input) noexcept;
 
 /**
- * @brief Converts a locally-encoded string to UTF-8.
+ * @brief Converts a system-locale string to UTF-8.
  *
  * @details
- * On Windows, reads the active ANSI code page and converts via Win32 APIs.
- * On POSIX, returns the input unchanged.
+ * Performs Windows ANSI-code-page conversion; returns the input unchanged on POSIX.
  *
- * @param local_str  Locally-encoded (system locale) string.
- * @return UTF-8 encoded string, or the original string if conversion is not needed.
+ * @param local_str  Locally encoded string.
+ * @return UTF-8 string, or the input when no conversion is needed.
  */
 [[nodiscard]] VLINK_EXPORT std::string string_local_to_utf8(const std::string& local_str) noexcept;
 
 /**
- * @brief Converts a UTF-8 string to the locally-encoded system string on Windows.
+ * @brief Converts UTF-8 to the active system locale on Windows; pass-through on POSIX.
  *
- * @details
- * On Windows, converts via Win32 APIs to the active ANSI code page.  On POSIX,
- * returns the input unchanged.
- *
- * @param utf8_str  UTF-8 encoded string.
- * @return Locally-encoded (system locale) string.
+ * @param utf8_str  UTF-8 source.
+ * @return Locally encoded string.
  */
 [[nodiscard]] VLINK_EXPORT std::string string_utf8_to_local(const std::string& utf8_str) noexcept;
 
 /**
- * @brief Converts a @c std::filesystem::path to a UTF-8 @c std::string portably.
+ * @brief Converts a filesystem path to a portable UTF-8 string.
  *
- * @details
- * On Windows, @c path::string() returns the ANSI path.  This function always
- * returns a UTF-8 string regardless of platform.
- *
- * @param path  File-system path.
+ * @param path  Source path.
  * @return UTF-8 path string.
  */
 [[nodiscard]] VLINK_EXPORT std::string path_to_string(const std::filesystem::path& path) noexcept;
 
 /**
- * @brief Splits a string by a delimiter character and returns the parts as a vector.
+ * @brief Splits a string by a single-character delimiter; empty parts are skipped.
  *
- * @param str  Input string.
+ * @param str  Source string.
  * @param f    Delimiter character.
- * @return Vector of non-empty substrings; empty fields from consecutive delimiters are skipped.
+ * @return Vector of non-empty substrings.
  */
 [[nodiscard]] VLINK_EXPORT std::vector<std::string> get_split_string(const std::string& str, char f) noexcept;
 
 /**
- * @brief Splits a @c string_view by a delimiter character returning non-owning views.
+ * @brief Splits a @c string_view by a delimiter and returns non-owning views.
  *
  * @details
- * Each element is a @c string_view into the original @p str.  The caller must ensure
- * @p str outlives all returned views.
+ * The caller must keep @p str alive while the returned views are used.
  *
- * @param str  Input string view.
+ * @param str  Source view.
  * @param f    Delimiter character.
- * @return Vector of non-empty @c string_view elements over the substrings.
+ * @return Vector of non-empty views over the parts.
  */
 [[nodiscard]] VLINK_EXPORT std::vector<std::string_view> get_split_string_view(std::string_view str, char f) noexcept;
 
 /**
- * @brief Splits a string at the first occurrence of a delimiter and returns a pair.
+ * @brief Splits a string at the first delimiter occurrence and returns the trimmed halves.
  *
  * @details
- * Both halves are trimmed via @c trim_string.
- * Returns @c {"", ""} if @p str is empty.
- * If the delimiter is not found, returns @c {trim(str), ""}.
+ * Empty input returns @c {"", @c ""}.  When the delimiter is not present the result is
+ * @c {trim(str), @c ""}.
  *
- * @param str  Input string.
+ * @param str  Source string.
  * @param f    Delimiter character.
- * @return Pair of the left and right substrings around the first delimiter.
+ * @return Pair of trimmed halves.
  */
 [[nodiscard]] VLINK_EXPORT std::pair<std::string, std::string> get_pair_string(const std::string& str, char f) noexcept;
 
 /**
- * @brief Splits a @c string_view at the first occurrence of a delimiter returning non-owning views.
+ * @brief Splits a @c string_view at the first delimiter occurrence into two non-owning views.
  *
- * @details
- * Each element is a @c string_view into the original @p str.  The caller must ensure
- * @p str outlives all returned views.
- * Returns @c {"", ""} if @p str is empty.
- * If the delimiter is not found, the entire string is returned as @c first with an empty @c second.
- *
- * @param str  Input string view.
+ * @param str  Source view.
  * @param f    Delimiter character.
- * @return Pair of @c string_view over the left and right substrings around the first delimiter.
+ * @return Pair of views around the first delimiter.
  */
 [[nodiscard]] VLINK_EXPORT std::pair<std::string_view, std::string_view> get_pair_string_view(std::string_view str,
                                                                                               char f) noexcept;
 
 /**
- * @brief Escapes one text-protocol field with percent encoding.
+ * @brief Percent-encodes one field of a delimiter-separated text frame.
  *
  * @details
- * Used by discovery-style colon/space delimited text frames.  The function
- * escapes @c %, space, @c :, LF and CR as uppercase @c %XX sequences while
- * leaving other bytes unchanged.
+ * Encodes @c %, space, @c :, LF and CR as uppercase @c %XX sequences; other bytes pass through.
  *
- * @param value  Field value to encode.
- * @return Encoded field value safe for delimiter-based text frames.
+ * @param value  Field to encode.
+ * @return Encoded field.
  */
 [[nodiscard]] VLINK_EXPORT std::string escape_field(std::string_view value) noexcept;
 
 /**
- * @brief Decodes fields produced by @c escape_field().
+ * @brief Reverses @c escape_field encoding.
  *
  * @details
- * Valid @c %XX sequences are decoded byte-for-byte.  Invalid or incomplete
- * percent sequences are preserved literally so older or malformed text frames
- * can still be parsed conservatively.
+ * Decodes valid @c %XX sequences; preserves invalid or truncated sequences verbatim so legacy
+ * frames remain parseable.
  *
- * @param value  Encoded field value.
- * @return Decoded field value.
+ * @param value  Encoded field.
+ * @return Decoded field.
  */
 [[nodiscard]] VLINK_EXPORT std::string unescape_field(std::string_view value) noexcept;
 
 /**
- * @brief Computes a 32-bit FNV-1a-style hash code for a string.
+ * @brief FNV-1a-style 32-bit hash of a string.
  *
- * @param str  Input string.
- * @return 32-bit hash value.
+ * @param str  Source string.
+ * @return Hash value.
  */
 [[nodiscard]] VLINK_EXPORT uint32_t get_hash_code(const std::string& str) noexcept;
 
 /**
- * @brief Formats a duration in milliseconds as a human-readable time string.
+ * @brief Renders a millisecond duration as a human-readable time string.
  *
- * @details
- * Example: 125000 ms -> @c "00:02:05" or @c "00:02:05:000" when @p show_millis is @c true.
- *
- * @param milliseconds  Duration in milliseconds.
- * @param show_millis   If @c true, append the sub-second milliseconds component.
- * @return Human-readable time string.
+ * @param milliseconds  Source duration.
+ * @param show_millis   When @c true the millisecond field is appended.
+ * @return Formatted duration string.
  */
 [[nodiscard]] VLINK_EXPORT std::string format_milliseconds(int64_t milliseconds, bool show_millis) noexcept;
 
 /**
- * @brief Formats a nanosecond-precision epoch timestamp as a UTC date-time string.
+ * @brief Renders a nanosecond Unix timestamp as @c "YYYY-MM-DD @c HH:MM:SS.mmm" in UTC.
  *
- * @details
- * Output format: @c "YYYY-MM-DD HH:MM:SS.mmm".
- *
- * @param nanoseconds_since_epoch  Unix timestamp in nanoseconds.
- * @return Formatted date-time string.
+ * @param nanoseconds_since_epoch  Source timestamp.
+ * @return Formatted date string.
  */
 [[nodiscard]] VLINK_EXPORT std::string format_date(int64_t nanoseconds_since_epoch) noexcept;
 
 /**
- * @brief Formats a time difference in milliseconds as a human-readable string.
+ * @brief Renders a millisecond time delta as @c "HH:MM:SS:mmm".
  *
- * @details
- * Produces strings such as @c "01:23:45:000" or @c "00:00:00:250".
- *
- * @param milliseconds  Time difference in milliseconds.
- * @return Human-readable time-diff string.
+ * @param milliseconds  Source delta.
+ * @return Formatted delta string.
  */
 [[nodiscard]] VLINK_EXPORT std::string format_time_diff(int32_t milliseconds) noexcept;
 
 /**
- * @brief Formats a signed 64-bit integer as a @c "0x..." hexadecimal string.
+ * @brief Renders a signed 64-bit integer as a @c "0x..." hex literal.
  *
- * @param hex_number  Value to format.
- * @return Hexadecimal string prefixed with @c "0x".
+ * @param hex_number  Source value.
+ * @return Hex literal string.
  */
 [[nodiscard]] VLINK_EXPORT std::string format_hex_number(int64_t hex_number) noexcept;
 
 /**
- * @brief Formats an unsigned 64-bit integer as a @c "0x..." hexadecimal string.
+ * @brief Renders an unsigned 64-bit integer as a @c "0x..." hex literal.
  *
- * @param hex_number  Value to format.
- * @return Hexadecimal string prefixed with @c "0x".
+ * @param hex_number  Source value.
+ * @return Hex literal string.
  */
 [[nodiscard]] VLINK_EXPORT std::string format_hex_number(uint64_t hex_number) noexcept;
 
 /**
- * @brief Formats a byte count as a human-readable size string.
+ * @brief Renders a byte count as a KB / MB / GB string with two decimal places.
  *
- * @details
- * Selects the appropriate unit and formats to 2 decimal places.  Three units
- * are emitted: @c KB (always for sizes below 1 MiB, including small
- * sub-KiB byte counts which are rendered as fractional KB), @c MB
- * sizes below 1 GiB), @c GB (everything else, no @c TB step).
- * Examples: @c 1536 → @c "1.50KB", @c 100 → @c "0.10KB", @c 5 @c GiB →
- * @c "5.00GB".
- *
- * @param size  Size in bytes.
- * @return Human-readable size string (KB / MB / GB only).
+ * @param size  Source value in bytes.
+ * @return Human-readable size string.
  */
 [[nodiscard]] VLINK_EXPORT std::string format_file_size(size_t size) noexcept;
 
 /**
- * @brief Formats a byte-per-second rate as a human-readable string.
+ * @brief Renders a byte-per-second rate as a B/s, KB/s, MB/s or GB/s string.
  *
- * @details
- * Selects the appropriate unit (B/s, KB/s, MB/s, GB/s) and formats to 2 decimal places.
- * Example: @c 1048576 -> @c "1.00MB/s".
- *
- * @param size  Rate in bytes per second.
+ * @param size  Source rate in bytes per second.
  * @return Human-readable rate string.
  */
 [[nodiscard]] VLINK_EXPORT std::string format_rate_size(size_t size) noexcept;
 
 /**
- * @brief Converts a date string to a Unix nanosecond timestamp.
+ * @brief Parses a @c "%Y/%m/%d @c %H:%M:%S" (optionally @c ":<ms>") date into a Unix nanosecond timestamp.
  *
  * @details
- * Parses with the format @c "%Y/%m/%d %H:%M:%S" (slash-separated date,
- * colon-separated time) plus an optional @c ":<ms>" trailing field for
- * milliseconds, e.g. @c "2026/03/18 12:00:00" or
- * @c "2026/03/18 12:00:00:250".  ISO-8601 dashes (@c "2026-03-18") are
- * **not** accepted and will return @c -1.
+ * Interpreted in the local timezone via @c std::mktime.  ISO-8601 dashes are not accepted.
  *
- * The string is interpreted in the **local timezone** of the calling
- * process (it is fed through @c std::mktime), so the same input yields
- * different timestamps depending on @c $TZ / system locale.
- *
- * @param date  Date string to parse.
- * @return Unix timestamp in **nanoseconds** (ns since 1970-01-01 00:00:00
- *         UTC), or @c -1 on parse failure.
+ * @param date  Source date string.
+ * @return Nanoseconds since Unix epoch, or @c -1 on parse failure.
  */
 [[nodiscard]] VLINK_EXPORT int64_t convert_date_to_timestamp(const std::string& date) noexcept;
 
 /**
- * @brief Compile-time check whether @p str starts with the literal @p target.
+ * @brief Compile-time prefix check against a string literal.
  *
- * @tparam SizeT  Size of the string literal @p target (deduced; includes null terminator).
+ * @tparam SizeT  Size of @p target including the null terminator (deduced).
  * @param str     String to test.
- * @param target  String literal prefix to check for.
- * @return @c true if @p str begins with @p target.
+ * @param target  Literal prefix.
+ * @return @c true when @p str starts with @p target.
  */
 template <uint8_t SizeT>
 [[nodiscard]] bool has_startwith(const std::string& str, const char (&target)[SizeT]) noexcept;
 
 /**
- * @brief Compile-time check whether @p str ends with the literal @p target.
+ * @brief Compile-time suffix check against a string literal.
  *
- * @tparam SizeT  Size of the string literal @p target (deduced; includes null terminator).
+ * @tparam SizeT  Size of @p target including the null terminator (deduced).
  * @param str     String to test.
- * @param target  String literal suffix to check for.
- * @return @c true if @p str ends with @p target.
+ * @param target  Literal suffix.
+ * @return @c true when @p str ends with @p target.
  */
 template <uint8_t SizeT>
 [[nodiscard]] bool has_endwith(const std::string& str, const char (&target)[SizeT]) noexcept;
 
 /**
- * @brief Checks whether a @c string_view starts with a given prefix (constexpr-friendly).
- *
- * @details
- * Falls back to @c std::string_view::starts_with on C++20; otherwise uses manual comparison.
+ * @brief Constexpr prefix check for two @c string_view values.
  *
  * @param str     String to test.
  * @param target  Prefix to check for.
- * @return @c true if @p str starts with @p target.
+ * @return @c true when @p str starts with @p target.
  */
 [[nodiscard]] constexpr bool has_startwith(std::string_view str, std::string_view target) noexcept;
 
 /**
- * @brief Checks whether a @c string_view ends with a given suffix (constexpr-friendly).
- *
- * @details
- * Falls back to @c std::string_view::ends_with on C++20; otherwise uses manual comparison.
+ * @brief Constexpr suffix check for two @c string_view values.
  *
  * @param str     String to test.
  * @param target  Suffix to check for.
- * @return @c true if @p str ends with @p target.
+ * @return @c true when @p str ends with @p target.
  */
 [[nodiscard]] constexpr bool has_endwith(std::string_view str, std::string_view target) noexcept;
 
 /**
- * @brief Checks whether a @c string_view contains a given substring.
+ * @brief Constexpr substring search.
  *
  * @param sv      String to search.
- * @param needle  Substring to find.
- * @return @c true if @p sv contains @p needle.  Returns @c true if @p needle is empty.
+ * @param needle  Substring to look for; an empty needle returns @c true.
+ * @return @c true when @p sv contains @p needle.
  */
 [[nodiscard]] constexpr bool contains_substring(std::string_view sv, std::string_view needle) noexcept;
 

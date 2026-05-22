@@ -23,53 +23,50 @@
 
 /**
  * @file memory_resource.h
- * @brief @c std::pmr::memory_resource adapter over @c vlink::MemoryPool.
+ * @brief PMR adapter that lets standard pmr-aware containers allocate through @c vlink::MemoryPool.
  *
  * @details
- * @c vlink::MemoryResource lets any pmr-aware container or allocator route its
- * raw byte allocations through a @c vlink::MemoryPool.  The adapter is a thin
- * forwarding shim -- every @c allocate / @c deallocate hops through one virtual
- * call to the underlying pool.
+ * @c vlink::MemoryResource derives from @c std::pmr::memory_resource and forwards each request
+ * onto an owned (or shared) @c vlink::MemoryPool.  This bridges the standard polymorphic
+ * allocator machinery with VLink's tiered pool.
  *
- * Lifetime model:
- * - The @c Config, the @c int @p level, and the no-arg constructors each
- *   heap-allocate a private @c MemoryPool that the resource owns and destroys
- *   alongside itself.  The no-arg constructor builds a bypass pool (no tiers,
- *   every alloc goes through @c ::operator @c new).
- * - @c MemoryResource::global_instance() exposes a process-wide
- *   @c MemoryResource that wraps @c MemoryPool::global_instance() -- the
- *   static singleton is shared, never deleted by this resource.
+ * @par PMR vs VLink resources
+ *
+ * | Aspect                | @c std::pmr::new_delete_resource      | @c vlink::MemoryResource                    |
+ * | --------------------- | ------------------------------------- | ------------------------------------------- |
+ * | Backing allocator     | global @c operator @c new / @c delete | @c vlink::MemoryPool (per-tier free lists)  |
+ * | Allocation footprint  | unpredictable per-call                | bounded per-tier; pooled                    |
+ * | Concurrent allocs     | global allocator scaling              | per-tier locking, low contention            |
+ * | Bypass mode           | not applicable                        | empty tier list yields pass-through         |
+ * | Maintenance           | not applicable                        | @c trim releases idle chunks                |
+ *
+ * @par Lifetime
+ *  - @c MemoryResource(), @c MemoryResource(int) and @c MemoryResource(const @c Config&) each
+ *    heap-allocate a private @c MemoryPool and own it for the lifetime of the resource.
+ *  - @c MemoryResource::global_instance returns a process-wide singleton that wraps
+ *    @c MemoryPool::global_instance; the resource is not deleted by the destructor.
  *
  * @par Example
  * @code
- * // 1. Drop-in process-wide handle (shares the global Bytes pool).
- * std::pmr::vector<int> v(&vlink::MemoryResource::global_instance());
- * v.reserve(1024);                                       // -> MemoryPool
+ *   // Shared process-wide resource.
+ *   std::pmr::vector<int> v(&vlink::MemoryResource::global_instance());
+ *   v.reserve(1024);
  *
- * // 2. Private resource using the built-in level-3 (balanced) pyramid.
- * vlink::MemoryResource res(3);
- * std::pmr::polymorphic_allocator<char> alloc(&res);
- * std::pmr::string s(alloc);
+ *   // Private level-3 pyramid:
+ *   vlink::MemoryResource res(3);
+ *   std::pmr::polymorphic_allocator<char> alloc(&res);
+ *   std::pmr::string s(alloc);
  *
- * // 3. Private resource with custom tier configuration.
- * vlink::MemoryPool::Config cfg;
- * cfg.tiers = {{64, 16}, {1024, 4}};
- * cfg.prealloc = true;                                   // full-quota prealloc
- * vlink::MemoryResource custom(cfg);
- * std::pmr::vector<double> w(&custom);
- *
- * // 4. Private resource in bypass mode (no pool, raw new/delete).
- * vlink::MemoryResource bypass;                          // no-arg ctor = bypass
- * std::pmr::vector<int> direct(&bypass);
+ *   // Private resource with a custom tier list and full-quota preallocation.
+ *   vlink::MemoryPool::Config cfg;
+ *   cfg.tiers    = {{64, 16}, {1024, 4}};
+ *   cfg.prealloc = true;
+ *   vlink::MemoryResource custom(cfg);
+ *   std::pmr::vector<double> w(&custom);
  * @endcode
  *
- * @note
- * - @c do_allocate throws @c std::bad_alloc when the underlying pool returns
- *   @c nullptr (pmr contract).  The underlying @c MemoryPool itself is noexcept.
- * - @c do_is_equal returns @c true iff @p other is also a @c MemoryResource
- *   bound to the same @c MemoryPool object.
- * - @c MemoryResource is non-copyable and non-movable, matching
- *   @c std::pmr::memory_resource's contract.
+ * @note @c do_allocate throws @c std::bad_alloc when the underlying pool returns @c nullptr,
+ *       satisfying the pmr contract.  Equality is identity over the bound @c MemoryPool object.
  */
 
 #pragma once
@@ -94,17 +91,20 @@ namespace vlink {
 
 /**
  * @class MemoryResource
- * @brief @c std::pmr::memory_resource adapter that delegates to a
- *        @c vlink::MemoryPool.
+ * @brief Adapter satisfying @c std::pmr::memory_resource that delegates to a @c vlink::MemoryPool.
+ *
+ * @details
+ * Non-copyable, non-movable -- matching the standard interface.  The bound pool may be either
+ * owned by the resource or shared with @c MemoryPool::global_instance, depending on the
+ * constructor that produced the instance.
  */
 class VLINK_EXPORT MemoryResource : public std::pmr::memory_resource {
  public:
   /**
-   * @brief Deleter that returns the object to its pmr allocator.
+   * @brief Deleter type used by @c make_unique to return objects back through the pmr allocator.
    *
    * @details
-   * Used by @c MemoryResource::make_unique().  Carries one
-   * @c polymorphic_allocator copy, so @c sizeof(Deleter<T>) == sizeof(void*).
+   * Carries one @c polymorphic_allocator copy so @c sizeof(Deleter<T>) equals @c sizeof(void*).
    */
   template <typename T>
   struct Deleter final {
@@ -118,116 +118,91 @@ class VLINK_EXPORT MemoryResource : public std::pmr::memory_resource {
   };
 
   /**
-   * @brief Constructs a bypass-mode resource owning a private bypass pool.
+   * @brief Constructs a resource that owns a private bypass-mode pool.
    *
    * @details
-   * Equivalent to @c MemoryResource(MemoryPool::Config{}) -- the owned pool
-   * has no tiers, so every allocation is forwarded to @c ::operator @c new.
+   * Equivalent to @c MemoryResource(MemoryPool::Config{}); every allocation goes through
+   * @c ::operator @c new.
    */
   MemoryResource();
 
   /**
-   * @brief Owns a private @c MemoryPool using the built-in pyramid for
-   *        @p level.
+   * @brief Constructs a resource owning a private pool built from the built-in pyramid @p level.
    *
    * @details
-   * Forwards to @c MemoryPool(int, bool); see that constructor for
-   * clamping and preallocation semantics.  In bypass mode (level @c 0)
-   * @p prealloc is ignored.
+   * Forwards to @c MemoryPool(int, @c bool).  In bypass mode @p prealloc is ignored.
    *
-   * @param level     Built-in level in @c [0, 9].  Out-of-range values are
-   *                  clamped.  Level @c 0 yields bypass mode (no pool).
-   * @param prealloc  When @c true, eagerly fills every tier to its full
-   *                  @c blocks_per_chunk quota with one upstream allocation
-   *                  per tier (best-effort).  Defaults to @c false.
+   * @param level     Built-in pyramid level in @c [0, @c 9].
+   * @param prealloc  When @c true, fills every tier to its quota on construction.  Default: @c false.
    */
   explicit MemoryResource(int level, bool prealloc = false);
 
   /**
-   * @brief Owns a private @c MemoryPool built from the given config.
+   * @brief Constructs a resource owning a private pool built from @p config.
    *
-   * @details
-   * Empty @c config.tiers = bypass mode (every allocation goes straight to
-   * @c ::operator @c new / @c delete).  Same validation and fallback rules
-   * as the @c MemoryPool constructor apply, including @c config.prealloc.
-   *
-   * @param config  Tier configuration forwarded to the @c MemoryPool ctor.
+   * @param config  Tier configuration forwarded to the @c MemoryPool constructor.
    */
   explicit MemoryResource(const MemoryPool::Config& config);
 
   /**
-   * @brief Destroys the resource and, if it owns one, the @c MemoryPool it
-   *        was constructed with.
+   * @brief Destructor; releases the owned pool when the resource owns one.
    *
    * @details
-   * The @c global_instance() resource does NOT own its pool; only resources
-   * built via the public constructors do, and their owned pool is destroyed
-   * here.  The caller must guarantee that no live block obtained from this
-   * resource is still outstanding and no other thread is calling
-   * @c allocate / @c deallocate on this resource at destruction time.
+   * The destructor does not delete the pool of @c global_instance.  The caller must guarantee
+   * no live block obtained from this resource is still outstanding at destruction.
    */
   ~MemoryResource() override;
 
   /**
-   * @brief Returns the underlying @c MemoryPool the adapter forwards to.
+   * @brief Returns the underlying @c MemoryPool used by this resource.
    *
-   * @details
-   * For @c global_instance() this returns the same reference as
-   * @c MemoryPool::global_instance().  For other constructors it returns
-   * the private pool owned by this resource.
+   * @return Reference to the bound pool (private or shared depending on the constructor).
    */
   [[nodiscard]] MemoryPool& get_memory_pool() noexcept;
 
   /**
-   * @brief Forwards to @c MemoryPool::trim() on the underlying pool.
+   * @brief Trims idle chunks from the underlying pool.
    *
    * @details
-   * Releases only fully-free chunks; chunks still backing a live allocation
-   * are preserved.  Safe to call concurrently with @c allocate /
-   * @c deallocate on this resource.  See @c MemoryPool::trim() for the full
-   * complexity and concurrency contract.
+   * Forwards to @c MemoryPool::trim on the bound pool.
    */
   void trim() noexcept;
 
   /**
-   * @brief Returns a process-wide @c MemoryResource that wraps
-   *        @c MemoryPool::global_instance().
+   * @brief Returns the process-wide @c MemoryResource that wraps @c MemoryPool::global_instance.
    *
    * @details
-   * Lazily constructs the singleton on first call.  The resource does NOT
-   * own the underlying pool; deletion is a no-op.  The first call's
-   * @p use_env_level value is forwarded to @c MemoryPool::global_instance()
-   * and decides the underlying pool's configuration; subsequent calls
-   * return the same resource and ignore the argument.
+   * Lazy singleton.  The first call's @p use_env_level value is forwarded to
+   * @c MemoryPool::global_instance and decides the underlying pool's configuration; later calls
+   * ignore the argument and return the same resource.
    *
-   * @code
-   * std::pmr::vector<T> v(&vlink::MemoryResource::global_instance());
-   * @endcode
-   *
-   * @param use_env_level  Forwarded to @c MemoryPool::global_instance().
-   *                       Default @c true honours @c VLINK_MEMORY_LEVEL and
-   *                       @c VLINK_MEMORY_PREALLOC.
-   * @return Reference to the global resource, valid for the program's lifetime.
+   * @param use_env_level  Forwarded to @c MemoryPool::global_instance.  Default: @c true.
+   * @return Reference to the shared resource.
    */
   static MemoryResource& global_instance(bool use_env_level = true);
 
   /**
-   * @brief @c std::allocate_shared backed by @c global_instance().
+   * @brief @c std::allocate_shared backed by @c global_instance.
    *
-   * @details
-   * Object and control block share one allocation from the global
-   * @c MemoryPool.
+   * @tparam T     Object type.
+   * @tparam Args  Constructor argument types.
+   * @param args   Constructor arguments forwarded into the new object.
+   * @return Shared pointer whose control block and object share one pool allocation.
    */
   template <typename T, typename... Args>
   [[maybe_unused]] static std::shared_ptr<T> make_shared(Args&&... args);
 
   /**
-   * @brief @c make_unique backed by @c global_instance().
+   * @brief Pool-backed analogue of @c std::make_unique.
    *
    * @details
-   * Returns @c std::unique_ptr<T, Deleter<T>> -- not convertible to plain
-   * @c std::unique_ptr<T>.  Storage is returned to the pool if @c T's
+   * Returns @c std::unique_ptr<T, @c Deleter<T>>.  Storage is returned to the pool when @c T 's
    * constructor throws.
+   *
+   * @tparam T     Object type.
+   * @tparam Args  Constructor argument types.
+   * @param args   Constructor arguments forwarded into the new object.
+   * @return Owning pointer that returns memory to the pool on destruction.
    */
   template <typename T, typename... Args>
   [[maybe_unused]] static std::unique_ptr<T, MemoryResource::Deleter<T>> make_unique(Args&&... args);
@@ -283,13 +258,12 @@ namespace vlink {
 
 /**
  * @namespace vlink::MemoryResource
- * @brief Fallback shim when the standard memory_resource header is unavailable.
+ * @brief Fallback shim when @c <memory_resource> is unavailable.
  *
  * @details
- * Only @c make_shared / @c make_unique are emulated, forwarding to the
- * standard @c std versions.  The @c MemoryResource class, @c Deleter, and
- * @c global_instance() are not available in this mode.  @c make_unique
- * here returns @c std::unique_ptr<T>, not @c unique_ptr<T, Deleter<T>>.
+ * Only @c make_shared and @c make_unique are emulated by forwarding to the corresponding
+ * @c std versions.  The @c MemoryResource class, the @c Deleter alias and
+ * @c global_instance are not provided in this mode.
  */
 namespace MemoryResource {  // NOLINT(readability-identifier-naming)
 

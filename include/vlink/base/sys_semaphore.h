@@ -23,44 +23,48 @@
 
 /**
  * @file sys_semaphore.h
- * @brief Named, cross-process counting semaphore backed by the OS IPC layer.
+ * @brief Cross-process named semaphore backed by the host kernel.
  *
  * @details
- * @c SysSemaphore wraps a named POSIX semaphore on Linux-like POSIX targets,
- * a named Win32 semaphore on Windows, or an in-process dispatch semaphore on
- * macOS.  Cross-process synchronisation via a shared OS name is available on
- * the named backends, not on the macOS dispatch backend.
+ * @c vlink::SysSemaphore wraps the platform IPC primitive that is closest to a counting
+ * semaphore: a POSIX named semaphore on Linux-like targets, a named Win32 semaphore on
+ * Windows, and a dispatch semaphore on macOS.  Cross-process synchronisation works on
+ * every backend that exposes a kernel name; the macOS dispatch backend is process-local
+ * because Apple deprecated the named POSIX API.
+ *
+ * Comparison with the in-process @c vlink::Semaphore:
+ *
+ * | Aspect                 | @c Semaphore (in-process)   | @c SysSemaphore (kernel)                    |
+ * | ---------------------- | --------------------------- | ------------------------------------------- |
+ * | Scope                  | Single process              | Cross-process via OS name                   |
+ * | Backing primitive      | @c std::condition_variable  | @c sem_open / @c CreateSemaphore            |
+ * | Naming                 | None (object handle only)   | UTF-8 name (POSIX requires @c "/x")         |
+ * | Signal-safe @c release | No                          | Yes on POSIX                                |
+ * | Persistence            | Bound to process lifetime   | Persists in kernel namespace until unlinked |
  *
  * Lifecycle:
- * -# Construct the @c SysSemaphore object.
- * -# Call @c attach(name) to create or open a named semaphore.
- * -# Use @c acquire() / @c release() for P/V operations.
- * -# Call @c detach(force) to close the handle.  If @c force is @c true the
- *    semaphore is also removed from the OS namespace.
- * -# The destructor calls @c detach(false) automatically.
+ * -# Construct with the initial count for the @b creator process.
+ * -# Call @c attach(name) to create the kernel object or open an existing one.
+ * -# Use @c acquire and @c release for P/V.
+ * -# Call @c detach(force) explicitly, or rely on the destructor (force=@c false).
  *
  * @note
- * - The initial count passed to the constructor is only used when the
- *   semaphore is @b created by @c attach().  If the semaphore already exists
- *   in the OS namespace the constructor count is ignored and the existing
- *   value is used.  On macOS, @c attach() creates an unnamed in-process
- *   dispatch semaphore and ignores the name.
- * - @c attach() reports creation/open failures by returning @c false.
- * - Semaphore names on Linux-like POSIX backends must start with '/'
- *   (e.g., @c "/vlink_ready").  On Windows any non-empty string is accepted.
+ * - The initial count is honoured only on first creation.  Subsequent @c attach() calls
+ *   on a pre-existing kernel object inherit its current value.
+ * - macOS ignores @p name and produces an in-process dispatch semaphore.
  *
  * @par Example
  * @code
- * // Process A (server) creates the semaphore:
+ * // Process A (server)
  * vlink::SysSemaphore sem(0);
  * sem.attach("/vlink_ready");
  * do_init();
- * sem.release();  // signal Process B
+ * sem.release();
  *
- * // Process B (client) opens the same semaphore:
+ * // Process B (client)
  * vlink::SysSemaphore sem;
  * sem.attach("/vlink_ready");
- * sem.acquire();  // blocks until Process A releases
+ * sem.acquire();
  * @endcode
  */
 
@@ -75,111 +79,88 @@ namespace vlink {
 
 /**
  * @class SysSemaphore
- * @brief Named cross-process counting semaphore.
+ * @brief Counting semaphore that can be shared across processes through an OS name.
  *
  * @details
- * Backed by the OS named-semaphore API (POSIX @c sem_open or Win32
- * @c CreateSemaphore) where available.  The macOS backend uses an in-process
- * dispatch semaphore.
+ * Resolves to a POSIX named semaphore, a Win32 named semaphore or a macOS dispatch
+ * semaphore depending on the host platform.
  */
 class VLINK_EXPORT SysSemaphore final {
  public:
   /**
-   * @brief Sentinel value for @c acquire() meaning "wait indefinitely".
+   * @brief Sentinel value for @c acquire() meaning wait indefinitely.
    */
   static constexpr int kInfinite{-1};
 
   /**
-   * @brief Constructs a @c SysSemaphore with the given initial count.
+   * @brief Constructs the wrapper with the initial count used when @c attach() creates the kernel object.
    *
-   * @details
-   * The semaphore is not yet attached to any OS name.  Call @c attach()
-   * before using @c acquire() or @c release().
-   *
-   * @param count  Initial count used when a new named semaphore is created
-   *               by @c attach() (default: 0).
+   * @param count  Initial permit count for first creation.  Default: @c 0.
    */
   explicit SysSemaphore(size_t count = 0);
 
   /**
-   * @brief Destructor.  Calls @c detach(false) if the semaphore is still attached.
+   * @brief Destructor.  Invokes @c detach(false) when the wrapper is still attached.
    */
   ~SysSemaphore();
 
   /**
-   * @brief Creates or opens a named semaphore with the given name.
+   * @brief Creates or opens the kernel object identified by @p name.
    *
    * @details
-   * If a semaphore with @p name already exists in the OS namespace, it is
-   * opened and the constructor-provided initial count is ignored.  If it does
-   * not exist it is created with that count.  On macOS the name is ignored and
-   * a new in-process dispatch semaphore is created.
+   * When the kernel object already exists the constructor-supplied initial count is
+   * ignored.  POSIX backends require @p name to begin with @c '/'.  macOS ignores @p name
+   * and produces a fresh in-process dispatch semaphore.
    *
-   * @param name  OS semaphore name (Linux-like POSIX: must start with '/';
-   *              ignored on macOS).
-   * @return @c true on success, @c false if the semaphore could not be created
-   *         or opened.
+   * @param name  Platform-specific semaphore name.
+   * @return @c true on success, @c false otherwise.
    */
   bool attach(const std::string& name);
 
   /**
-   * @brief Closes the semaphore handle and optionally removes it from the
-   *        OS namespace.
+   * @brief Releases the kernel handle and optionally unlinks the named object.
    *
-   * @details
-   * After @c detach(), @c is_attached() returns @c false.
-   *
-   * @param force  If @c true, the semaphore is unlinked from the OS namespace
-   *               on named POSIX backends.  Ignored on Windows/macOS.
-   *               Default: @c true.
-   * @return @c true on success, @c false if not attached or unlink failed.
+   * @param force  When @c true, POSIX backends unlink the name so it disappears from the
+   *               kernel namespace.  Ignored on Windows and macOS.  Default: @c true.
+   * @return @c true on success.
    */
   bool detach(bool force = true);
 
   /**
-   * @brief Decrements the semaphore counter by @p n, blocking if necessary.
+   * @brief Decrements the kernel counter by @p n, blocking when permits are unavailable.
    *
-   * @details
-   * Blocks the caller until @p n permits are available or @p timeout_ms
-   * milliseconds elapse.
-   *
-   * @param n           Number of permits to acquire (default: 1).
-   * @param timeout_ms  Maximum time to wait in milliseconds.
-   *                    Use @c kInfinite (-1) to wait indefinitely (default).
-   * @return @c true if permits were acquired, @c false on timeout or error.
+   * @param n           Number of permits requested.  Default: @c 1.
+   * @param timeout_ms  Maximum wait in milliseconds; @c kInfinite waits forever.
+   * @return @c true when the permits were acquired; @c false on timeout or error.
    *
    * @pre @c is_attached() must be @c true.
    */
   bool acquire(size_t n = 1, int timeout_ms = kInfinite);
 
   /**
-   * @brief Increments the semaphore counter by @p n.
+   * @brief Increments the kernel counter by @p n, waking blocked acquirers.
    *
-   * @details
-   * Wakes at most @p n threads (from any process) blocked in @c acquire().
-   *
-   * @param n  Number of permits to release (default: 1).
+   * @param n  Number of permits to add.  Default: @c 1.
    *
    * @pre @c is_attached() must be @c true.
    */
   void release(size_t n = 1);
 
   /**
-   * @brief Returns @c true if the semaphore is currently attached to an OS name.
+   * @brief Reports whether the wrapper currently owns a kernel handle.
    *
-   * @return @c true if attached, @c false otherwise.
+   * @return @c true when @c attach() succeeded and @c detach() has not been called yet.
    */
   [[nodiscard]] bool is_attached() const;
 
   /**
-   * @brief Returns the current count of the semaphore.
+   * @brief Returns a non-atomic snapshot of the current counter value.
    *
    * @details
-   * The value is a snapshot and may change immediately after the call.
-   * Intended for diagnostics only.
+   * Some backends (notably macOS dispatch) do not expose the counter; @c 0 is returned
+   * in that case.
    *
-   * @return Current semaphore count, or 0 if not attached or unsupported on
-   *         the current backend.
+   * @return Current permit count snapshot.
    */
   [[nodiscard]] size_t get_count() const;
 

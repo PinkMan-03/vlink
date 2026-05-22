@@ -21,6 +21,28 @@
  * limitations under the License.
  */
 
+/**
+ * @file spdlog_time_rolling_file_sink.h
+ * @brief Private spdlog sink that rolls log files by both size and wall-clock timestamp.
+ *
+ * @details
+ * The VLink @c Logger needs a sink that combines spdlog's size-based rotation with timestamped
+ * filenames so that operators can correlate log slices with bag recordings.  This private,
+ * non-installed header provides that sink as a header-only template, plus two factory functions
+ * matching spdlog's usual @c _mt / @c _st convention.
+ *
+ * Compiled only when @c VLINK_ENABLE_LOG_SPD is defined; otherwise the file expands to nothing.
+ *
+ * | Component                          | Role                                                     |
+ * | ---------------------------------- | -------------------------------------------------------- |
+ * | @c TimeRollingFile<MutexT>         | The sink itself; @c MutexT selects multi/single-threaded |
+ * | @c TimeRollingFile_mt / @c _st     | Convenience type aliases                                 |
+ * | @c time_rolling_logger_mt / @c _st | Factory functions returning a complete @c spdlog::logger |
+ *
+ * Filenames follow the @c YYYY-MM-DD_HH-MM-SS.<index>.log pattern under a base directory; the
+ * sink keeps at most @c max_files such files, deleting the oldest on rotation.
+ */
+
 #pragma once
 
 #if defined(VLINK_ENABLE_LOG_SPD)
@@ -47,12 +69,26 @@
 namespace vlink {
 namespace spdlog_custom_sink {
 
+/**
+ * @enum TimeZone
+ * @brief Selects the wall-clock interpretation used when stamping rolled log files.
+ */
 enum class TimeZone : uint8_t {
   kTimezoneLocal = 0,
 
   kTimezoneUtc = 1,
 };
 
+/**
+ * @class TimeRollingFile
+ * @brief Header-only spdlog sink that rolls log files by size with timestamped, indexed filenames.
+ *
+ * @details
+ * The sink writes to @c <base>/<timestamp>.<index>.log; once a file exceeds @c max_size it is
+ * rotated to a fresh timestamped file and indexed-rotated entries are pruned until at most
+ * @c max_files remain.  On construction the sink also scans the existing directory so that a
+ * crashed process can continue appending into the most recent file without losing the index.
+ */
 template <typename MutexT>
 class TimeRollingFile final : public spdlog::sinks::base_sink<MutexT> {
  public:
@@ -116,6 +152,7 @@ class TimeRollingFile final : public spdlog::sinks::base_sink<MutexT> {
 using TimeRollingFile_mt = TimeRollingFile<std::mutex>;
 using TimeRollingFile_st = TimeRollingFile<spdlog::details::null_mutex>;
 
+/** @brief Factory: create a thread-safe spdlog logger backed by @c TimeRollingFile_mt. */
 template <typename FactoryT = spdlog::synchronous_factory>
 static std::shared_ptr<spdlog::logger> time_rolling_logger_mt(const std::string& logger_name,
                                                               const spdlog::filename_t& base_filename,
@@ -124,6 +161,7 @@ static std::shared_ptr<spdlog::logger> time_rolling_logger_mt(const std::string&
                                                               bool rotate_on_open = false,
                                                               const spdlog::file_event_handlers& event_handlers = {});
 
+/** @brief Factory: create a single-threaded spdlog logger backed by @c TimeRollingFile_st. */
 template <typename FactoryT = spdlog::synchronous_factory>
 static std::shared_ptr<spdlog::logger> time_rolling_logger_st(const std::string& logger_name,
                                                               const spdlog::filename_t& base_filename,
@@ -131,10 +169,6 @@ static std::shared_ptr<spdlog::logger> time_rolling_logger_st(const std::string&
                                                               TimeZone timezone = TimeZone::kTimezoneLocal,
                                                               bool rotate_on_open = false,
                                                               const spdlog::file_event_handlers& event_handlers = {});
-
-////////////////////////////////////////////////////////////////
-/// Details
-////////////////////////////////////////////////////////////////
 
 template <typename MutexT>
 inline TimeRollingFile<MutexT>::TimeRollingFile(spdlog::filename_t base_filename, size_t max_size, size_t max_files,
@@ -290,7 +324,7 @@ inline typename TimeRollingFile<MutexT>::FileInfo TimeRollingFile<MutexT>::parse
 
   auto last_dot = stem.rfind('.');
 
-  if VUNLIKELY (last_dot == std::string::npos || last_dot != 19) {  // YYYY-MM-DD_HH-MM-SS (len = 19)
+  if VUNLIKELY (last_dot == std::string::npos || last_dot != 19) {
     return info;
   }
 

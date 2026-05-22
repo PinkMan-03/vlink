@@ -23,50 +23,43 @@
 
 /**
  * @file uint128.h
- * @brief Portable 128-bit unsigned integer with full arithmetic, bitwise, and comparison operators.
+ * @brief Portable 128-bit unsigned integer with native-fastpath multiplication.
  *
  * @details
- * @c Uint128 represents a 128-bit unsigned value as two @c uint64_t halves (@c high_ and
- * @c low_).  On platforms that provide @c __uint128_t (GCC/Clang with 64-bit targets),
- * multiplication is delegated to the compiler's native type for maximum performance.  On
- * other platforms a portable fallback algorithm (@c mul_u128_fallback) is used.
+ * @c vlink::Uint128 stores the value as a pair of @c uint64_t halves (@c high_, @c low_).
+ * On GCC and Clang 64-bit targets the multiplication, division and modulo paths delegate
+ * to the compiler-native @c __uint128_t for maximum performance; on platforms without
+ * that builtin the portable fallback (@c mul_u128_fallback / @c u128_divmod) is used.
  *
- * Supported operations:
+ * Supported operator set:
  *
- * | Category      | Operators                                     | Notes                          |
- * | ------------- | --------------------------------------------- | ------------------------------ |
- * | Arithmetic    | +  -  *  /  %  +=  -=  *=  /=  %=             | /  and % throw on divisor zero |
- * | Bitwise       | |  &  ^  ~  <<  >>  |=  &=  ^=  <<=  >>=      | Shifts clamped to [0, 127]     |
- * | Comparison    | ==  !=  <  >  <=  >=                          | Lexicographic (high then low)  |
- * | Increment     | ++  --  (prefix and postfix)                  | 128-bit carry propagated       |
- * | Stream        | operator<<(ostream)                           | Hexadecimal output             |
+ * | Category   | Operators                              | Notes                                |
+ * | ---------- | -------------------------------------- | ------------------------------------ |
+ * | Arithmetic | + - * / % += -= *= /= %=               | Division throws on divisor @c 0      |
+ * | Bitwise    | OR AND XOR NOT shift compound-assign   | Shifts clamp to @c [0, @c 128]       |
+ * | Comparison | == != < > <= >=                        | Lexicographic over (high, low)       |
+ * | Increment  | ++ -- (prefix and postfix)             | Carry/borrow crosses the 64-bit line |
+ * | Stream     | operator<<(std::ostream&)              | Lowercase hexadecimal output         |
  *
- * @par Implicit conversion from integral types
- * A non-explicit single-argument constructor accepts any integral type @c T:
- * - If @c T is @c __uint128_t (when available), high and low halves are extracted.
- * - Otherwise the value is zero-extended into the low 64 bits.
+ * @par Implicit construction from integral types
+ * The single-argument constructor is intentionally non-explicit so integral literals can
+ * flow into @c Uint128 transparently.  Signed source values are sign-extended, unsigned
+ * values are zero-extended, and @c __uint128_t source values are split into halves.
  *
- * @par Conversion to __uint128_t
- * On platforms that support it, an explicit @c operator __uint128_t() is provided for
- * interoperability with compiler-native 128-bit arithmetic.
+ * @par Conversion back to @c __uint128_t
+ * An explicit @c operator @c __uint128_t() is provided on platforms that expose the type.
  *
  * @par std::hash specialisation
- * A @c std::hash<vlink::Uint128> specialisation is defined at the bottom of this file,
- * enabling @c Uint128 to be used as a key in @c std::unordered_map / @c std::unordered_set.
- *
- * @par Type alias
- * @code
- * using uint128_t = Uint128;
- * @endcode
+ * A @c std::hash<vlink::Uint128> specialisation at the bottom of this file enables use
+ * inside @c std::unordered_map and @c std::unordered_set.
  *
  * @par Example
  * @code
- * vlink::Uint128 a(0, UINT64_MAX);      // 0xFFFFFFFFFFFFFFFF
- * vlink::Uint128 b(1, 0);               // 0x10000000000000000
- * vlink::Uint128 c = a + vlink::Uint128(0, 1);  // carry propagates to high word
+ * vlink::Uint128 a(0, UINT64_MAX);
+ * vlink::Uint128 b(1, 0);
+ * vlink::Uint128 c = a + vlink::Uint128(0, 1);
  * assert(c == b);
  *
- * // Hash map usage:
  * std::unordered_map<vlink::uint128_t, std::string> map;
  * map[vlink::Uint128(0xDEAD, 0xBEEF)] = "key";
  * @endcode
@@ -85,12 +78,12 @@ namespace vlink {
 
 /**
  * @class Uint128
- * @brief 128-bit unsigned integer stored as two 64-bit halves with full operator support.
+ * @brief 128-bit unsigned integer represented as two 64-bit halves with full operator support.
  *
  * @details
- * Stores the value as @c (high_ << 64) | low_.  All arithmetic correctly handles
- * carry/borrow across the 64-bit boundary.  Division and modulo are implemented using
- * a portable binary-long-division algorithm (@c u128_divmod).
+ * Logical layout is @c (high_ @c << @c 64) @c | @c low_.  All arithmetic propagates carry
+ * and borrow across the 64-bit boundary so the observable behaviour matches a true
+ * 128-bit unsigned integer.
  */
 class Uint128 final {
  public:
@@ -100,33 +93,26 @@ class Uint128 final {
   Uint128() noexcept = default;
 
   /**
-   * @brief Constructs a @c Uint128 from an integral-like type @p T (implicit conversion).
+   * @brief Constructs from an integral-like type @p T (implicit on purpose).
    *
    * @details
-   * - If @c T is @c __uint128_t (available on GCC/Clang 64-bit), splits into
-   *   high and low halves.
-   * - Else if @c T is signed and @c uint64_t is constructible from @c T,
-   *   sign-extends @p v: negative values yield @c high_ @c = @c ~uint64_t{0}
-   *   and @c low_ @c = the two's-complement bit pattern of @p v, so e.g.
-   *   @c Uint128(int64_t{-1}) equals @c (~uint64_t{0}, @c ~uint64_t{0})
-   *   matching @c __uint128_t(int64_t{-1}).
-   * - Else if @c uint64_t is constructible from @c T (unsigned case),
-   *   zero-extends @p v into @c low_ and sets @c high_ to @c 0.
-   * - Otherwise both halves keep their default-member-initialized value of
-   *   @c 0 — there is no diagnostic for non-integral @p T because the
-   *   integrality assertion is intentionally not enforced at this layer.
+   * - When @c T is @c __uint128_t (where available) the source is split into halves.
+   * - When @c T is signed the source is sign-extended: a negative value yields
+   *   @c high_ @c = @c ~uint64_t{0} and @c low_ @c = the two's-complement bit pattern.
+   * - When @c T is unsigned the source is zero-extended into @c low_ with @c high_ @c = @c 0.
+   * - For any other @p T both halves keep their default value of @c 0; no diagnostic is
+   *   emitted because integrality is intentionally not asserted here.
    *
-   * @tparam T  Source type.  Expected to be integral or @c __uint128_t; other
-   *            types silently produce a zero-valued @c Uint128.
+   * @tparam T  Source type (integral or @c __uint128_t).
    * @param v   Source value.
    *
-   * @note This constructor is intentionally non-explicit to allow natural integral literals.
+   * @note Non-explicit by design so integral literals interoperate naturally.
    */
   template <typename T>
   constexpr Uint128(T v) noexcept;  // NOLINT(google-explicit-constructor)
 
   /**
-   * @brief Constructs a @c Uint128 from explicit high and low 64-bit halves.
+   * @brief Constructs from explicit high and low halves.
    *
    * @param high  Upper 64 bits.
    * @param low   Lower 64 bits.
@@ -138,10 +124,9 @@ class Uint128 final {
    * @brief Converts to the compiler-native @c __uint128_t type.
    *
    * @details
-   * Only available on platforms that provide @c __uint128_t (GCC/Clang, 64-bit targets).
-   * Reconstructed as @c (high_ << 64) | low_.
+   * Only available where @c __uint128_t exists (GCC/Clang 64-bit targets).
    *
-   * @return Native 128-bit value.
+   * @return Reconstructed native 128-bit value.
    */
   explicit operator __uint128_t() const noexcept;
 #endif
@@ -149,16 +134,16 @@ class Uint128 final {
   /**
    * @brief Returns the sum of @c *this and @p other.
    *
-   * @param other  Right-hand operand.
-   * @return New @c Uint128 equal to @c *this + @p other.
+   * @param other  Right operand.
+   * @return New value equal to @c *this + @p other (wraps on overflow).
    */
   Uint128 operator+(const Uint128& other) const noexcept;
 
   /**
    * @brief Returns the difference of @c *this and @p other.
    *
-   * @param other  Right-hand operand.
-   * @return New @c Uint128 equal to @c *this - @p other (wraps on underflow).
+   * @param other  Right operand.
+   * @return New value equal to @c *this - @p other (wraps on underflow).
    */
   Uint128 operator-(const Uint128& other) const noexcept;
 
@@ -166,11 +151,11 @@ class Uint128 final {
    * @brief Returns the product of @c *this and @p other.
    *
    * @details
-   * Uses @c __uint128_t multiplication when available; falls back to
-   * @c mul_u128_fallback otherwise.
+   * Delegates to native @c __uint128_t multiplication when available; otherwise falls
+   * back to @c mul_u128_fallback.
    *
-   * @param other  Right-hand operand.
-   * @return New @c Uint128 equal to @c *this * @p other (low 128 bits of true product).
+   * @param other  Right operand.
+   * @return Low 128 bits of the true product.
    */
   Uint128 operator*(const Uint128& other) const noexcept;
 
@@ -178,9 +163,9 @@ class Uint128 final {
    * @brief Returns the quotient of @c *this divided by @p other.
    *
    * @param other  Divisor.
-   * @return New @c Uint128 equal to @c *this / @p other.
+   * @return Quotient.
    *
-   * @throws std::domain_error if @p other is zero.
+   * @throws std::domain_error when @p other is zero.
    */
   Uint128 operator/(const Uint128& other) const;
 
@@ -188,16 +173,16 @@ class Uint128 final {
    * @brief Returns the remainder of @c *this divided by @p other.
    *
    * @param other  Divisor.
-   * @return New @c Uint128 equal to @c *this % @p other.
+   * @return Remainder.
    *
-   * @throws std::domain_error if @p other is zero.
+   * @throws std::domain_error when @p other is zero.
    */
   Uint128 operator%(const Uint128& other) const;
 
   /**
    * @brief Adds @p other to @c *this in-place with carry propagation.
    *
-   * @param other  Right-hand operand.
+   * @param other  Right operand.
    * @return Reference to @c *this.
    */
   Uint128& operator+=(const Uint128& other) noexcept;
@@ -205,7 +190,7 @@ class Uint128 final {
   /**
    * @brief Subtracts @p other from @c *this in-place with borrow propagation.
    *
-   * @param other  Right-hand operand.
+   * @param other  Right operand.
    * @return Reference to @c *this.
    */
   Uint128& operator-=(const Uint128& other) noexcept;
@@ -213,7 +198,7 @@ class Uint128 final {
   /**
    * @brief Multiplies @c *this by @p other in-place.
    *
-   * @param other  Right-hand operand.
+   * @param other  Right operand.
    * @return Reference to @c *this.
    */
   Uint128& operator*=(const Uint128& other) noexcept;
@@ -224,7 +209,7 @@ class Uint128 final {
    * @param other  Divisor.
    * @return Reference to @c *this.
    *
-   * @throws std::domain_error if @p other is zero.
+   * @throws std::domain_error when @p other is zero.
    */
   Uint128& operator/=(const Uint128& other);
 
@@ -234,38 +219,38 @@ class Uint128 final {
    * @param other  Divisor.
    * @return Reference to @c *this.
    *
-   * @throws std::domain_error if @p other is zero.
+   * @throws std::domain_error when @p other is zero.
    */
   Uint128& operator%=(const Uint128& other);
 
   /**
    * @brief Returns the bitwise OR of @c *this and @p other.
    *
-   * @param other  Right-hand operand.
-   * @return New @c Uint128 with each bit set if it is set in either operand.
+   * @param other  Right operand.
+   * @return New value with each bit set if it is set in either operand.
    */
   Uint128 operator|(const Uint128& other) const noexcept;
 
   /**
    * @brief Returns the bitwise AND of @c *this and @p other.
    *
-   * @param other  Right-hand operand.
-   * @return New @c Uint128 with each bit set only if set in both operands.
+   * @param other  Right operand.
+   * @return New value with each bit set only when set in both operands.
    */
   Uint128 operator&(const Uint128& other) const noexcept;
 
   /**
    * @brief Returns the bitwise XOR of @c *this and @p other.
    *
-   * @param other  Right-hand operand.
-   * @return New @c Uint128 with each bit set if it differs between operands.
+   * @param other  Right operand.
+   * @return New value with each bit set when the bits differ between operands.
    */
   Uint128 operator^(const Uint128& other) const noexcept;
 
   /**
-   * @brief Returns the bitwise NOT (complement) of @c *this.
+   * @brief Returns the bitwise complement of @c *this.
    *
-   * @return New @c Uint128 with all 128 bits inverted.
+   * @return New value with all 128 bits inverted.
    */
   Uint128 operator~() const noexcept;
 
@@ -273,11 +258,10 @@ class Uint128 final {
    * @brief Returns @c *this shifted left by @p shift bits.
    *
    * @details
-   * - Shift <= 0: returns @c *this unchanged.
-   * - Shift >= 128: returns zero.
-   * - Shift in [64, 127]: low bits are shifted into the high word.
+   * Shift values @c <= @c 0 leave the value unchanged; @c >= @c 128 produce zero; values
+   * in @c [64, @c 127] move bits across the 64-bit boundary.
    *
-   * @param shift  Number of bit positions to shift left.
+   * @param shift  Bit positions to shift.
    * @return Shifted value.
    */
   Uint128 operator<<(int shift) const noexcept;
@@ -286,11 +270,9 @@ class Uint128 final {
    * @brief Returns @c *this shifted right by @p shift bits (logical, zero-fill).
    *
    * @details
-   * - Shift <= 0: returns @c *this unchanged.
-   * - Shift >= 128: returns zero.
-   * - Shift in [64, 127]: high bits are shifted into the low word.
+   * Same edge-case rules as @c operator<<.
    *
-   * @param shift  Number of bit positions to shift right.
+   * @param shift  Bit positions to shift.
    * @return Shifted value.
    */
   Uint128 operator>>(int shift) const noexcept;
@@ -298,7 +280,7 @@ class Uint128 final {
   /**
    * @brief Applies bitwise OR with @p other in-place.
    *
-   * @param other  Right-hand operand.
+   * @param other  Right operand.
    * @return Reference to @c *this.
    */
   Uint128& operator|=(const Uint128& other) noexcept;
@@ -306,7 +288,7 @@ class Uint128 final {
   /**
    * @brief Applies bitwise AND with @p other in-place.
    *
-   * @param other  Right-hand operand.
+   * @param other  Right operand.
    * @return Reference to @c *this.
    */
   Uint128& operator&=(const Uint128& other) noexcept;
@@ -314,7 +296,7 @@ class Uint128 final {
   /**
    * @brief Applies bitwise XOR with @p other in-place.
    *
-   * @param other  Right-hand operand.
+   * @param other  Right operand.
    * @return Reference to @c *this.
    */
   Uint128& operator^=(const Uint128& other) noexcept;
@@ -322,7 +304,7 @@ class Uint128 final {
   /**
    * @brief Shifts @c *this left by @p shift bits in-place.
    *
-   * @param shift  Number of bit positions to shift left.
+   * @param shift  Bit positions to shift.
    * @return Reference to @c *this.
    */
   Uint128& operator<<=(int shift) noexcept;
@@ -330,112 +312,106 @@ class Uint128 final {
   /**
    * @brief Shifts @c *this right by @p shift bits in-place (logical, zero-fill).
    *
-   * @param shift  Number of bit positions to shift right.
+   * @param shift  Bit positions to shift.
    * @return Reference to @c *this.
    */
   Uint128& operator>>=(int shift) noexcept;
 
   /**
-   * @brief Returns @c true if @c *this equals @p other.
+   * @brief Returns @c true when both halves of @c *this and @p other are equal.
    *
-   * @param other  Right-hand operand.
-   * @return @c true if high and low words are both equal.
+   * @param other  Right operand.
+   * @return Equality result.
    */
   [[nodiscard]] bool operator==(const Uint128& other) const noexcept;
 
   /**
-   * @brief Returns @c true if @c *this does not equal @p other.
+   * @brief Returns @c true when any half differs.
    *
-   * @param other  Right-hand operand.
-   * @return @c true if any word differs.
+   * @param other  Right operand.
+   * @return Inequality result.
    */
   [[nodiscard]] bool operator!=(const Uint128& other) const noexcept;
 
   /**
-   * @brief Returns @c true if @c *this is less than @p other.
+   * @brief Returns @c true when @c *this is strictly less than @p other.
    *
    * @details
-   * Compares the high word first; if equal, compares the low word.
+   * Compares the high half first; ties are broken by the low half.
    *
-   * @param other  Right-hand operand.
-   * @return @c true if @c *this < @p other.
+   * @param other  Right operand.
+   * @return Comparison result.
    */
   [[nodiscard]] bool operator<(const Uint128& other) const noexcept;
 
   /**
-   * @brief Returns @c true if @c *this is greater than @p other.
+   * @brief Returns @c true when @c *this is strictly greater than @p other.
    *
-   * @param other  Right-hand operand.
-   * @return @c true if @c *this > @p other.
+   * @param other  Right operand.
+   * @return Comparison result.
    */
   [[nodiscard]] bool operator>(const Uint128& other) const noexcept;
 
   /**
-   * @brief Returns @c true if @c *this is less than or equal to @p other.
+   * @brief Returns @c true when @c *this is less than or equal to @p other.
    *
-   * @param other  Right-hand operand.
-   * @return @c true if @c *this <= @p other.
+   * @param other  Right operand.
+   * @return Comparison result.
    */
   [[nodiscard]] bool operator<=(const Uint128& other) const noexcept;
 
   /**
-   * @brief Returns @c true if @c *this is greater than or equal to @p other.
+   * @brief Returns @c true when @c *this is greater than or equal to @p other.
    *
-   * @param other  Right-hand operand.
-   * @return @c true if @c *this >= @p other.
+   * @param other  Right operand.
+   * @return Comparison result.
    */
   [[nodiscard]] bool operator>=(const Uint128& other) const noexcept;
 
   /**
-   * @brief Pre-increment: increments the value by one and returns @c *this.
-   *
-   * @details
-   * Carry from the low word is propagated to the high word.
+   * @brief Pre-increment with carry across the 64-bit boundary.
    *
    * @return Reference to the incremented value.
    */
   Uint128& operator++() noexcept;
 
   /**
-   * @brief Post-increment: increments the value by one and returns the previous value.
+   * @brief Post-increment returning a copy of the value prior to incrementing.
    *
-   * @return Copy of the value before incrementing.
+   * @return Pre-increment value.
    */
   Uint128 operator++(int) noexcept;
 
   /**
-   * @brief Pre-decrement: decrements the value by one and returns @c *this.
-   *
-   * @details
-   * Borrow from the low word underflow is propagated to the high word.
+   * @brief Pre-decrement with borrow across the 64-bit boundary.
    *
    * @return Reference to the decremented value.
    */
   Uint128& operator--() noexcept;
 
   /**
-   * @brief Post-decrement: decrements the value by one and returns the previous value.
+   * @brief Post-decrement returning a copy of the value prior to decrementing.
    *
-   * @return Copy of the value before decrementing.
+   * @return Pre-decrement value.
    */
   Uint128 operator--(int) noexcept;
 
   /**
-   * @brief Returns the upper 64 bits of the 128-bit value.
+   * @brief Returns the upper 64 bits of the stored value.
    *
-   * @return High 64-bit word.
+   * @return High half.
    */
   [[nodiscard]] uint64_t get_high() const noexcept;
 
   /**
-   * @brief Returns the lower 64 bits of the 128-bit value.
+   * @brief Returns the lower 64 bits of the stored value.
    *
-   * @return Low 64-bit word.
+   * @return Low half.
    */
   [[nodiscard]] uint64_t get_low() const noexcept;
 
   /**
-   * @brief Writes the hexadecimal string representation of the value to @p os.
+   * @brief Writes the lowercase hexadecimal representation of @p value to @p os.
    *
    * @param os     Output stream.
    * @param value  Value to print.
@@ -461,6 +437,9 @@ class Uint128 final {
   uint64_t low_{0};
 };
 
+/**
+ * @brief Convenience alias matching the lowercase fixed-width style of the standard integer types.
+ */
 using uint128_t = Uint128;
 
 ////////////////////////////////////////////////////////////////
@@ -766,21 +745,19 @@ inline constexpr Uint128::Uint128(T v) noexcept {
 namespace std {
 
 /**
- * @brief @c std::hash specialisation for @c vlink::Uint128.
+ * @brief @c std::hash specialisation enabling @c vlink::Uint128 keys in unordered containers.
  *
  * @details
- * Enables @c vlink::Uint128 (and the @c vlink::uint128_t alias) to be used as a key in
- * @c std::unordered_map, @c std::unordered_set, and similar hash-based containers.
- *
- * The hash function combines the high and low 64-bit words to produce a @c size_t result.
+ * The hash combines both 64-bit halves so @c std::unordered_map, @c std::unordered_set and
+ * similar containers can key on a @c vlink::Uint128 directly.
  */
 template <>
 struct hash<vlink::Uint128> {
   /**
-   * @brief Computes the hash of @p value.
+   * @brief Hashes @p value into a @c size_t.
    *
-   * @param value  The 128-bit value to hash.
-   * @return Hash value derived from both the high and low 64-bit words.
+   * @param value  Value to hash.
+   * @return Hash derived from both halves.
    */
   VLINK_EXPORT size_t operator()(const vlink::Uint128& value) const noexcept;
 };

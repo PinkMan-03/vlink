@@ -23,47 +23,68 @@
 
 /**
  * @file status.h
- * @brief DDS-compatible status type hierarchy for VLink publisher and subscriber callbacks.
+ * @brief DDS-aligned status event hierarchy delivered to publisher and subscriber callbacks.
  *
  * @details
- * The @c Status namespace defines an event-driven status reporting model that mirrors the
- * DDS status change notification system.  When a transport-level event occurs (e.g., a
- * new subscriber appears, a deadline is missed), the middleware creates a concrete
- * @c Status::Base subclass and delivers it to the registered status callback.
+ * The @c Status namespace exposes a polymorphic, shared-pointer based event model that mirrors
+ * the DDS status change notification system.  When the underlying transport (DDS, intra, shm,
+ * zenoh, etc.) detects an interesting condition it constructs a concrete @c Base subclass and
+ * forwards it to the user-registered @c StatusCallback.  Callers use @c Base::as<T>() to safely
+ * narrow the pointer to the concrete type carried by the event.
  *
- * Status types are divided into two groups:
+ * @par Status codes
  *
- * Writer-side (DataWriter / Publisher / Server / Setter):
+ * | Value | Enumerator                     | Side    | Triggered when                                       |
+ * | ----- | ------------------------------ | ------- | ---------------------------------------------------- |
+ * |  0    | @c kUnknown                    | -       | transport reports an unrecognised status type        |
+ * |  1    | @c kPublicationMatched         | writer  | matching subscriber appeared or disappeared          |
+ * |  2    | @c kOfferedDeadlineMissed      | writer  | offered publication deadline missed                  |
+ * |  3    | @c kOfferedIncompatibleQos     | writer  | discovered subscriber with incompatible QoS          |
+ * |  4    | @c kLivelinessLost             | writer  | writer failed to assert liveliness within lease      |
+ * |  5    | @c kSubscriptionMatched        | reader  | matching publisher appeared or disappeared           |
+ * |  6    | @c kRequestedDeadlineMissed    | reader  | reader missed its requested deadline                 |
+ * |  7    | @c kLivelinessChanged          | reader  | matched publisher liveliness state changed           |
+ * |  8    | @c kSampleRejected             | reader  | inbound sample dropped (resource limit)              |
+ * |  9    | @c kRequestedIncompatibleQos   | reader  | discovered publisher with incompatible QoS           |
+ * | 10    | @c kSampleLost                 | reader  | sample lost before delivery                          |
  *
- * | Type                       | Triggered when                                          |
- * | -------------------------- | ------------------------------------------------------- |
- * | @c kPublicationMatched     | A matching subscriber appeared or disappeared           |
- * | @c kOfferedDeadlineMissed  | Writer failed to publish within its declared deadline   |
- * | @c kOfferedIncompatibleQos | A subscriber with incompatible QoS was discovered       |
- * | @c kLivelinessLost         | Writer failed to assert liveliness within its duration  |
+ * @par Severity matrix
  *
- * Reader-side (DataReader / Subscriber / Client / Getter):
+ * | Status                          | Severity      | Action recommended                                      |
+ * | ------------------------------- | ------------- | ------------------------------------------------------- |
+ * | @c kPublicationMatched          | informational | log peer count change                                   |
+ * | @c kSubscriptionMatched         | informational | log peer count change                                   |
+ * | @c kLivelinessChanged           | informational | track @c alive_count delta                              |
+ * | @c kOfferedDeadlineMissed       | warning       | investigate slow publisher loop                         |
+ * | @c kRequestedDeadlineMissed     | warning       | investigate dropped traffic                             |
+ * | @c kOfferedIncompatibleQos      | warning       | reconcile QoS profile with peer                         |
+ * | @c kRequestedIncompatibleQos    | warning       | reconcile QoS profile with peer                         |
+ * | @c kSampleRejected              | error         | enlarge @c ResourceLimits or drop sources               |
+ * | @c kSampleLost                  | error         | enlarge @c History depth or upgrade reliability         |
+ * | @c kLivelinessLost              | error         | peer considers writer dead; restore heartbeats          |
  *
- * | Type                       | Triggered when                                           |
- * | -------------------------- | -------------------------------------------------------- |
- * | @c kSubscriptionMatched    | A matching publisher appeared or disappeared             |
- * | @c kRequestedDeadlineMissed| Reader did not receive data within its declared deadline |
- * | @c kLivelinessChanged      | A writer's liveliness status changed                     |
- * | @c kSampleRejected         | An incoming sample was rejected (resource limit hit)     |
- * | @c kRequestedIncompatibleQos | A publisher with incompatible QoS was discovered       |
- * | @c kSampleLost             | A sample was lost before it could be delivered           |
+ * Concrete event structs and their counter / handle fields live in @c status_detail.h.
  *
- * Concrete status structs (counters, handles, etc.) are defined in @c status_detail.h.
- *
- * @par Usage
+ * @par Example
  * @code
- * auto sub = vlink::Subscriber<MyMsg>::create("dds://my_topic");
- * sub->register_status_callback([](vlink::Status::BasePtr status) {
- *     if (status->get_type() == vlink::Status::kSubscriptionMatched) {
- *         auto matched = status->as<vlink::Status::SubscriptionMatched>();
- *         VLOG_I("Matched publishers: ", matched->current_count);
+ *   auto sub = vlink::Subscriber<MyMsg>::create("dds://my/topic");
+ *
+ *   sub->register_status_callback([](vlink::Status::BasePtr status) {
+ *     switch (status->get_type()) {
+ *       case vlink::Status::kSubscriptionMatched: {
+ *         auto detail = status->as<vlink::Status::SubscriptionMatched>();
+ *         VLOG_I("matched publishers: ", detail->current_count);
+ *         break;
+ *       }
+ *       case vlink::Status::kSampleLost: {
+ *         auto detail = status->as<vlink::Status::SampleLost>();
+ *         VLOG_W("samples lost so far: ", detail->total_count);
+ *         break;
+ *       }
+ *       default:
+ *         break;
  *     }
- * });
+ *   });
  * @endcode
  */
 
@@ -82,75 +103,72 @@ namespace vlink {
 
 /**
  * @namespace vlink::Status
- * @brief DDS-compatible status type enumeration, base class, and type-safe cast utilities.
+ * @brief DDS-aligned status enumeration, base event class, and helper predicates.
  */
 namespace Status {  // NOLINT(readability-identifier-naming)
 
 /**
- * @brief Discriminator for concrete status event types.
+ * @brief Discriminator that identifies the concrete @c Base subclass carried by an event.
  *
  * @details
- * Values below @c kSubscriptionMatched are writer-side events; values from
- * @c kSubscriptionMatched onwards are reader-side events.
- * Use @c is_for_writer() / @c is_for_reader() for category tests.
+ * Values @c 1..4 are emitted on the writer side, values @c 5..10 on the reader side; use
+ * @c is_for_writer() / @c is_for_reader() to classify a value without inspecting the
+ * concrete subclass.
  */
 enum Type : uint8_t {
-  kUnknown = 0,  ///< Unknown or uninitialised status.
+  kUnknown = 0,  ///< Placeholder for unrecognised status events.
   // -- For writer
-  kPublicationMatched = 1,      ///< A matching subscriber appeared or was removed.
-  kOfferedDeadlineMissed = 2,   ///< Writer missed its offered deadline.
-  kOfferedIncompatibleQos = 3,  ///< Subscriber with incompatible QoS discovered.
-  kLivelinessLost = 4,          ///< Writer liveliness assertion failed.
+  kPublicationMatched = 1,      ///< Matching subscriber appeared or disappeared.
+  kOfferedDeadlineMissed = 2,   ///< Writer missed its offered publication deadline.
+  kOfferedIncompatibleQos = 3,  ///< Discovered subscriber with incompatible QoS.
+  kLivelinessLost = 4,          ///< Writer liveliness assertion lapsed.
   // -- For reader
-  kSubscriptionMatched = 5,       ///< A matching publisher appeared or was removed.
-  kRequestedDeadlineMissed = 6,   ///< Reader did not receive data within its deadline.
-  kLivelinessChanged = 7,         ///< Publisher liveliness state changed.
-  kSampleRejected = 8,            ///< Incoming sample was rejected (resource limit).
-  kRequestedIncompatibleQos = 9,  ///< Publisher with incompatible QoS discovered.
-  kSampleLost = 10,               ///< Sample was lost before delivery.
+  kSubscriptionMatched = 5,       ///< Matching publisher appeared or disappeared.
+  kRequestedDeadlineMissed = 6,   ///< Reader missed its requested deadline.
+  kLivelinessChanged = 7,         ///< Liveliness of a matched publisher changed.
+  kSampleRejected = 8,            ///< Inbound sample dropped by resource limits.
+  kRequestedIncompatibleQos = 9,  ///< Discovered publisher with incompatible QoS.
+  kSampleLost = 10,               ///< Sample lost before delivery.
 };
 
 /**
- * @brief Returns @c true if @p type is a writer-side status event.
+ * @brief Reports whether @p type belongs to the writer-side group.
  *
  * @param type  Status type to classify.
- * @return @c true for any type with a value below @c kSubscriptionMatched
- *         (excluding @c kUnknown, which returns @c false).
+ * @return @c true for values @c 1..4; @c false for @c kUnknown and reader-side values.
  */
 [[nodiscard]] [[maybe_unused]] static constexpr bool is_for_writer(Type type) noexcept {
   return type != kUnknown && type < kSubscriptionMatched;
 }
 
 /**
- * @brief Returns @c true if @p type is a reader-side status event.
+ * @brief Reports whether @p type belongs to the reader-side group.
  *
  * @param type  Status type to classify.
- * @return @c true for types @c kSubscriptionMatched and above.
+ * @return @c true for values @c 5..10.
  */
 [[nodiscard]] [[maybe_unused]] static constexpr bool is_for_reader(Type type) noexcept {
   return type >= kSubscriptionMatched;
 }
 
 /**
- * @brief Opaque handle type for DDS instance identifiers.
+ * @brief Opaque transport-defined identifier for a matched publication or subscription.
  *
  * @details
- * Carries a transport-level pointer to the matched publication or subscription
- * endpoint.  The exact value is transport-specific and should be treated as opaque.
+ * Treat as an opaque key; the bit pattern is transport-specific and is only meaningful when
+ * compared against handles obtained from the same transport.
  */
 using InstanceHandle = const void*;
 
 /**
  * @struct Base
- * @brief Abstract base class for all VLink status event objects.
+ * @brief Polymorphic base for every concrete status event delivered to a callback.
  *
  * @details
- * All concrete status types (PublicationMatched, SampleRejected, etc.) derive from
- * @c Base and are delivered as @c std::shared_ptr<Status::Base> via status callbacks.
- * Use @c as<T>() to safely downcast to a specific concrete type.
- *
- * Inherits @c std::enable_shared_from_this to support safe @c shared_ptr construction
- * from within member functions.
+ * Concrete subclasses live in @c status_detail.h and carry the counter, handle, and reason
+ * fields specific to each event.  Subscribers downcast through @c as<T>(), which throws
+ * @c Exception::RuntimeError for @c kUnknown events.  @c std::enable_shared_from_this allows
+ * implementations to safely produce a @c shared_ptr to themselves from inside member calls.
  */
 struct VLINK_EXPORT Base : public std::enable_shared_from_this<Base> {
  protected:
@@ -160,39 +178,34 @@ struct VLINK_EXPORT Base : public std::enable_shared_from_this<Base> {
 
  public:
   /**
-   * @brief Returns the concrete status type discriminator.
+   * @brief Returns the concrete event type discriminator.
    *
-   * @return One of the @c Status::Type enum values.
+   * @return One of the @c Status::Type enumerators.
    */
   [[nodiscard]] virtual Type get_type() const = 0;
 
   /**
-   * @brief Returns the status event name.
+   * @brief Returns the event name without numeric fields.
    *
-   * @return String name of the concrete status type.  Use @c operator<< to include field values.
+   * @return Short string such as @c "SubscriptionMatched".  Use @c operator<< for full detail.
    */
   [[nodiscard]] virtual std::string get_string() const = 0;
 
   /**
-   * @brief Safely downcasts this status to a concrete type @p T.
+   * @brief Safely narrows this event to a concrete @c Status subclass.
    *
-   * @details
-   * Performs a @c dynamic_pointer_cast.  If the status type is @c kUnknown,
-   * throws @c Exception::RuntimeError.
-   *
-   * @tparam T  Concrete status struct type (e.g., @c Status::SubscriptionMatched).
-   *            Must be derived from @c Base and not be @c Status::Unknown.
-   * @return @c shared_ptr<T> to the concrete status.
-   * @throws Exception::RuntimeError if the status type is @c kUnknown.
+   * @tparam T  Concrete event struct derived from @c Base; must not be @c Status::Unknown.
+   * @return @c shared_ptr<T> pointing at this event.
+   * @throws Exception::RuntimeError when @c get_type() is @c kUnknown.
    */
   template <typename T>
   [[nodiscard]] std::shared_ptr<T> as() const;
 
   /**
-   * @brief Writes the human-readable status description to @p ostream.
+   * @brief Writes the human-readable description of @p status to @p ostream.
    *
    * @param ostream  Output stream.
-   * @param status   Status object to print.
+   * @param status   Event to print.
    * @return Reference to @p ostream.
    */
   VLINK_EXPORT friend std::ostream& operator<<(std::ostream& ostream, const Base& status) noexcept;
@@ -200,10 +213,11 @@ struct VLINK_EXPORT Base : public std::enable_shared_from_this<Base> {
 
 /**
  * @struct Unknown
- * @brief Placeholder status returned when the transport reports an unrecognised event type.
+ * @brief Placeholder event emitted when the transport reports a status the runtime cannot map.
  *
  * @details
- * Callers should check @c get_type() == @c kUnknown and skip processing.
+ * Callbacks normally short-circuit on @c get_type() == @c kUnknown to avoid attempting an
+ * invalid downcast.
  */
 struct VLINK_EXPORT Unknown final : public Base {
  public:
@@ -215,7 +229,7 @@ struct VLINK_EXPORT Unknown final : public Base {
   [[nodiscard]] Type get_type() const override;
 
   /**
-   * @brief Returns "Unknown".
+   * @brief Returns the literal "Unknown".
    *
    * @return Descriptive string.
    */
@@ -225,18 +239,14 @@ struct VLINK_EXPORT Unknown final : public Base {
    * @brief Writes "Unknown" to @p ostream.
    *
    * @param ostream  Output stream.
-   * @param status   This @c Unknown status.
+   * @param status   This @c Unknown event.
    * @return Reference to @p ostream.
    */
   VLINK_EXPORT friend std::ostream& operator<<(std::ostream& ostream, const Unknown& status) noexcept;
 };
 
 /**
- * @brief Type alias for a shared pointer to a base status event.
- *
- * @details
- * Used as the parameter type for status callbacks registered on publishers,
- * subscribers, clients, servers, getters, and setters.
+ * @brief Shared-pointer alias used as the parameter type of every status callback.
  */
 using BasePtr = std::shared_ptr<Status::Base>;
 
@@ -244,7 +254,7 @@ using BasePtr = std::shared_ptr<Status::Base>;
  * @brief Writes the human-readable description of @p status to @p ostream.
  *
  * @param ostream  Output stream.
- * @param status   Shared pointer to a status event.
+ * @param status   Shared pointer to an event.
  * @return Reference to @p ostream.
  */
 VLINK_EXPORT std::ostream& operator<<(std::ostream& ostream, const BasePtr& status) noexcept;

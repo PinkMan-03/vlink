@@ -23,61 +23,55 @@
 
 /**
  * @file schedule.h
- * @brief RAII task scheduling wrapper with delay, priority, timeouts and result chaining.
+ * @brief Fluent task-scheduling wrapper used by @c MessageLoop::exec_task() and family.
  *
  * @details
- * @c Schedule is a utility namespace (implemented as a non-constructible struct) that wraps a
- * callable in a @c Config envelope and produces a @c Status or @c RetStatus RAII handle.
- * The handle lets callers register continuation callbacks in a fluent style:
+ * @c vlink::Schedule is a non-instantiable utility struct that wraps a user callable in a
+ * @c Config envelope and produces a @c Status (or @c RetStatus for bool-returning callbacks)
+ * RAII handle.  The handle lets callers attach continuation callbacks in a fluent style,
+ * including success/failure branches, exception handling, and scheduling/execution timeout
+ * hooks.
  *
- * @code
- * loop.exec_task(vlink::Schedule::Config{0, 100},     // no delay, priority 100
- *                []() -> bool { return do_work(); })
- *     .on_then([] { on_success(); })
- *     .on_else([] { on_failure(); })
- *     .on_catch([](std::exception& e) { on_error(e); })
- *     .on_schedule_timeout([] { on_not_started_in_time(); })
- *     .on_execution_timeout([] { on_took_too_long(); });
- * @endcode
+ * Categories of options carried by @c Schedule::Config:
  *
- * Config fields:
+ * | Field                    | Purpose                                                                |
+ * | ------------------------ | ---------------------------------------------------------------------- |
+ * | @c delay_ms              | Wait before posting via a one-shot Timer.                              |
+ * | @c priority              | Dispatch priority for priority-aware message loops.                    |
+ * | @c schedule_timeout_ms   | Maximum queue-wait budget after the delay.  Triggered once when the    |
+ * |                          | task is dequeued.  Drops the task on expiry.                           |
+ * | @c execution_timeout_ms  | Maximum execution budget per callback in the chain.  Reported once     |
+ * |                          | after each callback returns; never interrupts a running callback.      |
  *
- * | Field                   | Meaning                                                        |
- * | ----------------------- | -------------------------------------------------------------- |
- * | @c delay_ms             | Delay before the task is posted (via one-shot Timer)           |
- * | @c priority             | Task dispatch priority (for @c kPriorityType loop)             |
- * | @c schedule_timeout_ms  | Queue wait budget after @c delay_ms.  Checked once when the    |
- * |                         | task is dequeued: if elapsed time since scheduling exceeds     |
- * |                         | @c delay_ms + this budget, the task is **dropped** and         |
- * |                         | @c on_schedule_timeout fires instead of the user callback.     |
- * | @c execution_timeout_ms | Run-time budget for each executed callback in the chain.       |
- * |                         | Checked once **after** the callback returns: if it ran longer  |
- * |                         | than the budget, @c on_execution_timeout fires.  This is a     |
- * |                         | post-hoc notifier; it does not interrupt a running callback.   |
+ * Status surface exposed to the caller:
+ *
+ * @verbatim
+ *   exec_task() -> Status / RetStatus
+ *                    +--> on_schedule_timeout(cb)
+ *                    +--> on_execution_timeout(cb)
+ *                    +--> on_catch(cb)
+ *                    +--> [RetStatus] on_then(cb)
+ *                    +--> [RetStatus] on_else(cb)
+ * @endverbatim
  *
  * @note
- * - @c Status is move-only; copying is disabled.  The internal state is reference-counted
- *   via @c std::shared_ptr<Impl>, so it is safe to return by value.
- * - @c RetStatus adds @c on_then (fires when callback returns @c true) and @c on_else
- *   (fires when callback returns @c false).
- * - Callbacks are invoked from the execution context that runs the wrapped task
- *   (the @c MessageLoop thread for a normal loop, or a @c MultiLoop worker).
+ * - @c Status is move-only but reference-counted via a @c std::shared_ptr<Impl>, so it is
+ *   safe to return by value or to keep multiple references to the same task.
+ * - All continuation callbacks run on the dispatcher thread that ran the wrapped task.
  *
  * @par Example
  * @code
  * vlink::MessageLoop loop;
  * loop.async_run();
  *
- * // Void callback with execution timeout:
- * loop.exec_task(vlink::Schedule::Config{100},   // 100 ms delay
- *                [] { expensive_op(); })
- *     .on_execution_timeout([] { VLOG_W("slow!"); });
+ * loop.exec_task(vlink::Schedule::Config{100},
+ *                [] { do_work(); })
+ *     .on_execution_timeout([] { VLOG_W("slow"); });
  *
- * // Bool callback with result chaining:
  * loop.exec_task(vlink::Schedule::Config{},
  *                []() -> bool { return try_connect(); })
  *     .on_then([] { start_session(); })
- *     .on_else([] { retry_later(); });
+ *     .on_else([] { schedule_retry(); });
  * @endcode
  */
 
@@ -96,75 +90,76 @@ namespace vlink {
 
 /**
  * @struct Schedule
- * @brief Non-constructible utility struct providing task scheduling primitives.
+ * @brief Non-instantiable container for task-scheduling types and the @c process() entry points.
  *
  * @details
- * Contains @c Config, @c Status, @c RetStatus, @c process() and @c process_with_ret().
- * Users interact with this struct primarily via @c MessageLoop::exec_task().
+ * Provides the @c Config envelope, the @c Status / @c RetStatus handles, and the
+ * @c process / @c process_with_ret static functions used by @c MessageLoop::exec_task().
  */
 struct VLINK_EXPORT Schedule final {
   /**
-   * @brief Callback type for void tasks and lifecycle hooks (schedule/execution timeout, else).
+   * @brief Callback signature for void tasks and lifecycle hooks.
    */
   using Callback = MoveFunction<void()>;
 
   /**
-   * @brief Callback type for tasks that return a boolean result.
+   * @brief Callback signature for tasks that return a boolean indicating success.
    */
   using RetCallback = MoveFunction<bool()>;
 
   /**
-   * @brief Callback type invoked when a @c std::exception is caught inside the task.
+   * @brief Callback signature for exception handlers attached via @c on_catch().
    */
   using CatchCallback = MoveFunction<void(std::exception&)>;
 
   /**
    * @struct Config
-   * @brief Scheduling parameters for a task posted via @c MessageLoop::exec_task().
+   * @brief Scheduling parameters captured at the call to @c exec_task().
    *
    * @details
-   * All fields are optional; defaults result in immediate posting with no timeouts.
+   * All fields default to zero, which corresponds to immediate dispatch with no timeouts.
    */
   struct VLINK_EXPORT Config final {
     /**
-     * @brief Constructs a default @c Config with all fields set to zero.
+     * @brief Constructs a default @c Config with every field zero-initialised.
      */
     Config();
 
     /**
-     * @brief Constructs a @c Config with all fields specified.
+     * @brief Constructs a fully populated @c Config.
      *
-     * @param _delay_ms              Delay before posting in milliseconds.  0 = immediate.
-     * @param _priority              Task dispatch priority.  0 = default.
-     * @param _schedule_timeout_ms   Max queue wait after @c delay_ms before the task starts (0 = no timeout).
-     * @param _execution_timeout_ms  Max execution time of the task (0 = no timeout).
+     * @param _delay_ms              Delay before posting in milliseconds.
+     * @param _priority              Dispatch priority for priority-aware loops.
+     * @param _schedule_timeout_ms   Maximum queue-wait budget after the delay.
+     * @param _execution_timeout_ms  Maximum execution budget per callback in the chain.
      */
     explicit Config(uint32_t _delay_ms, uint16_t _priority = 0, uint32_t _schedule_timeout_ms = 0,
                     uint32_t _execution_timeout_ms = 0);
 
-    uint32_t delay_ms{0};              ///< Delay in ms before the task is posted.
-    uint16_t priority{0};              ///< Dispatch priority (higher = sooner).
-    uint32_t schedule_timeout_ms{0};   ///< Max queue wait after delay before task starts.  0 = disabled.
-    uint32_t execution_timeout_ms{0};  ///< Max ms the task may execute.  0 = disabled.
+    uint32_t delay_ms{0};              ///< Delay before posting; @c 0 posts immediately.
+    uint16_t priority{0};              ///< Dispatch priority hint; higher fires sooner.
+    uint32_t schedule_timeout_ms{0};   ///< Queue-wait budget after the delay; @c 0 disables.
+    uint32_t execution_timeout_ms{0};  ///< Execution budget per callback; @c 0 disables.
   };
 
   /**
    * @class Status
-   * @brief RAII handle returned by @c exec_task() for a void-callback task.
+   * @brief RAII handle returned by @c exec_task() when the wrapped callback returns @c void.
    *
    * @details
-   * Holds a shared reference to the internal task state.  Destruction does not
-   * cancel the task.  Callback registration methods return @c *this to allow chaining.
+   * Holds a shared reference to the underlying task state.  Continuation callbacks may be
+   * attached in any order before the wrapped task is dispatched; late attachments are
+   * ignored.  Destroying the handle does not cancel the task.
    */
   class VLINK_EXPORT Status {
    public:
     /**
-     * @brief Constructs a valid @c Status with fresh internal task state.
+     * @brief Constructs a fresh handle backed by a newly allocated task state.
      */
     Status();
 
     /**
-     * @brief Destructor.
+     * @brief Destroys the handle reference.  Does not cancel the task.
      */
     ~Status();
 
@@ -173,72 +168,69 @@ struct VLINK_EXPORT Schedule final {
     Status& operator=(const Status&) = delete;
 
     /**
-     * @brief Move constructor.
+     * @brief Move-constructs from @p status, transferring its task state.
      *
-     * @param status  Source status to move from.
+     * @param status  Source handle to move from.
      */
     Status(Status&& status) noexcept;
 
     /**
-     * @brief Move assignment.
+     * @brief Move-assigns from @p status, transferring its task state.
      *
-     * @param status  Source status to move from.
+     * @param status  Source handle to move from.
      * @return Reference to @c *this.
      */
     Status& operator=(Status&& status) noexcept;
 
     /**
-     * @brief Sets whether the status is valid (task was successfully posted).
+     * @brief Marks whether the handle's underlying task was successfully posted.
      *
-     * @param valid  @c true if the associated task was posted successfully.
+     * @param valid  @c true once the task is queued.
      */
     void set_valid(bool valid);
 
     /**
-     * @brief Returns @c true if the associated task was posted successfully.
+     * @brief Reports whether the wrapped task was successfully posted.
      *
-     * @return @c true if valid.
+     * @return @c true when the handle refers to a queued task.
      */
     [[nodiscard]] bool is_valid() const;
 
     /**
-     * @brief Registers a callback fired when the task does not start within @c schedule_timeout_ms.
+     * @brief Installs the callback fired when the task missed its scheduling deadline.
      *
      * @details
-     * Must be registered before the wrapped task is dispatched.  Late registration
-     * is ignored.  Only one schedule-timeout callback may be installed.
+     * Triggered once when the task is dequeued and the elapsed time since posting exceeds
+     * @c delay_ms + @c schedule_timeout_ms.  Only one schedule-timeout callback may be
+     * registered; late registrations are dropped.
      *
-     * @param callback  Callback invoked from the loop thread on schedule timeout.
-     * @return Reference to @c *this for chaining.
+     * @param callback  Hook invoked on the dispatcher thread.
+     * @return Reference to @c *this for fluent chaining.
      */
     Status& on_schedule_timeout(Callback&& callback);
 
     /**
-     * @brief Registers a callback fired when the task runs longer than @c execution_timeout_ms.
+     * @brief Installs the callback fired when a chained callback exceeds @c execution_timeout_ms.
      *
      * @details
-     * Must be registered before the wrapped task is dispatched.  Late registration
-     * is ignored.  Only one execution-timeout callback may be installed.  The
-     * timeout is checked after each executed callback in the schedule chain.
+     * Triggered after each callback in the chain returns.  Only one execution-timeout
+     * callback may be registered; late registrations are dropped.  Does not interrupt a
+     * running callback.
      *
-     * @param callback  Callback invoked from the loop thread on execution timeout.
-     * @return Reference to @c *this for chaining.
+     * @param callback  Hook invoked on the dispatcher thread.
+     * @return Reference to @c *this for fluent chaining.
      */
     Status& on_execution_timeout(Callback&& callback);
 
     /**
-     * @brief Registers a callback fired when the task throws a @c std::exception.
+     * @brief Installs the callback fired when the task throws a @c std::exception.
      *
      * @details
-     * Must be registered before the wrapped task is dispatched.  Late registration
-     * is ignored.  Only one catch callback may be installed.
+     * Only @c std::exception-derived failures are caught; other exception types are
+     * allowed to propagate.  Only one catch callback may be registered.
      *
-     * @c std::exception-derived failures are caught inside the wrapper and passed
-     * to this callback.  Non-standard exceptions are not caught here.  The task
-     * is considered failed after a caught exception.
-     *
-     * @param callback  Callback invoked with the caught exception.
-     * @return Reference to @c *this for chaining.
+     * @param callback  Hook receiving the caught exception.
+     * @return Reference to @c *this for fluent chaining.
      */
     Status& on_catch(CatchCallback&& callback);
 
@@ -261,40 +253,37 @@ struct VLINK_EXPORT Schedule final {
 
   /**
    * @class RetStatus
-   * @brief RAII handle returned by @c exec_task() for a bool-returning callback task.
+   * @brief RAII handle returned by @c exec_task() when the wrapped callback returns @c bool.
    *
    * @details
-   * Extends @c Status with @c on_then (fired if callback returns @c true) and
-   * @c on_else (fired if callback returns @c false).
+   * Extends @c Status with the @c on_then chain and the @c on_else fallback so callers can
+   * express success/failure branches inline.
    */
   class VLINK_EXPORT RetStatus final : public Status {
    public:
     using Status::Status;
 
     /**
-     * @brief Registers a callback fired when the task returns @c false.
+     * @brief Installs the callback fired when the wrapped task returns @c false.
      *
      * @details
-     * Must be registered before the wrapped task is dispatched.  Late registration
-     * is ignored.  Only one else callback may be installed.
+     * Only one else callback may be registered; late registrations are dropped.
      *
-     * @param callback  Invoked from the loop thread when the return value is @c false.
+     * @param callback  Hook invoked on the dispatcher thread when @c false is returned.
      * @return Reference to the base @c Status for further chaining.
      */
     Status& on_else(Callback&& callback);
 
     /**
-     * @brief Registers a callback chain element fired when the task returns @c true.
+     * @brief Appends a continuation that runs only when the previous callback returned @c true.
      *
      * @details
-     * Must be registered before the wrapped task is dispatched.  Late registration
-     * is ignored.  Multiple @c on_then callbacks may be chained; each is invoked in
-     * registration order only if the previous callback returned @c true.  As soon
-     * as any callback returns @c false, the registered @c on_else callback (if any)
-     * is invoked and the chain stops.
+     * Multiple @c on_then callbacks may be chained.  Each is invoked in registration order
+     * until one returns @c false, at which point the chain stops and the registered
+     * @c on_else (if any) fires.
      *
-     * @param callback  Callback taking no arguments and returning @c bool.
-     * @return Reference to @c *this for further @c on_then chaining.
+     * @param callback  Continuation taking no arguments and returning @c bool.
+     * @return Reference to @c *this for further chaining.
      */
     RetStatus& on_then(RetCallback&& callback);
   };
@@ -310,30 +299,30 @@ struct VLINK_EXPORT Schedule final {
   Schedule& operator=(Schedule&&) = delete;
 
   /**
-   * @brief Wraps a void callback in a @c Config envelope and produces a wrapper task.
+   * @brief Wraps a void callback in a @c Config envelope and produces the task wrapper for the dispatcher.
    *
    * @details
-   * Called internally by @c MessageLoop::exec_task().  Creates the @c Status and
-   * populates @p wrapper_callback with the task wrapper ready to be posted to the queue.
+   * Called internally by @c MessageLoop::exec_task().  Allocates the @c Status state and
+   * fills @p wrapper_callback with the closure that the dispatcher will eventually run.
    *
    * @param config            Scheduling configuration.
    * @param callback          Void callable to execute.
-   * @param wrapper_callback  Output: the wrapped task to be posted.
-   * @return @c Status handle for chaining callbacks.
+   * @param wrapper_callback  Out parameter receiving the dispatcher-ready wrapper.
+   * @return Fresh @c Status handle for fluent chaining.
    */
   [[nodiscard]] static Status process(const Config& config, Callback&& callback, Callback& wrapper_callback);
 
   /**
-   * @brief Wraps a bool-returning callback in a @c Config envelope and produces a wrapper task.
+   * @brief Wraps a bool-returning callback in a @c Config envelope and produces the task wrapper for the dispatcher.
    *
    * @details
-   * Called internally by @c MessageLoop::exec_task().  Creates the @c RetStatus and
-   * populates @p wrapper_callback with the task wrapper ready to be posted to the queue.
+   * Called internally by @c MessageLoop::exec_task().  Allocates the @c RetStatus state and
+   * fills @p wrapper_callback with the closure that the dispatcher will eventually run.
    *
    * @param config            Scheduling configuration.
    * @param callback          Bool-returning callable to execute.
-   * @param wrapper_callback  Output: the wrapped task to be posted.
-   * @return @c RetStatus handle for chaining callbacks.
+   * @param wrapper_callback  Out parameter receiving the dispatcher-ready wrapper.
+   * @return Fresh @c RetStatus handle for fluent chaining.
    */
   [[nodiscard]] static RetStatus process_with_ret(const Config& config, RetCallback&& callback,
                                                   Callback& wrapper_callback);

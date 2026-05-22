@@ -23,52 +23,102 @@
 
 /**
  * @file url.h
- * @brief URL-based transport configuration dispatcher for VLink nodes.
+ * @brief URL-driven configuration dispatcher that selects and forwards to a transport @c Conf.
  *
  * @details
- * This header provides two types that together implement the "one API, multiple
- * transports" core promise of VLink:
+ * This is an internal implementation header used by every public node template
+ * to translate a URL string into a concrete transport backend.  It also re-exports
+ * all transport @c *Conf headers and the @c *Impl headers so the impl layer can
+ * be pulled in with a single include.  Two types are introduced:
  *
  * @par Protocol
- * A plain-data struct that holds the parsed components of a VLink URL (transport,
- * host, path, query dictionary, fragment).  It is constructed from a URL string
- * and is used by @c Url::init_target_internal() to select the correct @c Conf
- * subclass.  @c Protocol is only constructible by @c Url (private constructor,
- * @c friend struct Url).
+ * A small plain-data struct populated by the @c UrlParser pipeline.  It owns
+ * the URL string (after any @c VLINK_URL_REMAP rewriting) plus the resolved
+ * @c TransportType and the parsed host, path, query dictionary and fragment.
+ * Only @c Url may construct a @c Protocol -- the constructor is private and
+ * @c Url is its only friend.
  *
  * @par Url
- * A concrete @c Conf subclass that wraps a @c Protocol and delegates all
- * @c Conf virtual methods to the underlying transport @c Conf (@c target_).
- * On construction it calls @c init_target_internal() which selects the correct
- * @c *Conf class based on the transport prefix in the URL and compile-time feature flags.
+ * A concrete @c Conf subclass that wraps a @c Protocol, builds the matching
+ * transport @c Conf in @c init_target_internal() and forwards every virtual
+ * @c Conf hook to that target.  Constructing a @c Url is the entry point used
+ * by every public Node<> template to set up its transport backend.
  *
- * @par Transport Selection at Construction
+ * @par Protocol struct fields
+ * | Field          | Meaning                                                  |
+ * | -------------- | -------------------------------------------------------- |
+ * | @c str         | Full URL string after any @c VLINK_URL_REMAP rewrite.    |
+ * | @c transport   | Resolved transport backend identifier.                   |
+ * | @c host        | Hostname or IP component, if any.                        |
+ * | @c path        | Topic path component.                                    |
+ * | @c dictionary  | Query parameters parsed into a @c std::map.              |
+ * | @c fragment    | Fragment identifier following @c #.                      |
+ *
+ * @par Transport prefix to backend
+ * | URL prefix    | Conf class created in @c init_target_internal() |
+ * | ------------- | ----------------------------------------------- |
+ * | @c intra://   | @c IntraConf                                    |
+ * | @c shm://     | @c ShmConf                                      |
+ * | @c shm2://    | @c Shm2Conf                                     |
+ * | @c zenoh://   | @c ZenohConf                                    |
+ * | @c dds://     | @c DdsConf                                      |
+ * | @c ddsc://    | @c DdscConf                                     |
+ * | @c ddsr://    | @c DdsrConf                                     |
+ * | @c ddst://    | @c DdstConf                                     |
+ * | @c someip://  | @c SomeipConf                                   |
+ * | @c mqtt://    | @c MqttConf                                     |
+ * | @c fdbus://   | @c FdbusConf                                    |
+ * | @c qnx://     | @c QnxConf                                      |
+ * | other         | @c load_for_plugin() searches loaded plugins.   |
+ *
+ * @par Construction flow
  * @code
- *   Url url("dds://vehicle/speed?domain_id=1");
- *   // Internally creates a DdsConf and calls:
- *   //   url.parse(kSubscriber)  -> target_->parse(kSubscriber)
- *   //   url.create_subscriber() -> target_->create_subscriber()
+ *   URL string  -> UrlParser -> Protocol -> init_target_internal() -> *Conf
+ *                                              |
+ *                                              v
+ *                                       parse(impl_type)
+ *                                              |
+ *                                              v
+ *                                       create_publisher() / create_subscriber() / ...
+ *                                              |
+ *                                              v
+ *                                       NodeImpl backend instance
  * @endcode
  *
  * @par URL Remapping
- * When the @c VLINK_URL_USE_REMAP preprocessor flag is set, the @c Protocol
- * constructor checks the @c VLINK_URL_REMAP environment variable and rewrites
- * the URL before transport detection, enabling zero-code transport switching.
+ * When @c VLINK_URL_USE_REMAP is enabled, the @c Protocol constructor inspects
+ * the @c VLINK_URL_REMAP environment variable and rewrites the URL before the
+ * transport is resolved.  This enables transport switching without touching
+ * application code.
  *
- * @par Dynamic Plugin Transport Loading
- * When the @c VLINK_URL_USE_PLUGIN flag is set, @c Url::load_for_plugin()
- * searches dynamically loaded @c ConfPluginInterface plugins (from
- * @c VLINK_URL_PLUGINS env var) for a matching transport when built-in transports are
- * not found.
+ * @par Plugin loading
+ * When @c VLINK_URL_USE_PLUGIN is enabled, @c Url::init_plugins() loads shared
+ * libraries listed in the @c VLINK_URL_PLUGINS environment variable; the
+ * loaded @c ConfPluginInterface entries are consulted by @c load_for_plugin()
+ * for any transport that has no built-in match.
  *
- * @par Transport Enable Flags
- * The @c TransportEnableFlag bitmask controls which transports are initialised via
- * @c global_init() and @c init_plugins().  This allows embedding environments
- * (e.g. Android, QNX) to exclude unsupported transports at runtime.
+ * @par Transport enable flags
+ * @c TransportEnableFlag is a bitmask that selects which built-in transports
+ * participate in @c global_init() and @c init_plugins().  Embedding
+ * environments (Android, QNX, etc.) use it to skip transports they cannot
+ * support at runtime.
  *
- * @note This file includes all @c *_conf.h module headers and all @c *_impl.h
- *       headers.  It is the single aggregation point for the VLink transport
- *       abstraction layer.
+ * @par Example
+ * @code
+ * vlink::Url url("dds://vehicle/speed?domain_id=1");
+ *
+ * if (url.parse(vlink::kSubscriber)) {
+ *   auto impl = url.get_target() != nullptr
+ *                 ? std::unique_ptr<vlink::SubscriberImpl>{}
+ *                 : nullptr;
+ *   // Public Subscriber<T> template performs this call internally.
+ *   auto sub = vlink::Subscriber<MyMsg>::create_unique(url.get_str());
+ * }
+ * @endcode
+ *
+ * @note This file is the single aggregation point for the VLink impl layer; it
+ *       transitively includes every transport @c *_conf.h header and every
+ *       @c *_impl.h header.
  */
 
 #pragma once
@@ -107,23 +157,23 @@ namespace vlink {
 
 /**
  * @struct Protocol
- * @brief Parsed URL components used to select and configure a transport @c Conf.
+ * @brief Plain-data record describing the parsed components of a VLink URL.
  *
  * @details
- * Produced by @c Protocol(const std::string& address) which runs the URL through
- * @c UrlParser, applies any @c VLINK_URL_REMAP remapping, and resolves the
- * @c TransportType from the transport string.  Only @c Url may construct a @c Protocol
- * (private constructor, friend @c Url).
+ * Built by @c Protocol(const std::string& address), which feeds the URL through
+ * @c UrlParser, applies any @c VLINK_URL_REMAP rewriting and resolves the
+ * @c TransportType from the URI scheme.  Only @c Url may construct a
+ * @c Protocol (the constructor is private and @c Url is the sole friend).
  *
- * @note The @c str field holds the input URL after any remap has been applied;
- *       it is not rebuilt from parsed components.
+ * @note The @c str field is the URL string after remap, not a reconstruction
+ *       from the other fields.
  */
 struct VLINK_EXPORT Protocol final {
   std::string str;                                ///< URL string after remap, if any.
-  TransportType transport;                        ///< Resolved transport backend.
-  std::string host;                               ///< Hostname or IP address component.
+  TransportType transport;                        ///< Resolved transport backend identifier.
+  std::string host;                               ///< Hostname or IP component, if any.
   std::string path;                               ///< Topic path component.
-  std::map<std::string, std::string> dictionary;  ///< Parsed query key-value pairs.
+  std::map<std::string, std::string> dictionary;  ///< Query parameters parsed into a key/value dictionary.
   std::string fragment;                           ///< Fragment identifier (after @c #).
 
  private:
@@ -133,27 +183,27 @@ struct VLINK_EXPORT Protocol final {
 
 /**
  * @struct Url
- * @brief URL-based @c Conf dispatcher that routes to the correct transport backend.
+ * @brief @c Conf subclass that routes virtual calls to the transport selected by a URL string.
  *
  * @details
- * @c Url is the user-facing transport configuration type.  It is constructed from a
- * URL string, parses it into a @c Protocol, then creates the matching transport
- * @c Conf (@c target_) in @c init_target_internal().  All @c Conf virtual methods
- * are forwarded to @c target_.
+ * Construction parses the URL into a @c Protocol and then runs
+ * @c init_target_internal() to instantiate the matching transport @c Conf
+ * (@c target_).  Every @c Conf virtual hook is forwarded to @c target_; the
+ * caller need only build one @c Url instance per topic.
  *
- * @par Full Lifecycle
+ * @par Full lifecycle
  * @code
  *   // 1. Construct with URL string:
  *   Url url("dds://vehicle/speed");
- *   //    -> Protocol("dds://vehicle/speed") -> transport = kDds
+ *   //    -> Protocol("dds://vehicle/speed") -> transport == kDds
  *   //    -> init_target_internal() -> target_ = make_unique<DdsConf>()
  *
- *   // 2. Parse for a specific node type:
+ *   // 2. Parse for a specific node role:
  *   url.parse(kSubscriber);
  *   //    -> target_->parse(kSubscriber)
  *   //    -> target_->parse_protocol(&protocol_)
  *
- *   // 3. Create transport implementation:
+ *   // 3. Create the transport implementation:
  *   auto impl = url.create_subscriber();
  *   //    -> target_->create_subscriber()
  * @endcode
@@ -161,56 +211,55 @@ struct VLINK_EXPORT Protocol final {
 struct Url final : public Conf {
   /**
    * @enum TransportEnableFlag
-   * @brief Bitmask controlling which transport backends are active at runtime.
+   * @brief Bitmask that selects which transports participate in @c global_init() / @c init_plugins().
    *
    * @details
-   * Passed to @c global_init() and @c init_plugins() to selectively initialise
-   * only the transports that are compiled in and needed for the current process.
-   * Each bit enables one transport family; the bit positions are listed below
-   * and are independent of the numeric @c TransportType values.
+   * Embedding environments (e.g. Android, QNX) pass a subset of these flags to
+   * skip transports they cannot support at runtime.  Bit positions are
+   * independent of the numeric @c TransportType values.
    *
-   * | Flag           | Bit Position | Transport      |
-   * | -------------- | ------------ | -------------- |
-   * | kEnableIntra   | 15           | intra://       |
-   * | kEnableShm     | 14           | shm://         |
-   * | kEnableShm2    | 13           | shm2://        |
-   * | kEnableZenoh   | 12           | zenoh://       |
-   * | kEnableDds     | 11           | dds://         |
-   * | kEnableDdsc    | 10           | ddsc://        |
-   * | kEnableDdsr    |  9           | ddsr://        |
-   * | kEnableDdst    |  8           | ddst://        |
-   * | kEnableSomeip  |  7           | someip://      |
-   * | kEnableMqtt    |  6           | mqtt://        |
-   * | kEnableFdbus   |  5           | fdbus://       |
-   * | kEnableQnx     |  4           | qnx://         |
-   * | kEnableAll     | all bits set | all transports |
+   * | Flag             | Bit position | Transport       |
+   * | ---------------- | ------------ | --------------- |
+   * | @c kEnableIntra  | 15           | @c intra://     |
+   * | @c kEnableShm    | 14           | @c shm://       |
+   * | @c kEnableShm2   | 13           | @c shm2://      |
+   * | @c kEnableZenoh  | 12           | @c zenoh://     |
+   * | @c kEnableDds    | 11           | @c dds://       |
+   * | @c kEnableDdsc   | 10           | @c ddsc://      |
+   * | @c kEnableDdsr   |  9           | @c ddsr://      |
+   * | @c kEnableDdst   |  8           | @c ddst://      |
+   * | @c kEnableSomeip |  7           | @c someip://    |
+   * | @c kEnableMqtt   |  6           | @c mqtt://      |
+   * | @c kEnableFdbus  |  5           | @c fdbus://     |
+   * | @c kEnableQnx    |  4           | @c qnx://       |
+   * | @c kEnableAll    | all bits set | Every transport |
    */
   enum TransportEnableFlag : uint16_t {
     kEnableEmpty = 0b0000'0000'0000'0000,   ///< No transport enabled.
-    kEnableIntra = 0b1000'0000'0000'0000,   ///< Enable intra:// transport.
-    kEnableShm = 0b0100'0000'0000'0000,     ///< Enable shm:// (Iceoryx) transport.
-    kEnableShm2 = 0b0010'0000'0000'0000,    ///< Enable shm2:// (Iceoryx2) transport.
-    kEnableZenoh = 0b0001'0000'0000'0000,   ///< Enable zenoh:// transport.
-    kEnableDds = 0b0000'1000'0000'0000,     ///< Enable dds:// (Fast-DDS) transport.
-    kEnableDdsc = 0b0000'0100'0000'0000,    ///< Enable ddsc:// (CycloneDDS) transport.
-    kEnableDdsr = 0b0000'0010'0000'0000,    ///< Enable ddsr:// (RTI DDS) transport.
-    kEnableDdst = 0b0000'0001'0000'0000,    ///< Enable ddst:// (TravoDDS) transport.
-    kEnableSomeip = 0b0000'0000'1000'0000,  ///< Enable someip:// transport.
-    kEnableMqtt = 0b0000'0000'0100'0000,    ///< Enable mqtt:// transport.
-    kEnableFdbus = 0b0000'0000'0010'0000,   ///< Enable fdbus:// transport.
-    kEnableQnx = 0b0000'0000'0001'0000,     ///< Enable qnx:// transport (QNX only).
-    kEnableAll = 0b1111'1111'1111'1111,     ///< Enable all transports.
+    kEnableIntra = 0b1000'0000'0000'0000,   ///< Enable the @c intra:// transport.
+    kEnableShm = 0b0100'0000'0000'0000,     ///< Enable the @c shm:// (Iceoryx) transport.
+    kEnableShm2 = 0b0010'0000'0000'0000,    ///< Enable the @c shm2:// (Iceoryx2) transport.
+    kEnableZenoh = 0b0001'0000'0000'0000,   ///< Enable the @c zenoh:// transport.
+    kEnableDds = 0b0000'1000'0000'0000,     ///< Enable the @c dds:// (Fast-DDS) transport.
+    kEnableDdsc = 0b0000'0100'0000'0000,    ///< Enable the @c ddsc:// (CycloneDDS) transport.
+    kEnableDdsr = 0b0000'0010'0000'0000,    ///< Enable the @c ddsr:// (RTI DDS) transport.
+    kEnableDdst = 0b0000'0001'0000'0000,    ///< Enable the @c ddst:// (TravoDDS) transport.
+    kEnableSomeip = 0b0000'0000'1000'0000,  ///< Enable the @c someip:// transport.
+    kEnableMqtt = 0b0000'0000'0100'0000,    ///< Enable the @c mqtt:// transport.
+    kEnableFdbus = 0b0000'0000'0010'0000,   ///< Enable the @c fdbus:// transport.
+    kEnableQnx = 0b0000'0000'0001'0000,     ///< Enable the @c qnx:// transport (QNX only).
+    kEnableAll = 0b1111'1111'1111'1111,     ///< Enable every transport.
   };
 
   /**
-   * @brief Constructs a @c Url from a transport address string.
+   * @brief Builds a @c Url from a transport address string.
    *
    * @details
-   * Parses @p str into a @c Protocol, then calls @c init_target_internal() to
-   * create the matching @c Conf subclass.  Logs a fatal error if no transport
-   * backend matches the URL.
+   * Parses @p str into a @c Protocol, then delegates to
+   * @c init_target_internal() to allocate the matching transport @c Conf.
+   * Triggers a fatal log entry when no transport backend matches the URL.
    *
-   * @param str  VLink URL string, e.g. @c "dds://vehicle/speed".
+   * @param str  VLink URL string (e.g. @c "dds://vehicle/speed").
    */
   explicit Url(const std::string& str);
 
@@ -218,9 +267,9 @@ struct Url final : public Conf {
    * @brief Copy constructor.
    *
    * @details
-   * Copies the @c Protocol from @p url and rebuilds @c target_ via
-   * @c init_target_internal().  The new object gets a fresh transport @c Conf
-   * rather than sharing the same instance.
+   * Copies the @c Protocol from @p url and rebuilds a fresh @c target_ via
+   * @c init_target_internal(), so the two @c Url objects do not share the
+   * same transport @c Conf instance.
    *
    * @param url  Source @c Url to copy.
    */
@@ -230,7 +279,8 @@ struct Url final : public Conf {
    * @brief Move constructor.
    *
    * @details
-   * Transfers @c protocol_ and @c target_ from @p url without rebuilding.
+   * Transfers both @c protocol_ and @c target_ from @p url; no rebuild is
+   * performed.
    *
    * @param url  Source @c Url to move from.
    */
@@ -242,191 +292,179 @@ struct Url final : public Conf {
   ~Url() override;
 
   /**
-   * @brief Copy-assignment operator.
+   * @brief Copy assignment.
    *
    * @details
-   * Copies @c protocol_ and reinitialises @c target_ via @c init_target_internal().
+   * Copies @c protocol_ and re-runs @c init_target_internal() to rebuild
+   * @c target_.
    *
    * @param url  Source @c Url.
-   * @return     Reference to @c *this.
+   * @return Reference to @c *this.
    */
   Url& operator=(const Url& url);
 
   /**
-   * @brief Move-assignment operator.
+   * @brief Move assignment.
    *
    * @param url  Source @c Url.
-   * @return     Reference to @c *this.
+   * @return Reference to @c *this.
    */
   Url& operator=(Url&& url) noexcept;
 
   /**
-   * @brief Returns the stored URL string after any remap.
+   * @brief Returns the stored URL string (after any @c VLINK_URL_REMAP rewrite).
    *
-   * @return Const reference to the URL string stored in @c Protocol::str.
+   * @return Reference to the string stored inside @c Protocol::str.
    */
   [[nodiscard]] const std::string& get_str() const;
 
   /**
-   * @brief Returns a pointer to the underlying transport @c Conf, or @c nullptr.
+   * @brief Returns the underlying transport @c Conf or @c nullptr.
    *
    * @details
-   * Allows callers to inspect or downcast the concrete transport configuration
-   * (e.g. to a @c DdsConf to set DDS-specific QoS).
+   * Lets callers downcast the active transport conf for transport-specific
+   * inspection (for example to a @c DdsConf for native DDS QoS).
    *
-   * @return Pointer to the active transport @c Conf; @c nullptr if the URL was invalid.
+   * @return Pointer to the cached transport @c Conf; @c nullptr when the URL
+   *         was invalid or @c init_target_internal() failed.
    */
   [[nodiscard]] const Conf* get_target() const;
 
   /**
-   * @brief Parses the URL for the given node type, delegating to @c target_.
+   * @brief Parses the URL for @p impl_type by delegating to @c target_.
    *
    * @details
-   * Calls @c Conf::parse(impl_type), @c target_->parse(impl_type), and
-   * @c target_->parse_protocol() in sequence.  Returns @c false if @c target_
-   * is null or any step fails.
+   * Chains @c Conf::parse(impl_type), @c target_->parse(impl_type) and
+   * @c target_->parse_protocol(); returns @c false on @c target_ being null
+   * or any step failing.
    *
-   * @param impl_type  Bitmask of @c ImplType roles (e.g. @c kSubscriber).
-   * @return           @c true if all parse steps succeed; @c false otherwise.
+   * @param impl_type  Bitmask of @c ImplType roles to validate.
+   * @return @c true when every step succeeds; @c false otherwise.
    */
   bool parse(ImplType impl_type) const override;
 
   /**
-   * @brief Returns @c true if the underlying @c target_ @c Conf is valid.
+   * @brief Reports whether the underlying @c target_ conf is valid.
    *
-   * @details
-   * Delegates to @c target_->is_valid().  Returns @c false if @c target_ is null.
-   *
-   * @return @c true if the transport conf is valid and ready for use.
+   * @return Result of @c target_->is_valid(), or @c false when @c target_ is null.
    */
   [[nodiscard]] bool is_valid() const override;
 
   /**
-   * @brief Returns the @c ImplType resolved by the underlying @c target_ @c Conf.
+   * @brief Returns the @c ImplType cached by the most recent @c target_->parse().
    *
-   * @details
-   * Delegates to @c target_->get_impl_type().  Returns @c kUnknownImplType if
-   * @c target_ is null or @c parse() has not been called yet.
-   *
-   * @return The @c ImplType for this URL, or @c kUnknownImplType.
+   * @return Cached @c ImplType, or @c kUnknownImplType when @c target_ is null.
    */
   [[nodiscard]] ImplType get_impl_type() const override;
 
   /**
-   * @brief Returns the transport backend resolved from the URL.
+   * @brief Returns the transport backend identifier resolved from the URL.
    *
-   * @details
-   * Delegates to @c target_->get_transport_type().  Returns @c TransportType::kUnknown
-   * if @c target_ is null.
-   *
-   * @return The @c TransportType for this URL.
+   * @return @c TransportType value, or @c TransportType::kUnknown when no transport was resolved.
    */
   [[nodiscard]] TransportType get_transport_type() const override;
 
   /**
-   * @brief Loads and registers external @c ConfPluginInterface transport plugins.
+   * @brief Loads and registers transport plugins from @c VLINK_URL_PLUGINS.
    *
    * @details
-   * Searches for plugin shared libraries listed in the @c VLINK_URL_PLUGINS
-   * environment variable.  The @p transport_enable_flags argument is the set of
-   * built-in transports already available in this process; matching plugin names
-   * are skipped so linked modules take precedence over external plugins.  This
-   * is called automatically when a @c Url is first constructed; explicit calls
-   * are only needed in unusual initialisation order.
+   * Discovered plugins whose @c TransportType already appears in
+   * @p transport_enable_flags are skipped so that linked transports continue
+   * to take precedence.  The first @c Url construction triggers this call
+   * automatically; explicit invocations are only needed for unusual
+   * initialisation sequences.
    *
-   * @param transport_enable_flags  Bitmask of built-in @c TransportEnableFlag
-   *                                values to skip; default @c 0 skips none.
+   * @param transport_enable_flags  Bitmask of built-in transports already
+   *                                available; matching plugins are ignored.
    */
   VLINK_EXPORT static void init_plugins(uint16_t transport_enable_flags = 0);
 
   /**
-   * @brief Searches loaded plugins for a @c Conf factory matching @p type.
+   * @brief Asks loaded plugins for a @c Conf factory matching @p type.
    *
    * @details
-   * Looks up a previously loaded @c ConfPluginInterface for @p type and calls
-   * @c create() on it.  Returns @c nullptr if no matching plugin is registered.
+   * Looks up a previously registered @c ConfPluginInterface whose
+   * @c get_transport_type() returns @p type and invokes @c create() on it.
    *
-   * @param type  Transport backend to search for.
-   * @return      A new @c Conf instance from the plugin, or @c nullptr.
+   * @param type  Transport backend to look up.
+   * @return Newly created @c Conf, or @c nullptr when no plugin matches.
    */
   [[nodiscard]] VLINK_EXPORT static std::unique_ptr<Conf> load_for_plugin(TransportType type);
 
   /**
-   * @brief Returns a numeric sort index for the transport backend used by a URL.
+   * @brief Returns a numeric sort index for the transport backend of @p url.
    *
    * @details
-   * Used to order multiple URLs by transport priority.  Local transports
-   * (@c intra://, @c shm://) return lower indices than network transports.
-   * Empty URLs return @c -1.  Non-empty URLs with an unknown or unsupported
-   * transport return @c 0 and still participate in low-index priority sorting.
+   * Used to order URLs by transport priority.  Local transports
+   * (@c intra://, @c shm://) yield lower indices than network transports.
+   * Empty URLs return @c -1, while non-empty URLs whose transport is unknown
+   * still return @c 0 so they can participate in low-priority sorting.
    *
    * @param url  URL string to classify.
-   * @return     Sort index; lower values = higher priority.
+   * @return Sort index; lower values mean higher priority.
    */
   [[nodiscard]] VLINK_EXPORT static int get_sort_index(std::string_view url);
 
   /**
-   * @brief Returns @c true if the URL refers to a local (same-machine) transport.
+   * @brief Returns whether @p url designates a same-machine transport.
    *
    * @details
-   * A URL is considered local if its transport is @c intra://, @c shm://, or
-   * @c shm2://.
+   * A URL is local when it uses @c intra://, @c shm:// or @c shm2://.
    *
    * @param url  URL string to classify.
-   * @return     @c true for local transports; @c false for network transports.
+   * @return @c true for local transports; @c false for network ones.
    */
   [[nodiscard]] VLINK_EXPORT static bool is_local_type(std::string_view url);
 
   /**
-   * @brief Returns @c true if the URL uses the @c intra:// in-process transport.
+   * @brief Returns whether @p url designates the @c intra:// in-process transport.
    *
    * @param url  URL string to classify.
-   * @return     @c true only for @c intra:// URLs.
+   * @return @c true only for @c intra:// URLs.
    */
   [[nodiscard]] VLINK_EXPORT static bool is_intra_type(std::string_view url);
 
   /**
-   * @brief Returns @c true if the URL uses a shared-memory transport (@c shm:// or @c shm2://).
+   * @brief Returns whether @p url uses a shared-memory transport.
    *
    * @param url  URL string to classify.
-   * @return     @c true for @c shm:// and @c shm2:// URLs.
+   * @return @c true for both @c shm:// and @c shm2:// URLs.
    */
   [[nodiscard]] VLINK_EXPORT static bool is_shm_type(std::string_view url);
 
   /**
-   * @brief Initialises the global state for all enabled transport backends.
+   * @brief Initialises the process-wide state for every enabled transport.
    *
    * @details
-   * Calls @c NodeImpl::global_init() and then @c *Conf::global_init() for each
-   * transport whose bit is set in @p transport_enable_flags.  Must be called once
-   * before creating any @c Url objects if fine-grained transport control is needed.
-   * If not called explicitly, transports are lazily initialised on first use.
+   * Calls @c NodeImpl::global_init() first and then each @c *Conf::global_init()
+   * whose bit appears in @p transport_enable_flags.  Passing @c 0 expands to
+   * all compiled-in transports.  Must run once before any @c Url is created
+   * when fine-grained transport selection is required; otherwise the
+   * transports are lazily initialised on first use.
    *
-   * @param transport_enable_flags  Bitmask of @c TransportEnableFlag values.  Passing
-   *                                @c 0 (the default) expands to all compiled-in transports.
+   * @param transport_enable_flags  Bitmask of @c TransportEnableFlag values.
    */
   static void global_init(uint16_t transport_enable_flags = 0);
 
   /**
-   * @brief Returns a bitmask of all compile-time-enabled transport backends.
+   * @brief Returns a bitmask of all compile-time-enabled transports.
    *
    * @details
-   * Built at compile time from the @c VLINK_SUPPORT_* preprocessor flags.  The
-   * result can be passed to @c global_init() to initialise exactly the available
-   * transports.
+   * Computed from the @c VLINK_SUPPORT_* preprocessor flags.  The result can
+   * be passed to @c global_init() to initialise the available transports
+   * exactly.
    *
-   * @return @c TransportEnableFlag bitmask of supported transports.
+   * @return Bitmask of @c TransportEnableFlag values.
    */
   [[nodiscard]] static uint16_t get_transport_enable_flags();
 
   /**
-   * @brief Creates the @c target_ @c Conf for a given @c Protocol.
+   * @brief Builds @c target_ for the resolved transport in @p protocol.
    *
    * @details
-   * Called by constructors and assignment operators.  Switches on
-   * @c Protocol::transport and instantiates the corresponding @c *Conf class.
-   * Falls back to @c load_for_plugin() if no built-in transport matches.  Logs a
-   * fatal error if neither path succeeds.
+   * Switches on @c Protocol::transport, allocates the matching @c *Conf class,
+   * and falls back to @c load_for_plugin() when no built-in backend matches.
+   * Logs a fatal entry when neither path succeeds.
    *
    * @param protocol  Parsed URL information used to select the transport.
    * @param target    Output: receives the newly created @c Conf instance.

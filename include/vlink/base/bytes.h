@@ -23,71 +23,72 @@
 
 /**
  * @file bytes.h
- * @brief Versatile byte buffer with small-buffer optimisation, ownership semantics and compression.
+ * @brief Canonical 128-byte binary payload carrier with inline storage, multi-mode ownership and LZAV compression.
  *
  * @details
- * @c Bytes is the primary binary data carrier in VLink.  Every message serialised or received by
- * a publisher/subscriber is wrapped in a @c Bytes object.  The class is designed to minimise
- * heap allocations on the hot path:
+ * Every binary buffer that crosses a VLink boundary (publish, subscribe, RPC argument, field value,
+ * proxy snapshot) flows through a @c vlink::Bytes object.  The class fuses five orthogonal concerns
+ * into a single fixed-size 128-byte structure: small-buffer optimisation, ownership tagging,
+ * loaned-memory tracking, prefix-offset reservation and a compression / encoding utility surface.
  *
- * - Buffers up to @c kStackSize (96) bytes are stored entirely within the object's inline
- *   @c stack_data_ array (small-buffer optimisation / SBO).
- * - Larger buffers are allocated through @c bytes_malloc() / @c bytes_free(), which forward
- *   to @c MemoryPool::global_instance() (a tiered free-list pool, see @c memory_pool.h).
- * - The total object size is exactly 128 bytes regardless of content.
+ * @par Ownership model
  *
- * Ownership model:
+ * | Factory                       | Owns memory | Frees on destroy | Aliases source pointer | Typical caller        |
+ * | ----------------------------- | ----------- | ---------------- | ---------------------- | --------------------- |
+ * | @c Bytes::create              | yes         | yes              | no                     | Fresh allocation      |
+ * | @c Bytes::shallow_copy        | no          | no               | yes                    | Zero-copy view        |
+ * | @c Bytes::deep_copy           | when sized  | when sized       | no                     | Detached owned copy   |
+ * | @c Bytes::loan_internal       | no (loaned) | no               | yes                    | Iceoryx zero-copy     |
+ * | @c Bytes::shallow_copy_ptr    | no          | no               | yes                    | Opaque pointer wrap   |
  *
- * | Factory method                  | Owns memory | On copy     | Use case                           |
- * | ------------------------------- | ----------- | ----------- | ---------------------------------- |
- * | @c Bytes::create()              | Yes         | Deep copy   | Fresh allocation                   |
- * | @c Bytes::shallow_copy()        | No          | Ptr alias   | Zero-copy wrapping of extern buf   |
- * | @c Bytes::deep_copy()           | Conditional | Deep copy   | Owned copy when source data exists |
- * | @c Bytes::loan_internal()       | No (loaned) | Ptr alias   | Iceoryx zero-copy loan             |
- * | @c Bytes::shallow_copy_ptr()    | No          | Ptr alias   | Wrap opaque pointer (size == 0)    |
+ * @par Memory layout (logical)
  *
- * Compression support (LZAV):
- * - @c compress_data() appends a 4-byte header magic, a 4-byte original-size field and a
- *   4-byte footer magic around the LZAV compressed payload, enabling @c is_compress_data()
- *   to detect compressed buffers.
- * - @c uncompress_data() strips the wrapper and decompresses; optionally validates the
- *   magic bytes first.
+ * @verbatim
+ *  +------------------------------------------------------------------+
+ *  |                          Bytes (128 B)                           |
+ *  +-------------------------+-------+----+------+-------+------------+
+ *  | stack_data_ (96 B SBO)  | owner | ln | off  | size  | capacity   |
+ *  +-------------------------+-------+----+------+-------+------------+
+ *                                              |
+ *                                              | (when size > 96 B)
+ *                                              v
+ *                                +--------------------------------+
+ *                                |  heap buffer from MemoryPool   |
+ *                                |  [ offset prefix ][ payload ]  |
+ *                                +--------------------------------+
+ * @endverbatim
  *
- * Utility helpers:
- * - Base-64 encode/decode (@c encode_to_base64 / @c decode_from_base64)
- * - CRC-32 checksum (@c get_crc_32)
- * - CRC-64 checksum (@c get_crc_64) -- ECMA-182 variant
- * - Byte-order reversal (@c reverse_order)
- * - Hex-string conversion (@c convert_to_hex_str)
- * - User-input parsing from whitespace-separated or @c 0x-prefixed hex strings (@c from_user_input)
+ * @par Compression frame layout
  *
- * @note
- * - The @c offset_ field reserves a prefix region inside the allocated buffer.  @c data()
- *   returns @c real_data() + @c offset().  This allows transport layers to prepend headers
- *   in-place without re-allocation.
- * - @c is_loaned() is set by @c loan_internal(), which is used exclusively for iceoryx
- *   zero-copy payloads that must @b not be freed by VLink.
- * - @c is_ptr() returns @c true when @c data_ is non-null, size == 0, offset == 0 and the
- *   object is not an owner, meaning the buffer holds only an opaque pointer created via
- *   @c shallow_copy_ptr().
- * - @c init_memory_pool() may be called explicitly at application startup to eagerly
- *   construct the global @c MemoryPool; @c release_memory_pool() trims fully-free chunks.
- *   Both are no-ops when the pool is unavailable.
+ * @verbatim
+ *  byte:    0   1   2   3   4   5   6   7   8                       N-4  N-3  N-2  N-1
+ *         +---+---+---+---+---+---+---+---+---+ - - - - - - - - - +----+----+----+----+
+ *  field: | header magic  | original size BE  |  LZAV payload     |  footer magic     |
+ *         +---+---+---+---+---+---+---+---+---+ - - - - - - - - - +----+----+----+----+
+ *           17  49  B2  6F                                            A7   05   ED   71
+ * @endverbatim
+ *
+ * Buffers below or equal to @c kStackSize (96 bytes) reside entirely in @c stack_data_; only larger
+ * payloads pull from @c MemoryPool::global_instance() through @c bytes_malloc.  The total object
+ * footprint is fixed at 128 bytes regardless of payload size.  An @c offset prefix reserves space
+ * at the head of the buffer so transport adapters can prepend protocol headers without realloc;
+ * @c data() returns @c real_data() @c + @c offset().
  *
  * @par Example
  * @code
- * // SBO path (no heap allocation):
- * auto buf = vlink::Bytes::create(64);
- * std::memcpy(buf.data(), payload, 64);
+ *   vlink::Bytes a = vlink::Bytes::create(64);            // SBO path, no heap allocation
+ *   std::memcpy(a.data(), payload, a.size());
  *
- * // Zero-copy shallow wrap:
- * auto view = vlink::Bytes::shallow_copy(ext_ptr, ext_size);
+ *   vlink::Bytes view = vlink::Bytes::shallow_copy(ext, ext_size);   // zero-copy alias
  *
- * // Compression:
- * auto compressed = vlink::Bytes::compress_data(buf.data(), buf.size());
- * if (vlink::Bytes::is_compress_data(compressed.data(), compressed.size())) {
- *   auto original = vlink::Bytes::uncompress_data(compressed.data(), compressed.size());
- * }
+ *   auto packed = vlink::Bytes::compress_data(a.data(), a.size());
+ *   if (vlink::Bytes::is_compress_data(packed.data(), packed.size())) {
+ *     vlink::Bytes plain = vlink::Bytes::uncompress_data(packed.data(), packed.size());
+ *   }
+ *
+ *   const uint32_t crc = vlink::Bytes::get_crc_32(a);
+ *   const std::string base64 = vlink::Bytes::encode_to_base64(a);
+ *   vlink::Bytes round_trip = vlink::Bytes::decode_from_base64(base64);
  * @endcode
  */
 
@@ -107,463 +108,406 @@ namespace vlink {
 
 /**
  * @class Bytes
- * @brief Versatile 128-byte byte buffer with SBO, five ownership modes and compression helpers.
+ * @brief Fixed-size 128-byte buffer holder with SBO, five ownership modes and integrated codecs.
  *
  * @details
- * The total object size is always 128 bytes (96-byte inline stack storage + metadata).
- * Allocations larger than 96 bytes spill to the memory pool or system heap.
+ * Implements VLink's universal binary carrier.  Small payloads live inside the embedded
+ * @c stack_data_ array; larger payloads spill to the global @c MemoryPool.  Ownership is encoded
+ * in two flags (@c is_owner_, @c is_loaned_) so the destructor can route to the correct release
+ * primitive: heap free, iceoryx loan release, or no-op for shallow aliases.  All public functions
+ * are @c noexcept; failure is reported via empty return values.
  */
 class VLINK_EXPORT Bytes final {  // size == 128 bytes
  public:
   /**
-   * @brief Initialises the global thread-safe memory pool for @c Bytes allocations.
+   * @brief Eagerly constructs the process-wide @c MemoryPool that backs heap allocations.
    *
    * @details
-   * Triggers construction of the static @c MemoryPool used by @c bytes_malloc.
-   * The pool's tier configuration is built from @c MemoryPool::get_default_config(),
-   * which honours the @c VLINK_MEMORY_LEVEL environment variable (0..9,
-   * default 3; 0 = bypass mode, every allocation goes straight to
-   * @c ::operator @c new / @c delete).
-   * Call this once at application start before any @c Bytes objects are created.
-   * Safe to call multiple times; subsequent calls are no-ops.
+   * @c Bytes::bytes_malloc routes through @c MemoryPool::global_instance().  Calling this once
+   * at program start front-loads the singleton construction cost and respects
+   * @c VLINK_MEMORY_LEVEL / @c VLINK_MEMORY_PREALLOC.  Subsequent calls are idempotent no-ops.
    */
   static void init_memory_pool() noexcept;
 
   /**
-   * @brief Releases every fully-free upstream chunk cached by the global
-   *        @c Bytes memory pool.
+   * @brief Releases every empty chunk currently cached by the @c Bytes memory pool.
    *
    * @details
-   * Forwards to @c MemoryPool::global_instance().clear().  Drops only those
-   * cached chunks that have zero live allocations -- chunks containing any
-   * @c Bytes buffer still in use stay intact, so the call is safe to invoke
-   * without first reaping every @c Bytes instance.  Lifetime counters
-   * (@c upstream_alloc_count / @c upstream_alloc_bytes) and the geometric
-   * growth state (@c next_chunk_blocks) are preserved.
+   * Forwards to @c MemoryPool::global_instance().trim().  Only chunks whose blocks are entirely
+   * on their tier's free list are returned to the system allocator; chunks still backing a live
+   * @c Bytes instance are preserved.  Lifetime statistics and the geometric chunk-growth state
+   * are kept intact.
    *
-   * @note
-   * Under @c MemoryPool's per-tier locking, this method is safe to call
-   * concurrently with other @c Bytes operations (@c create / @c reserve /
-   * destruction).  The cleanup pass holds each tier's lock for
-   * @c O(N_freelist * N_chunks) work, so callers running it during heavy
-   * traffic will see contention on hot tiers -- treat it as a maintenance
-   * call (e.g. periodic memory trim, idle-time pruning), not a hot-path
-   * primitive.  Calling it never invalidates a still-live @c Bytes
-   * instance.
+   * @note Safe to invoke concurrently with allocations and frees; treat as a periodic maintenance
+   *       call rather than a hot-path primitive.
    */
   static void release_memory_pool() noexcept;
 
   /**
-   * @brief Allocates a raw byte buffer from the memory pool (or heap if pool is unavailable).
+   * @brief Allocates a raw aligned byte buffer through the global memory pool.
    *
-   * @param size  Number of bytes to allocate.
-   * @return Pointer to the allocated memory, or @c nullptr on failure.
-   *
-   * @note The returned pointer must be freed with @c bytes_free() using the same @p size.
+   * @param size  Number of bytes requested.
+   * @return Pointer to the newly allocated buffer, or @c nullptr on upstream OOM.
+   * @note The same @p size value must be passed to the matching @c bytes_free call.
    */
   [[nodiscard]] static uint8_t* bytes_malloc(size_t size) noexcept;
 
   /**
-   * @brief Frees a buffer previously allocated by @c bytes_malloc().
+   * @brief Returns a buffer previously obtained from @c bytes_malloc to the pool.
    *
-   * @param ptr   Pointer returned by @c bytes_malloc().
-   * @param size  Original size passed to @c bytes_malloc().
+   * @param ptr   Pointer returned by @c bytes_malloc.  @c nullptr is a no-op.
+   * @param size  Original size; must match the value passed to @c bytes_malloc.
    */
   static void bytes_free(uint8_t* ptr, size_t size) noexcept;
 
   /**
-   * @brief Creates an owned @c Bytes buffer of the given size.
+   * @brief Allocates an owned buffer of the requested size with an optional header offset.
    *
    * @details
-   * Memory is allocated from the pool or heap.  If @p size <= @c kStackSize (96) the inline
-   * stack buffer is used instead (no heap allocation).  The contents are @b not initialised.
+   * Payloads up to @c kStackSize stay in @c stack_data_; larger payloads use the memory pool.
+   * The content is left uninitialised.  When @p offset is non-zero the first @p offset bytes of
+   * the backing buffer are reserved so transport layers can prepend frame headers in place;
+   * @c data() then points past the reserved prefix.
    *
-   * @param size    Number of usable bytes (i.e. @c size() after construction).
-   * @param offset  Number of bytes to reserve at the start of the backing buffer as a prefix
-   *                region (e.g., for protocol headers). @c data() = @c real_data() + @p offset.
-   *                Default: 0.
-   * @return A new owned @c Bytes object.
+   * @param size    Number of usable payload bytes after construction.
+   * @param offset  Header bytes reserved before the payload region.  Default: @c 0.
+   * @return New owning @c Bytes instance.
    */
   [[nodiscard]] static Bytes create(size_t size, uint8_t offset = 0) noexcept;
 
   /**
-   * @brief Creates a non-owning @c Bytes alias pointing to an external mutable buffer.
+   * @brief Wraps an external mutable buffer as a non-owning alias.
    *
    * @details
-   * No memory is allocated or copied.  The caller is responsible for ensuring the external
-   * buffer outlives the returned @c Bytes object.  @c is_owner() returns @c false.
+   * Performs no allocation and no copy.  The caller guarantees the lifetime of @p data exceeds
+   * the lifetime of the returned object.
    *
-   * @param data  Pointer to the external buffer.
+   * @param data  External buffer to alias.
    * @param size  Length of the buffer in bytes.
-   * @return A non-owning @c Bytes object wrapping @p data.
+   * @return Non-owning @c Bytes pointing at @p data.
    */
   [[nodiscard]] static Bytes shallow_copy(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Creates a non-owning @c Bytes alias pointing to an external read-only buffer.
+   * @brief Wraps an external read-only buffer as a non-owning alias.
    *
    * @details
-   * Same as the mutable overload except the @p data pointer is @c const.
-   * The current implementation stores the pointer via @c const_cast, so the
-   * non-const @c data() accessor also returns that address.
+   * Identical to the mutable overload; the @c const pointer is stored verbatim through a
+   * @c const_cast so the non-const @c data() accessor returns the same address.
    *
-   * @param data  Pointer to the external read-only buffer.
+   * @param data  External read-only buffer to alias.
    * @param size  Length of the buffer in bytes.
-   * @return A non-owning @c Bytes object wrapping @p data.
+   * @return Non-owning @c Bytes pointing at @p data.
    */
   [[nodiscard]] static Bytes shallow_copy(const uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Wraps an opaque pointer without associating a byte size.
+   * @brief Wraps an opaque pointer as a zero-size pointer carrier.
    *
    * @details
-   * Sets size == 0 and offset == 0 so that @c is_ptr() returns @c true.  Useful for
-   * passing opaque C handles or iceoryx chunk pointers through the @c Bytes transport.
-   * The caller owns the pointed-to memory; VLink will not free it.
+   * Sets @c size() and @c offset() to @c 0 so @c is_ptr() reports @c true.  The wrapped pointer
+   * is retrieved through @c to_ptr<T>(); ownership stays with the caller.
    *
-   * @param data  Opaque pointer to wrap.
-   * @return A non-owning, zero-size @c Bytes object carrying the pointer.
+   * @param data  Opaque pointer value to embed.
+   * @return Non-owning, zero-size @c Bytes carrying @p data.
    */
   [[nodiscard]] static Bytes shallow_copy_ptr(void* data) noexcept;
 
   /**
-   * @brief Creates an owned deep copy of an external mutable buffer.
+   * @brief Produces an owned copy of an external mutable buffer.
    *
    * @details
-   * Allocates new memory, copies @p size bytes from @p data, and returns an
-   * owning @c Bytes object.  Safe even after the original buffer is freed.
-   * When @p data is @c nullptr or @p size is 0, no source bytes are copied:
-   * with zero offset the result is empty and non-owning; with a non-zero
-   * offset only the prefix area is allocated.
+   * Allocates a fresh buffer and @c memcpy s @p size bytes from @p data into it.  When the source
+   * is empty (null pointer or zero size) and @p offset is @c 0 the result is empty and non-owning;
+   * with a non-zero @p offset only the prefix region is allocated.
    *
-   * @param data    Pointer to the source buffer.
+   * @param data    Source buffer.
    * @param size    Number of bytes to copy.
-   * @param offset  Prefix-region size in the new buffer.  Default: 0.
-   * @return A new @c Bytes containing a copy of the source data when present.
+   * @param offset  Header bytes reserved in the new buffer.  Default: @c 0.
+   * @return Owning @c Bytes containing the copied payload.
    */
   [[nodiscard]] static Bytes deep_copy(uint8_t* data, size_t size, uint8_t offset = 0) noexcept;
 
   /**
-   * @brief Creates an owned deep copy of an external read-only buffer.
+   * @brief Produces an owned copy of an external read-only buffer.
    *
    * @details
-   * Same as the mutable overload but accepts a @c const source pointer.  Empty
-   * or null sources follow the same ownership rules as the mutable overload.
+   * Read-only overload of @c deep_copy(uint8_t*, size_t, uint8_t).  Ownership rules for empty
+   * sources match the mutable overload exactly.
    *
-   * @param data    Pointer to the source read-only buffer.
+   * @param data    Source read-only buffer.
    * @param size    Number of bytes to copy.
-   * @param offset  Prefix-region size in the new buffer.  Default: 0.
-   * @return A new @c Bytes containing a copy of the source data when present.
+   * @param offset  Header bytes reserved in the new buffer.  Default: @c 0.
+   * @return Owning @c Bytes containing the copied payload.
    */
   [[nodiscard]] static Bytes deep_copy(const uint8_t* data, size_t size, uint8_t offset = 0) noexcept;
 
   /**
-   * @brief Creates a loaned (non-owning) alias for an iceoryx zero-copy payload (mutable).
+   * @brief Wraps an iceoryx-loaned mutable payload as a non-owning, non-aliasing carrier.
    *
    * @details
-   * Marks the object with @c is_loaned() == @c true.  VLink will not free the memory
-   * because it is owned by the iceoryx RouDi daemon.  This factory is used internally
-   * by the @c shm:// transport backend.
+   * Marks @c is_loaned() as @c true so the destructor skips the free call -- the underlying
+   * memory is owned by RouDi.  Used internally by the @c shm:// transport backend.
    *
    * @param data  Pointer to the iceoryx chunk payload.
-   * @param size  Size of the payload in bytes.
-   * @return A loaned @c Bytes object.
+   * @param size  Length of the payload in bytes.
+   * @return Loaned @c Bytes instance.
    */
   [[nodiscard]] static Bytes loan_internal(uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Creates a loaned (non-owning) alias for an iceoryx zero-copy payload (read-only).
-   *
-   * @details
-   * Same as the mutable overload but for @c const payloads.
+   * @brief Wraps an iceoryx-loaned read-only payload as a non-owning, non-aliasing carrier.
    *
    * @param data  Pointer to the read-only iceoryx chunk payload.
-   * @param size  Size of the payload in bytes.
-   * @return A loaned @c Bytes object.
+   * @param size  Length of the payload in bytes.
+   * @return Loaned @c Bytes instance.
    */
   [[nodiscard]] static Bytes loan_internal(const uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Constructs a @c Bytes buffer from a @c std::string by deep-copying its contents.
+   * @brief Builds an owned @c Bytes from the bytes of a UTF-8 string.
    *
-   * @param str     Source string.
-   * @param offset  Prefix-region reserved before the string data.  Default: 0.
-   * @return A new @c Bytes containing the UTF-8 bytes of @p str; an empty
-   *         string with zero offset yields an empty non-owning object.
+   * @param str     Source string; copied byte-for-byte.
+   * @param offset  Header bytes reserved before the payload.  Default: @c 0.
+   * @return Owning @c Bytes containing @p str.  Empty input with zero offset yields an empty result.
    */
   [[nodiscard]] static Bytes from_string(const std::string& str, uint8_t offset = 0) noexcept;
 
   /**
-   * @brief Parses a user-provided hex string into a @c Bytes buffer.
+   * @brief Parses a user-typed hex literal into a @c Bytes payload.
    *
    * @details
-   * Accepts whitespace-separated byte tokens such as @c "1A 2B 3C", optional
-   * @c 0x / @c 0X prefixes, and contiguous even-length hex with or without a
-   * prefix (for example @c "1A2B3C" or @c "0x1A2B3C").  Sets @p ok to
-   * @c false if parsing fails.
+   * Accepts space-separated byte tokens (@c "1A @c 2B"), a contiguous even-length hex run with
+   * or without a @c 0x / @c 0X prefix (@c "0x1A2B"), or mixed forms.  Returns an empty result on
+   * parse failure and sets @p ok to @c false.
    *
-   * @param str  Input string to parse.
-   * @param ok   Optional pointer set to @c true on success, @c false on failure.
-   * @return The parsed @c Bytes, or an empty object on failure.
+   * @param str  Source hex string.
+   * @param ok   Optional pointer set to @c true on success and @c false on failure.
+   * @return Parsed @c Bytes, or an empty value on failure.
    */
   [[nodiscard]] static Bytes from_user_input(const std::string& str, bool* ok = nullptr) noexcept;
 
   /**
-   * @brief Converts a raw byte array to an uppercase hex string with spaces.
+   * @brief Renders a raw byte array as space-separated uppercase hex tokens.
    *
-   * @details
-   * Each byte is rendered as two uppercase hex digits separated by spaces, e.g.,
-   * @c {0x1A, 0xB2} -> @c "1A B2".  Useful for logging binary frames.
-   *
-   * @param value  Pointer to the byte array.
-   * @param size   Number of bytes to convert.
-   * @return Hex string representation.
+   * @param value  Pointer to the source buffer.
+   * @param size   Number of bytes to render.
+   * @return Hex string such as @c "1A B2 C3" for the input @c {0x1A, @c 0xB2, @c 0xC3}.
    */
   [[nodiscard]] static std::string convert_to_hex_str(const uint8_t* value, size_t size) noexcept;
 
   /**
-   * @brief Returns a new @c Bytes object with the byte order of @p target reversed.
+   * @brief Returns a new owned @c Bytes with the byte order of @p target reversed.
    *
    * @param target  Source buffer to reverse.
-   * @return A new owned @c Bytes with bytes in reversed order.
+   * @return New owned buffer with reversed byte order.
    */
   [[nodiscard]] static Bytes reverse_order(const Bytes& target) noexcept;
 
   /**
-   * @brief Encodes a @c Bytes buffer as a standard Base-64 ASCII string.
+   * @brief Encodes a payload as a standard Base-64 ASCII string.
    *
-   * @param target  Buffer to encode.
-   * @return Base-64 encoded string.
+   * @param target  Source buffer.
+   * @return Base-64 string representation.
    */
   [[nodiscard]] static std::string encode_to_base64(const Bytes& target) noexcept;
 
   /**
-   * @brief Decodes a Base-64 ASCII string into a @c Bytes buffer.
+   * @brief Decodes a Base-64 ASCII string back into a binary payload.
    *
-   * @param target  Base-64 encoded string.
-   * @return Decoded @c Bytes.  Returns an empty object on invalid input.
+   * @param target  Base-64 source string.
+   * @return Decoded @c Bytes, or an empty value on invalid input.
    */
   [[nodiscard]] static Bytes decode_from_base64(const std::string& target) noexcept;
 
   /**
-   * @brief Computes the CRC-32 (ISO-HDLC) checksum of a @c Bytes buffer.
+   * @brief Computes the CRC-32 (ISO-HDLC) checksum of @p target.
    *
-   * @param target  Buffer to checksum.
-   * @return 32-bit CRC value.
+   * @param target  Source buffer.
+   * @return 32-bit CRC-32 value.
    */
   [[nodiscard]] static uint32_t get_crc_32(const Bytes& target) noexcept;
 
   /**
-   * @brief Computes the CRC-64 (ECMA-182) checksum of a @c Bytes buffer.
+   * @brief Computes the CRC-64 (ECMA-182) checksum of @p target.
    *
-   * @param target  Buffer to checksum.
-   * @return 64-bit CRC value.
+   * @param target  Source buffer.
+   * @return 64-bit CRC-64 value.
    */
   [[nodiscard]] static uint64_t get_crc_64(const Bytes& target) noexcept;
 
   /**
-   * @brief Constructs an empty, unallocated @c Bytes object.
+   * @brief Constructs an empty, non-owning carrier with no payload.
    *
    * @details
-   * @c data() returns @c nullptr and @c size() returns 0.
-   * @c is_owner() and @c is_loaned() are both @c false.
+   * @c data() is @c nullptr and @c size() is @c 0; both @c is_owner() and @c is_loaned() are
+   * @c false.  The SBO region is zero-initialised.
    */
   Bytes() noexcept;
 
   /**
-   * @brief Copy constructor -- produces an owned deep copy when source data exists.
+   * @brief Copy constructor; converts any source into an owned deep copy.
    *
    * @details
-   * Allocates a fresh buffer through @c MemoryPool and @c memcpy s the source
-   * payload into it when @p target has data.  Empty sources produce an empty
-   * non-owner result.  Non-empty results are owners (@c is_owner() returns
-   * @c true, @c is_loaned() returns @c false), regardless of whether @p target
-   * was an owner, a shallow alias, or a loaned object.
+   * Allocates a fresh buffer through the memory pool and copies @p target's bytes into it when
+   * @p target carries data.  Empty inputs yield an empty non-owning result.  The copy is always
+   * an owner regardless of the source's ownership tags -- aliasing and loaned semantics are not
+   * preserved by this constructor.
    *
-   * @note
-   * If you need to preserve aliasing or loaned semantics, do not use the copy
-   * constructor — use one of the explicit factory methods instead:
-   *  - @c Bytes::shallow_copy(const Bytes&) — keeps the alias (no ownership).
-   *  - @c Bytes::loan_internal(...) — preserves the loaned tag for iceoryx
-   *    zero-copy transports.
-   * Copying a loaned @c Bytes through this constructor releases the loan
-   * (the new object owns an independent copy and the original loan is not
-   * extended by the copy).
-   *
-   * @param target  Source @c Bytes to copy.
+   * @param target  Source buffer.
+   * @note To keep aliasing or loaned semantics use the explicit factory methods
+   *       (@c shallow_copy / @c loan_internal) instead of the copy constructor.
    */
   Bytes(const Bytes& target) noexcept;
 
   /**
-   * @brief Move constructor.
+   * @brief Move constructor; transfers payload, ownership flags and prefix from @p target.
    *
-   * @details
-   * Transfers all ownership and data from @p target.  After the move, @p target is empty.
-   *
-   * @param target  Source @c Bytes to move from.
+   * @param target  Source buffer left in the empty state after the move.
    */
   Bytes(Bytes&& target) noexcept;
 
   /**
-   * @brief Constructs an owned @c Bytes from an initialiser list of byte values.
+   * @brief Constructs an owned buffer from an initialiser list of bytes.
    *
-   * @details
-   * Equivalent to @c create(list.size()) followed by a @c memcpy of the list elements.
-   *
-   * @param list  Initialiser list of @c uint8_t values.
+   * @param list  Byte values to copy into the new buffer.
    */
   Bytes(const std::initializer_list<uint8_t>& list) noexcept;
 
   /**
-   * @brief Constructs an owned @c Bytes by deep-copying a @c std::vector<uint8_t>.
+   * @brief Constructs an owned buffer from a @c std::vector<uint8_t> by deep copy.
    *
-   * @param data  Vector whose contents are copied into the new buffer.
+   * @param data  Source vector; its contents are copied verbatim.
    */
   explicit Bytes(const std::vector<uint8_t>& data) noexcept;
 
   /**
-   * @brief Destructor.  Frees owned memory if @c is_owner() is @c true and @c is_loaned() is @c false.
+   * @brief Destructor; releases owned heap storage and ignores loaned / shallow buffers.
    */
   ~Bytes() noexcept;
 
   /**
-   * @brief Copy assignment operator -- produces an owned deep copy when source data exists.
+   * @brief Copy assignment; converts any source into an owned deep copy of @p target.
    *
    * @details
-   * Releases the current buffer (if owned), then allocates a fresh buffer
-   * through @c MemoryPool and @c memcpy s @p target 's payload into it when
-   * @p target has data.  Empty sources produce an empty non-owner result.
+   * Releases the current buffer first when this instance owns one.  Empty sources produce an
+   * empty non-owning result.
    *
-   * @note
-   * To keep alias / loaned semantics, prefer @c shallow_copy(const Bytes&) or
-   * the dedicated factory methods rather than this assignment operator.
-   *
-   * @param target  Source @c Bytes to copy-assign from.
+   * @param target  Source buffer.
    * @return Reference to @c *this.
    */
   Bytes& operator=(const Bytes& target) noexcept;
 
   /**
-   * @brief Move assignment operator.
+   * @brief Move assignment; releases the current buffer and adopts @p target's state.
    *
-   * @details
-   * Releases the current buffer, then transfers all state from @p target.
-   *
-   * @param target  Source @c Bytes to move from.
+   * @param target  Source buffer left empty after the move.
    * @return Reference to @c *this.
    */
   Bytes& operator=(Bytes&& target) noexcept;
 
   /**
-   * @brief Assignment from a @c std::vector<uint8_t> (deep copy).
+   * @brief Replaces the payload with a deep copy of @p data.
    *
-   * @param data  Vector whose contents are deep-copied into this buffer.
+   * @param data  Source vector.
    * @return Reference to @c *this.
    */
   Bytes& operator=(const std::vector<uint8_t>& data) noexcept;
 
   /**
-   * @brief Equality comparison -- compares byte content.
+   * @brief Byte-wise equality comparison with another @c Bytes.
    *
-   * @param target  @c Bytes to compare with.
-   * @return @c true if both objects have identical size and content.
+   * @param target  Right-hand operand.
+   * @return @c true when sizes and payload bytes match exactly.
    */
   [[nodiscard]] bool operator==(const Bytes& target) const noexcept;
 
   /**
-   * @brief Inequality comparison -- compares byte content.
+   * @brief Byte-wise inequality comparison with another @c Bytes.
    *
-   * @param target  @c Bytes to compare with.
-   * @return @c true if the objects differ in size or content.
+   * @param target  Right-hand operand.
+   * @return @c true when either the sizes or the payload bytes differ.
    */
   [[nodiscard]] bool operator!=(const Bytes& target) const noexcept;
 
   /**
-   * @brief Equality comparison with a @c std::vector<uint8_t>.
+   * @brief Byte-wise equality comparison with a @c std::vector<uint8_t>.
    *
-   * @param data  Vector to compare with.
-   * @return @c true if sizes and contents match.
+   * @param data  Right-hand operand.
+   * @return @c true when sizes and bytes match exactly.
    */
   [[nodiscard]] bool operator==(const std::vector<uint8_t>& data) const noexcept;
 
   /**
-   * @brief Inequality comparison with a @c std::vector<uint8_t>.
+   * @brief Byte-wise inequality comparison with a @c std::vector<uint8_t>.
    *
-   * @param data  Vector to compare with.
-   * @return @c true if sizes or contents differ.
+   * @param data  Right-hand operand.
+   * @return @c true when either the sizes or the bytes differ.
    */
   [[nodiscard]] bool operator!=(const std::vector<uint8_t>& data) const noexcept;
 
   /**
-   * @brief Mutable subscript operator.
+   * @brief Mutable indexed access into the payload region.
    *
    * @details
-   * Accesses the byte at logical index @p index (i.e., @c real_data()[offset + index]).
-   * No bounds checking is performed.
+   * Resolves to @c real_data()[offset() @c + @c index].  No bounds checking is performed; pass
+   * indices in @c [0, size()).
    *
-   * @param index  Logical index (0-based from the start of the user data region).
+   * @param index  Zero-based logical offset within the payload.
    * @return Reference to the byte at @p index.
    */
   [[nodiscard]] uint8_t& operator[](size_t index) noexcept;
 
   /**
-   * @brief Read-only subscript operator.
+   * @brief Read-only indexed access into the payload region.
    *
-   * @param index  Logical index (0-based from the start of the user data region).
+   * @param index  Zero-based logical offset within the payload.
    * @return Const reference to the byte at @p index.
    */
   [[nodiscard]] const uint8_t& operator[](size_t index) const noexcept;
 
   /**
-   * @brief Returns a pointer to the start of the user data region (after the prefix offset).
+   * @brief Returns a mutable pointer to the start of the payload (post-offset).
    *
-   * @details
-   * Equivalent to @c real_data() + @c offset().
-   * Returns @c nullptr if the buffer is empty.
-   *
-   * @return Mutable pointer to user data, or @c nullptr if not allocated.
+   * @return Pointer to the first payload byte, or @c nullptr when empty.
    */
   [[nodiscard]] uint8_t* data() noexcept;
 
   /**
-   * @brief Returns a const pointer to the start of the user data region.
+   * @brief Returns a read-only pointer to the start of the payload (post-offset).
    *
-   * @return Read-only pointer to user data, or @c nullptr if not allocated.
+   * @return Pointer to the first payload byte, or @c nullptr when empty.
    */
   [[nodiscard]] const uint8_t* data() const noexcept;
 
   /**
-   * @brief Returns a pointer to the very beginning of the backing buffer (before the offset).
+   * @brief Returns a mutable pointer to the very beginning of the backing buffer.
    *
    * @details
-   * Use this to write protocol headers into the reserved prefix region.
-   * @c real_data() + @c offset() == @c data().
+   * @c real_data() points at the prefix region; @c real_data() @c + @c offset() equals @c data().
    *
-   * @return Mutable pointer to the raw buffer origin.
+   * @return Pointer to the raw buffer origin, or @c nullptr when empty.
    */
   [[nodiscard]] uint8_t* real_data() noexcept;
 
   /**
-   * @brief Returns a const pointer to the very beginning of the backing buffer.
+   * @brief Returns a read-only pointer to the very beginning of the backing buffer.
    *
-   * @return Read-only pointer to the raw buffer origin.
+   * @return Pointer to the raw buffer origin, or @c nullptr when empty.
    */
   [[nodiscard]] const uint8_t* real_data() const noexcept;
 
   /**
-   * @brief Returns the number of usable bytes (excluding the prefix offset region).
+   * @brief Returns the size of the payload region in bytes.
    *
-   * @return Size in bytes.  Returns 0 if empty.
+   * @return Number of payload bytes (excluding the prefix offset).
    */
   [[nodiscard]] size_t size() const noexcept;
 
   /**
-   * @brief Returns the total backing-buffer size including the prefix offset region.
+   * @brief Returns the size of the used backing region (payload plus prefix offset).
    *
-   * @details
-   * @c real_size() == @c size() + @c offset().
-   *
-   * @return Total size of the backing buffer in bytes.
+   * @return @c size() @c + @c offset().
    */
   [[nodiscard]] size_t real_size() const noexcept;
 
@@ -571,328 +515,295 @@ class VLINK_EXPORT Bytes final {  // size == 128 bytes
    * @brief Returns the allocated capacity of the backing buffer.
    *
    * @details
-   * @c capacity() >= @c real_size() always holds.  For SBO buffers, @c capacity() == @c kStackSize.
+   * SBO buffers report @c kStackSize; pool-allocated buffers report the rounded allocation size.
    *
-   * @return Capacity in bytes.
+   * @return Capacity in bytes; always @c >= @c real_size().
    */
   [[nodiscard]] size_t capacity() const noexcept;
 
   /**
-   * @brief Returns the size of the prefix offset region in bytes.
-   *
-   * @details
-   * @c data() == @c real_data() + @c offset().
+   * @brief Returns the reserved header offset preceding the payload.
    *
    * @return Offset in bytes.
    */
   [[nodiscard]] uint8_t offset() const noexcept;
 
   /**
-   * @brief Returns @c true if this object owns and is responsible for freeing its buffer.
+   * @brief Reports whether this instance owns and will free its storage.
    *
-   * @return @c true for objects created via @c create() or @c deep_copy().
+   * @return @c true for objects produced by @c create / @c deep_copy and surviving copy/move
+   *         assignments that produced an owned deep copy.
    */
   [[nodiscard]] bool is_owner() const noexcept;
 
   /**
-   * @brief Returns @c true if this object holds an iceoryx loaned chunk.
+   * @brief Reports whether the buffer is an iceoryx loan that VLink must not free.
    *
-   * @details
-   * Loaned objects must not free the underlying memory; ownership belongs to RouDi.
-   *
-   * @return @c true for objects created via @c loan_internal().
+   * @return @c true for objects produced by @c loan_internal.
    */
   [[nodiscard]] bool is_loaned() const noexcept;
 
   /**
-   * @brief Returns @c true if the buffer is empty (no data pointer and size == 0).
+   * @brief Reports whether the buffer is logically empty.
    *
-   * @return @c true if @c data_ == nullptr and @c size_ == 0.
+   * @return @c true when @c data() is @c nullptr and @c size() is @c 0.
    */
   [[nodiscard]] bool empty() const noexcept;
 
   /**
-   * @brief Iterator begin (mutable) -- same as @c data().
+   * @brief Returns a mutable iterator to the first payload byte.
    *
-   * @return Pointer to the first usable byte.
+   * @return Pointer to the first payload byte, or @c nullptr when empty.
    */
   [[nodiscard]] uint8_t* begin() noexcept;
 
   /**
-   * @brief Iterator begin (const) -- same as @c data() const.
+   * @brief Returns a read-only iterator to the first payload byte.
    *
-   * @return Const pointer to the first usable byte.
+   * @return Pointer to the first payload byte, or @c nullptr when empty.
    */
   [[nodiscard]] const uint8_t* begin() const noexcept;
 
   /**
-   * @brief Iterator end (mutable) -- one past the last usable byte.
+   * @brief Returns a mutable iterator one past the last payload byte.
    *
-   * @return Pointer to one past the last byte.
+   * @return End pointer, or @c nullptr when empty.
    */
   [[nodiscard]] uint8_t* end() noexcept;
 
   /**
-   * @brief Iterator end (const) -- one past the last usable byte.
+   * @brief Returns a read-only iterator one past the last payload byte.
    *
-   * @return Const pointer to one past the last byte.
+   * @return End pointer, or @c nullptr when empty.
    */
   [[nodiscard]] const uint8_t* end() const noexcept;
 
   /**
-   * @brief Iterator begin for the full backing buffer (mutable) -- same as @c real_data().
+   * @brief Returns a mutable iterator to the start of the raw backing region.
    *
-   * @return Pointer to the first byte of the raw buffer (before the offset).
+   * @return Pointer equal to @c real_data().
    */
   [[nodiscard]] uint8_t* real_begin() noexcept;
 
   /**
-   * @brief Iterator begin for the full backing buffer (const).
+   * @brief Returns a read-only iterator to the start of the raw backing region.
    *
-   * @return Const pointer to the first byte of the raw buffer.
+   * @return Pointer equal to @c real_data().
    */
   [[nodiscard]] const uint8_t* real_begin() const noexcept;
 
   /**
-   * @brief Iterator end for the raw used region (mutable).
+   * @brief Returns a mutable iterator one past the prefix-plus-payload region.
    *
-   * @return Pointer to one past the prefix plus usable byte region.
+   * @return End pointer for the used backing region, or @c nullptr when empty.
    */
   [[nodiscard]] uint8_t* real_end() noexcept;
 
   /**
-   * @brief Iterator end for the raw used region (const).
+   * @brief Returns a read-only iterator one past the prefix-plus-payload region.
    *
-   * @return Const pointer to one past the prefix plus usable byte region.
+   * @return End pointer for the used backing region, or @c nullptr when empty.
    */
   [[nodiscard]] const uint8_t* real_end() const noexcept;
 
   /**
-   * @brief Returns @c true if the object holds only an opaque pointer
-   *        (non-null @c data_, size == 0, offset == 0, not owner).
+   * @brief Reports whether this carrier merely wraps an opaque pointer.
    *
    * @details
-   * An object created via @c shallow_copy_ptr() has @c data_ != nullptr,
-   * @c size_ == 0, @c offset_ == 0 and @c is_owner_ == false.  Use
-   * @c to_ptr<T>() to retrieve the wrapped pointer.
+   * A pointer-only wrapper satisfies @c data_ @c != @c nullptr, @c size_ @c == @c 0,
+   * @c offset_ @c == @c 0 and @c is_owner_ @c == @c false.  Retrieve the underlying pointer via
+   * @c to_ptr<T>().
    *
-   * @return @c true if this is a pointer-only wrapper.
+   * @return @c true when this is a pointer-only wrapper.
    */
   [[nodiscard]] bool is_ptr() const noexcept;
 
   /**
-   * @brief Copies the usable byte region into a new @c std::vector<uint8_t>.
+   * @brief Copies the payload region into a new @c std::vector<uint8_t>.
    *
-   * @return A vector containing a copy of @c data()[0..size()-1].
+   * @return Vector mirroring @c data()[0, size()).
    */
   [[nodiscard]] std::vector<uint8_t> to_raw_data() const noexcept;
 
   /**
-   * @brief Returns the usable byte region as a @c std::string.
+   * @brief Materialises the payload region as a new @c std::string.
    *
-   * @return A string constructed from @c data() and @c size().
+   * @return Owning string with the payload bytes.
    */
   [[nodiscard]] std::string to_string() const noexcept;
 
   /**
-   * @brief Returns a zero-copy @c std::string_view over the usable byte region.
+   * @brief Returns a non-owning @c std::string_view into the payload region.
    *
    * @details
-   * The returned view is valid only as long as this @c Bytes object is alive and unmodified.
+   * The view is valid until the next mutation of this @c Bytes instance or its destruction.
    *
-   * @return @c string_view pointing into the buffer.
+   * @return View covering @c data()[0, size()).
    */
   [[nodiscard]] std::string_view to_string_view() const noexcept;
 
   /**
-   * @brief Reinterprets the backing buffer as a pointer to @c T.
+   * @brief Reinterprets the backing pointer as @c T*.
    *
    * @details
-   * Calls @c reinterpret_cast<T*>(real_data()).  Use with care; alignment must be
-   * compatible with @c T.
+   * Equivalent to @c reinterpret_cast<T*>(real_data()).  Caller is responsible for alignment.
    *
-   * @tparam T  Target type.  Defaults to @c void.
-   * @return Pointer to @c T, or @c nullptr if the buffer is empty.
+   * @tparam T  Target pointee type.  Defaults to @c void.
+   * @return Pointer to @c T, or @c nullptr when empty.
    */
   template <typename T = void>
   [[nodiscard]] T* to_ptr() const noexcept;
 
   /**
-   * @brief Returns the size of the inline stack storage in bytes.
+   * @brief Returns the SBO threshold below which payloads stay inline.
    *
-   * @details
-   * Buffers of this size or smaller use the embedded @c stack_data_ array and
-   * never incur a heap allocation.
-   *
-   * @return @c kStackSize (96).
+   * @return @c kStackSize (@c 96).
    */
   [[nodiscard]] static constexpr uint8_t stack_size() noexcept;
 
   /**
-   * @brief Returns @c true if the platform uses little-endian byte order.
+   * @brief Returns @c true at compile time when the platform is little-endian.
    *
-   * @details
-   * Determined at compile time from preprocessor macros (@c __BYTE_ORDER__,
-   * @c __LITTLE_ENDIAN__, Windows defaults).
-   *
-   * @return @c true on little-endian platforms (x86, arm-le, etc.).
+   * @return @c true on x86 / arm-le / Windows; @c false on big-endian targets.
    */
   [[nodiscard]] static constexpr bool is_little_endian() noexcept;
 
   /**
-   * @brief Returns @c true if the platform uses big-endian byte order.
+   * @brief Returns @c true at compile time when the platform is big-endian.
    *
-   * @return @c true on big-endian platforms.  Equivalent to @c !is_little_endian().
+   * @return Logical negation of @c is_little_endian().
    */
   [[nodiscard]] static constexpr bool is_big_endian() noexcept;
 
   /**
-   * @brief Checks whether a raw byte buffer contains LZAV-compressed VLink data.
+   * @brief Detects whether a raw byte buffer matches the VLink LZAV compression frame layout.
    *
    * @details
-   * Inspects the first 4 bytes for the header magic @c {0x17, 0x49, 0xB2, 0x6F}
-   * and the last 4 bytes for the footer magic @c {0xA7, 0x05, 0xED, 0x71}.
-   * The buffer must also be non-null and at least 13 bytes long.  Both magic
-   * values must match for the function to return @c true.
+   * Validates the 4-byte header magic (@c 17 @c 49 @c B2 @c 6F), the 4-byte footer magic
+   * (@c A7 @c 05 @c ED @c 71) and that the buffer is at least 13 bytes long.
    *
    * @param data  Pointer to the buffer to inspect.
    * @param size  Length of the buffer.
-   * @return @c true if header and footer magic are present.
+   * @return @c true when both magics match and the size precondition holds.
    */
   [[nodiscard]] static bool is_compress_data(const uint8_t* data, size_t size) noexcept;
 
   /**
-   * @brief Compresses a raw byte buffer using the LZAV algorithm.
+   * @brief Compresses a payload using LZAV and wraps it in the VLink compression frame.
    *
    * @details
-   * Wraps the compressed payload with a 4-byte header magic, a 4-byte big-endian
-   * original-size field and a 4-byte footer magic so that @c is_compress_data()
-   * can recognise it.  Buffers larger than
-   * @c kMaxCompressCacheSize (1 MiB) are rejected and an empty @c Bytes is returned.
+   * Emits the layout shown in the file-level diagram.  Inputs larger than @c 1 @c MiB
+   * (@c kMaxCompressCacheSize) are rejected and produce an empty result.
    *
-   * @param data       Pointer to the uncompressed data.
-   * @param size       Number of bytes to compress.
-   * @param high_ratio If @c true, uses LZAV high-compression mode (slower but better ratio).
-   *                   Default: @c false (normal mode).
-   * @return Compressed @c Bytes with header/size/footer wrapper, or empty on failure.
+   * @param data       Source pointer.
+   * @param size       Source length in bytes.
+   * @param high_ratio @c true to use LZAV's high-compression preset; default @c false.
+   * @return Compressed framed buffer, or an empty @c Bytes on failure.
    */
   [[nodiscard]] static Bytes compress_data(const uint8_t* data, size_t size, bool high_ratio = false) noexcept;
 
   /**
-   * @brief Decompresses a LZAV-compressed @c Bytes buffer.
+   * @brief Decompresses an LZAV-framed buffer back into its original payload.
    *
    * @details
-   * Strips the 4-byte header, 4-byte original-size field and footer magic, then
-   * calls @c lzav_decompress().  If @p check_valid is @c true the magic bytes
-   * are validated first; an invalid magic returns an empty @c Bytes.  Stored
-   * original sizes of 0 or greater than 256 MiB are rejected.
+   * Strips the header / size / footer fields and feeds the LZAV payload to @c lzav_decompress.
+   * When @p check_valid is @c true the magics are verified up front; invalid magics yield an
+   * empty result.  Stored original sizes of @c 0 or above @c 256 @c MiB are also rejected.
    *
-   * @param data         Pointer to the compressed buffer (including header/footer).
-   * @param size         Total size of the compressed buffer.
-   * @param check_valid  If @c true, validate the header/footer magic before decompressing.
-   *                     Default: @c true.
-   * @return Decompressed @c Bytes, or empty on failure.
+   * @param data         Framed source pointer.
+   * @param size         Framed source length in bytes.
+   * @param check_valid  @c true to verify magics before decompressing.  Default: @c true.
+   * @return Decompressed payload, or an empty @c Bytes on failure.
    */
   [[nodiscard]] static Bytes uncompress_data(const uint8_t* data, size_t size, bool check_valid = true) noexcept;
 
   /**
-   * @brief Releases the buffer and resets the object to the empty state.
+   * @brief Releases owned storage and resets all metadata to the empty state.
    *
    * @details
-   * If @c is_owner() is @c true, the backing memory is returned to the pool or heap.
-   * After this call, @c empty() returns @c true.
+   * When @c is_owner() is @c true the backing buffer is returned to the pool; loaned and
+   * shallow carriers are simply forgotten.  After the call @c empty() reports @c true.
    */
   void clear() noexcept;
 
   /**
-   * @brief Reduces the logical size of the buffer without reallocating.
+   * @brief Truncates the logical payload size in place without reallocating.
    *
    * @details
-   * Valid only for owned buffers.  Sets @c size_ to @p size if @p size <=
-   * current @c size(); the backing buffer is not freed or shrunk.  Non-owned,
-   * shallow, and loaned buffers return @c false.
+   * Valid only for owned buffers.  @p size must be @c <= current @c size(); the backing
+   * capacity is unchanged.
    *
-   * @param size  New logical size in bytes.  Must be <= current @c size().
-   * @return @c true on success, @c false for non-owned buffers or if @p size
-   *         exceeds the current size.
+   * @param size  New logical size in bytes.
+   * @return @c true on success; @c false for non-owned buffers or oversized requests.
    */
   [[nodiscard]] bool shrink_to(size_t size) noexcept;
 
   /**
-   * @brief Ensures the backing buffer can hold at least @p new_capacity bytes.
+   * @brief Ensures the backing capacity is at least @p new_capacity bytes.
    *
    * @details
-   * Valid only for owned buffers.  If the current capacity is already
-   * @c >= @p new_capacity this is a no-op.  Otherwise a new buffer is
-   * allocated and the existing data is copied.  Non-owned, shallow, and
-   * loaned buffers return @c false.
+   * Valid only for owned buffers.  When the current capacity already satisfies the request the
+   * call is a no-op; otherwise a fresh buffer is allocated and the existing payload copied.
    *
-   * @param new_capacity  Minimum required capacity in bytes.
-   * @return @c true on success, @c false for non-owned buffers or if
-   *         allocation failed.
+   * @param new_capacity  Minimum required capacity.
+   * @return @c true on success; @c false for non-owned buffers or allocation failure.
    */
   [[nodiscard]] bool reserve(size_t new_capacity) noexcept;
 
   /**
-   * @brief Resizes the logical data region to @p size bytes.
+   * @brief Resizes the logical payload region to @p size bytes.
    *
    * @details
-   * Valid only for owned buffers.  If @p size <= current capacity, only
-   * @c size_ is updated.  If @p size > current capacity, @c reserve(size) is
-   * called first.  Newly added bytes are @b not initialised unless
-   * @c VLINK_BYTES_MEM_RESET is enabled.  Non-owned, shallow, and loaned
-   * buffers return @c false.
+   * Valid only for owned buffers.  When @p size exceeds the current capacity @c reserve is
+   * invoked first.  Newly exposed bytes are uninitialised unless the build defines
+   * @c VLINK_BYTES_MEM_RESET.
    *
-   * @param size  New desired size in bytes.
-   * @return @c true on success, @c false for non-owned buffers or if
-   *         reallocation failed.
+   * @param size  New payload size in bytes.
+   * @return @c true on success; @c false for non-owned buffers or reallocation failure.
    */
   [[nodiscard]] bool resize(size_t size) noexcept;
 
   /**
-   * @brief Makes this object a non-owning alias of @p bytes (shallow copy in-place).
+   * @brief Replaces this instance with a non-owning alias of @p bytes.
    *
    * @details
-   * Releases the current buffer, then copies @p bytes' raw pointer, logical size,
-   * and offset without copying the underlying data.  The resulting object is a
-   * non-owning alias and is not marked as loaned even if @p bytes was loaned;
-   * use @c loan_internal() for an explicit loaned wrapper.
+   * Releases any owned storage first.  Copies @p bytes's raw pointer, size and offset without
+   * copying the payload.  The result is non-owning regardless of @p bytes's loaned tag; use
+   * @c loan_internal directly to preserve loaned semantics.
    *
-   * @param bytes  Source to alias.
+   * @param bytes  Source carrier to alias.
    * @return Reference to @c *this.
    */
   Bytes& shallow_copy(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Replaces this object with a deep copy of @p bytes.
+   * @brief Replaces this instance with an owned deep copy of @p bytes.
    *
    * @details
-   * Releases the current buffer, allocates new memory, and copies all bytes from
-   * @p bytes when it has data.  Empty sources leave this object empty and
-   * non-owning.
+   * Releases any owned storage first, then allocates and populates a fresh buffer when
+   * @p bytes carries data.  Empty sources leave this instance empty and non-owning.
    *
-   * @param bytes  Source to copy.
+   * @param bytes  Source carrier to copy.
    * @return Reference to @c *this.
    */
   Bytes& deep_copy(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Converts this object from a non-owning alias with data to an owned deep copy.
+   * @brief Converts an existing non-owning carrier into an owning one in place.
    *
    * @details
-   * If the object is already an owner, this is a no-op.  If it has no data or
-   * zero size, the object is cleared.  Otherwise, new memory is allocated, the
-   * current data is copied, and @c is_owner_ is set to @c true.
+   * Owners are returned unchanged.  Empty carriers are cleared.  Otherwise a fresh buffer is
+   * allocated and the current payload copied into it.
    *
    * @return Reference to @c *this.
    */
   Bytes& deep_copy_self() noexcept;
 
   /**
-   * @brief Stream insertion operator -- prints bytes as space-separated hex pairs.
+   * @brief Stream insertion operator; prints the payload as space-separated hex bytes.
    *
-   * @param ostream  Output stream.
-   * @param target   @c Bytes to print.
+   * @param ostream  Target output stream.
+   * @param target   Buffer to print.
    * @return Reference to @p ostream.
    */
   VLINK_EXPORT friend std::ostream& operator<<(std::ostream& ostream, const Bytes& target) noexcept;

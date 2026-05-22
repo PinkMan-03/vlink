@@ -23,7 +23,46 @@
 
 /**
  * @file schema_plugin_manager.h
- * @brief Process-global singleton manager for the @c SchemaPluginInterface dynamic plugin.
+ * @brief Process-wide singleton wrapper that loads and owns a @c SchemaPluginInterface implementation.
+ *
+ * @details
+ * @c SchemaPluginManager hides the dynamic-loader plumbing required to surface a single shared
+ * @c SchemaPluginInterface to every component of the running process.  It is the recommended
+ * entry point for CLI tools (@c eproto, @c efbs), webviz converters, and bag writers that need
+ * to resolve Protobuf and FlatBuffers metadata without each subsystem rolling its own loader.
+ *
+ * @par Manager state machine
+ * @code
+ *           +-------------+   first get(path)         +-----------+   library missing   +---------+
+ *           |  not built  | ------------------------> | resolving | ------------------> | invalid |
+ *           +-------------+                           +-----------+                     +---------+
+ *                                                          | load ok
+ *                                                          v
+ *                                                     +---------+
+ *                                                     |  valid  | <-- get_interface() returns plugin
+ *                                                     +---------+
+ *                                                          |
+ *                                                          v  process exit
+ *                                                     +---------+
+ *                                                     | unloaded |  interface released before loader
+ *                                                     +---------+
+ * @endcode
+ *
+ * @par Resolution order
+ * 1. The @p schema_plugin_path argument supplied to the very first @c get() call.
+ * 2. The @c VLINK_SCHEMA_PLUGIN environment variable when the argument is empty.
+ * 3. No plugin loaded (the manager reports @c is_valid() == @c false).
+ *
+ * @par Example
+ * @code
+ *   auto& mgr = vlink::SchemaPluginManager::get("/opt/vlink/libschema_plugin.so");
+ *
+ *   if (mgr.is_valid()) {
+ *     auto plugin = mgr.get_interface();
+ *     auto schema = plugin->search_schema("demo.proto.PointCloud", vlink::SchemaType::kProtobuf);
+ *     VLOG_I("loaded schema: ", schema.name);
+ *   }
+ * @endcode
  */
 
 #pragma once
@@ -37,61 +76,36 @@ namespace vlink {
 
 /**
  * @class SchemaPluginManager
- * @brief Singleton manager that owns and provides access to the @c SchemaPluginInterface.
+ * @brief Singleton accessor that owns a lazily loaded @c SchemaPluginInterface plugin.
  *
  * @details
- * @c SchemaPluginManager is a process-level singleton that loads and holds a single
- * @c SchemaPluginInterface plugin. The plugin path is resolved in the following order:
- * 1. The @p schema_plugin_path argument passed to @c get() on first call.
- * 2. The @c VLINK_SCHEMA_PLUGIN environment variable if @p schema_plugin_path is empty.
- * 3. No plugin loaded (the manager is invalid) if neither is set.
- *
- * @par Usage
- * @code
- * // Load by environment variable VLINK_SCHEMA_PLUGIN:
- * auto& mgr = vlink::SchemaPluginManager::get();
- *
- * // Or explicitly (first call wins):
- * auto& mgr = vlink::SchemaPluginManager::get("/path/to/my_schema_plugin.so");
- *
- * if (mgr.is_valid()) {
- *     auto iface = mgr.get_interface();
- *     auto schema = iface->search_schema("my_pkg.MyMessage", SchemaType::kProtobuf);
- * }
- * @endcode
- *
- * @note
- * - @c get() creates the singleton on first call; subsequent calls ignore @p schema_plugin_path.
- * - @c is_valid() returns @c false when no plugin was loaded.
- * - The plugin interface is released before the @c Plugin loader on destruction, ensuring
- *   safe unloading.
+ * Subsequent @c get() invocations are cheap and return the cached singleton regardless of
+ * the argument passed; the very first call wins.  The destructor releases the contained
+ * interface before tearing down the @c Plugin loader, ensuring the shared object outlives
+ * any dependent global objects inside it.
  */
 class VLINK_EXPORT SchemaPluginManager final {
  public:
   /**
-   * @brief Returns the process-global @c SchemaPluginManager singleton.
+   * @brief Returns the process-wide manager, building it on the first call.
    *
-   * @details
-   * On the first call, loads the plugin from @p schema_plugin_path if non-empty,
-   * or from the @c VLINK_SCHEMA_PLUGIN environment variable. Subsequent calls
-   * return the same singleton regardless of @p schema_plugin_path.
-   *
-   * @param schema_plugin_path  Path to the plugin shared library. Empty = use env var.
-   * @return Reference to the singleton.
+   * @param schema_plugin_path  Absolute path to the plugin shared object.  Empty means
+   *                            fall back to the @c VLINK_SCHEMA_PLUGIN environment variable.
+   * @return Reference to the singleton instance.
    */
   [[nodiscard]] static SchemaPluginManager& get(const std::string& schema_plugin_path = "");
 
   /**
-   * @brief Returns @c true if a @c SchemaPluginInterface was successfully loaded.
+   * @brief Reports whether a plugin was successfully loaded.
    *
-   * @return @c true if @c get_interface() will return a non-null pointer.
+   * @return @c true when @c get_interface() will yield a non-null pointer.
    */
   [[nodiscard]] bool is_valid() const;
 
   /**
-   * @brief Returns the loaded @c SchemaPluginInterface instance.
+   * @brief Returns the shared plugin instance, or @c nullptr when the manager is invalid.
    *
-   * @return Shared pointer to the interface, or @c nullptr if not loaded.
+   * @return Shared pointer to the loaded @c SchemaPluginInterface implementation.
    */
   [[nodiscard]] std::shared_ptr<SchemaPluginInterface> get_interface() const;
 

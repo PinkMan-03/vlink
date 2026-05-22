@@ -23,31 +23,45 @@
 
 /**
  * @file thread_pool.h
- * @brief General-purpose thread pool for parallel task execution.
+ * @brief Fixed-size worker pool for parallel task execution.
  *
  * @details
- * @c ThreadPool maintains a fixed number of worker threads that dequeue and execute
- * tasks posted via @c post_task() or @c invoke_task().  Unlike @c MessageLoop, there
- * is no timer support or loop lifecycle; the pool is started on construction and shut
- * down with @c shutdown().  A zero-thread pool is left shut down and rejects posts.
+ * @c vlink::ThreadPool launches a configurable number of worker threads at construction
+ * and dispatches submitted tasks to whichever worker is idle.  Unlike @c MessageLoop, the
+ * pool has no built-in timer mechanism or loop lifecycle; it is started immediately and
+ * torn down with @c shutdown().  A pool created with zero workers is left in the
+ * shutdown state and rejects every submission.
  *
- * Queue types:
+ * Architecture:
  *
- * | Type              | Queue implementation                                  | Notes                            |
- * | ----------------- | ----------------------------------------------------- | -------------------------------- |
- * | @c kNormalType    | Mutex-protected @c std::deque (or @c std::pmr::deque) | Default; supports droppable scan |
- * | @c kLockfreeType  | @c MpmcQueue (lock-free MPMC)                         | Lower overhead under contention  |
+ * @verbatim
+ *     post_task() ----->  +---------------------------+
+ *                         | shared dispatcher queue   |
+ *                         +-----+----------+----------+
+ *                               |          |          |
+ *                               v          v          v
+ *                            worker 1   worker 2 ... worker N
+ *                               |          |          |
+ *                               v          v          v
+ *                            user task  user task  user task
+ * @endverbatim
  *
- * Push-side back-pressure strategies for handling a full queue (same semantics as
- * @c MessageLoop::Strategy).  These only affect @c post_task / @c invoke_task when
- * the queue is at capacity; idle worker wake-up is unconditionally driven by a
+ * Queue implementations:
+ *
+ * | Type              | Backing queue                                    | Notes                           |
+ * | ----------------- | ------------------------------------------------ | ------------------------------- |
+ * | @c kNormalType    | Mutex-protected @c std::deque (or @c std::pmr)   | Default; honours drop policy    |
+ * | @c kLockfreeType  | @c MpmcQueue (lock-free multi-producer/consumer) | Lower contention overhead       |
+ *
+ * Push-side back-pressure strategies are identical to @c MessageLoop::Strategy.  They
+ * only affect submission when the queue is full; worker wake-up is always driven by a
  * condition variable.
  *
  * @note
- * - Tasks may execute concurrently; shared state must be protected externally.
- * - @c invoke_task() returns a @c std::future.  Blocking on the future from a thread
- *   pool worker will deadlock if all workers are busy.
- * - @c is_in_work_thread() can be used to detect reentrant calls.
+ * - Tasks may run concurrently; protect shared state externally.
+ * - @c invoke_task() returns a @c std::future; blocking on it from a pool worker can
+ *   deadlock if every worker is busy.
+ * - @c is_in_work_thread() can detect re-entrant submissions.
  *
  * @par Example
  * @code
@@ -79,208 +93,193 @@ namespace vlink {
 
 /**
  * @class ThreadPool
- * @brief Fixed-size thread pool for parallel task execution.
+ * @brief Fixed worker pool that consumes a shared task queue.
  *
  * @details
- * Worker threads are created on construction and destroyed on @c shutdown() or destruction.
+ * Worker threads are created during construction and joined during @c shutdown() or
+ * destruction.  The pool object itself is non-copyable.
  */
 class VLINK_EXPORT ThreadPool {
  public:
   /**
-   * @brief Callback type for tasks submitted to the pool.
+   * @brief Callback signature used for submitted tasks.
    *
    * @details
-   * Move-only (`MoveFunction<void()>`); see @c MessageLoop::Callback for
-   * the rationale.
+   * Move-only (@c MoveFunction<void()>); see @c MessageLoop::Callback for rationale.
    */
   using Callback = MoveFunction<void()>;
 
   /**
-   * @brief Queue implementation type.
+   * @enum Type
+   * @brief Queue implementation backing the pool.
    */
   enum Type : uint8_t {
-    kNormalType = 0,    ///< Mutex-protected FIFO queue (default)
-    kLockfreeType = 1,  ///< Lock-free MPMC queue
+    kNormalType = 0,    ///< Default mutex-protected FIFO queue.
+    kLockfreeType = 1,  ///< Lock-free MPMC queue.
   };
 
   /**
-   * @brief Push-side back-pressure strategy applied when the bounded queue is full.
+   * @enum Strategy
+   * @brief Submission-side strategy applied when the bounded queue is full.
    *
    * @details
-   * Worker wake-up is unconditionally driven by a condition variable; this enum
-   * only affects how @c post_task / @c invoke_task react when the queue has
-   * reached its capacity.
+   * Worker wake-up is independent of this enum.  It controls only how @c post_task and
+   * @c invoke_task react when capacity is reached.
    */
   enum Strategy : uint8_t {
-    kOptimizationStrategy = 0,  ///< Balance: when full, retry; after 10 retries drop one eligible task and push.
-    kPopStrategy = 1,           ///< When full, drop one eligible task immediately and push the new task.
-    kBlockStrategy = 2,         ///< When full, retry indefinitely with 1 ms sleep between attempts.
+    kOptimizationStrategy = 0,  ///< Retry up to 10 times with 1 ms sleep; then drop one eligible task and push.
+    kPopStrategy = 1,           ///< Immediately drop one eligible task and push the new one.
+    kBlockStrategy = 2,         ///< Retry indefinitely with 1 ms sleep until capacity frees up.
   };
 
   /**
-   * @brief Constructs a @c ThreadPool with @p thread_count worker threads and @c kNormalType queue.
+   * @brief Constructs a pool with @p thread_count workers and the default @c kNormalType queue.
    *
-   * @param thread_count  Number of worker threads.  Default: 4.  If 0, the pool is
-   *                      created in a shut-down state and rejects posted tasks.
+   * @param thread_count  Worker thread count.  Default: @c 4.  Zero leaves the pool in
+   *                      the shutdown state.
    */
   explicit ThreadPool(size_t thread_count = 4U);
 
   /**
-   * @brief Constructs a @c ThreadPool with the specified thread count and queue type.
+   * @brief Constructs a pool with a custom queue implementation.
    *
-   * @param thread_count  Number of worker threads.  If 0, the pool is created in a
-   *                      shut-down state and rejects posted tasks.
+   * @param thread_count  Worker thread count.  Zero leaves the pool in the shutdown state.
    * @param type          Queue implementation type.
    */
   explicit ThreadPool(size_t thread_count, Type type);
 
   /**
-   * @brief Destructor.  Calls @c shutdown() and releases worker threads.
+   * @brief Destructor.  Calls @c shutdown() and joins worker threads.
    */
   virtual ~ThreadPool();
 
   /**
-   * @brief Sets a human-readable name for the pool (and its worker threads).
+   * @brief Assigns a human-readable name to the pool and its workers (used by debuggers).
    *
-   * @param name  Name string.
+   * @param name  Display name.
    */
   void set_name(const std::string& name);
 
   /**
-   * @brief Returns the name set via @c set_name().
+   * @brief Returns the display name assigned via @c set_name().
    *
-   * @return Reference to the name string.
+   * @return Reference to the stored name string.
    */
   [[nodiscard]] const std::string& get_name() const;
 
   /**
-   * @brief Returns the queue type this pool was constructed with.
+   * @brief Returns the queue implementation used by this pool.
    *
    * @return Queue type.
    */
   [[nodiscard]] Type get_type() const;
 
   /**
-   * @brief Returns the current back-pressure strategy.
+   * @brief Returns the current submission-side back-pressure strategy.
    *
    * @return Current strategy.
    */
   [[nodiscard]] Strategy get_strategy() const;
 
   /**
-   * @brief Changes the back-pressure strategy.
+   * @brief Updates the submission-side back-pressure strategy.
    *
    * @param strategy  New strategy.
    */
   void set_strategy(Strategy strategy);
 
   /**
-   * @brief Signals all workers to finish current tasks and exit.
+   * @brief Marks the pool as quitting, drains in-flight tasks, and joins workers.
    *
    * @details
-   * Marks the pool as quitting (rejecting further posts) and joins all worker
-   * threads before returning.
+   * After @c shutdown() returns, further submissions are rejected.  Workers complete the
+   * task they are currently running plus any already-queued tasks before exiting.  When
+   * called from a worker thread the calling worker's handle is detached instead of
+   * joined because a thread cannot join itself; the @c Impl block is kept alive via
+   * @c std::shared_ptr so the detached worker continues to see a valid pool state until
+   * it returns.
    *
-   * @c shutdown() may itself be called from one of this pool's worker threads
-   * — for example, from a task that decides to tear the pool down.  In that
-   * case the calling worker cannot join itself, so its thread handle is
-   * detached instead of joined; the worker is allowed to return naturally
-   * from its current task and the underlying OS thread completes on its own.
-   * The shared @c Impl block is owned through a @c std::shared_ptr, so the
-   * detached worker continues to see a valid pool state until it exits.
-   *
-   * After @c shutdown() returns, the pool can no longer accept tasks; workers
-   * finish any current and already queued tasks before exiting.  The first
-   * @c shutdown() call returns @c true and subsequent calls return @c false.
-   *
-   * @return @c true on the first successful shutdown; @c false if the pool
-   *         was already shut down.
+   * @return @c true on the first successful shutdown; @c false on subsequent calls.
    */
   bool shutdown();
 
   /**
-   * @brief Posts a task to the queue for execution by a worker thread.
+   * @brief Submits a task to the queue for execution by a worker thread.
    *
    * @details
-   * Thread-safe.  Returns @c false if the pool has been shut down (via
-   * @c shutdown()) or if overflow handling cannot make room for the new task.
-   * Behaviour when the queue is full depends on the configured @c Strategy:
+   * Thread-safe.  Returns @c false when the pool is already shut down or when overflow
+   * handling cannot make room for the new task.  Overflow behaviour depends on the
+   * configured @c Strategy:
    *
-   * - @c kOptimizationStrategy: retry up to 10 times with 1 ms sleep between
-   *   attempts; after that, drop one eligible task and push the new task.
-   * - @c kPopStrategy: drop one eligible task immediately and push the new task.
-   * - @c kBlockStrategy: retry indefinitely with 1 ms sleep until space is available.
+   *  - @c kOptimizationStrategy: retry up to 10 times with a 1 ms sleep, then drop one
+   *    eligible task and push the new one.
+   *  - @c kPopStrategy: drop one eligible task immediately and push the new one.
+   *  - @c kBlockStrategy: retry indefinitely with 1 ms sleep until space is available.
    *
    * @note Drop-policy semantics:
-   *  - @c kNormalType queues honour @c TaskDropPolicy::kProtected on a per-task
-   *    basis: protected tasks are never selected as overflow drop victims, and
-   *    if every queued task is protected the post fails and returns @c false.
-   *  - @c kLockfreeType queues do not track per-task drop policy; overflow drop
-   *    simply removes one queued task regardless of how it was submitted.
+   *  - @c kNormalType respects @c TaskDropPolicy::kProtected; protected tasks are never
+   *    selected as eviction victims, and if every queued task is protected the post
+   *    fails and returns @c false.
+   *  - @c kLockfreeType does not track per-task drop policy; overflow drop simply removes
+   *    one queued task regardless of how it was submitted.
    *
    * @param callback  Task to execute.
-   * @return @c true if eventually enqueued (possibly after dropping an eligible
-   *         task or blocking); @c false if the pool has been shut down or no
-   *         eligible task could be dropped to make room.
+   * @return @c true when the task was eventually enqueued.
    */
   bool post_task(Callback&& callback);
 
   /**
-   * @brief Posts a tracked task to the queue and returns a @c TaskHandle.
+   * @brief Submits a task that produces an observable @c TaskHandle.
    *
    * @details
-   * Tracked counterpart of @c post_task().  The returned @c TaskHandle can be
-   * used to wait for completion, request cooperative cancellation through the
-   * task's @c CancellationToken, and observe whether the task was eventually
-   * rejected (pool shut down, no droppable victim available) or dropped
-   * before execution.
+   * Tracked counterpart of @c post_task().  The returned handle allows callers to wait
+   * for completion, request cooperative cancellation, and observe whether the task was
+   * rejected or dropped before execution.
    *
    * @param callback  Task to execute.
-   * @param options   Optional overflow, drop and cancellation policy.  See
-   *                  @c PostTaskOptions for defaults.
-   * @return Handle associated with the posted task.  The handle remains valid
-   *         even if the post is rejected — query its state to find out.
+   * @param options   Optional overflow, drop, and cancellation policy.
+   * @return Handle observing the posted task; the handle remains valid even when the
+   *         post is rejected so callers can inspect @c state().
    */
   [[nodiscard]] TaskHandle post_task_handle(Callback&& callback, const PostTaskOptions& options = {});
 
   /**
-   * @brief Returns the number of tasks currently in the queue.
+   * @brief Returns the current number of tasks waiting in the queue.
    *
    * @return Pending task count.
    */
   [[nodiscard]] size_t get_task_count() const;
 
   /**
-   * @brief Returns @c true if the calling thread is a worker thread of this pool.
+   * @brief Reports whether the calling thread is one of this pool's workers.
    *
-   * @return @c true if called from a pool worker.
+   * @return @c true when called from a worker.
    */
   [[nodiscard]] bool is_in_work_thread() const;
 
   /**
-   * @brief Returns the maximum queue depth.
+   * @brief Returns the maximum queue capacity.
    *
-   * @return Maximum number of tasks that can be queued simultaneously.
+   * @return Maximum number of tasks that may be queued at the same time.
    */
   [[nodiscard]] virtual size_t get_max_task_count() const;
 
   /**
-   * @brief Dispatches a callable to a worker thread and returns a @c std::future for the result.
+   * @brief Submits a callable to a worker thread and returns a @c std::future for the result.
    *
    * @details
-   * Thread-safe.  The future becomes ready after the callable is executed by a worker.
+   * Thread-safe.  The future is satisfied once the callable returns.  When posting fails
+   * the future becomes ready with a @c broken_promise / @c future_error result.
    *
-   * @warning Do not block on the future from a pool worker thread if all workers are busy;
-   *          this will deadlock.
+   * @warning Do not block on the returned future from a pool worker thread while all
+   *          workers are busy; doing so deadlocks the pool.
    *
    * @tparam FunctionT  Callable type.
-   * @tparam ArgsT      Argument types.
-   * @tparam ResultT    Return type (deduced).
+   * @tparam ArgsT      Argument types forwarded to the callable.
+   * @tparam ResultT    Deduced result type.
    * @param function  Callable to dispatch.
-   * @param args      Arguments forwarded to the callable.
-   * @return @c std::future<ResultT> that becomes ready when the task completes.
-   *         If posting fails, the returned future becomes ready with
-   *         @c std::future_error / @c broken_promise.
+   * @param args      Arguments to forward.
+   * @return Future resolved with the callable's result.
    */
   template <class FunctionT, class... ArgsT, typename ResultT = std::invoke_result_t<FunctionT, ArgsT...>>
   [[nodiscard]] std::future<ResultT> invoke_task(FunctionT&& function, ArgsT&&... args);

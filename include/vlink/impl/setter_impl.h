@@ -23,26 +23,37 @@
 
 /**
  * @file setter_impl.h
- * @brief Abstract base class for all transport-specific setter (field writer) implementations.
+ * @brief Transport-neutral base class for every field-model setter (latest-value writer).
  *
  * @details
- * @c SetterImpl is the intermediate layer between the generic @c Setter<T> template
- * and a concrete transport backend.  It inherits from @c NodeImpl and adds
- * field-setter semantics:
+ * This is an internal implementation header used by the public @c Setter
+ * template; applications should depend on @c setter.h.  @c SetterImpl extends
+ * @c NodeImpl with the field-model write semantics: writing overwrites the
+ * topic's single tracked value and the backend may notify the setter via a
+ * sync callback when a late getter needs the cached value resent.
  *
- * - Value write via @c write() -- sends the serialised latest value to all registered
- *   getters on the same topic.
- * - Late-getter synchronisation via @c sync() -- registers a callback that can
- *   be fired when a getter connects and needs the cached latest value.
+ * @par ImplType
+ * The constructor stamps @c impl_type with @c kSetter so the discovery and
+ * recording layers correctly identify outgoing field updates.
  *
- * @par Field Model Overview
- * Unlike the event model (publish/subscribe), the field model maintains a single
- * "latest value" per topic.  A @c Setter always overwrites the previous value; a
- * @c Getter can retrieve the most recent value at any time or be notified when it
- * changes.
+ * @par Lifecycle
+ * - Constructed by the matching @c Conf::create_setter().
+ * - @c init() / @c deinit() inherited from @c NodeImpl bring the transport up.
+ * - @c sync() is invoked by the public @c Setter once the user wires a
+ *   late-getter sync callback.
+ * - @c write() pushes the serialised value to all matched getters.
  *
- * @note Concrete subclasses must implement @c write(const Bytes&) and
- *       @c sync(SyncCallback&&).
+ * @par Role table
+ * | Capability                  | Provider                                  |
+ * | --------------------------- | ----------------------------------------- |
+ * | Wire write                  | Subclass override of @c write()           |
+ * | Late-getter resend          | Subclass override of @c sync()            |
+ *
+ * @par Internal API contract
+ * | Method                          | Default        | Subclass duty            |
+ * | ------------------------------- | -------------- | ------------------------ |
+ * | @c write(const Bytes&)          | Pure virtual   | Push frame to transport  |
+ * | @c sync(SyncCallback&&)         | Pure virtual   | Bind late-join callback  |
  */
 
 #pragma once
@@ -53,39 +64,38 @@ namespace vlink {
 
 /**
  * @class SetterImpl
- * @brief Transport-agnostic base for setter (field writer) node implementations.
+ * @brief Field-model writer base shared by every transport-specific setter.
  *
  * @details
- * Concrete backends override @c write() to push the serialised value onto the
- * transport and @c sync() to provide the transport-specific late-join
- * notification used by @c Setter<T> to re-send its cached value.
+ * Backends override @c write() to dispatch the serialised value onto the
+ * transport and @c sync() to receive the transport-specific late-join
+ * notification so the public @c Setter can resend its cached value.
  */
 class VLINK_EXPORT SetterImpl : public NodeImpl {
  public:
   /**
-   * @brief Destructor.
+   * @brief Releases backend resources.
    */
   ~SetterImpl() override;
 
   /**
-   * @brief Writes a new field value to all connected getter nodes.
+   * @brief Writes a new value to every reachable getter.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  @p msg_data contains
-   * the fully serialised latest value produced by @c Serializer::serialize().
-   * The write overwrites any previously stored value on the topic.
+   * Pure virtual.  @p msg_data is produced by @c Serializer::serialize() in the
+   * public layer; the call overwrites any previously stored value on the topic.
    *
-   * @param msg_data  Serialised field value bytes to transmit.
+   * @param msg_data  Serialised value bytes.
    */
   virtual void write(const Bytes& msg_data) = 0;
 
   /**
-   * @brief Registers the transport-specific late-getter sync callback.
+   * @brief Installs the transport-specific late-getter sync callback.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  Backends that can
-   * detect late getters invoke @p callback when the cached value should be sent
-   * again; backends without that concept may ignore the callback.
+   * Pure virtual.  Backends that detect a freshly attached getter invoke
+   * @p callback so the public @c Setter can resend the cached latest value;
+   * transports without such a signal may simply discard the callback.
    *
    * @param callback  Callable invoked when a late-getter sync is requested.
    */
@@ -93,7 +103,7 @@ class VLINK_EXPORT SetterImpl : public NodeImpl {
 
  protected:
   /**
-   * @brief Protected constructor; initialises the setter with @c kSetter role.
+   * @brief Stamps the node as @c kSetter.
    */
   SetterImpl();
 

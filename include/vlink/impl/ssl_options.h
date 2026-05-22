@@ -23,76 +23,78 @@
 
 /**
  * @file ssl_options.h
- * @brief Transport-layer SSL/TLS configuration for VLink communication backends.
+ * @brief Backend-neutral SSL / TLS settings shared by all VLink transports that support encryption.
  *
  * @details
- * @c SslOptions provides a backend-agnostic way to configure transport-layer
- * TLS encryption.  It works through the @c ssl.* property convention that
- * every transport backend reads during connection setup:
+ * This is an internal implementation header used by @c NodeImpl and by every
+ * transport backend that supports TLS; user code typically interacts with
+ * @c SslOptions through @c Node::set_ssl_options().  The struct is a thin
+ * aggregate that the transport factory translates into the @c ssl.* property
+ * convention used during connection setup.
  *
- * | Backend    | Native TLS Mechanism                                         |
- * | ---------- | ------------------------------------------------------------ |
- * | MQTT       | @c MQTTClient_SSLOptions (Paho C), auto @c tcp:// to ssl://  |
- * | DDS        | @c TCPv4TransportDescriptor::tls_config (Fast-DDS)           |
- * | CycloneDDS | @c ddsi_config ssl fields (requires @c DDS_HAS_SSL)          |
- * | Zenoh      | @c transport/link/tls config keys (zenoh-c, not zenoh-pico)  |
+ * @par Native mechanism per backend
+ * | Backend     | Underlying TLS mechanism                                                |
+ * | ----------- | ----------------------------------------------------------------------- |
+ * | MQTT        | @c MQTTClient_SSLOptions (Paho C); auto promotes @c tcp:// to @c ssl:// |
+ * | DDS         | @c TCPv4TransportDescriptor::tls_config (Fast-DDS)                      |
+ * | CycloneDDS  | @c ddsi_config SSL fields (requires @c DDS_HAS_SSL)                     |
+ * | Zenoh       | @c transport/link/tls config keys (zenoh-c, not zenoh-pico)             |
  *
- * @par Property Keys
- * | Property Key         | @c SslOptions Field  | Description                                  |
- * | -------------------- | -------------------- | -------------------------------------------- |
- * | @c ssl.ca            | @c ca_file           | CA certificate file path (PEM)               |
- * | @c ssl.cert          | @c cert_file         | Client certificate file path (PEM)           |
- * | @c ssl.key           | @c key_file          | Client private key file path (PEM)           |
- * | @c ssl.key_password  | @c key_password      | Private key passphrase                       |
- * | @c ssl.verify        | @c verify_peer       | @c "0" to skip verification; default verify  |
- * | @c ssl.server_name   | @c server_name       | SNI server name override                     |
- * | @c ssl.ciphers       | @c ciphers           | Cipher suite string (OpenSSL format)         |
+ * @par SSL options table
+ * | Field            | Property key         | Description                                  |
+ * | ---------------- | -------------------- | -------------------------------------------- |
+ * | @c ca_file       | @c ssl.ca            | CA certificate file path (PEM).              |
+ * | @c cert_file     | @c ssl.cert          | Client certificate file path (PEM).          |
+ * | @c key_file      | @c ssl.key           | Client private key file path (PEM).          |
+ * | @c key_password  | @c ssl.key_password  | Passphrase for an encrypted private key.     |
+ * | @c verify_peer   | @c ssl.verify        | @c "0" to skip server verification.          |
+ * | @c server_name   | @c ssl.server_name   | SNI override.                                |
+ * | @c ciphers       | @c ssl.ciphers       | Cipher suite string (OpenSSL format).        |
  *
- * @par Environment Variable Defaults
- * When a property is not set explicitly, the factory reads these environment
- * variables as lowest-priority defaults (property values always take precedence):
+ * @par Environment variable defaults
+ * The factory consults these variables when the matching property is not set;
+ * explicit properties always win.
  *
- * | Environment Variable   | Maps to             |
- * | ---------------------- | ------------------- |
- * | @c VLINK_SSL_CA        | @c ssl.ca           |
- * | @c VLINK_SSL_CERT      | @c ssl.cert         |
- * | @c VLINK_SSL_KEY       | @c ssl.key          |
- * | @c VLINK_SSL_KEY_PASS  | @c ssl.key_password |
- * | @c VLINK_SSL_VERIFY    | @c ssl.verify       |
- * | @c VLINK_SSL_SNI       | @c ssl.server_name  |
- * | @c VLINK_SSL_CIPHERS   | @c ssl.ciphers      |
+ * | Environment variable    | Property key         |
+ * | ----------------------- | -------------------- |
+ * | @c VLINK_SSL_CA         | @c ssl.ca            |
+ * | @c VLINK_SSL_CERT       | @c ssl.cert          |
+ * | @c VLINK_SSL_KEY        | @c ssl.key           |
+ * | @c VLINK_SSL_KEY_PASS   | @c ssl.key_password  |
+ * | @c VLINK_SSL_VERIFY     | @c ssl.verify        |
+ * | @c VLINK_SSL_SNI        | @c ssl.server_name   |
+ * | @c VLINK_SSL_CIPHERS    | @c ssl.ciphers       |
  *
  * @par Auto-detection
- * SSL is considered valid (enabled) when @c ca_file or @c cert_file is
- * non-empty.  There is no separate @c ssl.enabled flag.  When SSL is enabled
- * on DDS/CycloneDDS, TCP transport is automatically activated because TLS
- * requires TCP.
+ * TLS is considered active when @c ca_file or @c cert_file is non-empty; there
+ * is no separate enable flag.  On DDS / CycloneDDS, activating TLS also forces
+ * the TCP transport because TLS rides over TCP.
  *
- * @par Usage
+ * @par Example
  * @code
- * // --- Via Node API ---
- * Publisher<MyMsg> pub("mqtt://sensor/data");
- * SslOptions ssl;
+ * // --- Through the public Node API ---
+ * vlink::Publisher<MyMsg> pub("mqtt://sensor/data");
+ * vlink::SslOptions ssl;
  * ssl.ca_file   = "/etc/certs/ca.pem";
  * ssl.cert_file = "/etc/certs/client.pem";
  * ssl.key_file  = "/etc/certs/client-key.pem";
  * pub.set_ssl_options(ssl);
  *
- * // --- Via set_property ---
+ * // --- Through set_property ---
  * pub.set_property("ssl.ca", "/etc/certs/ca.pem");
  *
- * // --- Via global property ---
- * MqttConf::set_global_property("ssl.ca", "/etc/certs/ca.pem");
+ * // --- Through global property ---
+ * vlink::MqttConf::set_global_property("ssl.ca", "/etc/certs/ca.pem");
  *
- * // --- Via environment variable ---
+ * // --- Through environment ---
  * // export VLINK_SSL_CA=/etc/certs/ca.pem
  * @endcode
  *
  * @note
- * - Zenoh-pico (@c VLINK_ENABLE_ZENOH_PICO) does not support TLS; a warning
- *   is logged if SSL properties are present.
- * - CycloneDDS requires @c DDS_HAS_SSL at compile time; a warning is logged
- *   if SSL properties are present but the feature was not compiled in.
+ * - Zenoh-pico (@c VLINK_ENABLE_ZENOH_PICO) does not support TLS; SSL
+ *   properties trigger a warning.
+ * - CycloneDDS requires @c DDS_HAS_SSL at compile time; if the feature was
+ *   not compiled in, SSL properties also trigger a warning.
  */
 
 #pragma once
@@ -106,64 +108,57 @@ namespace vlink {
 
 /**
  * @struct SslOptions
- * @brief Aggregate of SSL/TLS settings for transport-layer encryption.
+ * @brief Aggregate of SSL / TLS settings for transport-layer encryption.
  *
  * @details
- * Populate the desired fields and pass to @c Node::set_ssl_options(), or
- * use @c parse_from() / @c parse_to() to convert between @c SslOptions and
- * the @c ssl.* entries in a @c Conf::PropertiesMap.
- *
- * @c is_valid() returns @c true when at least @c ca_file or @c cert_file is
- * set, which the transport backends interpret as "SSL is enabled".
+ * The struct can be either populated by hand and passed to
+ * @c Node::set_ssl_options(), or constructed from a @c Conf::PropertiesMap via
+ * @c parse_from() / written back via @c parse_to().  An instance is considered
+ * to enable TLS when @c ca_file or @c cert_file is non-empty.
  */
 struct VLINK_EXPORT SslOptions final {
   /**
-   * @brief Whether to verify the server certificate.
+   * @brief Whether the server certificate must be validated.
    *
    * @details
-   * Defaults to @c true.  Set to @c false to skip peer verification
-   * (maps to @c ssl.verify = @c "0").  This is useful for development
-   * environments with self-signed certificates, but should remain @c true
-   * in production.
+   * Defaults to @c true.  Setting it to @c false maps to @c ssl.verify = @c "0"
+   * and disables peer verification, which is convenient for development with
+   * self-signed certificates but should never ship to production.
    */
   bool verify_peer{true};
 
   /**
-   * @brief Path to the CA certificate file (PEM format).
+   * @brief Path to the CA certificate (PEM) used to validate the peer.
    *
    * @details
-   * Used by all backends to verify the remote peer.  Setting this field
-   * (or its corresponding property @c ssl.ca) is one of the two conditions
-   * that makes @c is_valid() return @c true.
+   * Setting this field (or its corresponding @c ssl.ca property) is one of the
+   * two conditions that makes @c is_valid() report @c true.
    */
   std::string ca_file;
 
   /**
-   * @brief Path to the client certificate file (PEM format).
+   * @brief Path to the client certificate (PEM) used for mutual TLS.
    *
    * @details
-   * Required for mutual TLS (mTLS) where the server verifies the client.
-   * Setting this field is the other condition that makes @c is_valid()
-   * return @c true.
+   * Setting this field is the second condition that makes @c is_valid() report
+   * @c true.  Pair with @c key_file for true mTLS.
    */
   std::string cert_file;
 
   /**
-   * @brief Path to the client private key file (PEM format).
+   * @brief Path to the client private key (PEM) accompanying @c cert_file.
    *
    * @details
-   * Paired with @c cert_file for mutual TLS.  If the key is encrypted,
-   * provide the passphrase via @c key_password.
+   * If the key is encrypted, provide its passphrase via @c key_password.
    */
   std::string key_file;
 
   /**
-   * @brief Passphrase for the encrypted private key.
+   * @brief Passphrase for an encrypted private key.
    *
    * @details
-   * Only needed when @c key_file is protected by a passphrase.
-   * Corresponds to property @c ssl.key_password and environment variable
-   * @c VLINK_SSL_KEY_PASS.
+   * Mirrored to the @c ssl.key_password property and the
+   * @c VLINK_SSL_KEY_PASS environment variable.
    */
   std::string key_password;
 
@@ -171,24 +166,22 @@ struct VLINK_EXPORT SslOptions final {
    * @brief Server Name Indication (SNI) override.
    *
    * @details
-   * When set, the TLS handshake uses this value as the expected server
-   * name instead of the hostname derived from the connection URL.
-   * Used by MQTT, DDS, and Zenoh backends.
+   * When non-empty the handshake announces this name to the server instead of
+   * the host derived from the URL.  Honoured by MQTT, DDS and Zenoh.
    */
   std::string server_name;
 
   /**
-   * @brief Cipher suite string (OpenSSL format).
+   * @brief Cipher suite string passed verbatim to the TLS implementation.
    *
    * @details
-   * Overrides the default cipher suite selection.  The format depends on
-   * the underlying TLS library (typically OpenSSL).  Leave empty to use
-   * the backend default.
+   * Format depends on the underlying TLS library (OpenSSL by default).  Leave
+   * empty to inherit the backend's default cipher choice.
    */
   std::string ciphers;
 
   /**
-   * @brief Default constructor; all strings are empty, @c verify_peer is @c true.
+   * @brief Default-constructs an empty options aggregate.
    */
   SslOptions() noexcept = default;
 
@@ -198,42 +191,41 @@ struct VLINK_EXPORT SslOptions final {
   ~SslOptions() noexcept = default;
 
   /**
-   * @brief Returns @c true when the configuration contains enough data to enable TLS.
+   * @brief Reports whether the configuration is sufficient to enable TLS.
    *
    * @details
-   * TLS is considered valid when at least @c ca_file or @c cert_file is
-   * non-empty.  An empty @c SslOptions (no certificates at all) is not valid
-   * and the transport backend will not attempt a TLS connection.
+   * Returns @c true as soon as @c ca_file or @c cert_file is non-empty.  An
+   * otherwise empty @c SslOptions yields @c false and the transport backend
+   * skips the TLS handshake entirely.
    *
-   * @return @c true if TLS should be enabled.
+   * @return @c true when TLS should be activated.
    */
   bool is_valid() const noexcept;
 
   /**
-   * @brief Constructs an @c SslOptions by reading @c ssl.* entries from a property map.
+   * @brief Reads @c ssl.* entries from @p properties (and the environment) into a new instance.
    *
    * @details
-   * Resolution order (highest priority first):
+   * Resolution order, highest priority first:
    * -# Explicit @c ssl.* entries in @p properties.
-   * -# Environment variables (@c VLINK_SSL_CA, @c VLINK_SSL_CERT, etc.).
+   * -# Matching @c VLINK_SSL_* environment variables.
    *
-   * Properties not present in either source retain their default values
-   * (@c verify_peer = @c true, all strings empty).
+   * Fields absent from both sources keep their default values.
    *
-   * @param properties  The property map to read from.
-   * @return            A fully-resolved @c SslOptions.
+   * @param properties  Property map to read.
+   * @return Fully-resolved @c SslOptions aggregate.
    */
   static SslOptions parse_from(const Conf::PropertiesMap& properties) noexcept;
 
   /**
-   * @brief Writes the non-default fields back into a property map as @c ssl.* entries.
+   * @brief Writes non-default fields back into @p properties as @c ssl.* entries.
    *
    * @details
-   * Only non-empty string fields and a @c false @c verify_peer are written.
-   * This is the inverse of @c parse_from() and is used internally by
-   * @c Node::set_ssl_options() to merge SSL settings into the node properties.
+   * Only non-empty string fields and a @c false @c verify_peer are emitted.
+   * Used internally by @c Node::set_ssl_options() to merge the aggregate into
+   * the node property map.
    *
-   * @param properties  The property map to write into.
+   * @param properties  Property map updated in place.
    */
   void parse_to(Conf::PropertiesMap& properties) const noexcept;
 };

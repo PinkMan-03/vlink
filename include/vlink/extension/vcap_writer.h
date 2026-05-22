@@ -23,25 +23,51 @@
 
 /**
  * @file vcap_writer.h
- * @brief Concrete BagWriter implementation for the MCAP bag file format.
+ * @brief Recorder that serialises VLink traffic into the MCAP container (@c .vcap / @c .vcapx).
  *
  * @details
- * @c VCAPWriter records VLink messages to the MCAP format (@c .vcap / @c .vcapx extension).
- * It inherits the shared writer configuration and split support from @c BagWriter.
- * Compression is Zstd-based for @c kCompressAuto / @c kCompressZstd when Zstd support
- * is compiled in; other compression selectors are treated as no compression.
+ * @c VCAPWriter materialises a @c BagWriter that emits Foxglove-compatible MCAP files.  It
+ * inherits the cross-format split-recording machinery from @c BagWriter and produces files
+ * that any MCAP-aware tool can replay.  Compression flips between no-compression and Zstd
+ * when the build links @c libzstd; other selectors degrade to plain chunks.
  *
- * MCAP files can be opened by the Foxglove Studio visualisation tool and other
- * MCAP-compatible readers.  The file is finalised with an index footer on clean shutdown.
- *
- * @par Usage
+ * @par File-format diagram
  * @code
- * auto writer = vlink::BagWriter::create("/data/recording.vcap");
- * // or explicitly:
- * auto writer = std::make_shared<vlink::VCAPWriter>("/data/recording.vcap");
- * writer->async_run();
- * writer->push("dds://my/topic", "demo.proto.PointCloud", vlink::SchemaType::kProtobuf,
- *              vlink::ActionType::kPublish, data);
+ *  push_schema()  -->  schema record
+ *  push(url, ser_type, schema_type, action, data)  -->  channel record (once per URL)
+ *                                                  -->  message chunk (Zstd optional)
+ *  on_end()       -->  attachments + summary section + footer (index of summary)
+ * @endcode
+ *
+ * @par Writer states
+ * @code
+ *   +----------+   on_begin()  +---------+   push()/push_schema()   +-----------+
+ *   |  closed  | ------------> | opening | -----------------------> | recording |
+ *   +----------+               +---------+                          +-----------+
+ *        ^                                                                 |
+ *        |                                                                 v split triggered
+ *        |                                                          +-------------+
+ *        |                                                          | rotating    |
+ *        |                                                          | (new .vcap) |
+ *        |                                                          +-------------+
+ *        |                                                                 |
+ *        +-------------------- on_end() / dtor --------------------- finalising
+ *                                                                          |
+ *                                                                          v
+ *                                                                       sealed
+ * @endcode
+ *
+ * @par Example
+ * @code
+ *   auto writer = vlink::BagWriter::create("/data/recording.vcap");
+ *
+ *   writer->async_run();
+ *   writer->push_schema(my_schema);
+ *
+ *   writer->push("dds://lidar/front", "demo.proto.PointCloud",
+ *                vlink::SchemaType::kProtobuf,
+ *                vlink::ActionType::kPublish,
+ *                serialized_bytes);
  * @endcode
  *
  * @see BagWriter, VDBWriter
@@ -58,87 +84,92 @@ namespace vlink {
 
 /**
  * @class VCAPWriter
- * @brief Concrete MCAP-format bag file recorder.
+ * @brief Concrete MCAP-format @c BagWriter implementation with optional Zstd compression.
  *
  * @details
- * All virtual methods from @c BagWriter are implemented.  Prefer using
- * @c BagWriter::create() for format-agnostic construction.
+ * Prefer @c BagWriter::create() for format-agnostic instantiation; instantiate this class
+ * directly when an MCAP-specific feature is required.
  */
 class VLINK_EXPORT VCAPWriter final : public BagWriter {
  public:
   /**
-   * @brief Constructs an @c VCAPWriter for the given @p path.
+   * @brief Opens or creates an MCAP file for recording.
    *
-   * @param path    Path to the output @c .vcap / @c .vcapx file.  Created if it does not exist.
-   * @param config  Recording configuration.
+   * @param path    Filesystem path of the @c .vcap or @c .vcapx target.
+   * @param config  Recording configuration (split policy, compression, etc.).
    */
   explicit VCAPWriter(const std::string& path, const Config& config = {});
 
   /**
-   * @brief Destructor -- finalises the MCAP file footer and flushes all pending writes.
+   * @brief Finalises the MCAP footer and flushes outstanding writes.
    */
   ~VCAPWriter() override;
 
   /**
-   * @brief Registers a callback invoked when a file split occurs.
+   * @brief Registers a callback invoked at each file-split boundary.
    *
-   * @param callback  Called with (split_index, new_filename) on each split.
-   * @param before    If @c true, fires before the new file is opened; otherwise after.
+   * @param callback  Receives (split_index, filename) before or after the split.
+   * @param before    @c true fires before the new file is opened; @c false fires after.
    */
   void register_split_callback(SplitCallback&& callback, bool before) override;
 
   /**
-   * @brief Registers a callback that resolves serialisation type strings to @c SchemaData.
+   * @brief Registers a resolver that maps a serialisation-type string to @c SchemaData.
    *
-   * @param callback  Function mapping (@c ser_type, @c schema_type) to @c SchemaData.
+   * @param callback  Function consulted before writing a channel record.
    */
   void register_schema_callback(SchemaCallback&& callback) override;
 
   /**
-   * @brief Embeds a @c SchemaData into the MCAP file for offline introspection.
+   * @brief Embeds @p schema_data in the MCAP file for offline introspection.
    *
-   * @param schema_data  Schema descriptor to store.
-   * @param immediate    If @c true, merges synchronously; otherwise enqueues.
-   * @return             @c false only when the immediate merge fails.
+   * @param schema_data  Schema descriptor to embed.
+   * @param immediate    @c true merges synchronously; @c false enqueues the write.
+   * @return @c false only when an immediate merge failed.
    */
   bool push_schema(const SchemaData& schema_data, bool immediate = false) override;
 
   /**
    * @brief Records one message to the MCAP file.
    *
-   * @param url                    VLink URL of the topic.
+   * @param url                    Topic URL identifying the channel.
    * @param ser_type               Serialisation type string.
    * @param schema_type            Coarse schema family for the payload.
-   * @param action_type            Action type (@c kPublish, @c kRequest, etc.).
-   * @param data                   Serialized payload bytes.
-   * @param microseconds_timestamp Optional recording-relative timestamp in microseconds.
-   *                               @c nullptr means use the writer's elapsed timer.
-   * @param immediate              If @c true, writes synchronously bypassing the queue.
-   * @return Message timestamp in microseconds, or a negative value on error.
+   * @param action_type            Action category (@c kPublish, @c kRequest, etc.).
+   * @param data                   Serialised payload bytes.
+   * @param microseconds_timestamp Optional caller-provided timestamp in microseconds.
+   * @param immediate              @c true writes synchronously bypassing the queue.
+   * @return Timestamp recorded in microseconds; negative on error.
    */
   int64_t push(const std::string& url, const std::string& ser_type, SchemaType schema_type, ActionType action_type,
                const Bytes& data, int64_t* microseconds_timestamp = nullptr, bool immediate = false) override;
 
   /**
    * @brief Returns the current value of the internal dumping flag.
+   *
+   * @return @c true while messages are actively being persisted.
    */
   [[nodiscard]] bool is_dumping() const override;
 
   /**
-   * @brief Returns @c true if split-file mode is active.
+   * @brief Reports whether split-file recording is active.
+   *
+   * @return @c true when emitting a @c .vcapx manifest with multiple parts.
    */
   [[nodiscard]] bool is_split_mode() const override;
 
   /**
-   * @brief Returns the zero-based index of the current split file.
+   * @brief Returns the index of the split part currently being written.
+   *
+   * @return Zero-based split index.
    */
   [[nodiscard]] int get_split_index() const override;
 
   /**
-   * @brief Sets the expected message loss ratio for a given URL.
+   * @brief Records the expected message-loss ratio for @p url.
    *
    * @param url   Topic URL.
-   * @param loss  Loss ratio.  Values greater than 1.0 are stored as -1.
+   * @param loss  Loss ratio; values greater than @c 1.0 are stored as @c -1.
    */
   void set_url_loss(const std::string& url, double loss) override;
 

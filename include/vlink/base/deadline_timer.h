@@ -23,46 +23,44 @@
 
 /**
  * @file deadline_timer.h
- * @brief An absolute-deadline timer for lightweight, lock-free timeout tracking.
+ * @brief Atomic absolute-deadline timer used for lock-free timeout tracking on hot paths.
  *
  * @details
- * @c DeadlineTimer stores an absolute expiry timestamp (rather than a countdown
- * duration) in an atomic 64-bit word, making it safe to read from multiple threads
- * without a mutex.  It is used inside VLink connection and request handling to
- * detect expired operations.
+ * @c DeadlineTimer stores a single absolute monotonic timestamp inside a 64-bit atomic, which
+ * makes deadline checks branch-light and concurrent reads safe without external locking.  It is
+ * used inside connection bookkeeping and RPC request tracking to detect expired operations.
  *
- * The deadline can be set in two ways:
- * - @c set_deadline(interval)  -- sets the deadline @p interval time units from now.
- * - @c set_deadline_abs(abs)   -- sets an explicit absolute timestamp.
+ * @par State diagram
  *
- * The same @c Accuracy enum from @c ElapsedTimer is reused to select
- * millisecond, microsecond, or nanosecond granularity.
+ * @verbatim
+ *   +--------+ set_deadline / set_deadline_abs +---------+ now >= deadline +----------+
+ *   |  idle  | ------------------------------> |  armed  | --------------> | expired  |
+ *   | (zero) |                                 |         |                 +----------+
+ *   +--------+ <------- reset() --------------- +---------+                       |
+ *      ^                                                                          |
+ *      +-----------------------  reset() / set 0 --------------------------------+
+ * @endverbatim
  *
- * @note
- * - A default-constructed @c DeadlineTimer has @c deadline() == 0 and
- *   @c is_valid() == false.  Always call @c set_deadline() before
- *   checking @c has_expired().
- * - @c remaining_time() returns 0 once the deadline has already passed, or when
- *   no deadline is set.
- * - The internal deadline is stored as a 64-bit atomic, so concurrent reads are
- *   safe.  Concurrent writes from multiple threads are technically racy at the
- *   application level, but the store itself is atomic.
- * - The timer is aligned to 64 bytes to prevent false sharing in structures
- *   that embed multiple timers.
+ * @par Comparison vs the periodic @c vlink::Timer
+ *
+ * | Aspect            | @c vlink::DeadlineTimer    | @c vlink::Timer                     |
+ * | ----------------- | -------------------------- | ----------------------------------- |
+ * | Purpose           | Track a single deadline    | Schedule repeating callbacks        |
+ * | Backing storage   | One @c atomic<uint64_t>    | Loop-managed timer list             |
+ * | Owns a thread     | No                         | Owned by an attached @c MessageLoop |
+ * | Cost per check    | One atomic load            | Insertion / removal on the loop     |
+ * | Cancellation      | @c reset()                 | @c detach() on the timer instance   |
  *
  * @par Example
  * @code
- * // Set a 200 ms deadline from now:
- * vlink::DeadlineTimer t(200);
- * while (!t.has_expired()) {
- *   process_events();
- * }
- * // Returns remaining ms (0 once expired):
- * int64_t left = t.remaining_time();
+ *   vlink::DeadlineTimer t(200);                          // 200 ms from now
+ *   while (!t.has_expired()) {
+ *     process_events();
+ *   }
+ *   const int64_t left = t.remaining_time();              // 0 once past deadline
  *
- * // Set an absolute deadline:
- * uint64_t abs_ms = vlink::ElapsedTimer::get_cpu_timestamp();
- * t.set_deadline_abs(abs_ms + 500);
+ *   const uint64_t now = vlink::ElapsedTimer::get_cpu_timestamp();
+ *   t.set_deadline_abs(now + 500);                        // absolute reset
  * @endcode
  */
 
@@ -78,53 +76,52 @@ namespace vlink {
 
 /**
  * @class DeadlineTimer
- * @brief Atomic absolute-deadline timer for lock-free timeout detection.
+ * @brief Cache-line aligned atomic deadline counter with millisecond / microsecond / nanosecond precision.
  *
  * @details
- * Stores an absolute expiry time (monotonic CPU timestamp) in a 64-bit atomic.
- * Concurrent @c has_expired() / @c remaining_time() reads from multiple threads
- * are safe without external locking.
+ * Reuses @c ElapsedTimer::Accuracy for time precision.  Reads and writes go through a single
+ * @c std::atomic<uint64_t> aligned to 64 bytes to avoid false sharing when several timers share
+ * a structure.  An invalid (unset) timer stores @c 0 and never reports expiry.
  */
 class VLINK_EXPORT DeadlineTimer final {
  public:
   /**
-   * @brief Time precision.  Aliases @c ElapsedTimer::Accuracy for convenience.
+   * @brief Precision unit alias inherited from @c ElapsedTimer::Accuracy.
    */
   using Accuracy = ElapsedTimer::Accuracy;
 
   /**
-   * @brief Default constructor.  Creates an invalid (unset) deadline.
+   * @brief Constructs an invalid timer with no deadline set.
    *
    * @details
-   * @c is_valid() returns @c false and @c has_expired() returns @c false
-   * until @c set_deadline() or @c set_deadline_abs() is called.
+   * @c is_valid returns @c false and @c has_expired returns @c false until @c set_deadline or
+   * @c set_deadline_abs is called.
    */
   DeadlineTimer() noexcept;
 
   /**
-   * @brief Constructs a @c DeadlineTimer that expires @p interval time units from now.
+   * @brief Constructs a timer that expires @p interval units in the future.
    *
    * @details
-   * The absolute deadline is computed as the current monotonic timestamp plus
-   * @p interval. If @p interval <= 0 the timer is reset to the invalid state
-   * (equivalent to @c reset()).
+   * The absolute deadline is computed as the current monotonic timestamp plus @p interval.  A
+   * non-positive @p interval leaves the timer invalid.
    *
-   * @param interval  Duration until expiry, in @p accuracy units.
-   * @param accuracy  Time precision (default: @c ElapsedTimer::kMilli).
+   * @param interval  Duration until expiry in @p accuracy units.
+   * @param accuracy  Precision of stored timestamps.  Default: @c ElapsedTimer::kMilli.
    */
   explicit DeadlineTimer(int64_t interval, Accuracy accuracy = ElapsedTimer::kMilli) noexcept;
 
   /**
-   * @brief Copy constructor.
+   * @brief Copy constructor; copies the stored deadline and accuracy.
    *
-   * @param other  The source timer.
+   * @param other  Source timer.
    */
   DeadlineTimer(const DeadlineTimer& other) noexcept;
 
   /**
-   * @brief Move constructor.
+   * @brief Move constructor; equivalent to copy because the timer holds only POD state.
    *
-   * @param other  The source timer (moved from).
+   * @param other  Source timer.
    */
   DeadlineTimer(DeadlineTimer&& other) noexcept;
 
@@ -134,60 +131,54 @@ class VLINK_EXPORT DeadlineTimer final {
   ~DeadlineTimer() noexcept;
 
   /**
-   * @brief Copy-assignment operator.
+   * @brief Copy assignment; replaces the stored deadline and accuracy.
    *
-   * @param other  The source timer.
-   * @return A reference to @c *this.
+   * @param other  Source timer.
+   * @return Reference to @c *this.
    */
   DeadlineTimer& operator=(const DeadlineTimer& other) noexcept;
 
   /**
-   * @brief Move-assignment operator.
+   * @brief Move assignment; equivalent to copy assignment for this POD-state type.
    *
-   * @param other  The source timer.
-   * @return A reference to @c *this.
+   * @param other  Source timer.
+   * @return Reference to @c *this.
    */
   DeadlineTimer& operator=(DeadlineTimer&& other) noexcept;
 
   /**
-   * @brief Sets the deadline to @p interval time units from now.
+   * @brief Sets the deadline @p interval units after the current monotonic timestamp.
    *
    * @details
-   * Reads the current monotonic timestamp and adds @p interval to produce the
-   * absolute deadline. A value of 0 or less clears the timer and makes it
-   * invalid.
+   * A non-positive @p interval clears the timer (equivalent to @c reset).
    *
-   * @param interval  Duration until expiry in the configured accuracy units.
+   * @param interval  Duration until expiry in the configured accuracy unit.
    */
   void set_deadline(int64_t interval) noexcept;
 
   /**
-   * @brief Sets an explicit absolute deadline timestamp.
+   * @brief Sets an absolute deadline timestamp directly.
    *
    * @details
-   * The value must be in the same unit and time base as the @c Accuracy
-   * configured for this timer. Typically obtain it via
-   * @c ElapsedTimer::get_cpu_timestamp(accuracy).
+   * @p abs_deadline must be expressed in the same unit and time base as the configured accuracy;
+   * obtain it via @c ElapsedTimer::get_cpu_timestamp(accuracy).
    *
-   * @param abs_deadline  Absolute monotonic timestamp of the deadline.
+   * @param abs_deadline  Absolute monotonic deadline.
    */
   void set_deadline_abs(uint64_t abs_deadline) noexcept;
 
   /**
-   * @brief Resets the deadline to 0, making the timer invalid again.
+   * @brief Resets the timer to the invalid state.
    *
    * @details
-   * After @c reset(), @c is_valid() returns @c false.
+   * After @c reset, @c is_valid returns @c false and @c has_expired returns @c false.
    */
   void reset() noexcept;
 
   /**
    * @brief Returns the stored absolute deadline timestamp.
    *
-   * @details
-   * A value of 0 means the timer has not been set (see @c is_valid()).
-   *
-   * @return Absolute deadline in the configured accuracy units.
+   * @return Deadline value in the configured accuracy unit.  @c 0 indicates an invalid timer.
    */
   [[nodiscard]] uint64_t deadline() const noexcept;
 
@@ -195,36 +186,31 @@ class VLINK_EXPORT DeadlineTimer final {
    * @brief Returns the time remaining until the deadline.
    *
    * @details
-   * Computed as @c (deadline - current_cpu_timestamp). Returns 0 when the
-   * timer is invalid or already expired.
+   * Computed as @c (deadline - current_cpu_timestamp); clamped to @c 0 once the deadline has
+   * been reached or when the timer is invalid.
    *
-   * @return Remaining time in the configured accuracy units.
-   *         A return value of 0 means invalid or expired.
+   * @return Remaining time in the configured accuracy unit; @c 0 when invalid or expired.
    */
   [[nodiscard]] int64_t remaining_time() const noexcept;
 
   /**
-   * @brief Returns @c true if the current time is past the stored deadline.
+   * @brief Reports whether the current time has passed the stored deadline.
    *
-   * @details
-   * Equivalent to @c remaining_time() <= 0 when @c is_valid() is @c true.
-   * Always returns @c false for an unset (invalid) timer.
-   *
-   * @return @c true if expired, @c false otherwise.
+   * @return @c true when expired; always @c false for invalid timers.
    */
   [[nodiscard]] bool has_expired() const noexcept;
 
   /**
-   * @brief Returns @c true if the deadline has been explicitly set (non-zero).
+   * @brief Reports whether a deadline has been set.
    *
-   * @return @c true if the timer is valid (deadline != 0).
+   * @return @c true when @c deadline() is non-zero.
    */
   [[nodiscard]] bool is_valid() const noexcept;
 
   /**
-   * @brief Returns the time precision configured for this timer.
+   * @brief Returns the precision configured for this timer.
    *
-   * @return The @c Accuracy value set at construction.
+   * @return Accuracy unit chosen at construction.
    */
   [[nodiscard]] Accuracy get_accuracy() const noexcept;
 

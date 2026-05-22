@@ -23,44 +23,68 @@
 
 /**
  * @file node_impl.h
- * @brief Abstract transport node base classes used by all VLink node implementations.
+ * @brief Foundational base classes shared by every transport-backed VLink node.
  *
  * @details
- * This header defines two base classes that form the backbone of the VLink
- * transport abstraction:
+ * This is an internal implementation header used by the public node templates
+ * (@c Publisher, @c Subscriber, @c Client, @c Server, @c Setter, @c Getter)
+ * and by every transport backend; it is not part of the public API surface.
+ * The header introduces two cooperating base classes:
  *
- * - @c AbstractNode -- minimal interface for retrieving the underlying native
- *   transport handle (e.g. a DDS DataWriter pointer).
- * - @c NodeImpl -- the main base class for @c PublisherImpl, @c SubscriberImpl,
- *   @c ServerImpl, @c ClientImpl, @c SetterImpl, and @c GetterImpl.  It
- *   provides common infrastructure:
+ * - @c AbstractNode -- exposes a single @c get_native_handle() escape hatch so
+ *   advanced users can reach the transport-native object behind a node.
+ * - @c NodeImpl -- the heavyweight base that every @c PublisherImpl,
+ *   @c SubscriberImpl, @c ServerImpl, @c ClientImpl, @c SetterImpl and
+ *   @c GetterImpl ultimately derive from.  It centralises lifecycle hooks,
+ *   property storage, message-loop attachment, interruption signalling and the
+ *   ancillary observability paths used by discovery, recording and proxying.
  *
- * | Feature                | API                                               |
- * | ---------------------- | ------------------------------------------------- |
- * | Transport initialise   | @c init() / @c deinit()                           |
- * | Zero-copy loan         | @c loan() / @c return_loan()                      |
- * | Suspend / resume       | @c suspend() / @c resume()                        |
- * | Interrupt              | @c interrupt() / @c reset_interrupted()           |
- * | Property store         | @c set_property() / @c get_property()             |
- * | Message loop attach    | @c attach() / @c detach() / @c get_message_loop() |
- * | Status callback        | @c register_status_handler() / @c call_status()   |
- * | Data recording         | @c set_record_path() / @c try_record()            |
- * | Discovery registration | @c init_ext() / @c deinit_ext()                   |
- * | Version check          | @c check_version()                                |
- * | Global init            | @c global_init() -- called once per process       |
+ * @par NodeImpl interface contract
+ * | Concern                | API surface                                                   |
+ * | ---------------------- | ------------------------------------------------------------- |
+ * | Transport lifecycle    | @c init() / @c deinit()                                       |
+ * | Zero-copy loans        | @c loan() / @c return_loan() / @c set_manual_unloan           |
+ * | Suspend / resume       | @c suspend() / @c resume() / @c is_suspend()                  |
+ * | Interrupt              | @c interrupt() / @c reset_interrupted() / @c is_interrupted   |
+ * | Property store         | @c set_property() / @c get_property() / @c get_all_properties |
+ * | Message loop binding   | @c attach() / @c detach() / @c get_message_loop()             |
+ * | Status callbacks       | @c register_status_handler() / @c call_status()               |
+ * | Recording              | @c set_record_path() / @c try_record()                        |
+ * | Extension / security   | @c init_ext() / @c deinit_ext() / @c enable_security()        |
+ * | Version probe          | @c check_version()                                            |
+ * | Process bootstrap      | static @c global_init()                                       |
  *
- * @par Callback Types
- * @c NodeImpl defines the standardised callback signatures used throughout all
- * transport backends:
+ * @par Lifecycle
+ * @code
+ *      construct -> set_property -> enable_security -> init -> init_ext
+ *                                                       ^         ^
+ *                                                       |         |
+ *                                       attach(loop) ---+         | active
+ *                                                                 |
+ *                                       interrupt -> reset_interrupted (optional)
+ *                                                                 |
+ *                                                                 v
+ *                                                deinit_ext -> deinit -> destroy
+ * @endcode
  *
- * | Type              | Signature                               | Used by                               |
- * | ----------------- | --------------------------------------- | ------------------------------------- |
- * | ConnectCallback   | @c void(bool)                           | PublisherImpl, ClientImpl, ServerImpl |
- * | StatusCallback    | @c void(const Status::BasePtr&)         | DDS status events                     |
- * | SyncCallback      | @c void()                               | SetterImpl sync                       |
- * | ReqRespCallback   | @c void(uint64_t, const Bytes&, Bytes*) | ServerImpl listen                     |
- * | MsgCallback       | @c void(const Bytes&)                   | SubscriberImpl, GetterImpl            |
- * | IntraMsgCallback  | @c void(const IntraData&)               | intra:// subscriber                   |
+ * @par ImplType / SecurityType / InitType
+ * - @c ImplType (defined in @c types.h) is captured at construction time and
+ *   exposes the node role to discovery / proxy.
+ * - @c SecurityType is the template parameter on the public node templates that
+ *   selects whether @c enable_security() runs.
+ * - @c InitType (also from @c types.h) controls whether the public template
+ *   calls @c init() immediately or defers it until the user invokes @c init()
+ *   manually.
+ *
+ * @par Callback signatures
+ * | Alias                | Signature                                | Used by                          |
+ * | -------------------- | ---------------------------------------- | -------------------------------- |
+ * | @c ConnectCallback   | @c void(bool)                            | Publisher/Client/Server peers    |
+ * | @c StatusCallback    | @c void(const Status::BasePtr&)          | DDS-family status reporting      |
+ * | @c SyncCallback      | @c void()                                | SetterImpl late-getter sync      |
+ * | @c ReqRespCallback   | @c void(uint64_t, const Bytes&, Bytes*)  | ServerImpl request handling      |
+ * | @c MsgCallback       | @c void(const Bytes&)                    | SubscriberImpl / GetterImpl      |
+ * | @c IntraMsgCallback  | @c void(const IntraData&)                | intra:// subscriber              |
  */
 
 #pragma once
@@ -84,30 +108,28 @@ namespace vlink {
 
 /**
  * @class AbstractNode
- * @brief Minimal interface for accessing the underlying native transport handle.
+ * @brief Tiny mix-in that exposes the backend-native handle behind a node.
  *
  * @details
- * Concrete transport backends (e.g. @c DdsPublisherImpl) inherit from both
- * @c AbstractNode and their corresponding @c NodeImpl subclass.
- * @c get_native_handle() returns an @c std::any wrapping the backend-specific
- * handle, allowing advanced users to access transport internals without
- * breaking the VLink API boundary.
+ * Transport backends commonly inherit from both @c AbstractNode and the matching
+ * @c NodeImpl subclass.  @c get_native_handle() returns an @c std::any wrapping
+ * the native object (for instance a DDS @c DataWriter pointer) so advanced users
+ * can interact with backend internals without leaking transport types through
+ * the rest of the VLink API.
  *
- * @note The base implementation returns a @c std::any containing @c nullptr.
+ * @note The base implementation returns an @c std::any holding @c nullptr; the
+ *       caller must @c std::any_cast to the expected backend type.
  */
 class VLINK_EXPORT AbstractNode {
  public:
   /**
-   * @brief Returns the underlying native transport handle wrapped in @c std::any.
+   * @brief Returns the backend-native handle wrapped in an @c std::any.
    *
    * @details
-   * Transport-specific subclasses override this to return, for example, a
-   * DDS @c DataWriter or @c DataReader pointer.  Callers must @c std::any_cast
-   * to the correct type.  The base implementation returns a non-empty
-   * @c std::any containing @c nullptr.
+   * Backends override this method to expose, for example, a DDS @c DataWriter
+   * or @c DataReader pointer.  Callers must @c std::any_cast the result.
    *
-   * @return Backend-specific handle, or @c nullptr wrapped in @c std::any in
-   *         the base class.
+   * @return Backend handle, or @c nullptr-bearing @c std::any in the base.
    */
   virtual std::any get_native_handle() const;
 
@@ -121,143 +143,137 @@ class VLINK_EXPORT AbstractNode {
 
 /**
  * @class NodeImpl
- * @brief Abstract base for all VLink transport backend node implementations.
+ * @brief Backbone of every transport-specific VLink node implementation.
  *
  * @details
- * Every concrete transport backend (e.g. @c DdsPublisherImpl, @c ShmSubscriberImpl)
- * ultimately derives from @c NodeImpl.  The class provides:
- * - The pure-virtual @c init() / @c deinit() lifecycle interface.
- * - Common property storage shared between the @c Conf layer and the node.
- * - An optional @c MessageLoop attachment for callback dispatch.
- * - An @c interrupt() mechanism to unblock blocking operations.
- * - Hooks for data recording (@c try_record) and discovery reporting
- *   (@c init_ext / @c deinit_ext).
- * - A static @c global_init() for process-wide singletons, invoked automatically
- *   by the constructor and also safe to call explicitly.
+ * Every concrete transport backend ultimately derives from @c NodeImpl.  The
+ * class centralises lifecycle, instrumentation and observability so that
+ * subclass authors only need to focus on transport mechanics.  The contract
+ * table at file scope summarises which knobs the base owns and which require
+ * a transport override.
  *
- * @note @c suspend() and @c resume() are optional -- the default implementations
- *       log a warning and return @c false if not overridden.
+ * @note @c suspend() and @c resume() are optional capabilities; the base
+ *       implementation logs a warning and returns @c false so that backends
+ *       lacking the operation can be detected gracefully.
  *
- * @note @c register_status_handler() and @c call_status() are only supported on
- *       DDS-family transports (@c kDds, @c kDdsc, @c kDdsr, @c kDdst).  Calling
- *       them on other transport types logs a warning and is a no-op.
+ * @note @c register_status_handler() and @c call_status() are only meaningful
+ *       on DDS-family transports (@c kDds, @c kDdsc, @c kDdsr, @c kDdst);
+ *       other backends log a warning and treat them as no-ops.
  */
 class VLINK_EXPORT NodeImpl {
  public:
   /**
-   * @brief Callback invoked when the peer connection state changes.
+   * @brief Callback fired when peer presence changes.
    *
-   * The single callback argument is @c true when connected and @c false when
-   * disconnected.
+   * The boolean argument is @c true when the peer becomes reachable and
+   * @c false when it disappears.
    */
   using ConnectCallback = Function<void(bool)>;
 
   /**
-   * @brief Callback invoked on DDS status events (e.g. deadline missed).
+   * @brief Callback fired on DDS-family status notifications (e.g. deadline missed).
    *
-   * @param ptr  Polymorphic status object; downcast to the concrete type.
+   * @param ptr Polymorphic status object; downcast to the concrete subtype.
    */
   using StatusCallback = Function<void(const Status::BasePtr& ptr)>;
 
   /**
-   * @brief Callback invoked when a @c SetterImpl sync completes.
+   * @brief Callback fired when a @c SetterImpl completes a late-getter sync.
    */
   using SyncCallback = Function<void()>;
 
   /**
-   * @brief Callback for @c ServerImpl request/response processing.
+   * @brief Request / response handler installed by @c ServerImpl::listen().
    *
    * @details
-   * Parameters: @c (req_id, request_bytes, response_bytes_ptr).
-   * The handler writes its response into @c *response_bytes_ptr; if
-   * @c response_bytes_ptr is @c nullptr the server is in fire-and-forget mode.
+   * Parameters are @c (req_id, request_bytes, response_bytes_ptr).  The handler
+   * writes the response into @c *response_bytes_ptr; when the pointer is
+   * @c nullptr the server is running in fire-and-forget mode.
    */
   using ReqRespCallback = Function<void(uint64_t, const Bytes&, Bytes*)>;
 
   /**
-   * @brief Callback delivering a raw serialised message to a @c SubscriberImpl or @c GetterImpl.
+   * @brief Callback delivering a serialised payload to a subscriber or getter.
    *
-   * @param bytes  Received payload; lifetime is scoped to the callback.
+   * @param bytes Payload bytes; lifetime is scoped to the callback.
    */
   using MsgCallback = Function<void(const Bytes&)>;
 
   /**
-   * @brief Callback delivering an in-process @c IntraData message.
+   * @brief Callback delivering an in-process payload to an intra:// subscriber.
    *
    * @details
-   * Only used on @c intra:// transport.  The @c IntraData is a @c shared_ptr
-   * to the payload type, so no copy occurs.
+   * @c IntraData is a @c shared_ptr to the payload type, so no copy occurs as
+   * the callback is dispatched.
    */
   using IntraMsgCallback = Function<void(const IntraData&)>;
 
   /**
-   * @brief Initialises the underlying transport channel.
+   * @brief Brings the underlying transport channel online.
    *
    * @details
-   * Called by the Node<> template after all properties have been set.
-   * Concrete implementations create DDS entities, SHM channels, etc.
+   * Called by the public Node<> template after properties have been wired in.
+   * Backends create their DDS entities, shared-memory channels or any other
+   * resources here.
    */
   virtual void init() = 0;
 
   /**
-   * @brief Tears down the underlying transport channel.
+   * @brief Tears the underlying transport channel down.
    *
    * @details
-   * Called by the Node<> template destructor.  Releases all transport
-   * resources (e.g. DDS entities, SHM segments).
+   * Called by the Node<> template destructor; releases all transport-owned
+   * resources.
    */
   virtual void deinit() = 0;
 
   /**
-   * @brief Temporarily suspends message delivery without tearing down the channel.
+   * @brief Pauses message delivery without releasing the channel.
    *
    * @details
-   * The base implementation logs a warning and returns @c false.
-   * Only a subset of transport backends support this operation.
+   * The base implementation logs a warning and returns @c false.  Only a few
+   * backends implement true suspension; others should leave the default.
    *
-   * @return @c true if suspended successfully; @c false if unsupported.
+   * @return @c true on success; @c false when the operation is unsupported.
    */
   virtual bool suspend();
 
   /**
-   * @brief Resumes message delivery after a @c suspend() call.
+   * @brief Resumes message delivery after @c suspend().
    *
    * @details
-   * The base implementation logs a warning and returns @c false.
+   * Default no-op returns @c false.  Override in backends that support
+   * suspension.
    *
-   * @return @c true if resumed successfully; @c false if unsupported.
+   * @return @c true on success; @c false otherwise.
    */
   virtual bool resume();
 
   /**
-   * @brief Returns @c true when the node is currently suspended.
+   * @brief Reports whether the node is currently suspended.
    *
    * @details
-   * The base implementation logs a warning and returns @c false.
+   * Default implementation logs a warning and returns @c false.  Override
+   * alongside @c suspend() / @c resume() when relevant.
    *
-   * @return @c true if the node is suspended; @c false otherwise or if unsupported.
+   * @return @c true when the node is paused.
    */
   [[nodiscard]] virtual bool is_suspend() const;
 
   /**
-   * @brief Signals any blocking operations to unblock and return immediately.
+   * @brief Marks the node interrupted and wakes blocking operations.
    *
    * @details
-   * Sets the internal interrupted flag and, in derived classes
-   * (e.g. @c PublisherImpl, @c ClientImpl), also notifies waiting
-   * condition variables to release threads blocked in @c wait_for_*.
-   * Call @c reset_interrupted() before resuming normal operations.
+   * Sets the internal interrupted flag and is overridden by subclasses to
+   * signal additional condition variables (e.g. @c wait_for_subscribers()).
+   * Pair with @c reset_interrupted() before reusing blocking helpers.
    */
   virtual void interrupt();
 
   /**
-   * @brief Returns @c true if the transport supports zero-copy loaning.
+   * @brief Indicates whether zero-copy loaning is available on this backend.
    *
-   * @details
-   * Zero-copy loan support is transport-specific and lets senders write
-   * directly into transport-managed memory.  The base returns @c false.
-   *
-   * @return @c true if @c loan() / @c return_loan() are supported.
+   * @return @c true when @c loan() / @c return_loan() can be used.
    */
   [[nodiscard]] virtual bool is_support_loan() const;
 
@@ -265,12 +281,12 @@ class VLINK_EXPORT NodeImpl {
    * @brief Borrows a write buffer of @p size bytes from the transport.
    *
    * @details
-   * Returns an empty @c Bytes in the base implementation.  Transports
-   * that support zero-copy override this to return a @c Bytes view into
-   * pre-allocated shared memory.
+   * Backends that support zero-copy override this method to return a @c Bytes
+   * view onto pre-allocated transport memory.  The default returns an empty
+   * @c Bytes.
    *
-   * @param size  Required buffer size in bytes.
-   * @return      Borrowed @c Bytes, or empty on failure.
+   * @param size  Requested buffer size in bytes.
+   * @return Borrowed @c Bytes; empty when loaning is unsupported or failed.
    */
   [[nodiscard]] virtual Bytes loan(int64_t size);
 
@@ -278,46 +294,41 @@ class VLINK_EXPORT NodeImpl {
    * @brief Returns a previously loaned buffer to the transport.
    *
    * @details
-   * Must be called if @c loan() returned a valid buffer and the caller
-   * decided not to publish (e.g. serialisation failed).  The base returns
-   * @c false.
+   * Must be called whenever @c loan() succeeded but the caller decided not to
+   * publish (for example because serialisation failed).
    *
-   * @param bytes  Buffer previously returned by @c loan().
-   * @return       @c true on success; @c false if unsupported.
+   * @param bytes  Buffer previously obtained via @c loan().
+   * @return @c true on success; @c false when loaning is unsupported.
    */
   virtual bool return_loan(const Bytes& bytes);
 
   /**
-   * @brief Configures manual unloan mode for zero-copy transports.
+   * @brief Toggles automatic versus manual release of received loaned buffers.
    *
    * @details
-   * When @p manual_unloan is @c true the transport does not automatically
-   * release received loaned buffers after callback dispatch; the caller must
-   * call @c return_loan() explicitly.  The base is a no-op.
+   * With @p manual_unloan set to @c true the backend does not release loaned
+   * buffers after callback dispatch; the application must call @c return_loan()
+   * itself.
    *
-   * @param manual_unloan  @c true to enable manual release; @c false for automatic.
+   * @param manual_unloan  @c true for manual release; @c false for automatic.
    */
   virtual void set_manual_unloan(bool manual_unloan);
 
   /**
-   * @brief Returns a pointer to the associated @c Conf configuration object.
+   * @brief Returns the associated transport @c Conf, or @c nullptr in the base.
    *
    * @details
-   * Concrete backends override this to return their typed @c Conf subclass
-   * (e.g. @c DdsConf).  The base returns @c nullptr.
+   * Concrete backends override the method to expose their typed @c Conf so the
+   * public node templates can resolve transport-specific options.
    *
-   * @return Pointer to the owning @c Conf, or @c nullptr in the base.
+   * @return Pointer to the owning @c Conf.
    */
   [[nodiscard]] virtual const struct Conf* get_conf() const;
 
   /**
-   * @brief Returns a pointer to the @c AbstractNode peer (if any).
+   * @brief Returns the companion @c AbstractNode, when the impl is split.
    *
-   * @details
-   * Used to access the native handle when the impl is split from the node.
-   * The base returns @c nullptr.
-   *
-   * @return Pointer to the @c AbstractNode, or @c nullptr.
+   * @return Pointer to the abstract node, or @c nullptr.
    */
   [[nodiscard]] virtual const AbstractNode* get_abstract_node() const;
 
@@ -325,24 +336,23 @@ class VLINK_EXPORT NodeImpl {
    * @brief Retrieves a transport-specific status object.
    *
    * @details
-   * Only supported on DDS-family transports.  The base logs a warning and
+   * Only meaningful on DDS-family transports; the base logs a warning and
    * returns @c Status::Unknown.
    *
-   * @param type  The type of status to retrieve (e.g. deadline missed).
-   * @return      Polymorphic status object; never @c nullptr.
+   * @param type  Requested status category.
+   * @return Polymorphic status object; never @c nullptr.
    */
   [[nodiscard]] virtual Status::BasePtr get_status(Status::Type type) const;
 
   /**
-   * @brief Checks whether @p version matches the runtime VLink library version.
+   * @brief Compares @p version with the runtime VLink library version.
    *
    * @details
-   * Compares @p version against @c VLINK_VERSION_MAJOR/MINOR/PATCH.  On the
-   * first mismatch a warning is logged (once per process).  Version checks are
-   * advisory; mismatches do not prevent node creation.
+   * Logs a warning (once per process) on the first mismatch.  Version checks
+   * are advisory and do not block node creation.
    *
-   * @param version  Compile-time version embedded by the application.
-   * @return         @c true if versions match; @c false otherwise.
+   * @param version  Compile-time version constants embedded by the caller.
+   * @return @c true when the versions agree.
    */
   virtual bool check_version(const Version& version);
 
@@ -350,15 +360,13 @@ class VLINK_EXPORT NodeImpl {
    * @brief Attaches the node to a @c MessageLoop for callback dispatch.
    *
    * @details
-   * Once attached, @c call_status() posts callbacks onto the loop thread.
-   * Pass a non-null loop.  This base implementation only records the pointer
-   * atomically; passing @c nullptr can return @c true from the compare-exchange
-   * when the node was already detached, but it does not create a usable loop
-   * binding.  Returns @c false if another non-null loop is already attached.
+   * Records @p message_loop atomically; subsequent @c call_status() posts onto
+   * the loop thread.  When another non-null loop is already attached the call
+   * is rejected.  Passing @c nullptr does not establish a usable binding even
+   * though it may succeed when the node was already detached.
    *
-   * @param message_loop  Loop to attach to.
-   * @return              @c true when the pointer was recorded; @c false if
-   *                      another loop is already attached.
+   * @param message_loop  Loop to bind to.
+   * @return @c true when the pointer was stored; @c false on conflict.
    */
   virtual bool attach(class MessageLoop* message_loop);
 
@@ -366,139 +374,127 @@ class VLINK_EXPORT NodeImpl {
    * @brief Detaches the node from its @c MessageLoop.
    *
    * @details
-   * Clears the attached-loop pointer and then waits for the previous loop to
-   * become idle if the call is from a different thread, ensuring no already
-   * posted callbacks are in-flight after this call returns.
+   * Clears the cached pointer and, when called from a thread different from
+   * the loop, blocks until the previous loop becomes idle so no callback is
+   * still in flight on return.
    *
    * @return @c true on success; @c false if no loop was attached.
    */
   virtual bool detach();
 
   /**
-   * @brief Returns the @c MessageLoop this node is attached to.
+   * @brief Returns the currently attached @c MessageLoop.
    *
-   * @return Pointer to the loop, or @c nullptr if not attached.
+   * @return Loop pointer or @c nullptr when none is bound.
    */
   [[nodiscard]] class MessageLoop* get_message_loop() const;
 
   /**
-   * @brief Returns a typed pointer to the conf by downcasting to @c T.
+   * @brief Convenience downcast wrapper around @c get_conf().
    *
-   * @details
-   * Convenience wrapper around @c get_conf() for transport backends that
-   * need to access their own @c Conf subclass.
-   *
-   * @tparam T  Concrete @c Conf subclass to cast to.
-   * @return    @c const T* pointer, or @c nullptr if @c get_conf() returns null.
+   * @tparam T  Expected concrete @c Conf subclass.
+   * @return Typed pointer; @c nullptr when @c get_conf() returns @c nullptr.
    */
   template <typename T>
   [[nodiscard]] const T* get_target_conf() const;
 
   /**
-   * @brief Registers a callback for DDS status events.
+   * @brief Installs a DDS-family status handler.
    *
    * @details
-   * Only effective on DDS-family transports (@c kDds, @c kDdsc, @c kDdsr,
-   * @c kDdst).  A warning is logged if called on other transport types.
-   * If a @c MessageLoop is attached, the callback is dispatched on that thread.
+   * No-op on non-DDS transports.  When a @c MessageLoop is attached the
+   * callback is invoked on the loop thread.
    *
-   * @param callback  Handler invoked with each status change.
+   * @param callback  Handler invoked for each status notification.
    */
   void register_status_handler(StatusCallback&& callback);
 
   /**
-   * @brief Returns @c true if a status handler has been registered.
+   * @brief Reports whether a status handler has been registered.
    *
-   * @details
-   * Only effective on DDS-family transports; logs a warning and returns
-   * @c false for other transport types.
-   *
-   * @return @c true if a non-null status callback is registered.
+   * @return @c true when a non-null status handler exists.
    */
   [[nodiscard]] bool has_register_status() const;
 
   /**
-   * @brief Dispatches a status event to the registered status handler.
+   * @brief Delivers a status notification to the registered handler.
    *
    * @details
-   * If a @c MessageLoop is attached the callback is posted onto the loop thread;
-   * otherwise it is called directly.  Only effective on DDS-family transports.
+   * Posts the call onto the attached @c MessageLoop when one exists; otherwise
+   * invokes the handler synchronously.
    *
-   * @param ptr  Status object to deliver.
+   * @param ptr  Status object to forward.
    */
   void call_status(Status::BasePtr ptr);
 
   /**
-   * @brief Sets a named transport property on this node.
+   * @brief Sets a named property on this node.
    *
    * @details
-   * Properties are key/value strings (e.g. @c "dds.ip" = @c "192.168.1.1").
-   * Must be called before @c init() to take effect.  The property map is
-   * protected by a shared mutex for thread safety.
+   * Properties are key / value strings consumed during @c init().  The
+   * underlying map is guarded by a shared mutex for thread safety.
    *
-   * @param prop   Property name.
+   * @param prop   Property key.
    * @param value  Property value.
    */
   void set_property(const std::string& prop, const std::string& value);
 
   /**
-   * @brief Retrieves a named transport property.
+   * @brief Retrieves the value of a named property.
    *
-   * @param prop  Property name.
-   * @return      Property value, or empty string if not set.
+   * @param prop  Property key.
+   * @return Value, or empty string when no entry exists.
    */
   [[nodiscard]] std::string get_property(const std::string& prop) const;
 
   /**
-   * @brief Returns a snapshot of all properties set on this node.
+   * @brief Returns a copy of every property currently set on this node.
    *
-   * @return A copy of the internal @c PropertiesMap.
+   * @return Snapshot of the internal @c PropertiesMap.
    */
   [[nodiscard]] Conf::PropertiesMap get_all_properties() const;
 
   /**
-   * @brief Enables or disables discovery reporting for this node.
+   * @brief Toggles whether this node is reported to the discovery layer.
    *
    * @details
-   * When @c false the node is hidden from @c DiscoveryReporter / @c DiscoveryViewer.
-   * Proxy-internal channels use this to suppress themselves from topology views.
-   * Must be called before @c init_ext().
+   * Must be called before @c init_ext().  Disabling discovery hides the node
+   * from @c DiscoveryReporter / @c DiscoveryViewer; the proxy implementation
+   * uses this to keep its internal channels off topology views.
    *
-   * @param enable  @c true to report to discovery (default); @c false to suppress.
+   * @param enable  @c true to report to discovery (default); @c false to hide.
    */
   void set_discovery_enabled(bool enable);
 
   /**
-   * @brief Returns @c true if discovery reporting is enabled for this node.
+   * @brief Returns the current discovery-reporting flag.
    *
-   * @return Current discovery-enabled state.
+   * @return @c true when the node will be visible to discovery.
    */
   [[nodiscard]] bool get_discovery_enabled() const;
 
   /**
-   * @brief Sets the file path for per-node message recording.
+   * @brief Configures per-node message recording.
    *
    * @details
-   * When non-empty a @c BagWriter instance is obtained (or shared with other
-   * nodes writing to the same path) and @c try_record() will capture messages.
-   * Pass an empty string to disable per-node recording.
+   * A non-empty @p path acquires (or shares) a @c BagWriter so that subsequent
+   * @c try_record() calls capture frames.  An empty path turns recording off.
    *
-   * @param path  File path for the bag; empty or unsupported suffix disables recording.
+   * @param path  File path; empty or unsupported suffix disables recording.
    */
   void set_record_path(const std::string& path);
 
   /**
-   * @brief Installs application-layer security for this implementation node.
+   * @brief Installs application-layer security from a const-reference config.
    *
    * @details
-   * Called before @c init() by the protected @c Node::enable_security() helper.
-   * Rejects unsupported transports, fills an empty AAD context from the node
-   * wire metadata, lets @c Security handle the empty-config default, validates
-   * the resulting instance against the current node role, then stores it in
-   * @c security on success.
+   * Performs the wire-metadata validation and AAD-context plumbing, then
+   * forwards a fully prepared @c Security::Config into a @c Security instance
+   * stored in @c security.  Unsupported transports return @c false without
+   * installing anything.
    *
-   * @param cfg  Security configuration aggregate supplied by the public node wrapper.
-   * @return @c true when a usable @c Security instance was installed; otherwise @c false.
+   * @param cfg  Security configuration supplied by the public node wrapper.
+   * @return @c true once a usable @c Security instance is installed.
    */
   bool enable_security(const Security::Config& cfg);
 
@@ -508,39 +504,36 @@ class VLINK_EXPORT NodeImpl {
    * @details
    * Same validation path as the const-reference overload, but avoids copying
    * callback targets and key material when the caller owns the config.  The
-   * method may fill @c cfg.advanced.aad_context before moving it into
-   * @c Security; an otherwise empty config is defaulted by @c Security.
+   * AAD context may be filled before the config is moved into @c Security.
    *
-   * @param cfg  Security configuration aggregate to consume.
-   * @return @c true when a usable @c Security instance was installed; otherwise @c false.
+   * @param cfg  Security configuration to consume.
+   * @return @c true once a usable @c Security instance is installed.
    */
   bool enable_security(Security::Config&& cfg);
 
   /**
-   * @brief Merges SSL/TLS options into the node property map.
+   * @brief Merges SSL options into the node property map.
    *
    * @details
-   * Acquires the helper mutex and calls @c SslOptions::parse_to() to
-   * write the non-default fields of @p options as @c ssl.* entries in
-   * @c helper_->property_map.  The transport factory reads these entries
-   * during connection setup to configure TLS.
+   * Acquires the helper mutex and delegates to @c SslOptions::parse_to() so
+   * the transport factory reads the resulting @c ssl.* entries during
+   * connection setup.
    *
-   * @param options  The SSL/TLS configuration to merge.
+   * @param options  SSL / TLS configuration to merge.
    *
    * @see SslOptions::parse_to(), Node::set_ssl_options()
    */
   void set_ssl_options(const SslOptions& options);
 
   /**
-   * @brief Records a message to the global and/or per-node bag writers.
+   * @brief Records a message to the global and / or per-node bag writers.
    *
    * @details
-   * Queries the global @c BagWriter (if one is active) and the per-node writer
-   * set by @c set_record_path().  DDS CDR messages are skipped; intra messages
-   * are skipped only when the internal ignore-intra filter is enabled.
+   * Skips DDS CDR payloads and (when the ignore-intra filter is on) intra
+   * messages.  Used by every node role to feed @c BagWriter pipelines.
    *
-   * @param action_type  The role this message is being recorded for.
-   * @param data         Raw serialised message bytes.
+   * @param action_type  Logical role under which the message is being recorded.
+   * @param data         Raw serialised payload bytes.
    */
   void try_record(ActionType action_type, const Bytes& data);
 
@@ -548,35 +541,34 @@ class VLINK_EXPORT NodeImpl {
    * @brief Clears the interrupted flag set by @c interrupt().
    *
    * @details
-   * Must be called before re-using a blocking operation after it has been
-   * interrupted, e.g. before calling @c wait_for_subscribers() again.
+   * Required before re-running a blocking helper such as
+   * @c wait_for_subscribers() after a prior interruption.
    */
   void reset_interrupted();
 
   /**
-   * @brief Returns @c true if @c interrupt() has been called and not yet reset.
+   * @brief Reports whether @c interrupt() has been called and not yet reset.
    *
    * @return @c true when the interrupted flag is set.
    */
   [[nodiscard]] bool is_interrupted() const;
 
   /**
-   * @brief Registers the node with the global @c DiscoveryReporter.
+   * @brief Registers the node with the global discovery reporter.
    *
    * @details
-   * Called at the end of @c init() by all Node<> template specialisations.
-   * Optionally starts the @c CpuProfiler if global profiling is enabled.
+   * Invoked at the end of @c init() by every public Node<> template.  Also
+   * starts the per-node @c CpuProfiler when global profiling is enabled.
    * Skips registration for CDR, security, and (by default) intra nodes.
    */
   void init_ext();
 
   /**
-   * @brief Deregisters the node from the global @c DiscoveryReporter.
+   * @brief Deregisters the node from the global discovery reporter.
    *
    * @details
-   * Called after the transport-specific @c deinit() by all Node<> template
-   * specialisations.
-   * Restarts the @c CpuProfiler if global profiling was running.
+   * Mirrors @c init_ext(); called after @c deinit() to release the discovery
+   * entry and restart the global profiler if it had been paused.
    */
   void deinit_ext();
 
@@ -584,23 +576,23 @@ class VLINK_EXPORT NodeImpl {
    * @brief Initialises process-wide VLink singletons.
    *
    * @details
-   * Ensures the @c Logger, memory pool, global @c BagWriter, and global
-   * @c DiscoveryReporter are initialised.  Safe to call multiple times; only
-   * the first call has an effect.  The constructor calls this automatically.
+   * Brings the logger, memory pool, global bag writer and discovery reporter
+   * online.  Safe to call multiple times; only the first call has an effect.
+   * The base constructor invokes this automatically.
    */
   static void global_init();
 
-  std::string url;                               ///< Full URL string of this node (e.g. @c "dds://my/topic").
-  std::string ser_type;                          ///< Serialisation type string (e.g. @c "demo.proto.PointCloud").
+  std::string url;                               ///< Full URL string of the node, e.g. @c "dds://my/topic".
+  std::string ser_type;                          ///< Concrete serialisation type tag (e.g. @c "demo.proto.PointCloud").
   ImplType impl_type{kUnknownImplType};          ///< Role of this implementation node.
-  SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse schema family reported to discovery and bag/proxy paths.
-  TransportType transport_type{TransportType::kUnknown};  ///< Transport backend of this implementation node.
-  bool is_cdr_type{false};                                ///< @c true when using DDS native CDR serialisation.
-  bool is_security_type{false};                           ///< @c true when security-authenticated transport is enabled.
-  bool is_discovery_enabled{true};                        ///< Whether this node is reported to the discovery layer.
-  std::atomic_bool has_suspend{false};    ///< Atomic suspend state flag (currently unused by default impls).
-  std::unique_ptr<CpuProfiler> profiler;  ///< Optional per-node CPU profiler (only when global profiling is on).
-  std::unique_ptr<Security> security;     ///< Installed per-node message security context, or @c nullptr.
+  SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse schema family reported to discovery and bag / proxy paths.
+  TransportType transport_type{TransportType::kUnknown};  ///< Transport backend identifier for this node.
+  bool is_cdr_type{false};                                ///< @c true when DDS native CDR serialisation is in use.
+  bool is_security_type{false};                           ///< @c true when an authenticated transport is enabled.
+  bool is_discovery_enabled{true};                        ///< Whether the node is reported to the discovery layer.
+  std::atomic_bool has_suspend{false};    ///< Atomic suspend flag (currently unused by the default impls).
+  std::unique_ptr<CpuProfiler> profiler;  ///< Optional per-node CPU profiler activated under global profiling.
+  std::unique_ptr<Security> security;     ///< Installed per-node message-security context, or @c nullptr.
 
  protected:
   explicit NodeImpl(ImplType type);

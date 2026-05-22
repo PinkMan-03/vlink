@@ -23,61 +23,72 @@
 
 /**
  * @file getter.h
- * @brief Type-safe field-model reader for VLink topics.
+ * @brief Read-side primitive of the VLink field communication model.
  *
  * @details
- * @c Getter<ValueT, SecT> is the read side of the VLink field model.
- * It maintains the latest value published by any matching @c Setter on the
- * same URL.  Unlike @c Subscriber, it retains only the most recent value
- * rather than queuing a history of updates.
+ * @c Getter\<ValueT, SecT\> mirrors the latest value produced by a matching
+ * @c Setter on the same URL.  Unlike @c Subscriber it retains only the most
+ * recent payload rather than queuing every update, and it offers a blocking
+ * @c wait_for_value() entry point in addition to the standard event callback.
  *
- * @par Field Model Overview
- * @code
- *  Setter<T>                 Transport Back-end              Getter<T>
- *      |                          |                               |
- *      |-- set(value) ----------> |                               |
- *      |   serialize(value)       |-- latest-value delivery ----> |
- *      |                          |  (overwrites previous)        |--> listen callback(value)
- *      |                          |                               |    value_ updated
- *      |                          |                               |--> get() returns latest
- * @endcode
+ * The class is a thin, header-only template wrapper around @c GetterImpl and
+ * owns its own cached @c value_, change-tracking buffer, and condition
+ * variable.
  *
- * @par Key Differences: Getter vs Subscriber
- * | Feature                 | @c Getter<T>                           | @c Subscriber<T>               |
- * | ----------------------- | -------------------------------------- | ------------------------------ |
- * | Value retention         | Latest value cached                    | No caching                     |
- * | Transport role          | @c kGetter                             | @c kSubscriber                 |
- * | Blocking read           | @c wait_for_value()                    | N/A                            |
- * | Change-reporting filter | @c set_change_reporting(true)          | No built-in filter             |
- * | Cross-transport use     | As subscriber: @c mark_as_subscriber() | As getter: @c mark_as_getter() |
+ * @par Field-model Data Flow
+ * @verbatim
+ *   Setter<ValueT>             Transport Back-end             Getter<ValueT>
+ *   --------------             ------------------             ---------------
+ *      | set(v)                       |                              |
+ *      |----------------------------->|  serialised latest value     |
+ *      |                              |--- overwrites previous ----->|
+ *      |                              |                              |
+ *      |                              |                              |  Serializer::
+ *      |                              |                              |  deserialize
+ *      |                              |                              |--> value_ cached
+ *      |                              |                              |--> listen cb (optional)
+ *      |                              |                              |--> wait_for_value
+ *      |                              |                              |    returns true
+ *      |                              |                              |--> get() => value
+ * @endverbatim
+ *
+ * @par Getter vs Subscriber
+ * | Feature                  | @c Getter\<T\>                          | @c Subscriber\<T\>             |
+ * | ------------------------ | --------------------------------------- | ------------------------------ |
+ * | Value retention          | Latest value cached                     | None                           |
+ * | Transport role tag       | @c kGetter                              | @c kSubscriber                 |
+ * | Blocking read            | @c wait_for_value()                     | N/A                            |
+ * | Duplicate suppression    | @c set_change_reporting(true)           | N/A                            |
+ * | Cross-role bridge        | @c mark_as_subscriber()                 | @c mark_as_getter()            |
+ *
+ * @par Read-Mode Variants
+ * | Method                                | Blocking | Result type             | Notes                        |
+ * | ------------------------------------- | -------- | ----------------------- | ---------------------------- |
+ * | @c get()                              | No       | @c std::optional        | Returns @c nullopt initially |
+ * | @c wait_for_value(timeout)            | Yes      | @c bool (then @c get()) | Default infinite if @c 0     |
+ * | @c listen(callback)                   | No       | @c void(const ValueT&)  | Fires on every update        |
+ * | @c listen(cb) + @c change_reporting   | No       | @c void(const ValueT&)  | Suppress identical bytes     |
  *
  * @par Usage Patterns
  * @code
- * // Pattern 1: polling
- * Getter<int> g("shm://my_field");
- * if (auto v = g.get()) {
- *     std::cout << "value: " << *v << std::endl;
+ * vlink::Getter<int> g("shm://vehicle/gear");
+ *
+ * if (auto v = g.get()) { use(*v); }
+ *
+ * if (g.wait_for_value(std::chrono::milliseconds(500))) {
+ *   use(*g.get());
  * }
  *
- * // Pattern 2: blocking wait
- * if (g.wait_for_value()) {
- *     auto v = g.get();
- * }
+ * g.listen([](const int& v) { on_update(v); });
  *
- * // Pattern 3: value-change callback (fires when Setter writes a new value)
- * g.listen([](const int& v) { std::cout << "updated: " << v << std::endl; });
- *
- * // Pattern 4: change-only reporting (suppress duplicate values)
  * g.set_change_reporting(true);
- * g.listen([](const int& v) { ... });
+ * g.listen([](const int& v) { on_changed(v); });
  * @endcode
  *
- * @note @c get() and @c wait_for_value() both require a prior Setter write to
- *       return a value.  Before any Setter has written, @c get() returns
- *       @c std::nullopt and @c wait_for_value() blocks until one does.
+ * @note Until a @c Setter writes for the first time, @c get() returns
+ *       @c std::nullopt and @c wait_for_value() blocks.
  *
- * @tparam ValueT  Value type.  Must satisfy @c Serializer::is_supported().
- * @tparam SecT    Security mode; defaults to @c SecurityType::kWithoutSecurity.
+ * @see setter.h, subscriber.h, node.h, serializer.h
  */
 
 #pragma once
@@ -97,55 +108,52 @@ namespace vlink {
 
 /**
  * @class Getter
- * @brief Type-safe field reader for the VLink field communication model.
+ * @brief Type-safe latest-value reader for the VLink field communication model.
  *
- * @tparam ValueT  Value type to read.
- * @tparam SecT    Security mode.
+ * @details
+ * Inherits the full @c Node API and adds field-specific operations: cached
+ * @c get(), blocking @c wait_for_value(), single-shot @c listen() callback,
+ * change-reporting filter, and latency / sample-loss tracking.
+ *
+ * @tparam ValueT  C++ value type. Must satisfy @c Serializer::is_supported().
+ * @tparam SecT    Security mode; defaults to @c SecurityType::kWithoutSecurity.
  */
 template <typename ValueT, SecurityType SecT = SecurityType::kWithoutSecurity>
 class Getter : public Node<GetterImpl, SecT> {
  public:
-  /** @brief Unique-pointer alias. */
-  using UniquePtr = std::unique_ptr<Getter<ValueT, SecT>>;
+  using UniquePtr = std::unique_ptr<Getter<ValueT, SecT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<Getter<ValueT, SecT>>;  ///< Owning shared-pointer alias.
+  using MsgCallback = Function<void(const ValueT&)>;        ///< User callback signature for value updates.
 
-  /** @brief Shared-pointer alias. */
-  using SharedPtr = std::shared_ptr<Getter<ValueT, SecT>>;
-
-  /** @brief User-facing callback type for value-change notifications. */
-  using MsgCallback = Function<void(const ValueT&)>;
-
-  /** @brief Node role identifier (@c kGetter). */
-  static constexpr ImplType kImplType = kGetter;
-
-  /** @brief Serializer type resolved at compile time from @c ValueT. */
-  static constexpr Serializer::Type kValueType = Serializer::get_type_of<ValueT>();
+  static constexpr ImplType kImplType = kGetter;                                     ///< Node role tag (@c kGetter).
+  static constexpr Serializer::Type kValueType = Serializer::get_type_of<ValueT>();  ///< Codec resolved from @c ValueT.
 
   static_assert(Serializer::is_supported(kValueType), "<ValueT> is not a supported Serializer type.");
 
   /**
-   * @brief Creates a @c Getter on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c Getter and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new getter.
+   * @param url_str  Field URL such as @c "shm://vehicle/gear".
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new getter.
    */
   [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c Getter on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c Getter and wraps it in a @c std::shared_ptr.
    *
    * @param url_str  Field URL string.
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new getter.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new getter.
    */
   [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
    * @brief Constructs a getter from a typed transport configuration object.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT  Concrete configuration type derived from @c Conf.
+   * @param conf    Populated configuration aggregate.
+   * @param type    Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
@@ -154,36 +162,40 @@ class Getter : public Node<GetterImpl, SecT> {
   /**
    * @brief Constructs a getter from a URL string.
    *
-   * @param url_str  Field URL (e.g. @c "shm://vehicle/gear").
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param url_str  Field URL such as @c "shm://vehicle/gear".
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   explicit Getter(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Destroys the getter and releases any subscribed resources.
+   * @brief Destroys the getter and drains in-flight transport callbacks.
+   *
+   * @details
+   * Required so the internal delivery callback installed by @c init() cannot
+   * fire on the transport thread after this getter's mutex and value have
+   * already been destroyed.
    */
   ~Getter() override;
 
   /**
-   * @brief Returns the latest cached value, if one has been received.
+   * @brief Returns the most recent cached value, if any has been received.
    *
    * @details
-   * Thread-safe.  Returns @c std::nullopt if no @c Setter has written a value
-   * yet since this getter was initialised.
+   * Thread-safe.  Returns @c std::nullopt before the first matching @c Setter
+   * write reaches this getter.
    *
-   * @return @c std::optional<ValueT> -- holds the latest value, or empty.
+   * @return @c std::optional\<ValueT\> -- the latest value, or empty.
    */
   [[nodiscard]] std::optional<ValueT> get() const;
 
   /**
-   * @brief Blocks until a value is received or the timeout expires.
+   * @brief Blocks until a value is received or @p timeout expires.
    *
    * @details
-   * Returns immediately if a value is already available.  A @p timeout of @c 0
-   * is treated as infinite (a warning is logged).  Can be interrupted by
-   * @c interrupt(), which causes this method to return @c false.
-   *
-   * After returning @c true, call @c get() to retrieve the value.
+   * Returns immediately if a value is already cached.  A @p timeout of @c 0
+   * is treated as infinite (with a warning).  @c interrupt() causes the wait
+   * to abort and return @c false.  Use @c get() afterwards to retrieve the
+   * value when this method returns @c true.
    *
    * @param timeout  Maximum wait duration.  Default: @c Timeout::kDefaultInterval.
    * @return         @c true if a value was received; @c false on timeout or interrupt.
@@ -191,108 +203,107 @@ class Getter : public Node<GetterImpl, SecT> {
   bool wait_for_value(std::chrono::milliseconds timeout = Timeout::kDefaultInterval);
 
   /**
-   * @brief Registers a callback invoked whenever a new value arrives.
+   * @brief Installs a callback invoked whenever a new value arrives.
    *
    * @details
-   * The callback receives a pre-deserialized @c ValueT reference.  It is
-   * invoked on every setter write unless @c set_change_reporting(true) is
-   * active, in which case duplicate values (same raw bytes as the last) are
-   * suppressed before the callback is called.
+   * The callback receives a deserialised @c ValueT reference.  It runs for
+   * every setter write unless @c set_change_reporting(true) is active, in
+   * which case duplicate consecutive payloads are filtered out.  Internally
+   * the getter also updates @c value_ and wakes @c wait_for_value() before
+   * the callback fires.
    *
-   * Internally, @c Getter also maintains @c value_ and notifies @c wait_for_value().
-   * The listen callback is stored once; calling @c listen() more than once is
-   * a fatal error.
+   * @note Calling @c listen() more than once is fatal.
    *
    * @param callback  @c void(const ValueT&) invoked on each new value.
-   * @return          @c true if the callback was stored; @c false if a callback
-   *                  was already registered.
+   * @return          @c true if installation succeeded; @c false if a callback
+   *                  is already registered.
    */
   bool listen(MsgCallback&& callback);
 
   /**
-   * @brief Enables or disables change-reporting (suppress duplicate values).
+   * @brief Toggles change-only reporting (duplicate suppression).
    *
    * @details
-   * When @c true, incoming values whose raw serialized bytes are identical to
-   * the previous delivery are silently dropped -- neither the callback nor
-   * @c wait_for_value() is notified.  Useful for reducing CPU load when a
-   * @c Setter writes the same value repeatedly.
+   * When enabled, incoming payloads whose raw serialised bytes match the
+   * previous delivery are dropped before any caching or callback dispatch.
+   * Useful when a @c Setter repeatedly writes the same value.
    *
-   * @param enable  @c true to enable change-only reporting; @c false to disable.
+   * @param enable  @c true to suppress duplicates; @c false (default) to deliver all.
    */
   void set_change_reporting(bool enable);
 
   /**
    * @brief Enables or disables manual-unloan mode for zero-copy receives.
    *
-   * @param manual_unloan  @c true to enable; @c false for automatic (default).
+   * @param manual_unloan  @c true to enable manual return; @c false for auto-return.
    */
   void set_manual_unloan(bool manual_unloan) override;
 
   /**
-   * @brief Enables or disables per-value latency and sample-loss tracking.
+   * @brief Toggles per-value latency and sample-loss measurement.
    *
-   * @param enable  @c true to start tracking; @c false to stop.
+   * @param enable  @c true to begin tracking; @c false to stop.
    */
   void set_latency_and_lost_enabled(bool enable);
 
   /**
-   * @brief Returns @c true if latency and sample-loss tracking is active.
+   * @brief Reports whether latency and sample-loss tracking is currently active.
    *
-   * @return @c true if @c set_latency_and_lost_enabled(true) was called.
+   * @return @c true if @c set_latency_and_lost_enabled(true) was invoked.
    */
   [[nodiscard]] bool is_latency_and_lost_enabled() const;
 
   /**
-   * @brief Returns the most recently measured end-to-end value latency.
+   * @brief Returns the most recent end-to-end latency measurement.
    *
    * @return Latency in nanoseconds; @c 0 if tracking is disabled.
    */
   [[nodiscard]] int64_t get_latency() const;
 
   /**
-   * @brief Returns cumulative sample delivery statistics.
+   * @brief Returns cumulative sample-delivery statistics.
    *
-   * @return @c SampleLostInfo with @c total expected and @c lost value counts.
+   * @return @c SampleLostInfo with total expected and total lost counts.
    */
   [[nodiscard]] SampleLostInfo get_lost() const;
 
   /**
-   * @brief Returns @c true if change-reporting mode is currently active.
+   * @brief Reports whether change-only reporting is currently active.
    *
    * @return @c true if duplicate suppression is enabled.
    */
   [[nodiscard]] bool get_change_reporting() const;
 
   /**
-   * @brief Initialises the getter and registers the internal delivery callback.
+   * @brief Initialises the getter and installs the internal delivery hook.
    *
    * @details
-   * Overrides @c Node::init() to also set up the internal @c listen_bytes()
-   * callback that receives raw bytes, deserialises them into @c ValueT,
-   * stores the result in @c value_, and fires the user @c listen() callback.
+   * Overrides @c Node::init() to additionally register a bytes-level callback
+   * that deserialises each delivery into @c value_, wakes the condition
+   * variable used by @c wait_for_value(), and (if installed) invokes the
+   * user @c listen() callback.
    *
-   * @return @c true on first initialisation; @c false if already initialised.
+   * @return @c true on first successful initialisation; @c false otherwise.
    */
   bool init() override;
 
   /**
-   * @brief Interrupts any blocking @c wait_for_value() call.
+   * @brief Aborts any blocking @c wait_for_value() call.
    *
    * @details
-   * Overrides @c Node::interrupt() to additionally notify the getter's own
-   * condition variable, causing @c wait_for_value() to return @c false.
+   * Overrides @c Node::interrupt() to additionally notify the local
+   * condition variable so that the blocking wait returns @c false promptly.
    */
   void interrupt() override;
 
   /**
-   * @brief Changes this getter's role to @c kSubscriber (event-receiver).
+   * @brief Promotes this getter to behave as a @c Subscriber at the transport layer.
    *
    * @details
-   * Updates @c impl_->impl_type from @c kGetter to @c kSubscriber so that
-   * transport-specific event semantics are applied.  If called after @c init(),
-   * the extension is automatically reinitialised.  Used internally when
-   * routing a @c Getter through an event-capable transport.
+   * Switches @c impl_type from @c kGetter to @c kSubscriber so that
+   * event-style semantics (no latest-value retention) are applied.
+   * Reinitialises the transport extension if called post-@c init().  Used
+   * when bridging a getter through event-only transports.
    */
   void mark_as_subscriber();
 
@@ -310,31 +321,28 @@ class Getter : public Node<GetterImpl, SecT> {
 
 /**
  * @class SecurityGetter
- * @brief Convenience alias for @c Getter with message security enabled.
+ * @brief Convenience alias of @c Getter with per-message decryption enabled.
  *
  * @details
- * Equivalent to @c Getter<ValueT, SecurityType::kWithSecurity>.  Decrypts
- * each incoming value using the configured security key or callbacks.
+ * Equivalent to @c Getter\<ValueT, SecurityType::kWithSecurity\>.  Each
+ * incoming payload is decrypted before codec dispatch and caching.
  *
  * @tparam ValueT  Value type to read.
  */
 template <typename ValueT>
 class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
  public:
-  /** @brief Unique-pointer alias. */
-  using UniquePtr = std::unique_ptr<SecurityGetter<ValueT>>;
-
-  /** @brief Shared-pointer alias. */
-  using SharedPtr = std::shared_ptr<SecurityGetter<ValueT>>;
+  using UniquePtr = std::unique_ptr<SecurityGetter<ValueT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<SecurityGetter<ValueT>>;  ///< Owning shared-pointer alias.
 
   /**
-   * @brief Creates a @c SecurityGetter on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c SecurityGetter and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new getter.
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
+   * @param url_str  Field URL string.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new secure getter.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -342,13 +350,13 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c SecurityGetter on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c SecurityGetter and wraps it in a @c std::shared_ptr.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new getter.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new secure getter.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -356,12 +364,13 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecurityGetter from a typed transport configuration object.
+   * @brief Constructs a @c SecurityGetter from a typed configuration object.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default; empty uses the built-in default symmetric slot).
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT           Configuration type derived from @c Conf.
+   * @tparam SecurityConfigT Forwardable @c Security::Config compatible type.
+   * @param conf     Populated configuration aggregate.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename SecurityConfigT = Security::Config,
@@ -369,18 +378,18 @@ class SecurityGetter : public Getter<ValueT, SecurityType::kWithSecurity> {
   explicit SecurityGetter(const ConfT& conf, SecurityConfigT&& sec_cfg = {}, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecurityGetter and installs the security configuration in place.
+   * @brief Constructs a @c SecurityGetter from a URL string and installs the security configuration.
    *
    * @details
-   * Always builds the base @c Getter with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
-   * @c NodeImpl::security was populated successfully; finally calls @c init()
-   * unless the caller requests deferred initialisation.
+   * Builds the base @c Getter in @c kWithoutInit mode, installs @p sec_cfg
+   * via @c enable_security(), then calls @c init() unless deferred.  When
+   * @c enable_security() fails to produce a usable @c NodeImpl::security the
+   * subsequent @c init() will fail.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>

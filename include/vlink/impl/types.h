@@ -23,44 +23,64 @@
 
 /**
  * @file types.h
- * @brief Core type definitions shared across all VLink node implementations.
+ * @brief Core enumerations and small value types shared by the entire VLink implementation layer.
  *
  * @details
- * Defines the fundamental enumerations and plain-data structs that are used
- * throughout the VLink implementation layer.  These types are part of the
- * internal ABI between the @c Node<> template, the transport @c Conf
- * implementations, and the @c NodeImpl backend classes.
+ * This is an internal implementation header consumed by every node template
+ * (@c Publisher, @c Subscriber, @c Client, @c Server, @c Setter, @c Getter),
+ * every @c Conf subclass and every @c NodeImpl backend.  It is also re-exported
+ * to applications via @c vlink.h so that user code can refer to enums such as
+ * @c SecurityType when instantiating the public node templates.
  *
- * @par Node Type Bitmask (@c ImplType)
- * @c ImplType values can be bitwise-OR'd together when querying combined roles:
+ * @par ImplType
+ * Role bitmask consumed by @c VLINK_ALLOW_IMPL_TYPE to restrict which node
+ * categories a given @c Conf can produce.
  *
- * | Value             | Hex  | Description                       |
- * | ----------------- | ---- | --------------------------------- |
- * | kUnknownImplType  | 0x00 | Type not yet determined.          |
- * | kPublisher        | 0x01 | Event publisher node.             |
- * | kSubscriber       | 0x02 | Event subscriber node.            |
- * | kSetter           | 0x04 | Field setter node.                |
- * | kGetter           | 0x08 | Field getter node.                |
- * | kServer           | 0x10 | Method server node.               |
- * | kClient           | 0x20 | Method client node.               |
+ * | Value               | Hex  | Meaning                                  |
+ * | ------------------- | ---- | ---------------------------------------- |
+ * | @c kUnknownImplType | 0x00 | Type not yet determined.                 |
+ * | @c kPublisher       | 0x01 | Event publisher node.                    |
+ * | @c kSubscriber      | 0x02 | Event subscriber node.                   |
+ * | @c kSetter          | 0x04 | Field setter node.                       |
+ * | @c kGetter          | 0x08 | Field getter node.                       |
+ * | @c kServer          | 0x10 | Method server node.                      |
+ * | @c kClient          | 0x20 | Method client node.                      |
  *
- * @par Transport Types (@c TransportType)
+ * @par TransportType
+ * Resolved at URL construction time from the URI scheme.
  *
- * | Value    | URL Prefix   | Transport                            |
- * | -------- | ------------ | ------------------------------------ |
- * | kUnknown | (none)       | Unknown or unsupported.              |
- * | kIntra   | intra://     | In-process queue (no serialisation). |
- * | kShm     | shm://       | Iceoryx shared memory.               |
- * | kShm2    | shm2://      | Iceoryx2 shared memory.              |
- * | kZenoh   | zenoh://     | Zenoh publish/subscribe.             |
- * | kDds     | dds://       | Fast-DDS RTPS.                       |
- * | kDdsc    | ddsc://      | CycloneDDS.                          |
- * | kDdsr    | ddsr://      | RTI DDS.                             |
- * | kDdst    | ddst://      | TravoDDS.                            |
- * | kSomeip  | someip://    | SOME/IP via vsomeip.                 |
- * | kMqtt    | mqtt://      | MQTT publish/subscribe.              |
- * | kFdbus   | fdbus://     | FDBus IPC.                           |
- * | kQnx     | qnx://       | QNX IPC (QNX only).                  |
+ * | Value        | URL prefix    | Backend                              |
+ * | ------------ | ------------- | ------------------------------------ |
+ * | @c kUnknown  | (none)        | Unknown or unsupported.              |
+ * | @c kIntra    | @c intra://   | In-process queue (no serialisation). |
+ * | @c kShm      | @c shm://     | Iceoryx shared memory.               |
+ * | @c kShm2     | @c shm2://    | Iceoryx2 shared memory.              |
+ * | @c kZenoh    | @c zenoh://   | Zenoh publish / subscribe.           |
+ * | @c kDds      | @c dds://     | Fast-DDS RTPS.                       |
+ * | @c kDdsc     | @c ddsc://    | CycloneDDS.                          |
+ * | @c kDdsr     | @c ddsr://    | RTI DDS.                             |
+ * | @c kDdst     | @c ddst://    | TravoDDS.                            |
+ * | @c kSomeip   | @c someip://  | SOME/IP through vsomeip.             |
+ * | @c kMqtt     | @c mqtt://    | MQTT publish / subscribe.            |
+ * | @c kFdbus    | @c fdbus://   | FDBus IPC.                           |
+ * | @c kQnx      | @c qnx://     | QNX IPC (QNX only).                  |
+ *
+ * @par InitType
+ * Controls whether the public Node<> template runs @c init() immediately or
+ * defers it so the user can adjust properties beforehand.
+ *
+ * | Value             | Meaning                                        |
+ * | ----------------- | ---------------------------------------------- |
+ * | @c kWithoutInit   | Defer initialisation; call @c init() manually. |
+ * | @c kWithInit      | Initialise immediately in the constructor.     |
+ *
+ * @par Cross-references
+ * - @c ImplType -- chosen at the @c NodeImpl base level; surfaced via
+ *   @c NodeImpl::impl_type.
+ * - @c SecurityType -- second template parameter on every public node type
+ *   (@c Publisher<T, SecurityType>, @c Subscriber<T, SecurityType>, ...).
+ * - @c InitType -- argument to the public node constructors that toggles
+ *   immediate versus deferred initialisation.
  */
 
 #pragma once
@@ -81,53 +101,54 @@ namespace vlink {
  * @brief Bitmask identifying the role of a VLink node implementation.
  *
  * @details
- * Values can be combined with bitwise-OR to represent compound roles, e.g.
- * @c (kPublisher | kSubscriber) for a topic that has both publisher and
- * subscriber endpoints.  The @c VLINK_ALLOW_IMPL_TYPE macro uses these
- * combined flags to restrict which node types a transport @c Conf may serve.
+ * Values may be combined with bitwise OR to express compound capabilities,
+ * for example @c (kPublisher | kSubscriber) for a backend that handles both
+ * roles on the same topic.  @c VLINK_ALLOW_IMPL_TYPE uses these combined flags
+ * to gate the @c Conf factory at compile time.
  */
 enum ImplType : uint8_t {
   kUnknownImplType = 0,  ///< Type not yet determined.
   kServer = 16,          ///< Method server (RPC responder).
   kClient = 32,          ///< Method client (RPC caller).
-  kPublisher = 1,        ///< Event publisher (1-to-many broadcast).
-  kSubscriber = 2,       ///< Event subscriber (receive broadcast).
-  kSetter = 4,           ///< Field setter (update latest value).
-  kGetter = 8,           ///< Field getter (retrieve latest value).
+  kPublisher = 1,        ///< Event publisher (one-to-many broadcast).
+  kSubscriber = 2,       ///< Event subscriber (receives broadcasts).
+  kSetter = 4,           ///< Field setter (writes latest value).
+  kGetter = 8,           ///< Field getter (reads latest value).
 };
 
 /**
  * @enum TransportType
- * @brief Enumeration of all supported transport backends.
+ * @brief Enumeration of every transport backend recognised by VLink.
  *
  * @details
- * Determined at URL construction time from the transport prefix string.
- * Concrete transport @c Conf classes use this enum to identify themselves.
+ * Resolved by @c Url when the URL string is parsed.  Concrete @c Conf classes
+ * report their own backend through @c get_transport_type().
  */
 enum class TransportType : uint8_t {
   kUnknown = 0,  ///< Unknown or unsupported transport.
-  kIntra = 1,    ///< In-process queue (intra://).
-  kShm = 2,      ///< Iceoryx shared memory (shm://).
-  kShm2 = 3,     ///< Iceoryx2 shared memory (shm2://).
-  kZenoh = 4,    ///< Zenoh publish/subscribe (zenoh://).
-  kDds = 5,      ///< Fast-DDS RTPS (dds://).
-  kDdsc = 6,     ///< CycloneDDS (ddsc://).
-  kDdsr = 7,     ///< RTI DDS (ddsr://).
-  kDdst = 8,     ///< TravoDDS (ddst://).
-  kSomeip = 9,   ///< SOME/IP via vsomeip (someip://).
-  kMqtt = 10,    ///< MQTT (mqtt://).
-  kFdbus = 11,   ///< FDBus IPC (fdbus://).
-  kQnx = 12,     ///< QNX IPC (qnx://; QNX only).
+  kIntra = 1,    ///< In-process queue (@c intra://).
+  kShm = 2,      ///< Iceoryx shared memory (@c shm://).
+  kShm2 = 3,     ///< Iceoryx2 shared memory (@c shm2://).
+  kZenoh = 4,    ///< Zenoh publish / subscribe (@c zenoh://).
+  kDds = 5,      ///< Fast-DDS RTPS (@c dds://).
+  kDdsc = 6,     ///< CycloneDDS (@c ddsc://).
+  kDdsr = 7,     ///< RTI DDS (@c ddsr://).
+  kDdst = 8,     ///< TravoDDS (@c ddst://).
+  kSomeip = 9,   ///< SOME/IP through vsomeip (@c someip://).
+  kMqtt = 10,    ///< MQTT (@c mqtt://).
+  kFdbus = 11,   ///< FDBus IPC (@c fdbus://).
+  kQnx = 12,     ///< QNX IPC (@c qnx://; QNX only).
 };
 
 /**
  * @enum InitType
- * @brief Controls whether a node is initialised immediately at construction.
+ * @brief Selects between immediate and deferred node initialisation.
  *
  * @details
- * Pass @c kWithoutInit to defer initialisation until @c init() is called
- * explicitly, allowing properties (e.g. DDS QoS, IP binding) to be set
- * before the underlying transport is started.
+ * Pass @c kWithoutInit when the application needs to call
+ * @c Publisher::set_property() (or similar) before the underlying transport
+ * starts; otherwise the default @c kWithInit performs the full init inside
+ * the constructor.
  */
 enum class InitType : uint8_t {
   kWithoutInit = 0,  ///< Defer initialisation; call init() manually.
@@ -136,68 +157,67 @@ enum class InitType : uint8_t {
 
 /**
  * @enum SecurityType
- * @brief Controls whether a node uses encrypted/authenticated transport.
+ * @brief Compile-time selector for the per-node message security variant.
  *
  * @details
- * Selects the security variant at compile time via the template parameter
- * of @c Publisher<T, SecurityType>, @c Subscriber<T, SecurityType>, etc.
- * @c kWithSecurity enables authenticated AES-128-GCM encryption (with optional
- * RSA-OAEP hybrid key wrap and RSA-PSS signature) on the serialised message
- * payload.  Supported on all transports except @c intra:// and @c dds:// with
- * CDR serialisation; on those, @c enable_security() rejects the config and a
- * @c SecurityXxx node has no usable security object for @c init().
+ * Used as the second template argument of @c Publisher<T, SecurityType>,
+ * @c Subscriber<T, SecurityType> and the rest of the public node templates.
+ * @c kWithSecurity enables authenticated AES-128-GCM encryption (optionally
+ * wrapped with RSA-OAEP and signed with RSA-PSS) over the serialised payload.
+ * Both the @c intra:// transport and DDS variants using native CDR rejection
+ * the configuration; on those transports the security-prefixed node simply
+ * has no usable security object once @c init() runs.
  */
 enum class SecurityType : uint8_t {
-  kWithoutSecurity = 0,  ///< Plain (unauthenticated) transport.
+  kWithoutSecurity = 0,  ///< Plain, unauthenticated transport.
   kWithSecurity = 1,     ///< Encrypted and authenticated transport.
 };
 
 /**
  * @enum ActionType
- * @brief Identifies the type of message action for recording purposes.
+ * @brief Labels for messages captured by the recording infrastructure.
  *
  * @details
- * Used by @c NodeImpl::try_record() to tag each captured message with its
- * originating operation so that the bag writer can reconstruct message flow
- * during playback.
+ * Used by @c NodeImpl::try_record() so the bag writer can reconstruct message
+ * flow across nodes during playback.
  */
 enum class ActionType : uint8_t {
-  kUnknownAction = 0,   ///< Action type not classified.
-  kClientRequest = 1,   ///< RPC request sent by a Client node.
-  kClientResponse = 2,  ///< RPC response received by a Client node.
-  kServerRequest = 3,   ///< RPC request received by a Server node.
-  kServerResponse = 4,  ///< RPC response sent by a Server node.
-  kPublish = 5,         ///< Message published by a Publisher node.
-  kSubscribe = 6,       ///< Message received by a Subscriber node.
-  kSet = 7,             ///< Field value written by a Setter node.
-  kGet = 8              ///< Field value read by a Getter node.
+  kUnknownAction = 0,   ///< Action category is not classified.
+  kClientRequest = 1,   ///< RPC request emitted by a Client node.
+  kClientResponse = 2,  ///< RPC response observed by a Client node.
+  kServerRequest = 3,   ///< RPC request observed by a Server node.
+  kServerResponse = 4,  ///< RPC response emitted by a Server node.
+  kPublish = 5,         ///< Message emitted by a Publisher node.
+  kSubscribe = 6,       ///< Message observed by a Subscriber node.
+  kSet = 7,             ///< Value written by a Setter node.
+  kGet = 8              ///< Value observed by a Getter node.
 };
 
 /**
  * @enum SchemaType
- * @brief Coarse runtime schema family used by discovery, bag metadata, and proxy routing.
+ * @brief Coarse runtime schema family used by discovery, bag metadata and proxy routing.
  *
  * @details
- * @c ser_type stores the concrete wire/type identifier (for example a protobuf
- * full name or a FlatBuffers table name), while @c SchemaType captures only the
- * high-level runtime decoding category so tools can choose the correct decode
- * stack without maintaining a second parallel enum.
+ * The wire / type identifier proper lives in @c ser_type (for example a
+ * protobuf fully qualified name or a FlatBuffers table name); @c SchemaType
+ * captures only the high-level decoding family so tools can pick the matching
+ * decoder without having to mirror the @c ser_type enum.
  */
 enum class SchemaType : uint8_t {
-  kUnknown = 0,      ///< Decode category is not known.
-  kRaw = 1,          ///< Treat the payload as opaque/raw bytes.
-  kZeroCopy = 2,     ///< Decode using VLink zero-copy message structs.
-  kProtobuf = 3,     ///< Decode using the Protocol Buffers stack.
-  kFlatbuffers = 4,  ///< Decode using the FlatBuffers stack.
+  kUnknown = 0,      ///< Decoding family unknown.
+  kRaw = 1,          ///< Treat the payload as opaque bytes.
+  kZeroCopy = 2,     ///< Decode through the VLink zero-copy structs.
+  kProtobuf = 3,     ///< Decode through the Protocol Buffers stack.
+  kFlatbuffers = 4,  ///< Decode through the FlatBuffers stack.
 };
 
 /**
  * @struct Timeout
- * @brief Compile-time timeout constants used by blocking wait methods.
+ * @brief Compile-time timeout constants used by the public blocking wait helpers.
  *
  * @details
- * Provides canonical timeout values used throughout the @c Publisher,
- * @c Subscriber, @c Client, etc. public APIs for @c wait_for_* calls.
+ * Provides canonical values for the @c wait_for_* family on @c Publisher,
+ * @c Subscriber, @c Client and friends.
  */
 struct Timeout final {
   [[maybe_unused]] static constexpr std::chrono::milliseconds kDefaultInterval{
@@ -207,14 +227,13 @@ struct Timeout final {
 
 /**
  * @struct SampleLostInfo
- * @brief Cumulative sample delivery statistics for a subscriber or getter.
+ * @brief Aggregate of cumulative delivered / lost sample counts.
  *
  * @details
- * Populated by @c SubscriberImpl::get_lost() and @c GetterImpl::get_lost().
- * The @c total field counts every message expected (both delivered and lost);
- * @c lost counts those that were never delivered due to queue overflow or
- * network loss.
- * Supports streaming via @c operator<<.
+ * Returned by @c SubscriberImpl::get_lost() and @c GetterImpl::get_lost().
+ * @c total counts every message that was expected (delivered or lost);
+ * @c lost counts the subset that did not arrive.  Stream-friendly through
+ * @c operator<<.
  */
 struct SampleLostInfo final {
   uint64_t total{0};  ///< Total number of samples expected (delivered + lost).
@@ -224,81 +243,80 @@ struct SampleLostInfo final {
    * @brief Streams a human-readable summary to @p ostream.
    *
    * @details
-   * Format: @c "SampleLostInfo:[total]N[lost]M".
+   * Output format: @c "SampleLostInfo:[total]N[lost]M".
    *
-   * @param ostream  Output stream to write to.
+   * @param ostream  Destination stream.
    * @param info     Instance to print.
-   * @return         Reference to @p ostream.
+   * @return Reference to @p ostream.
    */
   VLINK_EXPORT friend std::ostream& operator<<(std::ostream& ostream, const SampleLostInfo& info) noexcept;
 };
 
 /**
  * @struct SchemaData
- * @brief Carries one serialized schema blob for runtime registration or embedding.
+ * @brief Wire-format-neutral wrapper around one serialised schema blob.
  *
  * @details
- * Used by schema-aware tools such as bag readers, MCAP writers, and schema
- * plugins to move imported schema metadata around without assuming a specific
- * schema language. The @c encoding field stores the original schema payload
- * encoding (for example @c "protobuf", @c "flatbuffers", or @c "vlink_msg"),
- * while @c schema_type captures the coarse runtime family used by discovery,
- * bag routing, and proxy consumers.
+ * Consumed by schema-aware tooling such as bag readers, MCAP writers and
+ * schema plugins.  @c encoding stores the original schema payload encoding
+ * (for example @c "protobuf", @c "flatbuffers" or @c "vlink_msg"); the
+ * @c schema_type field exposes the coarse runtime family used by discovery,
+ * bag routing and proxy consumers.
  */
 struct VLINK_EXPORT SchemaData final {
-  std::string name;      ///< Schema subject name, typically a fully-qualified message or table type.
-  std::string encoding;  ///< Schema encoding identifier (e.g. @c "protobuf" or @c "flatbuffers").
-  SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse runtime schema family derived from @c encoding.
-  Bytes data;                                    ///< Raw serialized schema bytes (e.g. FileDescriptorSet or BFBS).
+  std::string name;      ///< Schema subject (usually a fully qualified message or table name).
+  std::string encoding;  ///< Schema encoding identifier, e.g. @c "protobuf" or @c "flatbuffers".
+  SchemaType schema_type{SchemaType::kUnknown};  ///< Coarse runtime family derived from @c encoding.
+  Bytes data;                                    ///< Raw serialised schema bytes (FileDescriptorSet, BFBS, ...).
 
   /**
-   * @brief Returns whether a schema type enum value is within the supported range.
+   * @brief Returns whether @p schema_type is within the supported enum range.
    *
-   * @param schema_type  Schema type value to validate.
-   * @return @c true when @p schema_type is a supported enum member.
+   * @param schema_type  Value to validate.
+   * @return @c true when @p schema_type names a defined enum member.
    */
   [[nodiscard]] static bool is_valid_type(SchemaType schema_type) noexcept;
 
   /**
-   * @brief Returns whether a schema type carries concrete runtime schema metadata.
+   * @brief Returns whether @p schema_type carries concrete schema metadata.
    *
    * @details
-   * Unlike @c is_valid_type(), this excludes @c kUnknown and @c kRaw.  It is
-   * used by schema caching / bag embedding code to decide whether a schema can
-   * be indexed or persisted as a real schema entry.
+   * Unlike @c is_valid_type(), excludes @c kUnknown and @c kRaw.  Used by
+   * schema caching / bag embedding code to decide whether the schema can be
+   * indexed or persisted as a real schema entry.
    *
-   * @param schema_type  Schema type value to classify.
-   * @return @c true for protobuf / flatbuffers / zerocopy families.
+   * @param schema_type  Value to classify.
+   * @return @c true for protobuf, flatbuffers and zero-copy families.
    */
   [[nodiscard]] static bool is_real_type(SchemaType schema_type) noexcept;
 
   /**
    * @brief Converts a schema type to its canonical persisted encoding label.
    *
-   * @param schema_type  Schema type to convert.
+   * @param schema_type  Value to convert.
    * @return Canonical encoding string, or an empty view for unknown values.
    */
   [[nodiscard]] static std::string_view convert_type(SchemaType schema_type) noexcept;
 
   /**
-   * @brief Parses a schema type from an encoding label.
+   * @brief Parses an encoding string back into a @c SchemaType value.
    *
-   * @param encoding  Encoding string such as @c "protobuf", @c "fbs", @c "blob", or @c "zerocopy".
-   * @return Matching schema type, or @c SchemaType::kUnknown.
+   * @param encoding  Encoding label such as @c "protobuf", @c "fbs", @c "blob" or @c "zerocopy".
+   * @return Matching @c SchemaType, or @c SchemaType::kUnknown.
    */
   [[nodiscard]] static SchemaType convert_encoding(std::string_view encoding) noexcept;
 
   /**
-   * @brief Infers a coarse schema family directly from a concrete @c ser_type string.
+   * @brief Infers a coarse schema family from a concrete @c ser_type string.
    *
    * @details
-   * This lightweight constexpr helper is intentionally conservative:
-   * - zero-copy types are recognised by the @c "vlink::zerocopy::" prefix
-   * - textual/raw payload types map to @c SchemaType::kRaw
-   * - protobuf / flatbuffers are not guessed from names here
+   * Intentionally conservative:
+   * - Zero-copy types are recognised by the @c "vlink::zerocopy::" prefix.
+   * - Textual / raw payload types map to @c SchemaType::kRaw.
+   * - Protobuf and FlatBuffers are not guessed from name alone.
    *
    * @param ser_type  Concrete serialisation type string.
-   * @return Matching schema family, or @c SchemaType::kUnknown.
+   * @return Inferred schema family, or @c SchemaType::kUnknown.
    */
   [[nodiscard]] static constexpr SchemaType infer_ser_type(std::string_view ser_type) noexcept;
 
@@ -306,15 +324,15 @@ struct VLINK_EXPORT SchemaData final {
    * @brief Resolves the best available schema family from explicit, encoding and ser hints.
    *
    * @details
-   * Resolution order is:
-   * 1. explicit @p schema_type when already known
-   * 2. inferred family from @p encoding
-   * 3. inferred family from @p ser_type
+   * Resolution order:
+   * -# Use @p schema_type when it is already known.
+   * -# Otherwise infer from @p encoding.
+   * -# Otherwise infer from @p ser_type.
    *
    * @param schema_type  Explicit schema family hint.
    * @param ser_type     Concrete serialisation type string.
    * @param encoding     Persisted schema encoding label.
-   * @return Best-effort resolved schema family, or @c SchemaType::kUnknown.
+   * @return Best-effort schema family, or @c SchemaType::kUnknown.
    */
   [[nodiscard]] static SchemaType resolve_type(SchemaType schema_type, std::string_view ser_type = {},
                                                std::string_view encoding = {}) noexcept;
@@ -322,75 +340,76 @@ struct VLINK_EXPORT SchemaData final {
 
 /**
  * @struct Version
- * @brief Semantic version number with comparison and string conversion utilities.
+ * @brief Semantic version number with comparison and string-conversion helpers.
  *
  * @details
- * Used by @c NodeImpl::check_version() to compare the compile-time VLink version
- * against the runtime library version.  All fields default to @c -1 (invalid).
+ * Used by @c NodeImpl::check_version() to compare a build-time application
+ * version against the live VLink library version.  All components default to
+ * @c -1, which marks the value as not yet set.
  */
 struct VLINK_EXPORT Version final {
-  int major{-1};  ///< Major version number; -1 if not set.
-  int minor{-1};  ///< Minor version number; -1 if not set.
-  int patch{-1};  ///< Patch version number; -1 if not set.
+  int major{-1};  ///< Major version number; @c -1 when unset.
+  int minor{-1};  ///< Minor version number; @c -1 when unset.
+  int patch{-1};  ///< Patch version number; @c -1 when unset.
 
   /**
-   * @brief Returns @c true when both versions are identical.
+   * @brief Tests equality with @p target.
    *
    * @param target  Version to compare against.
-   * @return        @c true if major, minor, and patch are all equal.
+   * @return @c true when major, minor and patch all match.
    */
   [[nodiscard]] bool operator==(const Version& target) const noexcept;
 
   /**
-   * @brief Returns @c true when versions differ.
+   * @brief Tests inequality with @p target.
    *
    * @param target  Version to compare against.
-   * @return        Logical negation of @c operator==.
+   * @return Logical negation of @c operator==.
    */
   [[nodiscard]] bool operator!=(const Version& target) const noexcept;
 
   /**
-   * @brief Returns @c true when this version is older than @p target.
+   * @brief Reports whether this version is strictly older than @p target.
    *
    * @details
-   * Compares major first, then minor, then patch (numeric order).
+   * Numeric ordering: compares major first, then minor, then patch.
    *
    * @param target  Version to compare against.
-   * @return        @c true if this version is strictly less than @p target.
+   * @return @c true when this version is less than @p target.
    */
   [[nodiscard]] bool operator<(const Version& target) const noexcept;
 
   /**
-   * @brief Returns @c true when this version is newer than @p target.
+   * @brief Reports whether this version is strictly newer than @p target.
    *
    * @param target  Version to compare against.
-   * @return        @c true if this version is strictly greater than @p target.
+   * @return @c true when this version is greater than @p target.
    */
   [[nodiscard]] bool operator>(const Version& target) const noexcept;
 
   /**
-   * @brief Parses a version string in @c "major.minor.patch" format.
+   * @brief Parses a version string in @c "major.minor.patch" form.
    *
    * @details
-   * Uses @c std::from_chars for each component; components missing from the
-   * string remain @c -1.
+   * Each component is decoded with @c std::from_chars; components missing
+   * from @p version_str retain the @c -1 sentinel.
    *
-   * @param version_str  String such as @c "2.1.0".
-   * @return             Parsed @c Version; any missing component stays @c -1.
+   * @param version_str  Source string such as @c "2.1.0".
+   * @return Parsed @c Version.
    */
   [[nodiscard]] static Version from_string(const std::string& version_str) noexcept;
 
   /**
-   * @brief Converts this version to a @c "major.minor.patch" string.
+   * @brief Serialises this version back to a @c "major.minor.patch" string.
    *
    * @return Formatted version string, e.g. @c "2.1.0".
    */
   [[nodiscard]] std::string to_string() const noexcept;
 
   /**
-   * @brief Returns @c true when all three components are non-negative.
+   * @brief Returns whether every component has been set to a non-negative value.
    *
-   * @return @c true if the version was successfully parsed or explicitly set.
+   * @return @c true when the version has been parsed or assigned explicitly.
    */
   [[nodiscard]] bool is_valid() const noexcept;
 };

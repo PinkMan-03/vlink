@@ -23,27 +23,38 @@
 
 /**
  * @file schema_plugin_base.h
- * @brief Default schema plugin implementation built around linked protobuf metadata and embedded BFBS blobs.
+ * @brief Reference base class mapping @c SchemaPluginInterface onto Protobuf descriptors and a BFBS registry.
  *
  * @details
- * @c SchemaPluginBase intentionally keeps the protobuf side aligned with the
- * previous protobuf-only runtime behaviour:
- * - protobuf descriptors are resolved directly from
- *   @c google::protobuf::DescriptorPool::generated_pool()
- * - protobuf schema payloads are serialised from the linked @c FileDescriptor graph
- * - dynamic protobuf messages are created via @c DynamicMessageFactory
+ * @c SchemaPluginBase is a header-only implementation that downstream schema plugins normally
+ * derive from.  It supplies the canonical Protobuf and FlatBuffers backends so that custom
+ * plugins only need to specialise version information and any extra metadata; behavioural
+ * compatibility with the original protobuf-only runtime is preserved by funnelling every
+ * Protobuf lookup through @c DescriptorPool::generated_pool() and serialising payloads as a
+ * @c FileDescriptorSet captured from the linked descriptor graph.  FlatBuffers does not provide
+ * an analogous global pool, so the concrete plugin is expected to register BFBS blobs through
+ * the @c FlatbuffersRegistry singleton (or the @c VLINK_REGISTER_FLATBUFFERS macro) before any
+ * lookups occur.
  *
- * FlatBuffers differs because there is no global descriptor pool. Therefore the
- * concrete plugin/library must explicitly register compiled-in BFBS blobs into
- * the process-local @c FlatbuffersRegistry through
- * @c FlatbuffersRegistry::register_schema() or the convenience macro
- * @c VLINK_REGISTER_FLATBUFFERS.
- * A common pattern is to generate headers with
- * @c flatc --bfbs-gen-embed and register the emitted @c *BinarySchema helpers
- * at translation-unit scope inside the plugin/library.
+ * | Implemented method               | Behaviour                                                            |
+ * | -------------------------------- | -------------------------------------------------------------------- |
+ * | @c search_schema()               | probe over Protobuf, FlatBuffers, and @c vlink::zerocopy::*          |
+ * | @c get_all_schemas()             | import all known BFBS blobs and return the cached schema set         |
+ * | @c search_protobuf_descriptor()  | cache and return descriptors from the generated Protobuf pool        |
+ * | @c create_protobuf_message()     | build a dynamic message via @c DynamicMessageFactory and cache it    |
+ * | @c search_flatbuffers_schema()   | verify the BFBS blob and return a stable @c reflection::Schema       |
+ * | @c create_flatbuffers_parser()   | deserialise the BFBS blob into a parser and remember it for cleanup  |
  *
- * This base class does not read @c VLINK_PROTO_DIR, @c VLINK_FBS_DIR, or any
- * schema files from the file system.
+ * @par Integration diagram
+ * @code
+ *  +---------------------+        +-----------------------+        +--------------------------+
+ *  | downstream plugin   | -----> | SchemaPluginBase      | -----> | DescriptorPool / generated|
+ *  | (overrides version) |        | (this header)         |        +--------------------------+
+ *  +---------------------+        |                       |        +--------------------------+
+ *                                 |                       | -----> | FlatbuffersRegistry      |
+ *                                 |                       |        | (static BFBS slots)      |
+ *                                 +-----------------------+        +--------------------------+
+ * @endcode
  */
 
 #pragma once
@@ -71,79 +82,76 @@ namespace vlink {
 
 /**
  * @class SchemaPluginBase
- * @brief Default mixed-schema plugin base class for Protobuf and FlatBuffers.
+ * @brief Reusable base implementation of @c SchemaPluginInterface for mixed Protobuf / FlatBuffers metadata.
  *
  * @details
- * The intended usage model is:
- * 1. Protobuf types are already linked into the same plugin/library, so lookups go
- *    straight to the generated descriptor pool.
- * 2. FlatBuffers BFBS blobs are generated at build time and explicitly registered
- *    into the static registry owned by the current plugin/library.
+ * Concrete plugins derive from this class and typically only override @c get_version_info().
+ * The base class is header-only so that linked Protobuf descriptors and registered BFBS blobs
+ * remain in the same translation unit as the plugin binary, which is required for the static
+ * registries to publish the expected types.
  *
- * This keeps protobuf behaviour compatible with the previous protobuf-only
- * runtime implementation while filling the missing FlatBuffers reflection and
- * parser hooks.
+ * Internal caches are protected by a single mutex; all public methods are safe to call from
+ * multiple threads.
  */
 class SchemaPluginBase : public SchemaPluginInterface {
  protected:
   /**
-   * @brief Constructs the base plugin and initialises the VLink memory pool.
+   * @brief Initialises the schema caches and primes the VLink memory pool.
    */
   SchemaPluginBase();
 
   /**
-   * @brief Destroys cached runtime objects owned by the plugin.
+   * @brief Releases cached dynamic messages and FlatBuffers parsers owned by the plugin.
    */
   ~SchemaPluginBase() override;
 
   /**
-   * @brief Finds one schema blob constrained by schema family.
+   * @brief Locates a schema by name within an optional family.
    *
-   * @param name         Serialization type or fully-qualified message name.
-   * @param schema_type  Coarse schema family hint, or @c SchemaType::kUnknown for
-   *                     family-agnostic lookup.
-   * @return Matching @c SchemaData, or an empty/name-only schema when not found.
+   * @param name         Serialisation type or fully qualified message name.
+   * @param schema_type  Family hint, or @c SchemaType::kUnknown for cross-family probing.
+   * @return Cached or freshly imported @c SchemaData, or an empty record on miss.
    */
   [[nodiscard]] SchemaData search_schema(const std::string& name,
                                          SchemaType schema_type = SchemaType::kUnknown) override;
 
   /**
-   * @brief Returns all cached schemas filtered by schema family.
+   * @brief Returns every cached schema, optionally restricted to a single family.
    *
-   * @param schema_type  Schema family to filter on; @c SchemaType::kUnknown returns all.
-   * @return Vector of cached schemas belonging to @p schema_type.
+   * @param schema_type  Family filter, or @c SchemaType::kUnknown for everything.
+   * @return Snapshot vector of cached entries.
    */
   [[nodiscard]] std::vector<SchemaData> get_all_schemas(SchemaType schema_type = SchemaType::kUnknown) override;
 
   /**
-   * @brief Looks up a Protobuf descriptor by fully-qualified type name.
+   * @brief Returns the Protobuf descriptor for a fully qualified type name.
    *
-   * @param name  Fully-qualified Protobuf message type.
-   * @return Opaque descriptor pointer, or @c nullptr if not found.
+   * @param name  Fully qualified Protobuf message name.
+   * @return Opaque descriptor pointer, or @c nullptr when unknown.
    */
   [[nodiscard]] ProtobufDescriptorPtr search_protobuf_descriptor(const std::string& name) override;
 
   /**
-   * @brief Creates or returns a cached Protobuf dynamic message instance for a type.
+   * @brief Returns a cached dynamic Protobuf message instance for the type.
    *
-   * @param name  Fully-qualified Protobuf message type.
-   * @return Opaque message pointer, or @c nullptr if not found.
+   * @param name  Fully qualified Protobuf message name.
+   * @return Opaque message pointer, or @c nullptr when unknown.
    */
   [[nodiscard]] ProtobufMessagePtr create_protobuf_message(const std::string& name) override;
 
   /**
-   * @brief Finds the BFBS reflection schema for a FlatBuffers root type.
+   * @brief Returns a verified FlatBuffers BFBS reflection schema.
    *
-   * @param name  Fully-qualified FlatBuffers root type.
-   * @return Opaque @c reflection::Schema handle, or @c nullptr if not found.
+   * @param name  Fully qualified FlatBuffers root type name.
+   * @return Opaque @c reflection::Schema pointer, or @c nullptr when unknown.
    */
   [[nodiscard]] FlatbuffersSchemaPtr search_flatbuffers_schema(const std::string& name) override;
 
   /**
-   * @brief Creates a FlatBuffers parser preloaded with the named root type.
+   * @brief Returns a freshly constructed FlatBuffers parser for the named root type.
    *
-   * @param name  Fully-qualified FlatBuffers root type.
-   * @return Opaque @c flatbuffers::Parser handle, or @c nullptr if not found.
+   * @param name  Fully qualified FlatBuffers root type name.
+   * @return Opaque @c flatbuffers::Parser pointer, or @c nullptr when unknown.
    */
   [[nodiscard]] FlatbuffersParserPtr create_flatbuffers_parser(const std::string& name) override;
 

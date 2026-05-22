@@ -23,24 +23,43 @@
 
 /**
  * @file getter_impl.h
- * @brief Abstract base class for all transport-specific getter (field reader) implementations.
+ * @brief Transport-neutral base for field-model getter (latest-value reader) implementations.
  *
  * @details
- * @c GetterImpl is the intermediate layer between the generic @c Getter<T> template
- * and a concrete transport backend.  It inherits from @c NodeImpl and adds
- * field-getter semantics:
+ * This is an internal implementation header used by the public @c Getter template;
+ * applications should depend on @c getter.h instead.  @c GetterImpl extends
+ * @c NodeImpl with the field-model receive semantics: a single value is tracked
+ * per topic, and the getter is notified whenever the matching @c SetterImpl
+ * writes a new value.  Optional latency / loss tracking mirrors the interface
+ * found on @c SubscriberImpl so that both receivers expose the same diagnostics.
  *
- * - Change notification via @c listen() -- the callback is invoked whenever a new
- *   value is written by the corresponding @c Setter on the same topic.
- * - Optional latency and sample-loss tracking, identical in interface to
- *   @c SubscriberImpl.
+ * @par ImplType
+ * The constructor stamps @c impl_type with @c kGetter, which the discovery and
+ * recording layers use to label outputs originating from this node.
  *
- * @par Field Model Overview
- * Unlike the event model, the field model maintains a single "latest value" per
- * topic.  A @c Getter receives the most recent value; it does not buffer a queue
- * of historic messages.
+ * @par Lifecycle
+ * - Constructed by the matching @c Conf::create_getter().
+ * - @c listen() is called by the public @c Getter once the user installs a
+ *   callback; @c is_listened flips to @c true on success.
+ * - @c init() / @c deinit() inherited from @c NodeImpl bring the underlying
+ *   transport up and tear it down.
+ * - @c set_latency_and_lost_enabled() may be toggled before or after listening.
  *
- * @note Concrete subclasses must implement @c listen(MsgCallback&&).
+ * @par Role table
+ * | Capability                  | Provider                                  |
+ * | --------------------------- | ----------------------------------------- |
+ * | Wire receive callback       | Subclass override of @c listen()          |
+ * | Latency / loss reporting    | Subclass override of the optional getters |
+ * | Listen state flag           | @c is_listened (set by @c Getter)         |
+ *
+ * @par Internal API contract
+ * | Method                                | Default                       | Subclass duty           |
+ * | ------------------------------------- | ----------------------------- | ----------------------- |
+ * | @c listen(MsgCallback&&)              | Pure virtual                  | Bind transport callback |
+ * | @c set_latency_and_lost_enabled(bool) | No-op                         | Toggle tracking         |
+ * | @c is_latency_and_lost_enabled() const| Returns @c false              | Report tracking state   |
+ * | @c get_latency() const                | Returns @c 0                  | Latest measured latency |
+ * | @c get_lost() const                   | Returns zero @c SampleLostInfo| Cumulative loss stats   |
  */
 
 #pragma once
@@ -51,85 +70,75 @@ namespace vlink {
 
 /**
  * @class GetterImpl
- * @brief Transport-agnostic base for getter (field reader) node implementations.
+ * @brief Field-model receive base class shared by every transport-specific getter.
  *
  * @details
- * Provides default (no-op) implementations for the optional latency/loss tracking
- * interface.  Concrete transport backends override @c listen(MsgCallback&&) to
- * register their value-change callback.
+ * Provides safe defaults for the optional latency / loss instrumentation so
+ * that backends without those signals can be plugged in without supplying
+ * empty overrides.  Concrete backends override @c listen() to wire the
+ * transport receive path to the supplied @c MsgCallback.
  */
 class VLINK_EXPORT GetterImpl : public NodeImpl {
  public:
   /**
-   * @brief Destructor.
+   * @brief Releases backend resources.
    */
   ~GetterImpl() override;
 
   /**
-   * @brief Registers the value-change callback for field updates.
+   * @brief Installs the latest-value notification callback.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  The callback is
-   * invoked with a @c Bytes buffer containing the serialised latest value each
-   * time the corresponding @c Setter writes a new value.  After registration
-   * @c is_listened is set to @c true by the @c Getter<T> layer.
+   * Pure virtual.  Backends bind @p callback to the transport receive path so
+   * the public @c Getter sees every value written by the matching @c Setter.
+   * The owning @c Getter sets @c is_listened to @c true once this method
+   * succeeds.
    *
-   * @param callback  Callable @c void(const Bytes&) invoked on each value update.
-   * @return          @c true if registration succeeded; @c false on error.
+   * @param callback  Callable @c void(const Bytes&) invoked on each update.
+   * @return @c true on successful registration; @c false on error.
    */
   virtual bool listen(MsgCallback&& callback) = 0;
 
   /**
-   * @brief Enables or disables per-update latency and sample-loss tracking.
+   * @brief Enables or disables per-update latency and loss tracking.
    *
    * @details
-   * When enabled, the transport backend tracks value timestamps (for latency) and
-   * sequence numbers (for loss detection).  The default implementation is a no-op;
-   * transports that support tracking override this method.
+   * Default no-op.  Backends that maintain timestamps and sequence numbers
+   * override the method to activate the instrumentation.
    *
-   * @param enable  @c true to enable tracking; @c false to disable.
+   * @param enable  @c true to start tracking; @c false to stop.
    */
   virtual void set_latency_and_lost_enabled(bool enable);
 
   /**
-   * @brief Returns whether latency and sample-loss tracking is currently enabled.
+   * @brief Reports whether tracking is currently enabled.
    *
-   * @details
-   * The default implementation always returns @c false.  Transports that support
-   * tracking override this to reflect the current enabled state.
-   *
-   * @return @c true if tracking is active; @c false otherwise.
+   * @return @c true when the backend is collecting latency / loss data.
    */
   [[nodiscard]] virtual bool is_latency_and_lost_enabled() const;
 
   /**
-   * @brief Returns the most recently measured end-to-end field update latency in nanoseconds.
+   * @brief Returns the most recent end-to-end latency measurement in nanoseconds.
    *
    * @details
-   * Only meaningful when @c is_latency_and_lost_enabled() returns @c true.  The
-   * default implementation returns @c 0.
+   * Only meaningful when @c is_latency_and_lost_enabled() returns @c true.
    *
-   * @return Latency in nanoseconds, or @c 0 if tracking is disabled or unsupported.
+   * @return Latency in nanoseconds; @c 0 if tracking is disabled or unsupported.
    */
   [[nodiscard]] virtual int64_t get_latency() const;
 
   /**
-   * @brief Returns cumulative sample delivery statistics for field updates.
+   * @brief Returns cumulative delivered / lost counts for field updates.
    *
-   * @details
-   * Returns the total number of expected updates and the number that were lost.
-   * Only meaningful when @c is_latency_and_lost_enabled() returns @c true.  The
-   * default implementation returns a zero-initialised @c SampleLostInfo.
-   *
-   * @return @c SampleLostInfo containing @c total and @c lost counts.
+   * @return @c SampleLostInfo with @c total and @c lost counters.
    */
   [[nodiscard]] virtual SampleLostInfo get_lost() const;
 
-  bool is_listened{false};  ///< @c true after @c listen() has been successfully called.
+  bool is_listened{false};  ///< @c true once @c listen() has been registered successfully.
 
  protected:
   /**
-   * @brief Protected constructor; initialises the getter with @c kGetter role.
+   * @brief Stamps the node as @c kGetter.
    */
   GetterImpl();
 

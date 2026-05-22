@@ -23,61 +23,63 @@
 
 /**
  * @file object_pool.h
- * @brief Thread-safe generic object pool with configurable reset policy and RAII ownership.
+ * @brief Thread-safe generic object pool with RAII handles and a tunable reset policy.
  *
  * @details
- * @c ObjectPool<T> maintains a free-list of pre-allocated @c T objects.  Callers acquire an
- * object, use it, then return it to the pool automatically (RAII) or manually.  Objects are
- * recycled rather than destroyed, reducing heap pressure in hot paths.
+ * @c ObjectPool<T> recycles previously allocated @c T instances so that hot paths avoid
+ * repeated heap traffic.  Callers acquire an object through one of three entry points,
+ * use it, and then either let RAII return it automatically or hand it back manually.
  *
- * Acquisition API:
+ * Acquisition variants:
  *
- * | Method        | Return type                       | Auto-return on destruction         |
- * | ------------- | --------------------------------- | ---------------------------------- |
- * | @c get()      | unique_ptr<T, PoolDeleter>        | Yes (via PoolDeleter)              |
- * | @c get_shared | shared_ptr<T>   (PoolDeleter)     | Yes (via shared_ptr deleter)       |
- * | @c borrow()   | T*  (raw pointer)                 | No -- caller must call give_back() |
+ * | Method         | Returned handle                    | Returns to pool automatically       |
+ * | -------------- | ---------------------------------- | ----------------------------------- |
+ * | @c get()       | @c unique_ptr<T, PoolDeleter>      | Yes, on @c unique_ptr destruction   |
+ * | @c get_shared  | @c shared_ptr<T>                   | Yes, on last @c shared_ptr release  |
+ * | @c borrow()    | Raw @c T*                          | No, caller must invoke @c give_back |
  *
- * Reset policy controls when the optional @c ResetCallback is invoked:
+ * Reset-policy decision table for the optional @c ResetCallback:
  *
- * | Policy             | Reset on acquire | Reset on release | Use case                         |
- * | ------------------ | ---------------- | ---------------- | -------------------------------- |
- * | @c kPolicyNone     | No               | No               | Immutable / stateless objects    |
- * | @c kPolicyRelease  | No               | Yes              | Clean before returning (default) |
- * | @c kPolicyAcquire  | Yes              | No               | Clean before use                 |
- * | @c kPolicyBoth     | Yes              | Yes              | Clean on both sides              |
+ * | Policy             | Reset on acquire | Reset on release | Typical use                       |
+ * | ------------------ | ---------------- | ---------------- | --------------------------------- |
+ * | @c kPolicyNone     | No               | No               | Pure / stateless objects          |
+ * | @c kPolicyRelease  | No               | Yes              | Default; scrub on the return path |
+ * | @c kPolicyAcquire  | Yes              | No               | Scrub right before use            |
+ * | @c kPolicyBoth     | Yes              | Yes              | Defence-in-depth scrubbing        |
+ *
+ * Lifecycle of a pooled object:
+ *
+ * @verbatim
+ *   factory ---> free list <----------+
+ *                  |  acquire         |
+ *                  v                  |
+ *               in use ---> release --+   (reset on release if enabled)
+ *                  ^                  |
+ *                  +--reset-on-acquire+
+ * @endverbatim
  *
  * @par Thread safety
- * All public methods are protected by an internal mutex and are safe to call concurrently.
- *
- * @note
- * - When @c max_size is 0 (default), the pool grows without bound.
- * - When the pool is exhausted (@c max_size > 0 and the number of live objects reaches @c max_size),
- *   @c get(), @c get_shared(), and @c borrow() throw @c std::runtime_error.
- * - If @c FactoryCallback returns @c nullptr, a @c std::runtime_error is thrown.
+ * Every public method acquires the internal mutex so concurrent callers may
+ * interleave freely.  Factory and reset callbacks run outside the mutex.
  *
  * @par Example
  * @code
  * auto pool = std::make_shared<vlink::ObjectPool<Buffer>>(
- *     []{ return std::make_unique<Buffer>(4096); },  // factory
- *     4,                                              // initial_size
- *     16,                                             // max_size
- *     [](Buffer& b){ b.reset(); },                   // reset callback
- *     vlink::ObjectPool<Buffer>::kPolicyRelease       // reset on return
- * );
+ *     []{ return std::make_unique<Buffer>(4096); },
+ *     4,
+ *     16,
+ *     [](Buffer& buf){ buf.clear(); },
+ *     vlink::ObjectPool<Buffer>::kPolicyRelease);
  *
  * {
- *     auto buf = pool->get();   // auto-returned when buf goes out of scope
- *     buf->write(data, len);
+ *   auto buf = pool->get();
+ *   buf->write(payload.data(), payload.size());
  * }
  *
- * // Manual acquire/release:
  * Buffer* raw = pool->borrow();
- * raw->write(data, len);
+ * raw->write(payload.data(), payload.size());
  * pool->give_back(raw);
  * @endcode
- *
- * @tparam T  Type of objects managed by the pool.
  */
 
 #pragma once
@@ -94,54 +96,59 @@ namespace vlink {
 
 /**
  * @class ObjectPoolBase
- * @brief Non-template base of @c ObjectPool: owns all element-type-independent state and
- *        provides counter / policy / threading primitives.
+ * @brief Type-independent base of @c ObjectPool that owns counters, mutex and policy state.
  *
  * @details
- * Holds the mutex, the live / borrowed / total counters, the @c max_size limit, and the
- * @c Policy enum.  The element-type-dependent state (factory callback, reset callback,
- * free-list vector) lives in @c ObjectPool<T>.  Cold-path validation and error throws are
- * also implemented here so each instantiation of @c ObjectPool<T> does not duplicate the
- * @c std::ostringstream / @c std::runtime_error code.
+ * Keeps the shared bookkeeping for @c ObjectPool<T> in a single translation unit so that
+ * cold-path validation and error-throwing helpers do not need to be re-instantiated for
+ * every element type.  Element storage and callbacks remain in the derived template.
  */
 class VLINK_EXPORT ObjectPoolBase {
  public:
   /**
-   * @brief Controls when the @c ResetCallback is invoked relative to acquire and release.
+   * @brief Decides when (or whether) the user-supplied @c ResetCallback runs.
    *
    * @details
-   * Release-side reset failures are caught and the object is discarded.  Acquire-side
-   * reset failures return the object to the pool and rethrow the exception.
+   * Reset failures on the release path are caught and the offending object is dropped from
+   * the pool instead of being recycled.  Failures on the acquire path are rethrown after
+   * the object has been put back on the free list.
    */
   enum Policy : uint8_t {
-    kPolicyNone = 0,     ///< Never invoke reset callback.
-    kPolicyRelease = 1,  ///< Invoke reset callback when object is returned to the pool.
-    kPolicyAcquire = 2,  ///< Invoke reset callback when object is acquired from the pool.
-    kPolicyBoth = 3,     ///< Invoke reset callback on both acquire and release.
+    kPolicyNone = 0,     ///< Never invoke the reset callback.
+    kPolicyRelease = 1,  ///< Reset on the return-to-pool path.
+    kPolicyAcquire = 2,  ///< Reset on the hand-out-to-caller path.
+    kPolicyBoth = 3,     ///< Reset on both paths.
   };
 
   /**
-   * @brief Snapshot of pool statistics at a point in time.
+   * @struct Stats
+   * @brief Point-in-time snapshot of internal pool counters.
    */
   struct Stats final {
-    size_t pool_size{0};      ///< Number of objects currently idle in the pool.
-    size_t borrowed{0};       ///< Number of objects currently held by callers.
-    size_t total_created{0};  ///< Total objects ever created (pool_size + borrowed + destroyed).
-    size_t max_size{0};       ///< Maximum allowed total objects.  0 means unlimited.
+    size_t pool_size{0};      ///< Objects currently idle on the free list.
+    size_t borrowed{0};       ///< Objects currently held by callers.
+    size_t total_created{0};  ///< Cumulative objects ever produced by the factory.
+    size_t max_size{0};       ///< Configured upper bound; @c 0 means unlimited.
   };
 
   /**
-   * @brief Returns the number of objects currently held by callers.
+   * @brief Returns the number of objects currently checked out of the pool.
+   *
+   * @return Borrowed object count.
    */
   [[nodiscard]] size_t borrowed() const;
 
   /**
-   * @brief Returns the total number of objects ever created by this pool.
+   * @brief Returns the cumulative number of objects ever produced by the factory.
+   *
+   * @return Total created count.
    */
   [[nodiscard]] size_t total_created() const;
 
   /**
-   * @brief Returns the maximum total object count allowed by this pool.
+   * @brief Returns the configured upper bound on live objects.
+   *
+   * @return Maximum size; @c 0 means unlimited.
    */
   [[nodiscard]] size_t max_size() const noexcept;
 
@@ -176,104 +183,120 @@ class VLINK_EXPORT ObjectPoolBase {
 
 /**
  * @class ObjectPool
- * @brief Thread-safe object pool for type @p T with RAII acquisition and configurable reset policy.
+ * @brief Thread-safe recycling pool for instances of @p T with RAII acquisition.
  *
  * @details
- * Must be heap-allocated and managed via @c std::shared_ptr, because @c PoolDeleter holds a
- * @c std::weak_ptr to the pool.  Create with @c std::make_shared<ObjectPool<T>>(...).
+ * Must always live behind a @c std::shared_ptr because @c PoolDeleter holds a
+ * @c std::weak_ptr back to the owning pool; constructing one on the stack leaks
+ * outstanding RAII handles into a dangling pool.  Use @c std::make_shared<ObjectPool<T>>().
  *
- * @tparam T  Type of pooled objects.  Must be default-constructible unless a custom
- *            @c FactoryCallback is supplied.
+ * @tparam T  Pooled element type.  Must be default-constructible unless a non-default
+ *            factory callback is supplied.
  */
 template <typename T>
 class ObjectPool : public ObjectPoolBase, public std::enable_shared_from_this<ObjectPool<T>> {
  public:
   /**
-   * @brief Callback type for creating a new instance of @p T.
+   * @brief Signature of the factory used to grow the pool on demand.
    *
    * @details
-   * Must return a non-null @c unique_ptr<T>.  Throwing or returning @c nullptr causes
-   * the acquisition call to propagate the error to the caller.
+   * A non-null @c std::unique_ptr<T> must be returned; @c nullptr or thrown exceptions
+   * are propagated to the caller of @c get / @c get_shared / @c borrow.
    */
   using FactoryCallback = MoveFunction<std::unique_ptr<T>()>;
 
   /**
-   * @brief Callback type for resetting an object before acquisition or after release.
+   * @brief Signature of the reset hook used to scrub objects on acquire and/or release.
    *
    * @details
-   * Called with a reference to the object.  Exceptions thrown here are caught; on release,
-   * the object is discarded (not returned to the pool) if the reset throws.
+   * Exceptions thrown on the release path are swallowed and the affected object is
+   * discarded.  Exceptions on the acquire path return the object to the pool and
+   * rethrow to the caller.
    */
   using ResetCallback = MoveFunction<void(T&)>;
 
   /**
    * @struct PoolDeleter
-   * @brief Custom deleter for RAII handles returned by @c get() and @c get_shared().
+   * @brief Custom deleter installed on every RAII handle handed out by @c get / @c get_shared.
    *
    * @details
-   * Holds a @c weak_ptr to the parent pool.  On destruction of the RAII handle,
-   * @c operator() is called:
-   * - If the pool is still alive, the object is returned to it via @c release().
-   * - If the pool has been destroyed, the object is deleted with @c delete.
+   * Holds a non-owning @c weak_ptr to the parent pool.  When the handle is destroyed,
+   * the deleter either returns the object via @c release() (when the pool is alive)
+   * or falls back to @c operator @c delete (when the pool has already been torn down).
    */
   struct PoolDeleter final {
     /**
-     * @brief Returns @p ptr to the pool, or deletes it if the pool is gone.
+     * @brief Returns @p ptr to the pool, or deletes it when the pool is gone.
      *
-     * @param ptr  Raw pointer to the object being released.  Ignored if @c nullptr.
+     * @param ptr  Raw pointer to the object being released; @c nullptr is silently ignored.
      */
     void operator()(T* ptr) const noexcept;
-    std::weak_ptr<ObjectPool<T>> weak_pool;  ///< Non-owning reference to the parent pool.
+    std::weak_ptr<ObjectPool<T>> weak_pool;  ///< Weak reference to the parent pool.
   };
 
   /**
-   * @brief Constructs the pool and optionally pre-populates it with objects.
+   * @brief Constructs the pool and optionally pre-warms the free list.
    *
-   * @param factory_callback  Factory used to create new @p T instances.
-   *                          Default: @c std::make_unique<T>().
-   * @param initial_size      Number of objects to pre-allocate at construction.
-   *                          The reset callback (if @c kPolicyRelease or @c kPolicyBoth) is
-   *                          invoked on each pre-allocated object.
-   * @param max_size          Upper bound on total objects (idle + borrowed).
-   *                          0 = unlimited.
-   * @param reset_callback    Optional callback invoked to reset objects per @p policy.
-   * @param policy            When to invoke @p reset_callback (default @c kPolicyRelease).
+   * @param factory_callback  Factory used to grow the pool.  Default: @c std::make_unique<T>().
+   * @param initial_size      Objects to allocate eagerly at construction time.
+   * @param max_size          Cap on the number of live objects.  @c 0 means unlimited.
+   * @param reset_callback    Optional scrubbing hook driven by @p policy.
+   * @param policy            When the reset hook fires.  Default: @c kPolicyRelease.
    *
-   * @throws std::invalid_argument if @p initial_size > @p max_size and @p max_size > 0.
-   * @throws std::runtime_error    if @p factory_callback returns @c nullptr during pre-fill.
+   * @throws std::invalid_argument when @p initial_size exceeds a non-zero @p max_size.
+   * @throws std::runtime_error    when the factory returns @c nullptr while pre-filling.
    *
-   * @note Must be used via @c std::make_shared<ObjectPool<T>>(...) to enable @c PoolDeleter.
+   * @note Always construct via @c std::make_shared<ObjectPool<T>>() so that
+   *       @c PoolDeleter can resolve its @c weak_ptr.
    */
   explicit ObjectPool(FactoryCallback factory_callback = get_default_factory(), size_t initial_size = 0,
                       size_t max_size = 0, ResetCallback reset_callback = nullptr, Policy policy = kPolicyRelease);
 
   /**
-   * @brief Acquires an object and returns it as a @c unique_ptr with automatic pool return.
+   * @brief Acquires an object wrapped in a @c unique_ptr with automatic return.
+   *
+   * @return RAII handle whose deleter releases the object back to the pool.
+   *
+   * @throws std::runtime_error when the pool is exhausted or the factory fails.
    */
   [[nodiscard]] std::unique_ptr<T, typename ObjectPool<T>::PoolDeleter> get();
 
   /**
-   * @brief Acquires an object and returns it as a @c shared_ptr with automatic pool return.
+   * @brief Acquires an object wrapped in a @c shared_ptr with automatic return.
+   *
+   * @return RAII handle whose deleter releases the object back to the pool.
+   *
+   * @throws std::runtime_error when the pool is exhausted or the factory fails.
    */
   [[nodiscard]] std::shared_ptr<T> get_shared();
 
   /**
-   * @brief Acquires an object and returns a raw pointer; caller is responsible for returning it.
+   * @brief Acquires an object as a raw pointer; the caller owns the return path.
+   *
+   * @return Raw pointer that must later be returned via @c give_back().
+   *
+   * @throws std::runtime_error when the pool is exhausted or the factory fails.
    */
   [[nodiscard]] T* borrow();
 
   /**
-   * @brief Returns a raw-pointer object previously obtained via @c borrow() to the pool.
+   * @brief Returns an object obtained from @c borrow() back to the pool.
+   *
+   * @param ptr  Raw pointer previously returned by @c borrow(); @c nullptr is ignored.
    */
   void give_back(T* ptr);
 
   /**
-   * @brief Returns a snapshot of all pool statistics (thread-safe).
+   * @brief Captures a thread-safe snapshot of pool statistics.
+   *
+   * @return Filled @c Stats value.
    */
   [[nodiscard]] Stats stats() const;
 
   /**
-   * @brief Returns the number of idle objects currently in the pool.
+   * @brief Returns the number of objects currently idle on the free list.
+   *
+   * @return Idle object count.
    */
   [[nodiscard]] size_t size() const;
 

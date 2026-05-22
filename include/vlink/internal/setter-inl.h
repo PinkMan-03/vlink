@@ -35,7 +35,6 @@
 
 namespace vlink {
 
-// Setter<ValueT>
 template <typename ValueT, SecurityType SecT>
 inline typename Setter<ValueT, SecT>::UniquePtr Setter<ValueT, SecT>::create_unique(const std::string& url_str,
                                                                                     InitType type) {
@@ -197,7 +196,6 @@ inline void Setter<ValueT, SecT>::write_bytes(const Bytes& data) {
   }
 }
 
-// SecuritySetter<ValueT>
 template <typename ValueT>
 template <typename SecurityConfigT>
 inline typename SecuritySetter<ValueT>::UniquePtr SecuritySetter<ValueT>::create_unique(const std::string& url_str,

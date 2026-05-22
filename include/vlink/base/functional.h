@@ -23,105 +23,86 @@
 
 /**
  * @file functional.h
- * @brief Type-erased callable wrappers: @c vlink::Function tracks the public
- *        surface of @c std::function (C++11) and @c vlink::MoveFunction tracks
- *        @c std::move_only_function (C++23). Storage uses a configurable SBO
- *        (default 64 bytes) and a @c vlink::MemoryPool-backed heap fallback.
+ * @brief Pool-backed type-erased callables: copyable @c vlink::Function and move-only @c vlink::MoveFunction.
  *
  * @details
+ * @c vlink::Function tracks the public surface of @c std::function while @c vlink::MoveFunction
+ * tracks @c std::move_only_function.  Both store the target in a configurable small-buffer
+ * region (64 bytes by default) and spill to @c vlink::MemoryPool::global_instance when the
+ * target does not fit.  This eliminates the heap-allocation surprise common to @c std::function
+ * on hot paths while still permitting arbitrarily large closures.
+ *
+ * @par Comparison vs the standard library
+ *
+ * | Property             | std::function    | std::move_only_function | vlink::Function    | vlink::MoveFunction |
+ * | -------------------- | ---------------- | ----------------------- | ------------------ | ------------------- |
+ * | Copyable             | yes              | no                      | yes                | no                  |
+ * | Movable              | yes              | yes                     | yes                | yes                 |
+ * | Default SBO size     | ~16-24 B (impl)  | ~16-24 B (impl)         | 64 B (tunable)     | 64 B (tunable)      |
+ * | Spill allocator      | ::operator new   | ::operator new          | @c MemoryPool tier | @c MemoryPool tier  |
+ * | Empty-call behaviour | throws bad_func  | UB                      | throws bad_func    | throws bad_func     |
+ * | RTTI inspection      | @c target / type | not provided            | @c target / type   | @c target / type    |
+ *
  * @par Storage predicate (kIsInline)
- * A target @c FunctorT is held inline iff @b all three conditions hold:
- * @c sizeof(FunctorT) is no greater than @c SboSizeT, @c alignof(FunctorT)
- * is no greater than @c alignof(std::max_align_t), and @c FunctorT is nothrow move-constructible.
- * Otherwise @c FunctorT is allocated through @c vlink::MemoryPool::global_instance();
- * the original @c sizeof(FunctorT) and @c alignof(FunctorT) are passed back to
- * @c deallocate so the block routes to its source tier. This predicate
- * matches the @c __stored_locally rule used by libstdc++
- * @c std::move_only_function.
+ * A target @c FunctorT is held inline only when all three hold simultaneously:
+ * @c sizeof(FunctorT) @c <= @c SboSizeT, @c alignof(FunctorT) @c <= @c alignof(std::max_align_t)
+ * and @c FunctorT is nothrow move-constructible.  Anything else goes to the heap path through
+ * @c MemoryPool::global_instance; the original @c sizeof / @c alignof values are passed back to
+ * @c deallocate so the block returns to its source tier.  This mirrors libstdc++'s
+ * @c __stored_locally rule.
  *
  * @par SBO sizing
- * Both wrappers expose a second non-type template parameter @c SboSizeT that
- * selects the inline storage budget at compile time:
- * @code
- * vlink::Function<void()>                // default 64-byte SBO
- * vlink::Function<void(), 128>           // 128-byte SBO
- * vlink::MoveFunction<void(), 256>       // 256-byte SBO -- explicit form
- * vlink::LargeFunction<void()>           // alias for Function<void(), 256>
- * vlink::LargeMoveFunction<void()>       // alias for MoveFunction<void(), 256>
- * @endcode
- * The 64-byte default intentionally exceeds the typical @c std::function SBO
- * (~16-24 B) so common VLink capture sets (a handful of @c shared_ptr /
- * pointers / small POD) stay inline.  Enlarge the budget when capturing
- * heavyweight closures (e.g. @c std::array<shared_ptr<T>, N>, multiple
- * @c std::string captures by value) to avoid the @c MemoryPool roundtrip.
- * @c SboSizeT must be at least @c sizeof(void*) so the heap-fallback pointer
- * fits inside the storage; this is enforced by a @c static_assert.
- *
- * @par Type identity per SboSizeT
- * @c Function<Sig, X> and @c Function<Sig, Y> are distinct types, but
- * copyable @c Function wrappers remain constructible and assignable across
- * SBO sizes through the generic functor path: a @c Function<Sig, 64> can be
- * used as the source for @c Function<Sig, 256>, which wraps it as a regular
- * callable.  @c MoveFunction follows the same pattern for movable sources.
+ * Both wrappers expose @c SboSizeT as the second non-type template argument.  Convenience
+ * aliases @c vlink::LargeFunction / @c vlink::LargeMoveFunction pick @c 256 bytes; the bound
+ * @c SboSizeT @c >= @c sizeof(void*) is enforced by @c static_assert so the heap-fallback
+ * pointer always fits in the SBO.  Distinct @c SboSizeT instantiations are distinct types but
+ * may still convert through the generic functor path -- a @c Function<Sig, @c 64> serves as a
+ * regular callable target for @c Function<Sig, @c 256>.
  *
  * @par Empty-state propagation
- * Constructing or assigning from any of the following yields an empty
- * wrapper -- no stored target, no allocation, no installed vtable:
- *  - an empty function-wrapper source: @c std::function /
- *    @c vlink::Function (plus @c std::move_only_function and
- *    @c vlink::MoveFunction when targeting @c MoveFunction);
- *  - a null function pointer;
+ * Constructing or assigning from any of these sources yields an empty wrapper with no vtable
+ * and no allocation:
+ *  - an empty function-wrapper source (@c std::function, @c vlink::Function, and -- when the
+ *    target is @c MoveFunction -- @c std::move_only_function / @c vlink::MoveFunction);
+ *  - a null raw function pointer;
  *  - a null pointer-to-member.
- * Invoking an empty wrapper throws @c std::bad_function_call. This matches
- * @c std::function; for @c MoveFunction it is a deliberate divergence from
- * @c std::move_only_function (which leaves the empty call as UB) so misuse
- * is diagnosable.
  *
  * @par Exception safety
- * Copy construction and copy assignment provide the strong guarantee via
- * copy-and-swap. @c swap, the move constructor, and move assignment are
- * @c noexcept -- the @c kIsInline predicate guarantees the underlying
- * FunctorT-move never throws on the inline path, and the heap path moves only a
- * pointer. Inline construction of @c FunctorT uses placement-new directly into the
- * SBO; heap construction uses a @c try/@c catch so the pool block is
- * returned on a constructor exception.
+ * Copy operations use copy-and-swap and offer the strong guarantee; @c swap, move construction
+ * and move assignment are @c noexcept.  The @c kIsInline predicate guarantees that inline-path
+ * moves never throw, while the heap path simply moves a pointer.  Inline construction uses
+ * placement-new directly into the SBO; heap construction is wrapped in @c try / @c catch so the
+ * pool block is returned on a constructor exception.
  *
  * @par Object-lifetime model
- * Inline targets are placed into the SBO via @c ::new(&storage_) @c FunctorT(...).
- * Heap-mode storage holds an @c FunctorT*; its lifetime is started explicitly
- * via @c ::new(dst) @c FunctorT*(p) at every site that introduces a new slot
- * (@c construct_from, @c HeapVTable::copy_construct, @c
- * HeapVTable::move_construct (dst)) -- this avoids relying on C++20
- * @c [intro.object]/10 implicit object creation, so the same source is
- * well-defined under both C++17 and C++20. All subsequent accesses to
- * the placement-new'd target -- whether the inline @c FunctorT or the heap @c FunctorT*
- * slot -- go through @c std::launder to obtain a pointer with provenance
- * matching the live object, satisfying @c [basic.life]/8 strictly.
- * After @c destroy / move-out the heap slot is set to @c nullptr but its
- * @c FunctorT* object lifetime continues until the wrapper itself is destroyed.
+ * Inline targets are placement-new'd into the SBO.  Heap storage holds a @c FunctorT*; the
+ * pointer object's lifetime is started explicitly via @c ::new(dst) @c FunctorT*(p) at every
+ * site that introduces a new slot, avoiding reliance on the C++20 @c [intro.object]/10
+ * implicit-object rule and keeping the code well-defined under C++17.  Subsequent accesses go
+ * through @c std::launder to satisfy @c [basic.life]/8.
  *
  * @par RTTI surface
- * When @c __cpp_rtti is defined, both wrappers expose @c target_type() and
- * @c target<FunctorT>() with @c std::function semantics. For @c MoveFunction this
- * is an extension -- @c std::move_only_function omits target inspection.
+ * When @c __cpp_rtti is defined both wrappers expose @c target_type() and
+ * @c target<FunctorT>() with @c std::function semantics.  This is an extension over
+ * @c std::move_only_function which omits target inspection.
  *
- * @par Limitations
- * Only the unqualified @c ReturnT(ArgsT...) signature is specialized; the
- * @c std::move_only_function cv / ref / @c noexcept qualified forms are
- * not supported and select the undefined primary template (hard error).
+ * @par Example
+ * @code
+ *   vlink::Function<int(int)> f = [](int x) { return x * 2; };
+ *   int y = f(21);                                              // == 42
  *
- * @note
- * - @c Function requires copy-constructible targets and is itself copyable.
- * - @c MoveFunction accepts move-only targets and is itself move-only.
- * - @c LargeFunction / @c LargeMoveFunction are convenience aliases for
- *   @c Function<Sig, 256> / @c MoveFunction<Sig, 256>.
- * - This header self-defines @c VLINK_ENABLE_BASE_FUNCTIONAL when the macro is
- *   absent, so normal builds always use the VLink SBO + @c MemoryPool
- *   implementation.  The standard-library alias block below is not a public
- *   compile-command opt-out and is not selected by passing
- *   @c -UVLINK_ENABLE_BASE_FUNCTIONAL.
- * - Class template declarations precede the @c Details section;
- *   out-of-class member definitions follow it.
+ *   auto pkg = std::packaged_task<int()>([] { return 7; });
+ *   vlink::MoveFunction<void()> mf = std::move(pkg);            // move-only target
+ *   mf();                                                       // runs the task
+ *
+ *   vlink::LargeMoveFunction<void()> heavy = ...heavy capture...; // 256-byte SBO
+ * @endcode
+ *
+ * @note Only the unqualified @c ReturnT(ArgsT...) signature is specialised; cv / ref /
+ *       @c noexcept-qualified function types resolve to the undefined primary template (hard
+ *       error).  This header self-defines @c VLINK_ENABLE_BASE_FUNCTIONAL when absent so normal
+ *       builds always select the VLink implementation; the standard-library alias block at the
+ *       bottom is not exposed via a compile-command opt-out.
  */
 
 #pragma once
@@ -198,30 +179,21 @@ struct IsStdMoveOnlyFunction<std::move_only_function<SignatureT>> : std::true_ty
 
 /**
  * @class Function
- * @brief Copyable type-erased callable wrapper -- @c std::function analogue
- *        with a configurable SBO (default 64 bytes) and a
- *        @c vlink::MemoryPool-backed heap fallback.
+ * @brief Copyable type-erased callable analogue of @c std::function with a tunable SBO and pool spill.
  *
  * @details
- * @c Function<ReturnT(ArgsT...), SboSizeT> stores any copy-constructible
- * callable that is invocable as @c ReturnT(ArgsT...).  The @c SboSizeT
- * non-type template argument selects the inline storage budget; default
- * @c Function<Sig> uses 64 bytes, @c Function<Sig, 256> (or the
- * @c LargeFunction alias) keeps any 256-byte-or-smaller functor inline.
- * The observable contract mirrors
- * @c std::function:
- *  - @c operator() is @c const (the @c std::function "logical const"
- *    convention -- the placement-newed target is non-const, so the standard
- *    @c const_cast pattern in the invoker is well-defined);
- *  - empty construction is supported via the default constructor and from
- *    @c nullptr;
- *  - invoking an empty wrapper throws @c std::bad_function_call;
- *  - @c target_type() and @c target<FunctorT>() expose the stored target when
- *    @c __cpp_rtti is defined.
+ * Holds any copy-constructible target invocable as @c ReturnT(ArgsT...).  Default-instantiated
+ * @c Function uses a 64-byte SBO; @c Function<Sig, @c N> picks an arbitrary inline budget.
+ * @c operator() is @c const (matching @c std::function 's logical-const convention -- the
+ * placement-newed target itself is non-const, so the @c const_cast pattern inside the invoker is
+ * well-defined).  Empty construction, @c nullptr-from-nullptr, and the @c std::bad_function_call
+ * empty-call exception all match @c std::function.  Copy operations follow copy-and-swap and
+ * provide the strong exception guarantee; move construction, move assignment and @c swap are
+ * @c noexcept.
  *
- * Copy construction and copy assignment provide the strong exception
- * guarantee through copy-and-swap. The move constructor, move assignment,
- * and @c swap are @c noexcept.
+ * @tparam ReturnT  Result type of the invocable target.
+ * @tparam ArgsT    Argument types of the invocable target.
+ * @tparam SboSizeT Inline storage budget in bytes; must be @c >= @c sizeof(void*).
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 class Function<ReturnT(ArgsT...), SboSizeT> {
@@ -231,48 +203,43 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
 
  public:
   /**
-   * @brief Inline storage budget before falling back to @c MemoryPool.
-   *
-   * @details
-   * Equal to the @c SboSizeT template argument.  Default-instantiated
-   * @c Function<Sig> uses 64 bytes; override via @c Function<Sig, N> to enlarge
-   * (e.g. @c Function<void(), 256> keeps 256-byte functors inline).
+   * @brief Inline storage budget in bytes before the heap-pool fallback kicks in.
    */
   static constexpr size_t kSboSize = SboSizeT;
 
   /**
-   * @brief Result type alias, matching @c std::function.
+   * @brief Result type alias matching @c std::function.
    */
   using result_type = ReturnT;
 
   /**
-   * @brief Constructs an empty function wrapper.
+   * @brief Constructs an empty wrapper with no stored target.
    */
   Function() noexcept = default;
 
   /**
-   * @brief Constructs an empty function wrapper from @c nullptr.
+   * @brief Constructs an empty wrapper from a null pointer literal.
    */
   Function(std::nullptr_t) noexcept;  // NOLINT(google-explicit-constructor)
 
   /**
-   * @brief Copy-constructs the stored callable, or remains empty.
+   * @brief Copy constructor; deep-copies the stored target or stays empty.
    */
   Function(const Function& other);
 
   /**
-   * @brief Move-constructs the stored callable and leaves @p other empty.
+   * @brief Move constructor; transfers the target and leaves @p other empty.
    */
   Function(Function&& other) noexcept;
 
   /**
-   * @brief Constructs from a compatible copy-constructible callable.
+   * @brief Constructs from any compatible copy-constructible callable.
    *
    * @details
-   * Empty function-wrapper sources and null callable pointers produce an empty
-   * wrapper instead of storing a null target.
+   * Null function pointers, null pointer-to-members and empty function wrappers all yield an
+   * empty result rather than storing a tombstone callable.
    *
-   * @tparam FunctorT  Callable type accepted by @c std::invoke.
+   * @tparam FunctorT  Callable type compatible with @c std::invoke.
    */
   template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
             // NOLINTNEXTLINE(modernize-use-constraints)
@@ -283,22 +250,24 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
   Function(FunctorT&& f);  // NOLINT(google-explicit-constructor)
 
   /**
-   * @brief Replaces the target with a copy of @p other.
+   * @brief Copy assignment; replaces the target with a deep copy of @p other.
    */
   Function& operator=(const Function& other);
 
   /**
-   * @brief Replaces the target by moving from @p other.
+   * @brief Move assignment; replaces the target with @p other 's target.
    */
   Function& operator=(Function&& other) noexcept;
 
   /**
-   * @brief Clears the stored callable.
+   * @brief Clears the wrapper to the empty state.
    */
   Function& operator=(std::nullptr_t) noexcept;
 
   /**
    * @brief Replaces the target with a compatible copy-constructible callable.
+   *
+   * @tparam FunctorT  Callable type compatible with @c std::invoke.
    */
   template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
             // NOLINTNEXTLINE(modernize-use-constraints)
@@ -309,7 +278,7 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
   Function& operator=(FunctorT&& f);
 
   /**
-   * @brief Destroys the stored callable.
+   * @brief Destructor; releases inline or pooled storage.
    */
   ~Function();
 
@@ -321,31 +290,35 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
   ReturnT operator()(ArgsT... args) const;
 
   /**
-   * @brief Returns whether a callable target is stored.
+   * @brief Reports whether a callable target is currently stored.
    */
   explicit operator bool() const noexcept;
 
 #if defined(__cpp_rtti)
   /**
-   * @brief Returns the stored callable type, or @c typeid(void) when empty.
+   * @brief Returns the dynamic type of the stored target, or @c typeid(void) when empty.
    */
   const std::type_info& target_type() const noexcept;
 
   /**
-   * @brief Returns the stored target when its type is exactly @c FunctorT.
+   * @brief Returns the stored target when its dynamic type is exactly @c FunctorT.
+   *
+   * @tparam FunctorT  Expected target type.
    */
   template <typename FunctorT>
   FunctorT* target() noexcept;
 
   /**
-   * @brief Returns the stored target when its type is exactly @c FunctorT.
+   * @brief Const overload of @c target<FunctorT>.
+   *
+   * @tparam FunctorT  Expected target type.
    */
   template <typename FunctorT>
   const FunctorT* target() const noexcept;
 #endif
 
   /**
-   * @brief Swaps this wrapper with @p other.
+   * @brief Swaps the stored target with @p other.
    */
   void swap(Function& other) noexcept;
 
@@ -436,61 +409,51 @@ class Function<ReturnT(ArgsT...), SboSizeT> {
 };
 
 /**
- * @brief Swaps two function wrappers.
+ * @brief Free-function swap; defers to the member @c swap of @p lhs.
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 void swap(Function<ReturnT(ArgsT...), SboSizeT>& lhs, Function<ReturnT(ArgsT...), SboSizeT>& rhs) noexcept;
 
 /**
- * @brief Returns whether @p cb is empty.
+ * @brief Equality with @c nullptr; @c true when @p cb has no stored target.
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator==(const Function<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
- * @brief Returns whether @p cb is empty.
+ * @brief Commutative overload of @c operator==(Function, nullptr_t).
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator==(std::nullptr_t, const Function<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;
 
 /**
- * @brief Returns whether @p cb stores a callable target.
+ * @brief Inequality with @c nullptr; @c true when @p cb stores a target.
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator!=(const Function<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
- * @brief Returns whether @p cb stores a callable target.
+ * @brief Commutative overload of @c operator!=(Function, nullptr_t).
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator!=(std::nullptr_t, const Function<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;
 
 /**
  * @class MoveFunction
- * @brief Move-only type-erased callable wrapper -- @c std::move_only_function
- *        analogue sharing the configurable SBO and @c MemoryPool fallback used
- *        by @c Function (default 64 bytes; pick a wider budget via the
- *        @c SboSizeT template argument or the @c LargeMoveFunction alias).
+ * @brief Move-only type-erased callable analogue of @c std::move_only_function with pool spill.
  *
  * @details
- * @c MoveFunction<ReturnT(ArgsT...), SboSizeT> stores any move-constructible
- * callable that is invocable as @c ReturnT(ArgsT...).  As with @c Function,
- * the @c SboSizeT non-type template parameter selects the inline storage
- * budget; @c MoveFunction<Sig, 256> (or @c LargeMoveFunction<Sig>) keeps any
- * 256-byte-or-smaller functor inline.  It mirrors @c std::move_only_function
- * with two deliberate divergences and one extension:
- *  - @b Divergence: invoking an empty wrapper throws
- *    @c std::bad_function_call (matching @c Function and @c std::function);
- *    @c std::move_only_function leaves it as UB.
- *  - @b Divergence: only the unqualified @c ReturnT(ArgsT...) signature is
- *    specialized; cv / ref / @c noexcept qualified forms are unsupported.
- *  - @b Extension: @c target_type() / @c target<FunctorT>() are provided when
- *    @c __cpp_rtti is defined.
+ * Holds any move-constructible target invocable as @c ReturnT(ArgsT...).  Shares the SBO and
+ * @c MemoryPool fallback used by @c Function.  Diverges from @c std::move_only_function in two
+ * deliberate ways and extends it in one: empty calls throw @c std::bad_function_call instead of
+ * being UB; only the unqualified signature is specialised (cv / ref / @c noexcept forms hard-
+ * fail); and RTTI inspection through @c target_type / @c target is provided.  @c operator() is
+ * non-@c const so mutating targets such as @c std::packaged_task work directly without the
+ * logical-const dance.  Move operations and @c swap are @c noexcept; copy is deleted.
  *
- * @c operator() is non-@c const, so @c MoveFunction can carry mutating /
- * @c std::packaged_task -style targets without the @c std::function
- * "logical const" workaround. Move construction, move assignment, and
- * @c swap are @c noexcept; copy operations are @c =delete.
+ * @tparam ReturnT  Result type of the invocable target.
+ * @tparam ArgsT    Argument types of the invocable target.
+ * @tparam SboSizeT Inline storage budget in bytes; must be @c >= @c sizeof(void*).
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
@@ -500,28 +463,22 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
 
  public:
   /**
-   * @brief Inline storage budget before falling back to @c MemoryPool.
-   *
-   * @details
-   * Equal to the @c SboSizeT template argument.  Default-instantiated
-   * @c MoveFunction<Sig> uses 64 bytes; override via @c MoveFunction<Sig, N>
-   * to enlarge (e.g. @c MoveFunction<void(), 256> keeps 256-byte functors
-   * inline).
+   * @brief Inline storage budget in bytes before the heap-pool fallback kicks in.
    */
   static constexpr size_t kSboSize = SboSizeT;
 
   /**
-   * @brief Result type alias.
+   * @brief Result type alias matching @c std::move_only_function.
    */
   using result_type = ReturnT;
 
   /**
-   * @brief Constructs an empty move-only function wrapper.
+   * @brief Constructs an empty wrapper with no stored target.
    */
   MoveFunction() noexcept = default;
 
   /**
-   * @brief Constructs an empty move-only function wrapper from @c nullptr.
+   * @brief Constructs an empty wrapper from a null pointer literal.
    */
   MoveFunction(std::nullptr_t) noexcept;  // NOLINT(google-explicit-constructor)
 
@@ -530,18 +487,18 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
   MoveFunction& operator=(const MoveFunction&) = delete;
 
   /**
-   * @brief Move-constructs the stored callable and leaves @p other empty.
+   * @brief Move constructor; transfers the target and leaves @p other empty.
    */
   MoveFunction(MoveFunction&& other) noexcept;
 
   /**
-   * @brief Constructs from a compatible move-constructible callable.
+   * @brief Constructs from any compatible move-constructible callable.
    *
    * @details
-   * Empty function-wrapper sources and null callable pointers produce an empty
-   * wrapper instead of storing a null target.
+   * Null function pointers, null pointer-to-members and empty function wrappers all yield an
+   * empty result rather than storing a tombstone callable.
    *
-   * @tparam FunctorT  Callable type accepted by @c std::invoke.
+   * @tparam FunctorT  Callable type compatible with @c std::invoke.
    */
   template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
             // NOLINTNEXTLINE(modernize-use-constraints)
@@ -553,17 +510,19 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
   MoveFunction(FunctorT&& f);  // NOLINT(google-explicit-constructor)
 
   /**
-   * @brief Replaces the target by moving from @p other.
+   * @brief Move assignment; replaces the target with @p other 's target.
    */
   MoveFunction& operator=(MoveFunction&& other) noexcept;
 
   /**
-   * @brief Clears the stored callable.
+   * @brief Clears the wrapper to the empty state.
    */
   MoveFunction& operator=(std::nullptr_t) noexcept;
 
   /**
    * @brief Replaces the target with a compatible move-constructible callable.
+   *
+   * @tparam FunctorT  Callable type compatible with @c std::invoke.
    */
   template <typename FunctorT, typename DecayFunctorT = std::decay_t<FunctorT>,
             // NOLINTNEXTLINE(modernize-use-constraints)
@@ -575,7 +534,7 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
   MoveFunction& operator=(FunctorT&& f);
 
   /**
-   * @brief Destroys the stored callable.
+   * @brief Destructor; releases inline or pooled storage.
    */
   ~MoveFunction();
 
@@ -587,31 +546,35 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
   ReturnT operator()(ArgsT... args);
 
   /**
-   * @brief Returns whether a callable target is stored.
+   * @brief Reports whether a callable target is currently stored.
    */
   explicit operator bool() const noexcept;
 
 #if defined(__cpp_rtti)
   /**
-   * @brief Returns the stored callable type, or @c typeid(void) when empty.
+   * @brief Returns the dynamic type of the stored target, or @c typeid(void) when empty.
    */
   const std::type_info& target_type() const noexcept;
 
   /**
-   * @brief Returns the stored target when its type is exactly @c FunctorT.
+   * @brief Returns the stored target when its dynamic type is exactly @c FunctorT.
+   *
+   * @tparam FunctorT  Expected target type.
    */
   template <typename FunctorT>
   FunctorT* target() noexcept;
 
   /**
-   * @brief Returns the stored target when its type is exactly @c FunctorT.
+   * @brief Const overload of @c target<FunctorT>.
+   *
+   * @tparam FunctorT  Expected target type.
    */
   template <typename FunctorT>
   const FunctorT* target() const noexcept;
 #endif
 
   /**
-   * @brief Swaps this wrapper with @p other.
+   * @brief Swaps the stored target with @p other.
    */
   void swap(MoveFunction& other) noexcept;
 
@@ -699,31 +662,31 @@ class MoveFunction<ReturnT(ArgsT...), SboSizeT> {
 };
 
 /**
- * @brief Swaps two move-only function wrappers.
+ * @brief Free-function swap; defers to the member @c swap of @p lhs.
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 void swap(MoveFunction<ReturnT(ArgsT...), SboSizeT>& lhs, MoveFunction<ReturnT(ArgsT...), SboSizeT>& rhs) noexcept;
 
 /**
- * @brief Returns whether @p cb is empty.
+ * @brief Equality with @c nullptr; @c true when @p cb has no stored target.
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator==(const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
- * @brief Returns whether @p cb is empty.
+ * @brief Commutative overload of @c operator==(MoveFunction, nullptr_t).
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator==(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;
 
 /**
- * @brief Returns whether @p cb stores a callable target.
+ * @brief Inequality with @c nullptr; @c true when @p cb stores a target.
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator!=(const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb, std::nullptr_t) noexcept;
 
 /**
- * @brief Returns whether @p cb stores a callable target.
+ * @brief Commutative overload of @c operator!=(MoveFunction, nullptr_t).
  */
 template <typename ReturnT, typename... ArgsT, size_t SboSizeT>
 bool operator!=(std::nullptr_t, const MoveFunction<ReturnT(ArgsT...), SboSizeT>& cb) noexcept;

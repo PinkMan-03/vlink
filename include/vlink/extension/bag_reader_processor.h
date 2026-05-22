@@ -23,35 +23,45 @@
 
 /**
  * @file bag_reader_processor.h
- * @brief Time-ordered message buffer for smoothing bag playback across split files.
+ * @brief Bounded reorder buffer that merges multiple @c BagReader streams into one ordered flow.
  *
  * @details
- * @c BagReaderProcessor accepts messages pushed from one or more @c BagReader instances
- * and delivers the oldest safe message from a bounded time-windowed cache.  This
- * smooths out-of-order messages that can arise when reading consecutive split
- * files concurrently without waiting forever for a late older timestamp.
+ * When several bag readers are played in parallel (typically across split files or several
+ * recordings being merged), their frames arrive interleaved and are not guaranteed to be
+ * globally sorted by timestamp.  @c BagReaderProcessor accepts every frame through
+ * @c push() and re-emits them through a single @c OutputCallback in timestamp order, while
+ * keeping latency bounded so the pipeline cannot stall on a slow stream.
  *
- * The processor maintains an internal sorted queue.  Once the buffered timestamp
- * span reaches @c Config::min_cache_time milliseconds, the oldest message can be
- * emitted.  If the tail never reaches that timestamp watermark, a wall-clock
- * timeout flushes the remaining messages so playback can finish.  Messages that
- * arrive after that bounded window can still be older than data already emitted.
+ * Pipeline overview:
  *
- * @par Typical usage
+ * @verbatim
+ *     bag_reader_a ---\
+ *                      \   push()      sorted cache (>= min_cache_time)
+ *     bag_reader_b -----+--------->  +-----------------------------+
+ *                      /             |  timestamp-ordered queue    |  on_output()
+ *     bag_reader_c ---/              +-----------------------------+ ----------> OutputCallback
+ * @endverbatim
+ *
+ * The processor flushes the oldest frame only after the time span between the oldest and
+ * newest cached frames reaches @c Config::min_cache_time, giving late arrivals a chance
+ * to slot in ahead of more recent frames.  A wall-clock fallback drains the cache at the
+ * tail of a session so playback can terminate even when one input goes silent.
+ *
+ * @par Example
  * @code
  * vlink::BagReaderProcessor processor;
  * processor.register_output_callback([](int64_t ts, const std::string& url,
  *                                       vlink::ActionType action, const vlink::Bytes& data) {
- *     // process in order
+ *   (void)action;
+ *   VLOG_I("ordered ts=", ts, " url=", url, " bytes=", data.size());
  * });
  *
- * // Feed from multiple readers:
- * reader_a->register_output_callback([&](auto ts, auto& url, auto action, auto& data) {
- *     processor.push(ts, url, action, data);
- * });
- * reader_b->register_output_callback([&](auto ts, auto& url, auto action, auto& data) {
- *     processor.push(ts, url, action, data);
- * });
+ * auto fan_in = [&processor](int64_t ts, const std::string& url,
+ *                            vlink::ActionType action, const vlink::Bytes& data) {
+ *   processor.push(ts, url, action, data);
+ * };
+ * reader_a->register_output_callback(fan_in);
+ * reader_b->register_output_callback(fan_in);
  * @endcode
  */
 
@@ -70,67 +80,71 @@ namespace vlink {
 
 /**
  * @class BagReaderProcessor
- * @brief Time-sorted message relay that buffers and orders messages before delivery.
+ * @brief Time-sorted relay buffer that smooths interleaved bag-reader outputs.
  *
  * @details
- * Thread-safe.  Multiple threads may call @c push() concurrently.
+ * Thread-safe in the sense that @c push() may be called concurrently from multiple
+ * reader threads; delivery to the @c OutputCallback happens on a dedicated worker
+ * thread owned by the processor.
  */
 class VLINK_EXPORT BagReaderProcessor {
  public:
   /**
-   * @brief Callback type fired for each message in timestamp order.
+   * @brief Callback signature receiving one ordered frame.
    *
    * @details
-   * Called from an internal processing thread after the cache window has elapsed.
+   * Invoked on the processor's internal worker thread once @c min_cache_time of
+   * timestamps have accumulated ahead of the candidate frame.
    */
   using OutputCallback =
       MoveFunction<void(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data)>;
 
   /**
    * @struct Config
-   * @brief Configuration for the time-ordered message cache.
+   * @brief Tunables controlling the reorder buffer behaviour.
    */
   struct Config final {
-    int64_t min_cache_time{500};                    ///< Minimum cache time in milliseconds before flushing.
-    int64_t max_cache_size{1024LL * 1024LL * 256};  ///< Maximum cache size in bytes (256 MiB).
+    int64_t min_cache_time{500};                    ///< Minimum head-to-tail timestamp span (ms) before flushing.
+    int64_t max_cache_size{1024LL * 1024LL * 256};  ///< Maximum total bytes held in the cache (default 256 MiB).
 
     Config() {}  // NOLINT(modernize-use-equals-default)
   };
 
   /**
-   * @brief Constructs the processor with the given @p config.
+   * @brief Builds the processor and spawns its worker thread.
    *
-   * @param config  Cache time and size limits.
+   * @param config Cache time-window and memory-budget tunables.
    */
   explicit BagReaderProcessor(const Config& config = Config());
 
   /**
-   * @brief Destructor -- flushes remaining cached messages and stops the processing thread.
+   * @brief Drains remaining frames and joins the worker thread.
    */
   ~BagReaderProcessor();
 
   /**
-   * @brief Registers the callback that receives time-ordered messages.
+   * @brief Sets the single sink receiving ordered frames.
    *
    * @details
-   * Only one callback may be registered.  A subsequent call replaces the previous one.
+   * Replaces any previously registered callback; only the most recent registration
+   * remains effective.
    *
-   * @param output_callback  Callback invoked for each message in order.
+   * @param output_callback Sink invoked once per frame on the worker thread.
    */
   void register_output_callback(OutputCallback&& output_callback);
 
   /**
-   * @brief Pushes a message into the time-ordered cache.
+   * @brief Inserts a frame into the time-sorted cache.
    *
    * @details
-   * Thread-safe.  The message is inserted into an internal sorted queue keyed by
-   * @p timestamp.  Messages are delivered to the @c OutputCallback after the
-   * @c min_cache_time window has elapsed.
+   * Safe to call from any thread.  Frames are inserted in timestamp order; an entry
+   * leaves the cache only after the @c Config::min_cache_time window is reached or
+   * after a wall-clock timeout when the producer side has gone quiet.
    *
-   * @param timestamp    Message timestamp in microseconds.
-   * @param url          Topic URL string.
-   * @param action_type  Action type.
-   * @param data         Serialized payload bytes.
+   * @param timestamp   Frame timestamp in microseconds.
+   * @param url         Source VLink URL.
+   * @param action_type Recorded action kind.
+   * @param data        Serialised payload bytes.
    */
   void push(int64_t timestamp, const std::string& url, ActionType action_type, const Bytes& data);
 

@@ -23,59 +23,92 @@
 
 /**
  * @file security.h
- * @brief Authenticated message-level encryption (AEAD) with optional RSA hybrid handshake.
+ * @brief Application-layer authenticated encryption with symmetric, hybrid asymmetric, and pluggable backends.
  *
  * @details
- * @c Security provides per-message encryption for VLink transports.  It operates at the
- * application layer and is independent of, and complementary to, the transport-layer TLS
- * configured through @c SslOptions.  When compiled with @c VLINK_ENABLE_SECURITY (requires
- * OpenSSL), three modes are available and selected automatically per call:
+ * @c Security sits between VLink serialisation and any transport layer.  Every endpoint
+ * (publisher / subscriber / client / server / setter / getter) may own at most one @c Security
+ * instance; the instance authenticates and encrypts each outbound message and verifies and
+ * decrypts each inbound message before the transport sees the payload.  It is fully orthogonal
+ * to the channel-level TLS controlled by @c SslOptions and can be combined with it.
  *
- * | Mode       | Sender state                       | Receiver state                       |
- * | ---------- | ---------------------------------- | ------------------------------------ |
- * | Custom     | @c encrypt_callback installed      | @c decrypt_callback installed        |
- * | Asymmetric | @c public_key_pem installed        | @c private_key_pem installed         |
- * | Symmetric  | @c key, @c passphrase, or default  | Same explicit or built-in default    |
+ * Compiling with @c VLINK_ENABLE_SECURITY enables the OpenSSL-backed default crypto suite.
+ * Without that macro only the user-supplied callback path is available.
  *
- * Cryptographic primitives:
- * - AEAD: AES-128-GCM with a 12-byte nonce, authenticated envelope header, and 16-byte tag.
- * - Envelope binding: version, mode, flags, sender id, sequence, nonce, and @c aad_context
- *   are authenticated as AAD; receivers reject replayed sequence numbers within @c replay_window.
- * - Asymmetric key wrap: RSA-OAEP-SHA256 wrapping a fresh 16-byte AES session key per message.
- * - Optional sender authentication: RSA-PSS-SHA256 over the AAD-bound envelope and ciphertext/tag.
- * - Symmetric key derivation: SHA-256 truncation (from @c key or the built-in default slot)
- *   or PBKDF2-HMAC-SHA256 (from @c passphrase + @c pbkdf2_salt + @c pbkdf2_iterations).
+ * @par Encryption algorithms
  *
- * Configuration is one-shot at construction time via @c Security::Config.  There are no
- * runtime setters; rebuild the @c Security instance to change settings.  An otherwise
- * empty @c Config uses the built-in default symmetric slot when built-in algorithms are
- * enabled; production deployments should pass an explicit key, passphrase, PEM, or callback.
+ * | Algorithm          | Key size           | Mode / construction                      | Used for                    |
+ * | ------------------ | ------------------ | ---------------------------------------- | --------------------------- |
+ * | AES-GCM            | 128 bit            | AEAD, 12-byte nonce, 16-byte tag         | bulk encrypt / decrypt      |
+ * | RSA-OAEP-SHA256    | >= 2048 b          | wrap a fresh per-message AES key         | asymmetric session-key wrap |
+ * | RSA-PSS-SHA256     | >= 2048 b          | sender signature over AAD-bound envelope | optional sender identity    |
+ * | SHA-256 truncation | 256 -> 128         | derive raw @c key -> AES-128 key         | symmetric key derivation    |
+ * | PBKDF2-HMAC-SHA256 | configurable iters | derive passphrase -> AES-128             | symmetric key derivation    |
  *
- * @par Example (symmetric passphrase)
+ * @par Key sources
+ *
+ * | Source                     | Selector field(s)                         | Notes                                    |
+ * | -------------------------- | ----------------------------------------- | ---------------------------------------- |
+ * | Built-in default symmetric | every cryptographic field empty           | only with @c VLINK_ENABLE_SECURITY       |
+ * | Explicit raw key           | @c Config::key                            | SHA-256 truncated to AES-128             |
+ * | Passphrase + salt          | @c Config::passphrase + @c pbkdf2_salt    | PBKDF2-HMAC-SHA256 @ iterations          |
+ * | Peer public-key PEM        | @c Config::public_key_pem                 | RSA-OAEP wrap of a fresh session key     |
+ * | Local private-key PEM      | @c Config::private_key_pem                | RSA-OAEP unwrap of session key           |
+ * | Custom callback pair       | @c encrypt_callback + @c decrypt_callback | bypasses every built-in algorithm        |
+ *
+ * @par Mode summary diagram
  * @code
- * vlink::Security::Config cfg;
- * cfg.passphrase = "correct horse battery staple";
- * cfg.pbkdf2_salt = shared_salt;
- * vlink::Security sec(cfg);
+ *      sender                                       transport                                       receiver
+ *  +------------+                                 +-----------+                                 +-------------+
+ *  |  plaintext | ---> [select mode] ---> AEAD/RSA-OAEP envelope ---> bytes on wire --->  [select mode] ---> |
+ *  +------------+         ^                                                                  ^   plaintext   |
+ *                         |                                                                  |               |
+ *           custom > asymmetric > symmetric                       custom > asymmetric > symmetric            |
+ *                                                                                                            |
+ *  encrypt(in, out)  -->  envelope(version, mode, nonce, AAD)  -->  ciphertext + tag  -->  decrypt(in, out)  v
  * @endcode
  *
- * @par Example (asymmetric from PEM files with sender authentication)
+ * @par Example (1: custom callback pair)
  * @code
- * auto sender = vlink::Security::from_public_key_path("peer_pub.pem");
- * sender.advanced.signing_key_pem = own_priv_pem;
- * vlink::Security sender_sec(sender);
+ *   vlink::Security::Config cfg;
+ *   cfg.encrypt_callback = [](const vlink::Bytes& in, vlink::Bytes& out) {
+ *     out = my_aead_encrypt(in);
+ *     return !out.empty();
+ *   };
+ *   cfg.decrypt_callback = [](const vlink::Bytes& in, vlink::Bytes& out) {
+ *     out = my_aead_decrypt(in);
+ *     return !out.empty();
+ *   };
+ *   vlink::Security sec(std::move(cfg));
+ * @endcode
  *
- * auto receiver = vlink::Security::from_private_key_path("own_priv.pem");
- * receiver.advanced.verify_key_pem = peer_pub_pem;
- * vlink::Security receiver_sec(receiver);
+ * @par Example (2: symmetric passphrase with PBKDF2)
+ * @code
+ *   vlink::Security::Config cfg;
+ *   cfg.passphrase = "correct horse battery staple";
+ *   cfg.pbkdf2_salt = shared_salt;            // >= 16 bytes, shared out of band
+ *   cfg.pbkdf2_iterations = 200000U;
+ *   vlink::Security sec(cfg);
+ * @endcode
+ *
+ * @par Example (3: asymmetric PEM with optional sender authentication)
+ * @code
+ *   auto sender_cfg = vlink::Security::from_public_key_path("peer_pub.pem");
+ *   sender_cfg.advanced.signing_key_pem = own_priv_pem;   // optional RSA-PSS signature
+ *   vlink::Security sender(std::move(sender_cfg));
+ *
+ *   auto receiver_cfg = vlink::Security::from_private_key_path("own_priv.pem");
+ *   receiver_cfg.advanced.verify_key_pem = peer_pub_pem;  // reject unsigned envelopes
+ *   vlink::Security receiver(std::move(receiver_cfg));
  * @endcode
  *
  * @note
- * - All public methods are thread-safe (internal mutex).
- * - @c encrypt() and @c decrypt() return @c true on success.  An empty input @b fails
- *   with @c false and an empty output; every built-in ciphertext carries an envelope,
- *   a 16-byte tag, and at least one byte of authenticated plaintext.
- * - When @c VLINK_ENABLE_SECURITY is undefined, only the custom-callback path works.
+ * - Every public method is thread-safe; concurrent @c encrypt() / @c decrypt() are serialised
+ *   by an internal mutex.
+ * - Configuration is immutable after construction; rebuild the @c Security instance to change
+ *   keys or callbacks.
+ * - When @c VLINK_ENABLE_SECURITY is undefined only the callback path is usable; other fields
+ *   are accepted but emit a warning and remain unconfigured.
  */
 
 #pragma once
@@ -92,22 +125,23 @@ namespace vlink {
 
 /**
  * @class Security
- * @brief Thread-safe authenticated encryption with symmetric, asymmetric, and custom modes.
+ * @brief Thread-safe authenticated encryption with symmetric, asymmetric, and pluggable modes.
  *
  * @details
- * Each instance is owned by exactly one transport endpoint.  Configuration is supplied at
- * construction time; copy and assignment are disabled.
+ * One @c Security instance per endpoint.  Configuration is supplied through @c Config at
+ * construction time; copy and assignment are deleted, move is supported.  Each call to
+ * @c encrypt() / @c decrypt() selects a mode using the precedence order described in the
+ * file-level @c mode summary diagram.
  */
 class VLINK_EXPORT Security final {
  public:
   /**
-   * @brief Plain-bytes encrypt or decrypt callback.
+   * @brief Callable signature for user-supplied encrypt / decrypt callbacks.
    *
    * @details
-   * When both @c Config::encrypt_callback and @c Config::decrypt_callback are installed
-   * the built-in AEAD path is bypassed entirely.  Implementations must write the result
-   * into @p out and return @c true on success.  @c Function is copyable so a @c Config
-   * value can be passed by const reference.
+   * Implementations must populate @c out and return @c true on success; failure leaves
+   * @c out empty and the surrounding @c encrypt() / @c decrypt() call returns @c false.
+   * @c Function is copyable, so callbacks may be passed in a const-reference @c Config.
    */
   using Callback = Function<bool(const Bytes& in, Bytes& out)>;
 
@@ -116,224 +150,170 @@ class VLINK_EXPORT Security final {
    * @brief Aggregate of every parameter accepted by the @c Security constructor.
    *
    * @details
-   * Fields are processed independently.  Empty PEM strings, empty @c key, empty @c passphrase,
-   * and null callbacks mean "do not install this explicit field"; non-empty values are validated
-   * and installed.  Validation failures (bad PEM, weak RSA key, missing salt, etc.) are logged and
-   * the corresponding slot is left empty.  If no explicit cryptographic field is supplied at all,
-   * the constructor installs the built-in default symmetric slot when built-in algorithms are
-   * enabled.  Invalid explicit fields do not fall back to the default; signing / verification PEM
-   * fields alone are not encrypt- or decrypt-capable.  PEM content may be assigned directly to the
-   * PEM fields or loaded from files via @c Security::from_private_key_path(),
-   * @c Security::from_public_key_path(), and @c Security::from_key_paths().
+   * Fields are processed independently.  Empty strings, empty @c Bytes, and null callbacks
+   * mean "leave this slot blank"; non-empty values are validated by the constructor and
+   * installed on success or logged-and-ignored on failure.  When every cryptographic field
+   * is empty and @c VLINK_ENABLE_SECURITY is defined, the constructor falls back to the
+   * built-in default symmetric slot, which is intended for development only.
    *
-   * @par Mode selection
-   * - @c encrypt_callback and @c decrypt_callback override everything else when present.
-   * - When @c public_key_pem is installed, outbound messages take the asymmetric path.
-   * - When @c private_key_pem is installed, inbound messages take the asymmetric path.
-   * - Otherwise the symmetric path is used with the derived AES-128 key.
-   *
-   * @par Symmetric key sources
-   * Provide either @c key (raw seed, hashed via SHA-256 truncation) or @c passphrase
-   * (low-entropy, normalised via PBKDF2-HMAC-SHA256 with @c pbkdf2_salt and
-   * @c pbkdf2_iterations).  When every explicit cryptographic field is empty, the built-in
-   * default symmetric slot is used.
-   *
-   * @par RSA constraints
-   * All four PEM fields require RSA keys of at least 2048 bits.
+   * @par Precedence rules
+   * - When both callbacks are present, the built-in path is bypassed for both directions.
+   * - Outbound: @c public_key_pem (if installed) -> @c key / @c passphrase -> default slot.
+   * - Inbound : @c private_key_pem (if installed) -> @c key / @c passphrase -> default slot.
    */
   struct Config final {
+    /**
+     * @struct Advanced
+     * @brief Low-frequency policy knobs and sender-authentication keys.
+     */
     struct Advanced final {
-      std::string aad_context;        ///< Application/channel context (<=65535 bytes) bound into AEAD.
-      uint32_t replay_window{4096U};  ///< Sliding replay window size in messages; 0 disables checks.
-      std::string signing_key_pem;    ///< Local RSA private key (PEM) for RSA-PSS signing.
-      std::string verify_key_pem;     ///< Peer's RSA public key (PEM) for RSA-PSS verification.
+      std::string aad_context;        ///< Application or channel tag (<= 65535 bytes) bound into AEAD AAD.
+      uint32_t replay_window{4096U};  ///< Sliding replay-window size in messages; @c 0 disables anti-replay.
+      std::string signing_key_pem;    ///< Local RSA private key (PEM) used to sign with RSA-PSS-SHA256.
+      std::string verify_key_pem;     ///< Peer's RSA public key (PEM) required for RSA-PSS verification.
     };
 
     std::string key;                      ///< Raw symmetric seed; SHA-256 truncated to 16 bytes.
-    std::string passphrase;               ///< Low-entropy passphrase fed into PBKDF2-HMAC-SHA256.
-    Bytes pbkdf2_salt;                    ///< Per-deployment salt (>=16 bytes), shared out-of-band.
-    uint32_t pbkdf2_iterations{200000U};  ///< PBKDF2 iteration count.
-    std::string public_key_pem;           ///< Peer's RSA public key (PEM) for outbound encryption.
-    std::string private_key_pem;          ///< Local RSA private key (PEM) for inbound decryption.
-    Callback encrypt_callback;            ///< Custom encrypt; bypasses AEAD.
-    Callback decrypt_callback;            ///< Custom decrypt; paired with @c encrypt_callback.
-    Advanced advanced;                    ///< Low-frequency knobs: AAD, replay, and signing.
+    std::string passphrase;               ///< Low-entropy passphrase consumed by PBKDF2-HMAC-SHA256.
+    Bytes pbkdf2_salt;                    ///< Per-deployment salt (>=16 bytes) shared out of band.
+    uint32_t pbkdf2_iterations{200000U};  ///< PBKDF2 iteration count, tune for target hardware.
+    std::string public_key_pem;           ///< Peer's RSA public key (PEM) for RSA-OAEP outbound wrap.
+    std::string private_key_pem;          ///< Local RSA private key (PEM) for RSA-OAEP inbound unwrap.
+    Callback encrypt_callback;            ///< Custom encrypt; bypasses the built-in AEAD pipeline.
+    Callback decrypt_callback;            ///< Custom decrypt; must accompany @c encrypt_callback.
+    Advanced advanced;                    ///< AAD, replay window, and signing / verifying PEM material.
 
     Config() = default;
   };
 
   /**
-   * @brief Creates a @c Config by reading a private-key PEM file.
+   * @brief Loads a private-key PEM file into a fresh @c Config.
    *
    * @details
-   * The file content is loaded into @c Config::private_key_pem.  PEM parsing and RSA
-   * validation still happen later when constructing @c Security from the returned config.
-   * If the file cannot be read, the returned config leaves @c private_key_pem empty.
-   * The returned @c Config contains private key material; prefer moving it directly into
-   * @c Security to avoid caller-owned copies living longer than necessary.
+   * Reads the file at construction time and populates @c Config::private_key_pem.  RSA
+   * validation is deferred until the @c Security constructor consumes the config.
    *
-   * @param private_key_path Filesystem path to the private-key PEM file.
-   * @return A @c Config with @c private_key_pem populated when the file is readable.
+   * @param private_key_path  Filesystem path of the PEM-encoded private key.
+   * @return Pre-populated @c Config; @c private_key_pem is empty when the file is unreadable.
    */
   [[nodiscard]] static Config from_private_key_path(const std::string& private_key_path);
 
   /**
-   * @brief Creates a @c Config by reading a public-key PEM file.
+   * @brief Loads a public-key PEM file into a fresh @c Config.
    *
-   * @details
-   * The file content is loaded into @c Config::public_key_pem.  PEM parsing and RSA
-   * validation still happen later when constructing @c Security from the returned config.
-   * If the file cannot be read, the returned config leaves @c public_key_pem empty.
-   *
-   * @param public_key_path Filesystem path to the public-key PEM file.
-   * @return A @c Config with @c public_key_pem populated when the file is readable.
+   * @param public_key_path  Filesystem path of the PEM-encoded public key.
+   * @return Pre-populated @c Config; @c public_key_pem is empty when the file is unreadable.
    */
   [[nodiscard]] static Config from_public_key_path(const std::string& public_key_path);
 
   /**
-   * @brief Creates a @c Config by reading public- and private-key PEM files.
+   * @brief Loads both a public-key and a private-key PEM file into a fresh @c Config.
    *
-   * @details
-   * The public-key file is loaded into @c Config::public_key_pem and the private-key
-   * file is loaded into @c Config::private_key_pem.  Unreadable files leave only their
-   * corresponding config field empty; normal PEM validation remains in @c Security.
-   * The returned @c Config contains private key material; prefer moving it directly into
-   * @c Security to avoid caller-owned copies living longer than necessary.
-   *
-   * @param public_key_path Filesystem path to the public-key PEM file.
-   * @param private_key_path Filesystem path to the private-key PEM file.
-   * @return A @c Config populated from the readable key files.
+   * @param public_key_path   Filesystem path of the PEM-encoded peer public key.
+   * @param private_key_path  Filesystem path of the PEM-encoded local private key.
+   * @return Pre-populated @c Config; per-file misses leave only the affected field empty.
    */
   [[nodiscard]] static Config from_key_paths(const std::string& public_key_path, const std::string& private_key_path);
 
   /**
-   * @brief Constructs an empty @c Security instance.
+   * @brief Constructs an empty @c Security; equivalent to @c Security(Config{}).
    *
    * @details
-   * Equivalent to @c Security(Config{}).  With built-in algorithms enabled, this installs
-   * the built-in default symmetric slot.  When built-in algorithms are disabled, encrypt/decrypt
-   * require a callback pair supplied through an explicit @c Config.
+   * With built-in algorithms compiled in, this installs the default symmetric slot; otherwise
+   * the instance reports @c is_configured() == @c false and refuses to encrypt or decrypt.
    */
   Security();
 
   /**
-   * @brief Constructs a @c Security instance from @p cfg.
+   * @brief Constructs from a configuration aggregate, copying caller state.
    *
-   * @details
-   * Each non-empty field of @p cfg is validated and installed under an internal mutex
-   * during construction.  Validation failures are logged and the offending slot is left
-   * empty.  When @c VLINK_ENABLE_SECURITY is undefined only the callback slots are honoured
-   * and a warning is logged for the symmetric / asymmetric fields.
-   *
-   * @param cfg  Configuration aggregate.
+   * @param cfg  Configuration aggregate; every non-empty field is validated and installed.
    */
   explicit Security(const Config& cfg);
 
   /**
-   * @brief Constructs a @c Security instance by moving @p cfg into the implementation.
+   * @brief Constructs from a configuration aggregate, moving caller state in.
    *
-   * @details
-   * This overload avoids copying callback targets and PEM / key strings when the
-   * caller no longer needs the configuration.  The stored config is normalised
-   * during construction (for example AAD context validation and replay-window bounds).
-   *
-   * @param cfg  Configuration aggregate to consume.
+   * @param cfg  Configuration aggregate consumed during construction.
    */
   explicit Security(Config&& cfg);
 
   /**
-   * @brief Destroys the instance and zeroises the symmetric key material in place.
+   * @brief Destroys the instance and zeroises any held symmetric key material in place.
    */
   ~Security();
 
   /**
-   * @brief Move-constructs from another instance.  The source is left empty
-   * (equivalent to a default-constructed @c Security).
+   * @brief Move-constructs from another @c Security; the source becomes default-constructed.
    */
   Security(Security&&) noexcept;
 
   /**
-   * @brief Move-assigns from another instance.  The source is left empty.
+   * @brief Move-assigns from another @c Security; the source becomes default-constructed.
    */
   Security& operator=(Security&&) noexcept;
 
   /**
-   * @brief Encrypts @p in into @p out using the currently active mode.
+   * @brief Encrypts @p in into @p out using the highest-precedence active mode.
    *
    * @details
-   * Mode selection order: custom callback > asymmetric (public key present) > symmetric.
-   * Empty input fails with @c false (AEAD requires at least one byte of plaintext or a
-   * non-empty AAD).  Inputs larger than @c INT_MAX bytes are rejected.
+   * The selected mode follows the precedence summarised in the file-level diagram:
+   * @c custom > @c asymmetric (public key present) > @c symmetric.  Empty @p in fails;
+   * AEAD requires at least one byte of authenticated material.  Inputs exceeding
+   * @c INT_MAX bytes are rejected.
    *
-   * @param in   Plaintext bytes.
-   * @param out  Ciphertext output buffer.  Overwritten on success; set to empty on failure.
-   * @return @c true on success.
+   * @param in   Plaintext payload.
+   * @param out  Output buffer overwritten on success and emptied on failure.
+   * @return @c true on success; @c false otherwise.
    */
   bool encrypt(const Bytes& in, Bytes& out);
 
   /**
-   * @brief Decrypts @p in into @p out using the currently active mode.
+   * @brief Decrypts @p in into @p out using the highest-precedence active mode.
    *
    * @details
-   * Mode selection order: custom callback > asymmetric (private key present) > symmetric.
-   * Empty input fails with @c false (a valid built-in ciphertext carries an envelope,
-   * at least one ciphertext byte, and a 16-byte tag).  Authentication
-   * failures (tampered ciphertext, wrong key, missing or invalid RSA-PSS signature
-   * when @c advanced.verify_key_pem is set) also cause @c decrypt() to return @c false.
+   * Mode selection mirrors @c encrypt() but uses the inbound direction
+   * (@c custom > @c asymmetric private key > @c symmetric).  Tampered ciphertext,
+   * mismatched AAD, replayed sequence numbers, and missing or invalid RSA-PSS
+   * signatures (when @c verify_key_pem is set) cause failure.
    *
-   * @param in   Ciphertext bytes produced by a peer's @c encrypt().
-   * @param out  Plaintext output buffer.  Overwritten on success; set to empty on failure.
-   * @return @c true on success.
+   * @param in   Ciphertext produced by a peer's @c encrypt().
+   * @param out  Output buffer overwritten on success and emptied on failure.
+   * @return @c true on success; @c false otherwise.
    */
   bool decrypt(const Bytes& in, Bytes& out);
 
   /**
-   * @brief Returns @c true if at least one usable cryptographic slot is installed.
+   * @brief Reports whether at least one usable cryptographic slot is installed.
    *
    * @details
-   * Returns @c true when any of the following is present:
-   *  - Both @c encrypt_callback and @c decrypt_callback (custom path), OR
-   *  - A symmetric AES-128 key (derived from @c Config::key or PBKDF2 passphrase), OR
-   *  - A peer @c public_key_pem (outbound asymmetric encrypt path), OR
-   *  - A local @c private_key_pem (inbound asymmetric decrypt path).
+   * A @c true result merely means the instance can call @c encrypt() or @c decrypt() in
+   * @b some direction; senders should additionally verify @c can_encrypt() and receivers
+   * @c can_decrypt() to catch direction-specific RSA misconfiguration.
    *
-   * Returns @c false when every field of @p Config was empty or every non-empty field
-   * failed validation (bad PEM, weak RSA, short salt, etc.).  In that state
-   * @c encrypt() and @c decrypt() always return @c false.
-   *
-   * @note This is the role-agnostic check.  Sender nodes (Publisher / Client /
-   * Setter) should additionally verify @c can_encrypt(), and receiver nodes
-   * (Subscriber / Server / Getter) should additionally verify @c can_decrypt()
-   * to catch direction-specific RSA misconfigurations (e.g. a subscriber
-   * supplied only @c public_key_pem, which is unusable for decryption).
+   * @return @c true when any slot is usable in either direction.
    */
   [[nodiscard]] bool is_configured() const noexcept;
 
   /**
-   * @brief Returns @c true if a slot capable of @c encrypt() is installed.
+   * @brief Reports whether @c encrypt() will succeed.
    *
    * @details
-   * Capability requirements:
-   *  - Both @c encrypt_callback and @c decrypt_callback (custom path), OR
-   *  - A symmetric AES-128 key, OR
-   *  - A peer @c public_key_pem (RSA-OAEP wraps a fresh session key).
+   * Requires at least one of: a custom callback pair, a derived AES-128 key, or a peer
+   * @c public_key_pem.  A bare @c private_key_pem alone is insufficient.
    *
-   * Sender-side nodes (Publisher / Client / Setter) require this; mere
-   * @c private_key_pem is insufficient for outbound encryption.
+   * @return @c true when an encryption capability is installed.
    */
   [[nodiscard]] bool can_encrypt() const noexcept;
 
   /**
-   * @brief Returns @c true if a slot capable of @c decrypt() is installed.
+   * @brief Reports whether @c decrypt() will succeed.
    *
    * @details
-   * Capability requirements:
-   *  - Both @c encrypt_callback and @c decrypt_callback (custom path), OR
-   *  - A symmetric AES-128 key, OR
-   *  - A local @c private_key_pem (RSA-OAEP unwraps the session key).
+   * Requires at least one of: a custom callback pair, a derived AES-128 key, or a local
+   * @c private_key_pem.  A bare @c public_key_pem alone is insufficient.
    *
-   * Receiver-side nodes (Subscriber / Server / Getter) require this; mere
-   * @c public_key_pem is insufficient for inbound decryption.
+   * @return @c true when a decryption capability is installed.
    */
   [[nodiscard]] bool can_decrypt() const noexcept;
 

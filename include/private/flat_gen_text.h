@@ -14,6 +14,30 @@
  * limitations under the License.
  */
 
+/**
+ * @file flat_gen_text.h
+ * @brief Private FlatBuffers text-generation helper carrying generated constants and JSON printer.
+ *
+ * @details
+ * This is a private, non-installed header.  It vendors a customised text generator from the
+ * upstream FlatBuffers project (the @c flatbuffers::custom::JsonPrinter class and the
+ * @c GenText entry point) so that VLink's bag-replay tooling can render FlatBuffers payloads
+ * to JSON with VLink-specific extensions:
+ *
+ * | Extension flag             | Effect                                                           |
+ * | -------------------------- | ---------------------------------------------------------------- |
+ * | @c ignore_array            | Skip vector / array fields entirely                              |
+ * | @c ignore_string           | Skip string fields entirely                                      |
+ * | @c print_time_string       | Render @c long / @c ulong fields named "time" as date strings    |
+ * | @c print_hex_string        | Render integer fields as hexadecimal                             |
+ * | @c print_enum_string       | Resolve enum values to identifiers                               |
+ * | @c filter_list             | Whitelist/blacklist of struct names (paired with @c black_mode)  |
+ *
+ * The upstream Google copyright header above is preserved verbatim per third-party-code
+ * policy.  The entire body is wrapped in @c NOLINTBEGIN / @c NOLINTEND because the vendored
+ * identifiers intentionally follow upstream FlatBuffers naming conventions.
+ */
+
 // NOLINTBEGIN
 
 #pragma once

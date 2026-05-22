@@ -23,69 +23,94 @@
 
 /**
  * @file subscriber.h
- * @brief Type-safe event-model subscriber for VLink topics.
+ * @brief Read-side primitive of the VLink event communication model.
  *
  * @details
- * @c Subscriber<MsgT, SecT> is the read side of the VLink event model.
- * It registers a callback that is invoked with each deserialized @c MsgT
- * message delivered from any matching @c Publisher on the same URL.
+ * @c Subscriber\<MsgT, SecT\> attaches a callback to a VLink topic.  Each
+ * frame delivered by the transport back-end is deserialised into a @c MsgT
+ * instance and forwarded to the user callback registered via @c listen().
+ * Unlike @c Getter, the subscriber retains no value history -- it simply
+ * forwards every event in delivery order.
  *
- * @par Event Model Data Flow
- * @code
- *  Publisher<T>              Transport Back-end            Subscriber<T>
- *      |-- publish(msg) --------> |                             |
- *      |   serialize(msg)         |-- bytes delivery ---------> |
- *      |                          |                             |--> callback(msg)
- *      |                          |                             |    deserialize(bytes)
- * @endcode
+ * The class is a thin, header-only template wrapper around @c SubscriberImpl.
+ * Codec dispatch is fully resolved at compile time using the type detected
+ * by @c Serializer::get_type_of\<MsgT\>().
+ *
+ * @par Event-model Delivery Path
+ * @verbatim
+ *   Transport Back-end                    Subscriber<MsgT>
+ *   ------------------                    -----------------
+ *      | inbound frame                          |
+ *      |--------------------------------------> |
+ *      |                                        |  Serializer::deserialize
+ *      |                                        |  (thread-local scratch)
+ *      |                                        |
+ *      |                                        |  optional MessageLoop hop
+ *      |                                        |
+ *      |                                        v
+ *      |                                  user callback(const MsgT&)
+ * @endverbatim
  *
  * @par Supported Message Types
- * | Category        | Type                        | Serializer       |
- * | --------------- | --------------------------- | ---------------- |
- * | Raw bytes       | @c Bytes                    | kBytesType       |
- * | Protobuf-like   | @c MyProto                  | kProtoType       |
- * | Protobuf ptr    | @c MyProto* (caller-owned)  | kProtoPtrType    |
- * | FlatBuffers     | @c MyTableT (NativeTable)   | kFlatTableType   |
- * | FlatBuffers     | @c MyTable* (Table ptr)     | kFlatPtrType     |
- * | CDR (DDS only)  | @c MyCdrType                | kCdrType         |
- * | Standard layout | POD struct / trivial type   | kStandardType    |
- * | String          | @c std::string              | kStringType      |
- * | Custom          | @c T (has operator>>/<<)    | kCustomType      |
+ * | Category          | Example C++ Type                 | @c Serializer::Type | Notes                          |
+ * | ----------------- | -------------------------------- | ------------------- | ------------------------------ |
+ * | Raw bytes         | @c Bytes                         | @c kBytesType       | Pass-through to callback.      |
+ * | Protobuf value    | @c MyProto                       | @c kProtoType       | ParseFromArray path.           |
+ * | Protobuf pointer  | @c MyProto*                      | @c kProtoPtrType    | Needs @c bind_proto_arena.     |
+ * | FlatBuffers obj   | @c MyTableT (NativeTable)        | @c kFlatTableType   | Object API.                    |
+ * | FlatBuffers ptr   | @c MyTable*                      | @c kFlatPtrType     | Zero-copy view of buffer.      |
+ * | DDS CDR           | type with @c deserialize(Cdr&)   | @c kCdrType         | DDS fast path.                 |
+ * | POD struct        | trivial standard-layout type     | @c kStandardType    | @c sizeof(T) byte copy.        |
+ * | UTF-8 text        | @c std::string                   | @c kStringType      | Length-prefixed.               |
+ * | Custom            | type with @c operator>>/<<       | @c kCustomType      | User-supplied codec.           |
  *
- * @par Basic Usage
+ * @par Basic Listen Example
  * @code
- * Subscriber<MyMsg> sub("dds://vehicle/speed");
- * sub.listen([](const MyMsg& msg) {
- *     std::cout << "speed: " << msg.value << std::endl;
- * });
+ * vlink::Subscriber<MyMsg> sub("dds://vehicle/speed");
+ * sub.listen([](const MyMsg& msg) { handle(msg); });
+ * @endcode
+ *
+ * @par Detecting Publishers Asynchronously
+ * @code
+ * vlink::Subscriber<MyMsg> sub("dds://vehicle/speed");
+ * sub.listen([](const MyMsg& m) { handle(m); });
+ *
+ * // Optional: react to publisher presence via the base Node API.
+ * if (sub.wait_for_subscribers(std::chrono::milliseconds(500))) {
+ *   handle_ready();
+ * }
  * @endcode
  *
  * @par Zero-copy Intra Transport
- * When @c MsgT is a shared pointer type whose @c element_type derives from
+ * When @c MsgT is a shared pointer whose @c element_type derives from
  * @c IntraDataType (generated via @c VLINK_INTRA_DATA_DECLARE) and the URL
- * uses @c intra://, the shared pointer is forwarded zero-copy (no
- * serialization):
+ * scheme is @c intra://, the shared pointer is forwarded zero-copy to the
+ * callback without serialisation:
  * @code
  * VLINK_INTRA_DATA_DECLARE(MyProtoMsg, MyIntra)
- * Subscriber<MyIntra> sub("intra://my_topic");
- * sub.listen([](const MyIntra& data) { ... });
+ * vlink::Subscriber<MyIntra> sub("intra://my_topic");
+ * sub.listen([](const MyIntra& data) { use(data); });
  * @endcode
  *
  * @par Latency and Sample-loss Tracking
  * @code
- * Subscriber<MyMsg> sub("dds://my_topic");
+ * vlink::Subscriber<MyMsg> sub("dds://my_topic");
  * sub.set_latency_and_lost_enabled(true);
- * // ... after receiving messages:
- * int64_t latency_ns = sub.get_latency();
- * SampleLostInfo lost = sub.get_lost();
- * std::cout << "lost: " << lost.lost << " / " << lost.total << std::endl;
+ * auto latency_ns = sub.get_latency();
+ * auto stats = sub.get_lost();
  * @endcode
  *
- * @note Calling @c listen() more than once is a fatal error.  The subscriber
- *       must be initialised before @c listen() is called.
+ * @warning The deserialised callback argument is backed by @c thread_local
+ *          scratch storage and is overwritten on the next delivery.  Copy
+ *          the value before storing it outside the callback scope.  This
+ *          warning does not apply to @c Bytes or @c IntraData arguments,
+ *          which are owned by value or by shared pointer.
  *
- * @tparam MsgT  Message type.  Must satisfy @c Serializer::is_supported().
- * @tparam SecT  Security mode; defaults to @c SecurityType::kWithoutSecurity.
+ * @note Calling @c listen() more than once is a fatal error.  The subscriber
+ *       must be initialised (either by @c InitType::kWithInit or by explicit
+ *       @c init()) before @c listen() is called.
+ *
+ * @see publisher.h, node.h, serializer.h, base/message_loop.h
  */
 
 #pragma once
@@ -102,46 +127,45 @@ namespace vlink {
 
 /**
  * @class Subscriber
- * @brief Type-safe subscriber for the VLink event communication model.
+ * @brief Type-safe topic listener for the VLink event communication model.
  *
- * @tparam MsgT  Message type.
- * @tparam SecT  Security mode.
+ * @details
+ * Inherits the full @c Node API and adds receive-specific operations:
+ * @c listen() to register the user callback, manual-unloan control for
+ * zero-copy back-ends, and latency / sample-loss tracking.  The transport
+ * implementation (@c SubscriberImpl) is selected by the URL scheme or by
+ * the typed configuration object supplied at construction time.
+ *
+ * @tparam MsgT  C++ message type. Must satisfy @c Serializer::is_supported().
+ * @tparam SecT  Security mode; defaults to @c SecurityType::kWithoutSecurity.
  */
 template <typename MsgT, SecurityType SecT = SecurityType::kWithoutSecurity>
 class Subscriber : public Node<SubscriberImpl, SecT> {
  public:
-  /** @brief Unique-pointer alias for heap allocation. */
-  using UniquePtr = std::unique_ptr<Subscriber<MsgT, SecT>>;
+  using UniquePtr = std::unique_ptr<Subscriber<MsgT, SecT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<Subscriber<MsgT, SecT>>;  ///< Owning shared-pointer alias.
+  using MsgCallback = Function<void(const MsgT&)>;            ///< User callback signature for received messages.
 
-  /** @brief Shared-pointer alias for heap allocation. */
-  using SharedPtr = std::shared_ptr<Subscriber<MsgT, SecT>>;
-
-  /** @brief User-facing callback type for received messages. */
-  using MsgCallback = Function<void(const MsgT&)>;
-
-  /** @brief Node role identifier (@c kSubscriber). */
-  static constexpr ImplType kImplType = kSubscriber;
-
-  /** @brief Serializer type resolved at compile time from @c MsgT. */
-  static constexpr Serializer::Type kMsgType = Serializer::get_type_of<MsgT>();
+  static constexpr ImplType kImplType = kSubscriber;                             ///< Node role tag (@c kSubscriber).
+  static constexpr Serializer::Type kMsgType = Serializer::get_type_of<MsgT>();  ///< Codec resolved from @c MsgT.
 
   static_assert(Serializer::is_supported(kMsgType), "<MsgT> is not a supported Serializer type.");
 
   /**
-   * @brief Creates a @c Subscriber on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c Subscriber and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Topic URL string (e.g. @c "dds://vehicle/speed").
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new subscriber.
+   * @param url_str  Topic URL string.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new subscriber.
    */
   [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c Subscriber on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c Subscriber and wraps it in a @c std::shared_ptr.
    *
    * @param url_str  Topic URL string.
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new subscriber.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new subscriber.
    */
   [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, InitType type = InitType::kWithInit);
 
@@ -149,13 +173,12 @@ class Subscriber : public Node<SubscriberImpl, SecT> {
    * @brief Constructs a subscriber from a typed transport configuration object.
    *
    * @details
-   * Accepts any @c Conf-derived configuration (e.g. @c DdsConf, @c ShmConf).
-   * A compile-time @c static_assert verifies the configuration supports the
-   * subscriber role.
+   * Accepts any @c Conf-derived configuration.  A compile-time check enforces
+   * that the configuration permits the subscriber role.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT  Concrete configuration type derived from @c Conf.
+   * @param conf    Populated configuration aggregate.
+   * @param type    Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
@@ -164,37 +187,31 @@ class Subscriber : public Node<SubscriberImpl, SecT> {
   /**
    * @brief Constructs a subscriber from a URL string.
    *
-   * @param url_str  Topic URL (e.g. @c "shm://vehicle/speed").
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param url_str  Topic URL such as @c "shm://vehicle/speed".
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   explicit Subscriber(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Registers the receive callback for incoming messages.
+   * @brief Installs the receive callback that runs for every inbound message.
    *
    * @details
-   * The callback is invoked on every delivery, already deserialized into @c MsgT.
-   * For @c intra:// with an @c IntraDataType-derived shared pointer type
-   * (generated via @c VLINK_INTRA_DATA_DECLARE) the pointer is forwarded
-   * zero-copy.  The callback runs on the transport thread unless the
-   * node is @c attach()ed to a @c MessageLoop.
+   * The callback is invoked on the transport delivery thread by default; if
+   * the subscriber is @c attach()ed to a @c MessageLoop the callback is
+   * posted onto that loop instead.  For @c intra:// transports carrying an
+   * @c IntraDataType shared pointer the value is forwarded zero-copy and
+   * no deserialisation occurs.
    *
-   * Calling @c listen() more than once is a fatal error.
+   * @warning The argument reference points at @c thread_local scratch
+   *          memory that is reused across invocations.  Copy the data before
+   *          stashing it outside the callback.  This restriction does not
+   *          apply to @c Bytes or @c IntraData payloads.
    *
-   * @warning The deserialized message object is @c thread_local and reused
-   *          across invocations.  Do not store references or pointers to the
-   *          callback argument beyond the callback scope; copy the data if
-   *          you need to retain it.  This does not apply to @c Bytes or
-   *          @c IntraData message types, which are passed by value/shared
-   *          pointer.
-   *
-   * @note The subscriber must be initialised (either via @c kWithInit in the
-   *       constructor or by calling @c init() explicitly) before @c listen()
-   *       is called.  Calling @c listen() on an uninitialised subscriber
-   *       triggers a fatal error.
+   * @note Calling @c listen() more than once is fatal.  The subscriber must
+   *       be initialised before the first call to @c listen().
    *
    * @param callback  @c void(const MsgT&) invoked for each received message.
-   * @return          @c true if registered successfully; @c false on error.
+   * @return          @c true if the callback was installed successfully.
    */
   bool listen(MsgCallback&& callback);
 
@@ -202,56 +219,54 @@ class Subscriber : public Node<SubscriberImpl, SecT> {
    * @brief Enables or disables manual-unloan mode for zero-copy receives.
    *
    * @details
-   * When enabled, the user must call @c return_loan() after consuming a received
-   * loaned buffer.  Only meaningful on loan-capable transports (e.g. @c shm://).
+   * In manual-unloan mode the user must call @c return_loan() after consuming
+   * each delivered buffer.  Only relevant on loan-capable transports
+   * (@c shm://, Zenoh with SHM, etc.).
    *
-   * @param manual_unloan  @c true to enable; @c false for automatic (default).
+   * @param manual_unloan  @c true to enable manual return; @c false for auto-return.
    */
   void set_manual_unloan(bool manual_unloan) override;
 
   /**
-   * @brief Enables or disables per-message latency and sample-loss tracking.
+   * @brief Toggles per-message latency and sample-loss measurement.
    *
-   * @param enable  @c true to start tracking; @c false to stop.
+   * @param enable  @c true to begin tracking; @c false to stop.
    */
   void set_latency_and_lost_enabled(bool enable);
 
   /**
-   * @brief Returns @c true if latency and sample-loss tracking is active.
+   * @brief Reports whether latency and sample-loss tracking is currently active.
    *
-   * @return @c true if @c set_latency_and_lost_enabled(true) was called.
+   * @return @c true if @c set_latency_and_lost_enabled(true) was invoked.
    */
   [[nodiscard]] bool is_latency_and_lost_enabled() const;
 
   /**
-   * @brief Returns the most recently measured end-to-end message latency.
+   * @brief Returns the most recent end-to-end latency measurement.
    *
    * @details
-   * Only meaningful when tracking is enabled.  Measured from publication
-   * timestamp to receive timestamp.
+   * Computed as receive-timestamp minus source-timestamp on the last
+   * delivered message.  Returns @c 0 when tracking is not enabled.
    *
-   * @return Latency in nanoseconds; @c 0 if tracking is disabled.
+   * @return Latency in nanoseconds; @c 0 if disabled.
    */
   [[nodiscard]] int64_t get_latency() const;
 
   /**
-   * @brief Returns cumulative sample delivery statistics.
+   * @brief Returns cumulative sample-delivery statistics.
    *
-   * @details
-   * Only meaningful when tracking is enabled.
-   *
-   * @return @c SampleLostInfo with @c total expected and @c lost sample counts.
+   * @return @c SampleLostInfo with total expected and total lost counts.
    */
   [[nodiscard]] SampleLostInfo get_lost() const;
 
   /**
-   * @brief Changes this subscriber's role to @c kGetter (field-reader).
+   * @brief Promotes this subscriber to behave as a @c Getter (field-reader) at the transport layer.
    *
    * @details
-   * Updates @c impl_->impl_type from @c kSubscriber to @c kGetter so that
-   * transport-specific field semantics (latest-value delivery) are applied.
-   * If called after @c init(), the extension is automatically reinitialised.
-   * Used internally by @c Getter.
+   * Switches @c impl_type from @c kSubscriber to @c kGetter so that
+   * latest-value delivery semantics are activated.  Reinitialises the
+   * transport extension if called post-@c init().  Used internally by
+   * @c Getter.
    */
   void mark_as_getter();
 
@@ -263,33 +278,32 @@ class Subscriber : public Node<SubscriberImpl, SecT> {
 
 /**
  * @class SecuritySubscriber
- * @brief Convenience alias for @c Subscriber with message security enabled.
+ * @brief Convenience alias of @c Subscriber with per-message decryption enabled.
  *
  * @details
- * Equivalent to @c Subscriber<MsgT, SecurityType::kWithSecurity>.  Decrypts
- * every incoming message using the configured security key or callbacks.
+ * Equivalent to @c Subscriber\<MsgT, SecurityType::kWithSecurity\>.  Every
+ * inbound payload is decrypted with the configured @c Security::Config
+ * before the codec dispatcher is invoked.
  *
- * @note Not supported on @c intra:// or @c dds:// CDR transport.
+ * @note Security is not supported on @c intra:// or on @c dds:// CDR
+ *       payloads.
  *
- * @tparam MsgT  Message type.
+ * @tparam MsgT  C++ message type to subscribe.
  */
 template <typename MsgT>
 class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> {
  public:
-  /** @brief Unique-pointer alias for heap allocation. */
-  using UniquePtr = std::unique_ptr<SecuritySubscriber<MsgT>>;
-
-  /** @brief Shared-pointer alias for heap allocation. */
-  using SharedPtr = std::shared_ptr<SecuritySubscriber<MsgT>>;
+  using UniquePtr = std::unique_ptr<SecuritySubscriber<MsgT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<SecuritySubscriber<MsgT>>;  ///< Owning shared-pointer alias.
 
   /**
-   * @brief Creates a @c SecuritySubscriber on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c SecuritySubscriber and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Topic URL string (e.g. @c "dds://vehicle/speed").
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new subscriber.
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
+   * @param url_str  Topic URL string.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new secure subscriber.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -297,13 +311,13 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> 
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c SecuritySubscriber on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c SecuritySubscriber and wraps it in a @c std::shared_ptr.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Topic URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new subscriber.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new secure subscriber.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -311,12 +325,13 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> 
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecuritySubscriber from a typed transport configuration object.
+   * @brief Constructs a @c SecuritySubscriber from a typed configuration object.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default; empty uses the built-in default symmetric slot).
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT           Configuration type derived from @c Conf.
+   * @tparam SecurityConfigT Forwardable @c Security::Config compatible type.
+   * @param conf     Populated configuration aggregate.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename SecurityConfigT = Security::Config,
@@ -324,18 +339,18 @@ class SecuritySubscriber : public Subscriber<MsgT, SecurityType::kWithSecurity> 
   explicit SecuritySubscriber(const ConfT& conf, SecurityConfigT&& sec_cfg = {}, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecuritySubscriber and installs the security configuration in place.
+   * @brief Constructs a @c SecuritySubscriber from a URL string and installs the security configuration.
    *
    * @details
-   * Always builds the base @c Subscriber with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
-   * @c NodeImpl::security was populated successfully; finally calls @c init()
-   * unless the caller requests deferred initialisation.
+   * Builds the base @c Subscriber in @c kWithoutInit mode, installs @p sec_cfg
+   * via @c enable_security(), then calls @c init() unless deferred.  When
+   * @c enable_security() fails to produce a usable @c NodeImpl::security the
+   * subsequent @c init() will fail.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Topic URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>

@@ -23,28 +23,56 @@
 
 /**
  * @file vdb_writer.h
- * @brief Concrete BagWriter implementation for the SQLite-backed VLink bag format.
+ * @brief SQLite-backed recorder that produces @c .vdb / @c .vdbx bag files with batched WAL commits.
  *
  * @details
- * @c VDBWriter records VLink messages to SQLite-backed @c .vdb / @c .vdbx files.  It extends
- * @c BagWriter with transactional write caching (WAL mode, batch commit), optional
- * VACUUM optimisation on exit, and in-place schema embedding for offline introspection.
+ * @c VDBWriter materialises @c BagWriter on top of SQLite.  Messages are accumulated in an
+ * in-memory cache and flushed to disk in WAL-mode transactions so that the write amplification
+ * remains bounded even at high publish rates; outstanding writes are committed during @c close()
+ * and an optional @c VACUUM step compacts the file on exit.
  *
- * Internally, messages are accumulated in a memory cache and committed in batches to
- * reduce SQLite write overhead.  Cache parameters are configurable via @c BagWriter::Config.
+ * @par VDB schema
  *
- * @par Usage
+ * | Table       | Purpose                                                             |
+ * | ----------- | ------------------------------------------------------------------- |
+ * | @c messages | (id, url_id, ts_us, action, data) -- one row per recorded message   |
+ * | @c urls     | (id, url, ser_type, schema_type) -- topic dictionary                |
+ * | @c schemas  | (id, ser_type, schema_type, blob) -- embedded schema descriptors    |
+ * | @c metadata | (key, value) -- tag, machine name, vlink version, capture time      |
+ * | @c stats    | (url_id, count, bytes, loss) -- per-URL aggregates updated on flush |
+ *
+ * @par Writer states
  * @code
- * vlink::BagWriter::Config cfg;
- * cfg.compress = vlink::BagWriter::kCompressLzav;
- * cfg.wal_mode = true;
+ *   +----------+   on_begin()       +---------+   push()/push_schema()   +-----------+
+ *   |  closed  | -----------------> | opening | -----------------------> | recording |
+ *   +----------+                    +---------+                          +-----------+
+ *        ^                                                                     |
+ *        |                                                                     v cache full / split
+ *        |                                                              +------------+
+ *        |                                                              | committing |
+ *        |                                                              | WAL flush  |
+ *        |                                                              +------------+
+ *        |                                                                     |
+ *        +-------------------- on_end() / dtor ----------------------- finalising
+ *                                                                              |
+ *                                                                              v
+ *                                                                          (optional)
+ *                                                                          vacuum
+ * @endcode
  *
- * auto writer = vlink::BagWriter::create("/data/recording.vdb", cfg);
- * // or explicitly:
- * auto writer = std::make_shared<vlink::VDBWriter>("/data/recording.vdb", cfg);
- * writer->async_run();
- * writer->push("dds://my/topic", "demo.proto.PointCloud", vlink::SchemaType::kProtobuf,
- *              vlink::ActionType::kPublish, data);
+ * @par Example
+ * @code
+ *   vlink::BagWriter::Config cfg;
+ *   cfg.compress = vlink::BagWriter::kCompressLzav;
+ *   cfg.wal_mode = true;
+ *
+ *   auto writer = vlink::BagWriter::create("/data/recording.vdb", cfg);
+ *
+ *   writer->async_run();
+ *   writer->push("dds://lidar/front", "demo.proto.PointCloud",
+ *                vlink::SchemaType::kProtobuf,
+ *                vlink::ActionType::kPublish,
+ *                serialized_bytes);
  * @endcode
  *
  * @see BagWriter, VCAPWriter
@@ -61,87 +89,92 @@ namespace vlink {
 
 /**
  * @class VDBWriter
- * @brief Concrete SQLite-backed bag file recorder with transactional write caching.
+ * @brief Concrete SQLite-backed @c BagWriter implementation with WAL caching and batch commits.
  *
  * @details
- * All virtual methods from @c BagWriter are implemented.  Prefer using
- * @c BagWriter::create() for format-agnostic construction.
+ * Prefer @c BagWriter::create() for format-agnostic instantiation; instantiate this class
+ * directly only when a SQLite-specific feature is required.
  */
 class VLINK_EXPORT VDBWriter final : public BagWriter {
  public:
   /**
-   * @brief Constructs a @c VDBWriter for the given @p path.
+   * @brief Opens or creates a SQLite bag file for recording.
    *
-   * @param path    Path to the output @c .vdb / @c .vdbx file.  Created if it does not exist.
-   * @param config  Recording configuration.
+   * @param path    Filesystem path of the @c .vdb or @c .vdbx target.
+   * @param config  Recording configuration (split policy, compression, cache thresholds).
    */
   explicit VDBWriter(const std::string& path, const Config& config = {});
 
   /**
-   * @brief Destructor -- commits remaining cached writes and closes the SQLite database.
+   * @brief Commits any cached writes and closes the SQLite database.
    */
   ~VDBWriter() override;
 
   /**
-   * @brief Registers a callback invoked when a file split occurs.
+   * @brief Registers a callback invoked at each file-split boundary.
    *
-   * @param callback  Called with (split_index, new_filename) on each split.
-   * @param before    If @c true, fires before the new file is opened; otherwise after.
+   * @param callback  Receives (split_index, filename) before or after the split.
+   * @param before    @c true fires before the new file is opened; @c false fires after.
    */
   void register_split_callback(SplitCallback&& callback, bool before) override;
 
   /**
-   * @brief Registers a callback that resolves serialisation type strings to @c SchemaData.
+   * @brief Registers a resolver that maps a serialisation-type string to @c SchemaData.
    *
-   * @param callback  Function mapping (@c ser_type, @c schema_type) to @c SchemaData.
+   * @param callback  Function consulted before inserting a URL row.
    */
   void register_schema_callback(SchemaCallback&& callback) override;
 
   /**
-   * @brief Embeds a @c SchemaData into the SQLite bag for offline introspection.
+   * @brief Embeds @p schema_data in the @c schemas table for offline introspection.
    *
-   * @param schema_data  Schema descriptor to store.
-   * @param immediate    If @c true, merges synchronously; otherwise enqueues.
-   * @return             @c false only when the immediate merge fails.
+   * @param schema_data  Schema descriptor to embed.
+   * @param immediate    @c true merges synchronously; @c false enqueues the write.
+   * @return @c false only when an immediate merge failed.
    */
   bool push_schema(const SchemaData& schema_data, bool immediate = false) override;
 
   /**
    * @brief Records one message to the SQLite bag file.
    *
-   * @param url                    VLink URL of the topic.
+   * @param url                    Topic URL identifying the channel.
    * @param ser_type               Serialisation type string.
    * @param schema_type            Coarse schema family for the payload.
-   * @param action_type            Action type (@c kPublish, @c kRequest, etc.).
-   * @param data                   Serialized payload bytes.
-   * @param microseconds_timestamp Optional recording-relative timestamp in microseconds.
-   *                               @c nullptr means use the writer's elapsed timer.
-   * @param immediate              If @c true, writes synchronously bypassing the queue.
-   * @return Message timestamp in microseconds, or a negative value on error.
+   * @param action_type            Action category (@c kPublish, @c kRequest, etc.).
+   * @param data                   Serialised payload bytes.
+   * @param microseconds_timestamp Optional caller-provided timestamp in microseconds.
+   * @param immediate              @c true writes synchronously bypassing the cache.
+   * @return Timestamp recorded in microseconds; negative on error.
    */
   int64_t push(const std::string& url, const std::string& ser_type, SchemaType schema_type, ActionType action_type,
                const Bytes& data, int64_t* microseconds_timestamp = nullptr, bool immediate = false) override;
 
   /**
    * @brief Returns the current value of the internal dumping flag.
+   *
+   * @return @c true while messages are actively being persisted.
    */
   [[nodiscard]] bool is_dumping() const override;
 
   /**
-   * @brief Returns @c true if split-file mode is active.
+   * @brief Reports whether split-file recording is active.
+   *
+   * @return @c true when emitting a @c .vdbx manifest with multiple parts.
    */
   [[nodiscard]] bool is_split_mode() const override;
 
   /**
-   * @brief Returns the zero-based index of the current split file.
+   * @brief Returns the index of the split part currently being written.
+   *
+   * @return Zero-based split index.
    */
   [[nodiscard]] int get_split_index() const override;
 
   /**
-   * @brief Sets the expected message loss ratio for a given URL.
+   * @brief Records the expected message-loss ratio for @p url.
    *
    * @param url   Topic URL.
-   * @param loss  Loss ratio.  Values greater than 1.0 are stored as -1.
+   * @param loss  Loss ratio; values greater than @c 1.0 are stored as @c -1.
    */
   void set_url_loss(const std::string& url, double loss) override;
 

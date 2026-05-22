@@ -36,7 +36,6 @@
 
 namespace vlink {
 
-// Client<ReqT, RespT>
 template <typename ReqT, typename RespT, SecurityType SecT>
 inline typename Client<ReqT, RespT, SecT>::UniquePtr Client<ReqT, RespT, SecT>::create_unique(
     const std::string& url_str, InitType type) {
@@ -474,7 +473,6 @@ inline bool Client<ReqT, RespT, SecT>::call_bytes(const Bytes& req_data, NodeImp
   }
 }
 
-// SecurityClient<ReqT, RespT>
 template <typename ReqT, typename RespT>
 template <typename SecurityConfigT>
 inline typename SecurityClient<ReqT, RespT>::UniquePtr SecurityClient<ReqT, RespT>::create_unique(

@@ -23,51 +23,53 @@
 
 /**
  * @file cpu_profiler.h
- * @brief Per-instance CPU utilisation profiler with a global environment toggle helper.
+ * @brief Per-instance CPU utilisation sampler with an env-driven global enable gate.
  *
  * @details
- * @c CpuProfiler measures the fraction of wall-clock time that the CPU was actively
- * executing work between paired @c begin() / @c end() calls.  It uses two @c ElapsedTimer
- * instances internally:
+ * @c CpuProfiler measures the fraction of wall-clock time spent inside paired
+ * @c begin / @c end intervals.  Two @c ElapsedTimer instances back the computation: one accrues
+ * active intervals; the other captures the total wall-clock span since the first @c begin.  The
+ * reported utilisation is therefore the ratio of accumulated active time to elapsed wall time.
  *
- * - @c cpu_active_timer_  -- measures only active time (CPU time spent in the section).
- * - @c cpu_timestamp_timer_ -- measures total elapsed wall-clock time since @c begin().
+ * @par Phases and events
  *
- * The utilisation ratio is:
- * @code
- * utilisation (%) = (sum of active intervals / total elapsed time) * 100
- * @endcode
+ * | Phase / event       | Source                         | Effect on counters                      |
+ * | ------------------- | ------------------------------ | --------------------------------------- |
+ * | First @c begin      | active timer + timestamp timer | Both timers start                       |
+ * | Subsequent @c begin | active timer @c restart        | Resets the active baseline              |
+ * | @c end              | active timer elapsed           | Adds positive delta to @c total_active_ |
+ * | @c get              | read-only                      | Returns @c (active / elapsed) * 100     |
+ * | @c restart          | read + reset                   | Returns the value then zeroes counters  |
+ *
+ * @par RAII guard pattern
+ *
+ * @verbatim
+ *   vlink::CpuProfiler profiler;
+ *   --------------------------------------------------------
+ *   {
+ *     vlink::CpuProfilerGuard guard(&profiler);  // begin()
+ *     do_work();
+ *   }                                            // end()
+ *   const double percent = profiler.get();
+ *   --------------------------------------------------------
+ * @endverbatim
  *
  * @par Global enable gate
- * The environment variable @c VLINK_PROFILER_ENABLE is exposed through
- * @c is_global_enabled() so callers can decide whether to sample.  Set it to
- * @c "1" to enable; @c "0" (default) to disable.  The value is read once at
- * first call and cached for the process lifetime.
+ * @c VLINK_PROFILER_ENABLE is read on the first call to @c is_global_enabled and cached for the
+ * remainder of the process lifetime.  Set it to @c "1" to enable; any other value disables.
+ *
+ * @par Example
  * @code
- * export VLINK_PROFILER_ENABLE=1
+ *   if (vlink::CpuProfiler::is_global_enabled()) {
+ *     for (auto& item : work_items) {
+ *       profiler.begin();
+ *       process(item);
+ *       profiler.end();
+ *     }
+ *     const double pct = profiler.restart();
+ *     publish(pct);
+ *   }
  * @endcode
- *
- * @par Typical usage
- * @code
- * vlink::CpuProfiler profiler;
- *
- * for (auto& item : work_items) {
- *     profiler.begin();
- *     process(item);
- *     profiler.end();
- * }
- *
- * double pct = profiler.get();  // CPU utilisation since first begin()
- * double reset_pct = profiler.restart();  // returns current value and resets
- * @endcode
- *
- * @note
- * - @c begin() and @c end() are guarded by an internal @c SpinLock and are safe to call
- *   from any thread, but each profiler instance measures a single logical stream of work.
- * - If profiling is globally disabled, @c begin() / @c end() still execute but should be
- *   short-circuited by the caller using @c is_global_enabled() for maximum performance.
- * - @c CpuProfilerGuard provides a convenient RAII wrapper that calls @c begin() and
- *   @c end() automatically.
  */
 
 #pragma once
@@ -83,19 +85,17 @@ namespace vlink {
 
 /**
  * @class CpuProfiler
- * @brief Tracks CPU active time as a percentage of total elapsed wall-clock time.
+ * @brief Tracks active CPU time as a percentage of wall-clock time using a @c SpinLock guard.
  *
  * @details
- * Each @c begin() / @c end() pair contributes one active interval to the running total.
- * @c get() returns the cumulative utilisation ratio; @c restart() returns the ratio and
- * resets all accumulators.
- *
- * @note Copy and assignment are disabled.  Instances should be owned by a single component.
+ * Each @c begin / @c end pair contributes one active interval to the running total.  @c get
+ * returns the ratio of active to elapsed time; @c restart returns the same value and clears the
+ * accumulators atomically.  Non-copyable; each profiler tracks a single logical stream.
  */
 class VLINK_EXPORT CpuProfiler final {
  public:
   /**
-   * @brief Constructs a profiler with all accumulators initialised to zero.
+   * @brief Constructs a profiler with zeroed accumulators and no active interval.
    */
   CpuProfiler() noexcept;
 
@@ -105,36 +105,31 @@ class VLINK_EXPORT CpuProfiler final {
   ~CpuProfiler() noexcept;
 
   /**
-   * @brief Returns whether CPU profiling is globally enabled via environment variable.
+   * @brief Reports whether profiling is enabled via the @c VLINK_PROFILER_ENABLE environment variable.
    *
    * @details
-   * Reads @c VLINK_PROFILER_ENABLE on the first call and caches the result.
-   * Returns @c true if the variable is set to @c "1", @c false otherwise.
+   * The environment is sampled lazily on the first call and cached for the process lifetime.
+   * Use the return value to gate expensive sampling around @c begin / @c end pairs.
    *
-   * @return @c true if profiling is enabled globally.
+   * @return @c true when @c VLINK_PROFILER_ENABLE is set to @c "1".
    */
   [[nodiscard]] static bool is_global_enabled() noexcept;
 
   /**
-   * @brief Marks the start of an active CPU work section.
+   * @brief Opens a new active interval.
    *
    * @details
-   * Restarts the active-time timer.  If this is the very first call, also starts the
-   * wall-clock timestamp timer used as the denominator in @c get().
-   * Safe to call multiple times; each call resets the active-timer baseline.
-   *
-   * @note This method acquires an internal @c SpinLock briefly.
+   * Restarts the internal active timer and, on the first call, also starts the wall-clock timer
+   * used as the denominator in @c get.  Acquires the internal @c SpinLock briefly.
    */
   void begin() noexcept;
 
   /**
-   * @brief Marks the end of an active CPU work section and accumulates the elapsed time.
+   * @brief Closes the current active interval and accrues its elapsed time.
    *
    * @details
-   * Reads the active-time elapsed since the last @c begin() and adds it to the running
-   * total (@c total_active_).  Negative elapsed values (e.g., clock skew) are ignored.
-   *
-   * @note This method acquires an internal @c SpinLock briefly.
+   * Reads the active timer's elapsed value and adds non-negative deltas to @c total_active_.
+   * Acquires the internal @c SpinLock briefly.
    */
   void end() noexcept;
 
@@ -142,23 +137,22 @@ class VLINK_EXPORT CpuProfiler final {
    * @brief Returns the current CPU utilisation ratio as a percentage.
    *
    * @details
-   * Computes:  @c (total_active_ns / total_elapsed_ns) * 100.0
-   * Returns @c 0.0 if no time has elapsed since profiling started.
+   * Computed as @c (total_active_ns @c / @c total_elapsed_ns) @c * @c 100.0.  Returns @c 0.0
+   * when no time has elapsed yet.  Values can exceed @c 100 on multi-core systems where the
+   * sum of active intervals outruns wall-clock time on one core.
    *
-   * @return CPU utilisation in the range [0.0, 100.0] (may exceed 100 on multi-core).
+   * @return Utilisation percentage; @c 0.0 when no data has accrued.
    */
   [[nodiscard]] double get() const noexcept;
 
   /**
-   * @brief Returns the current utilisation and resets all accumulators to zero.
+   * @brief Returns the current utilisation and atomically zeroes all accumulators.
    *
    * @details
-   * The return value is identical to calling @c get() before the reset.
-   * After this call, @c get() returns @c 0.0 until the next @c begin() / @c end() pair.
+   * Equivalent to reading @c get and then resetting both timers.  Acquires the internal
+   * @c SpinLock briefly.
    *
-   * @note This method acquires an internal @c SpinLock briefly.
-   *
-   * @return CPU utilisation percentage accumulated since construction or the last @c restart().
+   * @return Utilisation percentage accrued since construction or the last @c restart.
    */
   double restart() noexcept;
 

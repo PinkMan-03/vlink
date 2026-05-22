@@ -23,28 +23,43 @@
 
 /**
  * @file client_impl.h
- * @brief Abstract base class for all transport-specific client (RPC caller) implementations.
+ * @brief Transport-neutral backbone shared by every method-model client implementation.
  *
  * @details
- * @c ClientImpl is the intermediate layer between the generic @c Client<Req,Resp>
- * template and a concrete transport backend (e.g. @c DdsClientImpl,
- * @c ShmClientImpl).  It inherits from @c NodeImpl and adds method-client semantics:
+ * This is an internal implementation header used by the public @c Client template;
+ * application code should depend on @c client.h instead.  @c ClientImpl extends
+ * @c NodeImpl with the connectivity bookkeeping that lets a client wait for its
+ * counterpart server and issue blocking calls.  Concrete transports such as
+ * @c DdsClientImpl or @c ShmClientImpl derive from this class and implement the
+ * pure virtual @c is_connected() and @c call() entry points.
  *
- * - Server-connection detection and notification via @c detect_connected() /
- *   @c update_connected().
- * - Blocking wait for server availability with @c wait_for_connected().
- * - Synchronous (blocking) RPC call via @c call().
+ * @par ImplType
+ * The constructor stamps @c impl_type with @c kClient.  The base @c NodeImpl
+ * surfaces this value to discovery, bag, and proxy layers so they can route
+ * status callbacks correctly.
  *
- * @par Connection Detection Flow
- * @code
- *   // Transport detects server appearance or disappearance:
- *   client_impl->update_connected();
- *   //   -> compares is_connected() against cached state
- *   //   -> notifies the condition variable
- *   //   -> fires the ConnectCallback registered via detect_connected()
- * @endcode
+ * @par Role table
+ * | Concern               | Owner in this hierarchy                     |
+ * | --------------------- | ------------------------------------------- |
+ * | Wire send / receive   | Transport subclass (e.g. @c DdsClientImpl)  |
+ * | Connection detection  | @c ClientImpl (helper condition variable)   |
+ * | Blocking call timing  | @c ClientImpl + @c AckManager in subclass   |
+ * | Connect callback fan  | @c ClientImpl::detect_connected()           |
  *
- * @note Concrete subclasses must implement @c is_connected() and @c call().
+ * @par Internal API contract
+ * | Method                       | Provided by         | Notes                                            |
+ * | ---------------------------- | ------------------- | ------------------------------------------------ |
+ * | @c is_connected() const      | Subclass override   | Queries the live transport handle.               |
+ * | @c call(req, cb, timeout)    | Subclass override   | Performs the blocking round-trip.                |
+ * | @c update_connected()        | This class          | Invoked from discovery threads on state change.  |
+ * | @c detect_connected(cb)      | This class          | Stores the user callback and primes it.          |
+ * | @c wait_for_connected(t)     | This class          | Sleeps on the helper condition variable.         |
+ * | @c interrupt()               | This class          | Wakes waiters when the node is being shut down.  |
+ *
+ * @par Internal Notes
+ * @c is_resp_type captures whether the public @c Client template expects a
+ * response payload; backends that implement fire-and-forget RPC flavours may
+ * read it to skip the response wait.
  */
 
 #pragma once
@@ -58,111 +73,102 @@ namespace vlink {
 
 /**
  * @class ClientImpl
- * @brief Transport-agnostic base for client (RPC caller) node implementations.
+ * @brief Connection-aware base class for method-model client implementations.
  *
  * @details
- * Provides the server-connection-detection infrastructure (condition variable +
- * callback) used by @c Client<Req,Resp>::wait_for_connected() and
- * @c Client<Req,Resp>::detect_connected().  Concrete backends override
- * @c is_connected() to query the transport layer and call @c update_connected()
- * whenever the server connection state changes.
+ * Owns the helper condition variable used by @c wait_for_connected() and the
+ * cached @c ConnectCallback delivered via @c detect_connected().  Backends are
+ * expected to push presence updates by calling @c update_connected() whenever
+ * the discovery layer reports a server appear / disappear event.
  */
 class VLINK_EXPORT ClientImpl : public NodeImpl {
  public:
   /**
-   * @brief Destructor.
+   * @brief Releases the helper state held by the base class.
    */
   ~ClientImpl() override;
 
   /**
-   * @brief Interrupts the client, waking any blocked @c wait_for_connected() or
-   *        @c call() operation.
+   * @brief Wakes blocked waiters and forwards the interrupt to @c NodeImpl.
    *
    * @details
-   * Calls @c NodeImpl::interrupt() to set the interrupted flag, then
-   * @c notify_all() on the internal condition variable so that any thread blocked
-   * in @c wait_for_connected() returns immediately.  Concrete backends typically
-   * also forward the interrupt to any pending @c AckManager requests.
+   * Marks the node interrupted, notifies the helper condition variable so any
+   * @c wait_for_connected() call returns @c false promptly, and delegates the
+   * rest of the shutdown handshake to @c NodeImpl::interrupt().  Transport
+   * subclasses commonly override this to also cancel pending @c AckManager
+   * requests.
    */
   void interrupt() override;
 
   /**
-   * @brief Registers a callback to be fired when the server connection state changes.
+   * @brief Registers @p callback to fire whenever the server presence changes.
    *
    * @details
-   * The @p callback is stored and invoked with @c true when the server becomes
-   * reachable and @c false when it disconnects.  If the server is already connected
-   * at registration time the callback is fired immediately with @c true before this
-   * function returns.
+   * If the connection is already established at registration time, @p callback
+   * is invoked with @c true before this method returns.  Subsequent transitions
+   * are forwarded by @c update_connected().
    *
-   * @param callback  Callable @c void(bool) to invoke on connection state change.
+   * @param callback  Callable @c void(bool) to be notified on connect / disconnect.
    */
   virtual void detect_connected(ConnectCallback&& callback);
 
   /**
-   * @brief Blocks until the server is reachable or the timeout elapses.
+   * @brief Blocks until a server becomes reachable or @p timeout elapses.
    *
    * @details
-   * Returns immediately if @c is_connected() is already @c true.  Otherwise waits
-   * on an internal condition variable that is notified by @c update_connected() and
-   * @c interrupt().
+   * Returns immediately when @c is_connected() already reports @c true.
+   * Otherwise sleeps on the helper condition variable that is poked by
+   * @c update_connected() and by @c interrupt().  A negative @p timeout, such
+   * as @c Timeout::kInfinite, disables the deadline.
    *
-   * - @p timeout < 0 (e.g. @c Timeout::kInfinite): waits indefinitely.
-   * - @p timeout >= 0: returns @c false if no server appears within the period.
-   *
-   * @param timeout  Maximum time to wait; negative value means wait forever.
-   * @return         @c true if the server was detected; @c false on timeout or
-   *                 interruption.
+   * @param timeout  Maximum sleep duration.
+   * @return @c true when the server appeared in time; @c false on timeout or interruption.
    */
   virtual bool wait_for_connected(std::chrono::milliseconds timeout);
 
   /**
-   * @brief Returns @c true when the transport is connected to a server.
+   * @brief Reports whether the transport currently holds a path to a server.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  Called by
-   * @c wait_for_connected() and @c update_connected() to determine whether the
-   * connection state has changed.
+   * Pure virtual; subclasses query their underlying discovery handle.  Called
+   * by both @c wait_for_connected() and @c update_connected() to compute state
+   * transitions.
    *
-   * @return @c true if a server is reachable; @c false otherwise.
+   * @return @c true when a server is reachable; @c false otherwise.
    */
   [[nodiscard]] virtual bool is_connected() const = 0;
 
   /**
-   * @brief Sends a request and blocks until the response arrives or the timeout elapses.
+   * @brief Performs a synchronous round-trip with the remote server.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  @p req_data contains
-   * the serialised request payload.  The @p callback is invoked with the response
-   * bytes once the round-trip completes.
+   * Pure virtual; subclasses send @p req_data, wait for the matching response
+   * (typically through @c AckManager) and invoke @p callback with the received
+   * bytes once a frame arrives.
    *
    * @param req_data  Serialised request payload.
-   * @param callback  Callable @c void(const Bytes&) invoked with the response bytes.
-   * @param timeout   Maximum time to wait for the response; negative = infinite.
-   * @return          @c true if a response was received within the timeout;
-   *                  @c false on timeout, interruption, or transport error.
+   * @param callback  Callable @c void(const Bytes&) receiving the response bytes.
+   * @param timeout   Maximum wait duration; negative for unlimited.
+   * @return @c true on success; @c false on timeout, interruption or transport error.
    */
   virtual bool call(const Bytes& req_data, MsgCallback&& callback, std::chrono::milliseconds timeout) = 0;
 
   /**
-   * @brief Notifies the connection-detection subsystem that connectivity may have changed.
+   * @brief Notifies the base class that the underlying connection state may have changed.
    *
    * @details
-   * Called by the concrete transport backend whenever a server connects or disconnects.
-   * Compares the current @c is_connected() result against the cached state; if it
-   * differs, the condition variable is notified and the registered
-   * @c ConnectCallback is fired.
-   *
-   * @note This method is intended to be called from the transport's internal
-   *       discovery thread, not from user code.
+   * Compares @c is_connected() against the helper cache; when the value flips
+   * the condition variable is signalled and any registered @c ConnectCallback
+   * is delivered.  Intended to run on the transport's discovery / listener
+   * thread, not on the application thread.
    */
   void update_connected();
 
-  bool is_resp_type{false};  ///< @c true when the call expects a response (vs fire-and-forget).
+  bool is_resp_type{false};  ///< @c true when the public @c Client expects a response payload.
 
  protected:
   /**
-   * @brief Protected constructor; initialises the client with @c kClient role.
+   * @brief Stamps the node as @c kClient and prepares the helper state.
    */
   ClientImpl();
 

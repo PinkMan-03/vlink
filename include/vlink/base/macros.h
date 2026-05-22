@@ -23,48 +23,44 @@
 
 /**
  * @file macros.h
- * @brief Platform-independent macro definitions for the VLink library.
+ * @brief Cross-platform macros for visibility, branch hints, copy prevention, singletons and string helpers.
  *
  * @details
- * This header provides a unified set of macros used throughout VLink to handle
- * platform differences, visibility control, branch prediction hints, and common
- * class-level utilities such as singleton enforcement and copy-prevention.
+ * Every header in VLink relies on this file for ABI export decoration, alignment, branch
+ * prediction hints, and class-level boilerplate.  Macros that depend on compiler features
+ * gracefully degrade to no-ops on platforms that do not expose those features.
  *
- * The macros are grouped as follows:
+ * @par Macro reference
  *
- * | Group              | Macros                                         | Purpose                            |
- * | ------------------ | ---------------------------------------------- | ---------------------------------- |
- * | Symbol visibility  | VLINK_EXPORT, VLINK_EXPORT_AND_ALIGNED         | DLL export / visibility control    |
- * | Branch hints       | VLINK_LIKELY, VLINK_UNLIKELY, VLIKELY, ...     | Branch prediction optimization     |
- * | Copy prevention    | VLINK_DISALLOW_COPY_AND_ASSIGN                 | Disable copy constructor/operator  |
- * | Singleton guard    | VLINK_SINGLETON_CHECK, VLINK_SINGLETON_DECLARE | Enforce single-instance classes    |
- * | String utilities   | VLINK_MACRO_STRING_IFY, VLINK_MACRO_STRING_GET | Stringify macro tokens             |
- * | Constant check     | VLINK_ASSERT_CONSTANT                          | Static-assert constant string args |
- *
- * @note
- * - All macros are designed to be no-ops when the relevant feature is unavailable
- *   (e.g., VLINK_LIKELY falls back to a plain cast on platforms without __builtin_expect).
- * - The VLINK_EXPORT macro must be included before any class or function declaration
- *   that needs to be part of the public ABI.
- * - VLINK_SINGLETON_CHECK enforces that a class can only ever be instantiated once
- *   per process via a static atomic flag; any second instantiation will throw
- *   std::runtime_error.
+ * | Category             | Macro                                    | Purpose                                        |
+ * | -------------------- | ---------------------------------------- | ---------------------------------------------- |
+ * | Visibility           | @c VLINK_EXPORT                          | DLL / shared-object visibility                 |
+ * | Visibility + align   | @c VLINK_EXPORT_AND_ALIGNED(n)           | Combine export with byte alignment             |
+ * | Branch hints (long)  | @c VLINK_LIKELY(x), @c VLINK_UNLIKELY(x) | C++20 @c [[likely]] / @c __builtin_expect      |
+ * | Branch hints (short) | @c VLIKELY(...), @c VUNLIKELY(...)       | Aliases of @c VLINK_LIKELY / @c VLINK_UNLIKELY |
+ * | Class hygiene        | @c VLINK_DISALLOW_COPY_AND_ASSIGN(class) | Delete copy ctor and assignment                |
+ * | Singletons           | @c VLINK_SINGLETON_CHECK(class)          | Enforce one instance per process               |
+ * | Singletons           | @c VLINK_SINGLETON_DECLARE(class)        | Add @c get accessor + check + no-copy          |
+ * | Stringify            | @c VLINK_MACRO_STRING_IFY(name)          | Stringify a token directly                     |
+ * | Stringify (eval)     | @c VLINK_MACRO_STRING_GET(name)          | Stringify after macro expansion                |
+ * | Constant check       | @c VLINK_ASSERT_CONSTANT(msg)            | @c static_assert message is a literal          |
  *
  * @par Example
  * @code
- * // Marking a class as exported:
- * class VLINK_EXPORT MyClass final { ... };
+ *   class VLINK_EXPORT MyService final {
+ *     VLINK_DISALLOW_COPY_AND_ASSIGN(MyService)
+ *    public:
+ *     MyService();
+ *   };
  *
- * // Preventing copy and assignment:
- * class MyClass {
- *   VLINK_DISALLOW_COPY_AND_ASSIGN(MyClass)
- * };
- *
- * // Branch prediction hint:
- * if VLIKELY(ptr != nullptr) {
- *   ptr->do_something();
- * }
+ *   if VLIKELY (ptr != nullptr) {
+ *     ptr->do_something();
+ *   }
  * @endcode
+ *
+ * @note @c VLINK_SINGLETON_CHECK enforces uniqueness at run time by tripping a
+ *       @c std::atomic_flag the second time the constructor runs; the second
+ *       instantiation throws @c std::runtime_error.
  */
 
 #pragma once
@@ -92,13 +88,13 @@
 #else
 /**
  * @def VLINK_EXPORT_AND_ALIGNED(align_num)
- * @brief Marks a class or variable as both exported and aligned to the given byte boundary.
+ * @brief Marks a class or variable as both exported and aligned to @p align_num bytes.
  *
  * @details
- * On MSVC this expands to @c __declspec(align(align_num));
- * on GCC/Clang it expands to @c __attribute__((aligned(align_num))).
+ * Expands to @c __declspec(align(align_num)) on MSVC and to
+ * @c __attribute__((aligned(align_num))) on GCC / Clang.
  *
- * @param align_num  The required alignment in bytes (must be a power of two).
+ * @param align_num  Required alignment in bytes; must be a power of two.
  */
 #define VLINK_EXPORT_AND_ALIGNED(align_num) VLINK_EXPORT __attribute__((aligned(align_num)))
 #endif
@@ -133,24 +129,23 @@
 #if __cplusplus >= 202002L
 /**
  * @def VLINK_LIKELY(x)
- * @brief Hints to the compiler that expression @p x is very likely to be true.
+ * @brief Hints to the compiler that @p x is very likely to evaluate to @c true.
  *
  * @details
- * Under C++20 this expands to the @c [[likely]] attribute; under earlier standards
- * on GCC/Clang it uses @c __builtin_expect; on MSVC it is a no-op.
+ * Expands to the C++20 @c [[likely]] attribute when available, @c __builtin_expect on older
+ * GCC / Clang, and is a no-op on MSVC.
  *
- * @param x  A boolean expression.
+ * @param x  Boolean expression to predict.
  */
 #define VLINK_LIKELY(x) (x) [[likely]]
 /**
  * @def VLINK_UNLIKELY(x)
- * @brief Hints to the compiler that expression @p x is very unlikely to be true.
+ * @brief Hints to the compiler that @p x is very unlikely to evaluate to @c true.
  *
  * @details
- * Under C++20 this expands to the @c [[unlikely]] attribute; under earlier standards
- * on GCC/Clang it uses @c __builtin_expect; on MSVC it is a no-op.
+ * Counterpart of @c VLINK_LIKELY with the opposite hint.
  *
- * @param x  A boolean expression.
+ * @param x  Boolean expression to predict.
  */
 #define VLINK_UNLIKELY(x) (x) [[unlikely]]
 #else
@@ -172,14 +167,9 @@
  * @brief Deletes the copy constructor and copy-assignment operator of @p classname.
  *
  * @details
- * Place this macro in the private section of a class to prevent accidental copying.
- * It expands to:
- * @code
- * classname(const classname&) = delete;
- * classname& operator=(const classname&) = delete;
- * @endcode
+ * Drop the macro inside the private section of a class to prevent accidental copying.
  *
- * @param classname  The unqualified name of the enclosing class.
+ * @param classname  Unqualified name of the enclosing class.
  */
 #define VLINK_DISALLOW_COPY_AND_ASSIGN(classname) \
   classname(const classname&) = delete;           \
@@ -187,18 +177,17 @@
 
 /**
  * @def VLINK_SINGLETON_CHECK(classname)
- * @brief Injects a compile-time and run-time singleton enforcement guard.
+ * @brief Embeds a static check that enforces one-instance-per-process for @p classname.
  *
  * @details
- * This macro:
- * - Uses @c static_assert to verify that @p classname is @c final and has a
- *   private (non-default-constructible-from-outside) constructor.
- * - Uses a @c std::atomic_flag to guarantee that the constructor is only invoked
- *   once per process.  A second instantiation throws @c std::runtime_error.
+ * Combines two safeguards:
+ *  - Compile-time @c static_assert that @p classname is @c final and not externally
+ *    default-constructible.
+ *  - Run-time @c std::atomic_flag trip that throws @c std::runtime_error on the second
+ *    instantiation.
  *
- * @note Must be placed in the @c private section of the class body.
- *
- * @param classname  The unqualified name of the class being protected.
+ * @param classname  Unqualified name of the enclosing class.
+ * @note Place inside the @c private section of the class body.
  */
 #define VLINK_SINGLETON_CHECK(classname)                                                          \
  private:                                                                                         \
@@ -219,26 +208,25 @@
 
 /**
  * @def VLINK_SINGLETON_DECLARE(classname)
- * @brief Declares a complete Meyer's-singleton @c get() method with safety guards.
+ * @brief Declares a Meyers singleton @c get and the matching uniqueness guards on @p classname.
  *
  * @details
- * Combines VLINK_SINGLETON_CHECK with a public static @c get() accessor that
- * returns a reference to the single static instance.  The constructor must be
- * @c private and @c final, otherwise the embedded @c static_assert will fail.
+ * Expands to a public static @c get returning a reference to the single instance plus the
+ * @c VLINK_SINGLETON_CHECK and @c VLINK_DISALLOW_COPY_AND_ASSIGN macros.
  *
- * @param classname  The unqualified name of the singleton class.
+ * @param classname  Unqualified name of the singleton class.
  *
  * @par Example
  * @code
- * class MyService final {
- *   VLINK_SINGLETON_DECLARE(MyService)
- * public:
- *   void do_work();
- * private:
- *   MyService() = default;
- * };
+ *   class MyService final {
+ *     VLINK_SINGLETON_DECLARE(MyService)
+ *    public:
+ *     void do_work();
+ *    private:
+ *     MyService() = default;
+ *   };
  *
- * MyService::get().do_work();
+ *   MyService::get().do_work();
  * @endcode
  */
 #define VLINK_SINGLETON_DECLARE(classname)    \
@@ -254,35 +242,34 @@
 
 /**
  * @def VLINK_MACRO_STRING_IFY(name)
- * @brief Converts @p name to a C string literal using the preprocessor stringification operator.
+ * @brief Stringifies a token without performing macro expansion.
  *
- * @param name  A macro token (not a string literal) to stringify.
+ * @param name  Token to stringify.
  */
 #define VLINK_MACRO_STRING_IFY(name) #name
 
 /**
  * @def VLINK_MACRO_STRING_GET(name)
- * @brief Stringifies the expanded value of macro @p name (two-level expansion).
+ * @brief Stringifies the expanded value of a macro (two-step expansion).
  *
  * @details
- * This two-step macro ensures that @p name is fully expanded before
- * stringification.  Use this instead of VLINK_MACRO_STRING_IFY when @p name
- * is itself a macro that should be expanded first.
+ * Use this form instead of @c VLINK_MACRO_STRING_IFY when @p name is itself a macro that should
+ * be expanded before stringification.
  *
- * @param name  A macro whose expansion will be converted to a string literal.
+ * @param name  Macro whose expansion is stringified.
  */
 #define VLINK_MACRO_STRING_GET(name) VLINK_MACRO_STRING_IFY(name)
 
 #if __has_builtin(__builtin_constant_p)
 /**
  * @def VLINK_ASSERT_CONSTANT(msg)
- * @brief Asserts (at compile time) that @p msg is a constant string literal.
+ * @brief Asserts at compile time that @p msg is a constant string literal.
  *
  * @details
- * On compilers that support @c __builtin_constant_p this expands to a
- * @c static_assert; on others it is a no-op.
+ * Expands to a @c static_assert on toolchains that expose @c __builtin_constant_p; otherwise
+ * the macro is a no-op.
  *
- * @param msg  The expression to check for compile-time constancy.
+ * @param msg  Expression checked for compile-time constancy.
  */
 #define VLINK_ASSERT_CONSTANT(msg) static_assert(__builtin_constant_p(msg), "Must be a constant string literal.");
 #else
@@ -292,12 +279,12 @@
 #if !defined(VLIKELY) && !defined(VUNLIKELY)
 /**
  * @def VLIKELY(...)
- * @brief Shorthand alias for VLINK_LIKELY.  Hints that the expression is likely true.
+ * @brief Short alias for @c VLINK_LIKELY.
  */
 #define VLIKELY(...) VLINK_LIKELY(__VA_ARGS__)
 /**
  * @def VUNLIKELY(...)
- * @brief Shorthand alias for VLINK_UNLIKELY.  Hints that the expression is unlikely true.
+ * @brief Short alias for @c VLINK_UNLIKELY.
  */
 #define VUNLIKELY(...) VLINK_UNLIKELY(__VA_ARGS__)
 #endif

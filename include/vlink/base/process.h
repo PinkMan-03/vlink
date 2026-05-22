@@ -23,46 +23,57 @@
 
 /**
  * @file process.h
- * @brief Cross-platform child process management with I/O piping and async callbacks.
+ * @brief Portable child-process driver with asynchronous I/O notifications.
  *
  * @details
- * @c Process provides a Qt-QProcess-inspired API for launching, monitoring and communicating
- * with child processes.  It supports:
- * - Asynchronous state change, I/O ready-read and exit callbacks.
- * - Multiple channel modes (separate stdout/stderr, merged, or forwarded to parent).
- * - Line-by-line and bulk I/O reading from stdout and stderr.
- * - Writing to stdin with a configurable timeout.
- * - Synchronous helpers (@c execute, @c start_detached) for fire-and-forget use cases.
+ * @c vlink::Process spawns a single child program at a time and exposes a QProcess-style
+ * surface for inspecting its lifecycle, reading captured output, writing to its standard
+ * input, and triggering termination.  Output capture, exit notification, and timer-driven
+ * polling all run on an internal monitor thread.
  *
- * Channel modes:
+ * Capability groups exposed by the class:
  *
- * | Mode                   | stdout              | stderr              |
- * | ---------------------- | ------------------- | ------------------- |
- * | @c kSeparateMode       | Buffered pipe       | Buffered pipe       |
- * | @c kMergedMode         | Buffered pipe       | Merged into stdout  |
- * | @c kForwardedMode      | Forwarded to parent | Forwarded to parent |
- * | @c kForwardedOutputMode| Forwarded to parent | Buffered pipe       |
- * | @c kForwardedErrorMode | Buffered pipe       | Forwarded to parent |
+ * | Group                 | Representative members                                                   |
+ * | --------------------- | ------------------------------------------------------------------------ |
+ * | Lifecycle             | @c start, @c start_command, @c terminate, @c kill, @c close              |
+ * | Process metadata      | @c get_pid, @c get_state, @c get_error, @c get_exit_code                 |
+ * | Environment & cwd     | @c set_environment, @c set_inherit_environment, @c set_working_directory |
+ * | I/O routing           | @c set_process_mode, @c get_process_mode                                 |
+ * | stdout/stderr capture | @c read_line_stdout, @c read_all, @c bytes_available_stdout              |
+ * | stdin writing         | @c write, @c close_write_channel                                         |
+ * | Async notifications   | @c register_finished_callback, @c register_ready_read_stdout_callback    |
+ * | Synchronous waits     | @c wait_for_started, @c wait_for_finished, @c wait_for_ready_read        |
+ * | Static helpers        | @c execute, @c start_detached                                            |
+ *
+ * I/O channel routing modes:
+ *
+ * | Mode                    | stdout              | stderr              |
+ * | ----------------------- | ------------------- | ------------------- |
+ * | @c kSeparateMode        | Buffered pipe       | Buffered pipe       |
+ * | @c kMergedMode          | Buffered pipe       | Merged into stdout  |
+ * | @c kForwardedMode       | Inherits parent     | Inherits parent     |
+ * | @c kForwardedOutputMode | Inherits parent     | Buffered pipe       |
+ * | @c kForwardedErrorMode  | Buffered pipe       | Inherits parent     |
  *
  * @note
- * - All callbacks are invoked from an internal monitor thread; access shared state with care.
- * - @c close() requests termination and optionally force-kills after a timeout.
- * - @c Process objects are non-movable and non-copyable.
- * - The destructor waits @c kDestructorWaitTimeoutMs (5 s) for the process to exit.
+ * - Every callback fires from the monitor thread; protect shared caller state accordingly.
+ * - The destructor first sends @c SIGTERM, drains pending I/O, then optionally escalates to
+ *   @c SIGKILL after @c kDestructorWaitTimeoutMs (5000 ms) before joining.
+ * - The class is non-copyable and non-movable.
  *
  * @par Example
  * @code
  * vlink::Process proc;
  * proc.set_process_mode(vlink::Process::kSeparateMode);
- * proc.register_ready_read_stdout_callback([&proc]() {
+ * proc.register_ready_read_stdout_callback([&proc] {
  *   std::string line;
  *   while (proc.can_read_line_stdout()) {
  *     proc.read_line_stdout(line);
- *     // handle line
  *   }
  * });
  * proc.register_finished_callback([](int code, vlink::Process::ExitStatus status) {
- *   // handle exit
+ *   (void)code;
+ *   (void)status;
  * });
  * proc.start("/usr/bin/ls", {"-la"});
  * proc.wait_for_finished();
@@ -84,127 +95,127 @@ namespace vlink {
 
 /**
  * @class Process
- * @brief Cross-platform child process with async I/O and state notification.
+ * @brief Owns and drives a single child process with asynchronous I/O reporting.
  *
  * @details
- * A single @c Process object manages one child process at a time.
- * It is non-copyable and non-movable.
+ * The instance is non-copyable and non-movable.  A new child may only be launched after
+ * any previous one has terminated and the internal state has been cleaned up.
  */
 class VLINK_EXPORT Process {
  public:
   /**
-   * @brief Lifecycle state of the child process.
+   * @enum State
+   * @brief Coarse lifecycle stage of the child process.
    */
   enum State : uint8_t {
-    kNotRunningState = 0,  ///< Not started or has exited
-    kStartingState = 1,    ///< @c start() called; waiting for exec to complete
-    kRunningState = 2,     ///< Successfully running
+    kNotRunningState = 0,  ///< No child is currently active.
+    kStartingState = 1,    ///< @c start() has been called and the OS is launching the binary.
+    kRunningState = 2,     ///< Child has been successfully launched and is executing.
   };
 
   /**
-   * @brief How the child process exited.
+   * @enum ExitStatus
+   * @brief How the most recent child exited.
    */
   enum ExitStatus : uint8_t {
-    kNormalExitStatus = 0,  ///< Exited normally (via exit() or return from main)
-    kCrashExitStatus = 1,   ///< Killed by a signal or crashed
+    kNormalExitStatus = 0,  ///< Child returned from @c main or called @c exit normally.
+    kCrashExitStatus = 1,   ///< Child was terminated by a signal or crashed.
   };
 
   /**
-   * @brief Error codes set on failure.
+   * @enum Error
+   * @brief Sticky error indicator set by failing operations.
    */
   enum Error : uint8_t {
-    kNoError = 0,              ///< No error
-    kUnknownError = 1,         ///< Unknown error
-    kStartError = 2,           ///< Failed to start the process (e.g., file not found)
-    kCrashedError = 3,         ///< Process crashed
-    kTimedOutError = 4,        ///< A wait operation timed out
-    kWriteError = 5,           ///< Write to stdin failed
-    kReadError = 6,            ///< Read from stdout/stderr failed
-    kBufferOverflowError = 7,  ///< Output exceeded @c max_buffer_size
+    kNoError = 0,              ///< No error has been observed.
+    kUnknownError = 1,         ///< Catch-all bucket for unmapped errors.
+    kStartError = 2,           ///< Failed to launch the requested program.
+    kCrashedError = 3,         ///< Child process crashed.
+    kTimedOutError = 4,        ///< A blocking wait expired before its condition was met.
+    kWriteError = 5,           ///< Writing to the child's stdin failed.
+    kReadError = 6,            ///< Reading from a captured pipe failed.
+    kBufferOverflowError = 7,  ///< Captured output exceeded @c set_max_buffer_size.
   };
 
   /**
-   * @brief I/O channel routing mode.
+   * @enum Mode
+   * @brief Routing of the child's stdout/stderr file descriptors.
    */
   enum Mode : uint8_t {
-    kSeparateMode = 0,         ///< stdout and stderr buffered as separate pipes
-    kMergedMode = 1,           ///< stderr merged into stdout pipe
-    kForwardedMode = 2,        ///< Both stdout and stderr forwarded to the parent process
-    kForwardedOutputMode = 3,  ///< stdout forwarded; stderr buffered separately
-    kForwardedErrorMode = 4,   ///< stderr forwarded; stdout buffered separately
+    kSeparateMode = 0,         ///< Capture stdout and stderr through independent pipes.
+    kMergedMode = 1,           ///< Capture stdout; merge stderr into the stdout pipe.
+    kForwardedMode = 2,        ///< Inherit parent stdout/stderr without capture.
+    kForwardedOutputMode = 3,  ///< Inherit stdout; capture stderr.
+    kForwardedErrorMode = 4,   ///< Capture stdout; inherit stderr.
   };
 
   /**
-   * @brief Environment variable map type for @c set_environment().
+   * @brief Map type used to pass environment overrides to @c set_environment().
    */
   using EnvironmentMap = std::unordered_map<std::string, std::string>;
 
   /**
-   * @brief Callback type invoked when an error occurs.
+   * @brief Callback signature invoked when the @c Error state changes.
    */
   using ErrorCallback = Function<void(Error)>;
 
   /**
-   * @brief Callback type invoked when the process exits.
+   * @brief Callback signature invoked when the child exits.
    *
    * @details
-   * First argument is the exit code; second is @c kNormalExitStatus or @c kCrashExitStatus.
+   * The first parameter is the exit code; the second is @c kNormalExitStatus or
+   * @c kCrashExitStatus.
    */
   using FinishedCallback = Function<void(int, ExitStatus)>;
 
   /**
-   * @brief Callback type invoked when new data is available on a pipe.
+   * @brief Callback signature invoked whenever new data is available on a pipe.
    */
   using ReadyReadCallback = Function<void()>;
 
   /**
-   * @brief Callback type invoked when the process state changes.
+   * @brief Callback signature invoked when the process @c State transitions.
    */
   using StateChangedCallback = Function<void(State)>;
 
   /**
-   * @brief Sentinel wait timeout meaning wait indefinitely.
+   * @brief Sentinel value used to request an unbounded wait.
    */
   static constexpr int kInfinite{-1};
 
   /**
-   * @brief Default timeout for @c wait_for_started() and @c wait_for_finished() in milliseconds.
+   * @brief Default deadline for @c wait_for_started / @c wait_for_finished (3000 ms).
    */
   static constexpr int kDefaultWaitTimeoutMs{3000};
 
   /**
-   * @brief Default timeout for @c write() in milliseconds.
+   * @brief Default deadline for blocking writes to the child's stdin (5000 ms).
    */
   static constexpr int kDefaultWriteTimeoutMs{5000};
 
   /**
-   * @brief Default timeout for the synchronous @c execute() helper in milliseconds.
+   * @brief Default deadline for the synchronous @c execute() helper (30000 ms).
    */
   static constexpr int kDefaultExecuteTimeoutMs{30000};
 
   /**
-   * @brief Time the destructor waits for the child to exit before force-killing in milliseconds.
+   * @brief Grace period the destructor allows after sending @c SIGTERM before escalating.
    */
   static constexpr int kDestructorWaitTimeoutMs{5000};
 
   /**
-   * @brief Constructs a @c Process object.  No child is started yet.
+   * @brief Constructs an idle process driver with no child attached.
    */
   Process();
 
   /**
-   * @brief Destructor.
+   * @brief Destructor.  Terminates the child if still alive then frees driver resources.
    *
    * @details
-   * If the child is still running:
-   *  1. Sends @c SIGTERM via @c terminate(),
-   *  2. Drains any pending pipe output and waits up to
-   *     @c kDestructorWaitTimeoutMs (default @c 5000 ms) for graceful exit,
-   *  3. If the process is still alive, sends @c SIGKILL via @c kill() and
-   *     waits up to a further @c 1000 ms before tearing down.
-   *
-   * Always finalises by closing pipes, joining the I/O thread and freeing
-   * resources.
+   * The sequence sends @c SIGTERM via @c terminate(), drains any pending pipe data,
+   * waits up to @c kDestructorWaitTimeoutMs for a graceful exit, then escalates to
+   * @c SIGKILL via @c kill() and waits up to a further 1000 ms before releasing
+   * the I/O thread, pipes and child handles.
    */
   ~Process();
 
@@ -213,354 +224,349 @@ class VLINK_EXPORT Process {
   Process& operator=(Process&& other) noexcept = delete;
 
   /**
-   * @brief Returns the current state of the child process.
+   * @brief Returns the lifecycle state of the currently attached child.
    *
    * @return Current @c State value.
    */
   [[nodiscard]] State get_state() const;
 
   /**
-   * @brief Returns the last error code.
+   * @brief Returns the most recently latched error code.
    *
-   * @return @c kNoError if no error has occurred.
+   * @return Sticky @c Error value; @c kNoError if no error has occurred.
    */
   [[nodiscard]] Error get_error() const;
 
   /**
-   * @brief Returns the exit code of the child process.
+   * @brief Returns the exit code of the most recent child process.
    *
    * @details
-   * Valid only after @c get_state() returns @c kNotRunningState.
+   * Only meaningful once @c get_state() reports @c kNotRunningState.
    *
-   * @return Exit code.
+   * @return Exit code passed to @c exit() or implied by signal termination.
    */
   [[nodiscard]] int get_exit_code() const;
 
   /**
-   * @brief Returns how the child process exited.
+   * @brief Returns how the most recent child terminated.
    *
-   * @return @c kNormalExitStatus or @c kCrashExitStatus.
+   * @return @c kNormalExitStatus on graceful exit, @c kCrashExitStatus on signal/crash.
    */
   [[nodiscard]] ExitStatus get_exit_status() const;
 
   /**
-   * @brief Returns @c true if the child process is currently running.
+   * @brief Reports whether the attached child is currently running.
    *
-   * @return @c true if state is @c kRunningState.
+   * @return @c true when @c get_state() equals @c kRunningState.
    */
   [[nodiscard]] bool is_running() const;
 
   /**
-   * @brief Returns the operating-system process ID of the child.
+   * @brief Returns the OS-level identifier of the child process.
    *
-   * @return PID, or -1 if not running.
+   * @return Process ID, or @c -1 when no child is attached.
    */
   [[nodiscard]] int64_t get_process_id() const;
 
   /**
-   * @brief Sets the maximum buffer size for stdout and stderr capture.
+   * @brief Limits the in-memory capture buffer used for stdout/stderr.
    *
    * @details
-   * If the child produces more output than @p size bytes, @c kBufferOverflowError is set.
-   * Passing 0 resets the limit to the default (16 MB).
+   * When the captured output exceeds @p size bytes the @c kBufferOverflowError code is
+   * latched.  Passing @c 0 restores the default of 16 MiB.
    *
-   * @param size  Maximum buffer size in bytes.
+   * @param size  New buffer limit in bytes.
    */
   void set_max_buffer_size(size_t size);
 
   /**
-   * @brief Returns the configured maximum buffer size.
+   * @brief Returns the configured capture-buffer limit.
    *
-   * @return Buffer size in bytes.  Default is 16 MB (16 * 1024 * 1024).
+   * @return Buffer size in bytes; default is 16 MiB.
    */
   [[nodiscard]] size_t get_max_buffer_size() const;
 
   /**
-   * @brief Sets the environment variables for the child process.
+   * @brief Defines the environment that will be applied at the next @c start() call.
    *
-   * @details
-   * Replaces (or supplements, depending on @c set_inherit_environment) the child's
-   * environment with @p env_map.
-   *
-   * @param env_map  Map of variable name to value.
+   * @param env_map  Variable map to merge into or replace the parent environment based on
+   *                 the @c set_inherit_environment() setting.
    */
   void set_environment(const EnvironmentMap& env_map);
 
   /**
-   * @brief Returns the configured environment map.
+   * @brief Returns the currently configured environment override.
    *
    * @return Environment variable map.
    */
   [[nodiscard]] EnvironmentMap get_environment() const;
 
   /**
-   * @brief Sets the I/O channel routing mode.
+   * @brief Sets the I/O channel routing that will be applied at the next @c start() call.
    *
-   * @param mode  Channel mode.  Must be set before @c start().
+   * @param mode  Routing mode for stdout/stderr.
    */
   void set_process_mode(Mode mode);
 
   /**
-   * @brief Returns the configured I/O channel mode.
+   * @brief Returns the currently configured I/O routing mode.
    *
-   * @return Current mode.
+   * @return Current @c Mode.
    */
   [[nodiscard]] Mode get_process_mode() const;
 
   /**
-   * @brief Controls whether the child inherits the parent's environment.
+   * @brief Controls whether the child inherits the parent environment in addition to the override map.
    *
-   * @param inherit  If @c true, the child inherits all parent environment variables.
-   *                 If @c false, only the variables in the @c EnvironmentMap are set.
+   * @param inherit  @c true to merge with the parent environment, @c false to use only the override map.
    */
   void set_inherit_environment(bool inherit);
 
   /**
-   * @brief Returns whether the child inherits the parent environment.
+   * @brief Reports whether the child currently inherits the parent environment.
    *
-   * @return @c true if inheriting.
+   * @return @c true when the parent environment is merged.
    */
   [[nodiscard]] bool get_inherit_environment() const;
 
   /**
-   * @brief Sets the working directory for the child process.
+   * @brief Sets the working directory used at the next @c start() call.
    *
-   * @param dir  Absolute path to the working directory.
+   * @param dir  Absolute path the child should @c chdir to before executing the program.
    */
   void set_working_directory(const std::string& dir);
 
   /**
-   * @brief Returns the configured working directory.
+   * @brief Returns the currently configured working directory.
    *
    * @return Working directory path.
    */
   [[nodiscard]] std::string get_working_directory() const;
 
   /**
-   * @brief Registers a callback for error events.
+   * @brief Installs a callback fired when the @c Error state changes.
    *
-   * @param callback  Invoked with the @c Error code when an error occurs.
+   * @param callback  Callback invoked from the monitor thread.
    */
   void register_error_callback(ErrorCallback&& callback);
 
   /**
-   * @brief Registers a callback invoked when the child exits.
+   * @brief Installs a callback fired when the child exits.
    *
-   * @param callback  Invoked with @c (exit_code, exit_status).
+   * @param callback  Callback invoked with exit code and exit status.
    */
   void register_finished_callback(FinishedCallback&& callback);
 
   /**
-   * @brief Registers a callback invoked when new stdout data is available.
+   * @brief Installs a callback fired when stdout has new data buffered.
    *
-   * @param callback  Invoked from the monitor thread when stdout has data.
+   * @param callback  Callback invoked from the monitor thread.
    */
   void register_ready_read_stdout_callback(ReadyReadCallback&& callback);
 
   /**
-   * @brief Registers a callback invoked when new stderr data is available.
+   * @brief Installs a callback fired when stderr has new data buffered.
    *
-   * @param callback  Invoked from the monitor thread when stderr has data.
+   * @param callback  Callback invoked from the monitor thread.
    */
   void register_ready_read_stderr_callback(ReadyReadCallback&& callback);
 
   /**
-   * @brief Registers a callback invoked when the process state changes.
+   * @brief Installs a callback fired on every @c State transition.
    *
-   * @param callback  Invoked with the new @c State value.
+   * @param callback  Callback invoked from the monitor thread with the new @c State.
    */
   void register_state_changed_callback(StateChangedCallback&& callback);
 
   /**
-   * @brief Launches the child process.
+   * @brief Launches @p program with the given argument vector.
    *
    * @details
-   * The launch attempt runs synchronously and returns after the child is either
-   * in @c kRunningState or start failure has been recorded.  I/O monitoring and
-   * exit notification continue asynchronously on the monitor thread.
+   * Returns once the launch attempt has either succeeded (state becomes @c kRunningState)
+   * or failed (an @c Error is latched).  I/O monitoring continues asynchronously on the
+   * internal monitor thread.
    *
    * @param program    Path to the executable.
-   * @param arguments  Command-line arguments.  Default: empty.
+   * @param arguments  Argument vector excluding @c argv[0].
    */
   void start(const std::string& program, const std::vector<std::string>& arguments = {});
 
   /**
-   * @brief Parses and launches a shell command string.
+   * @brief Parses a shell-style command line and launches it.
    *
    * @details
-   * Parses @p command into a program and argument list with whitespace separation,
-   * quote handling and backslash escapes, then calls @c start().
+   * Splits @p command on whitespace with quote and backslash handling, then delegates to
+   * @c start().
    *
-   * @param command  Shell command string.
+   * @param command  Shell-style command string.
    */
   void start_command(const std::string& command);
 
   /**
-   * @brief Blocks until the child process enters @c kRunningState.
+   * @brief Blocks until the child reaches @c kRunningState or the timeout elapses.
    *
-   * @param msecs  Timeout in milliseconds.  Default: @c kDefaultWaitTimeoutMs (3000 ms).
-   * @return @c true if the process is running within the timeout.
+   * @param msecs  Maximum wait in milliseconds.  Default: @c kDefaultWaitTimeoutMs.
+   * @return @c true when the running state was observed in time.
    */
   bool wait_for_started(int msecs = kDefaultWaitTimeoutMs);
 
   /**
-   * @brief Blocks until the child process exits.
+   * @brief Blocks until the child terminates or the timeout elapses.
    *
-   * @param msecs  Timeout in milliseconds.  Default: @c kDefaultWaitTimeoutMs (3000 ms).
-   * @return @c true if the process exited within the timeout.
+   * @param msecs  Maximum wait in milliseconds.  Default: @c kDefaultWaitTimeoutMs.
+   * @return @c true when the child has exited within the timeout.
    */
   bool wait_for_finished(int msecs = kDefaultWaitTimeoutMs);
 
   /**
-   * @brief Blocks until new data is available on any pipe.
+   * @brief Blocks until new pipe data becomes available or the timeout elapses.
    *
-   * @param msecs  Timeout in milliseconds.  Default: @c kDefaultWaitTimeoutMs (3000 ms).
-   * @return @c true if data became available within the timeout.
+   * @param msecs  Maximum wait in milliseconds.  Default: @c kDefaultWaitTimeoutMs.
+   * @return @c true when data is now available on stdout or stderr.
    */
   bool wait_for_ready_read(int msecs = kDefaultWaitTimeoutMs);
 
   /**
-   * @brief Requests child termination.
+   * @brief Requests cooperative termination of the child.
    *
    * @details
-   * On POSIX this sends @c SIGTERM, which the child may handle or ignore.
-   * On Windows this uses @c TerminateProcess, so termination is immediate.
-   * Use @c kill() for an explicit forceful stop.
+   * POSIX sends @c SIGTERM, which the child may catch.  Windows uses @c TerminateProcess,
+   * which is unconditional.  @c kill() must be used for a forced exit on POSIX.
    */
   void terminate();
 
   /**
-   * @brief Forcefully kills the child process (SIGKILL / TerminateProcess).
+   * @brief Forces immediate termination of the child via @c SIGKILL / @c TerminateProcess.
    */
   void kill();
 
   /**
-   * @brief Calls @c terminate() and optionally force-kills after a timeout.
+   * @brief Sends @c SIGTERM and optionally escalates to @c kill() after the wait timeout.
    *
-   * @param force_kill_on_timeout  If @c true, calls @c kill() if the process has not exited
-   *                               after @c kDefaultWaitTimeoutMs. If @c false and the child
-   *                               does not exit in time, the process remains running. On Windows,
-   *                               @c terminate() is already forceful. Default: @c false.
+   * @param force_kill_on_timeout  When @c true and the child has not exited within
+   *                               @c kDefaultWaitTimeoutMs, @c kill() is invoked.  On
+   *                               Windows @c terminate() is already forceful so the flag
+   *                               is effectively ignored.  Default: @c false.
    */
   void close(bool force_kill_on_timeout = false);
 
   /**
-   * @brief Returns the number of bytes available to read from stdout.
+   * @brief Returns the number of buffered bytes available to read from stdout.
    *
-   * @return Bytes available in the stdout buffer.
+   * @return Bytes available on stdout.
    */
   [[nodiscard]] size_t bytes_available_stdout() const;
 
   /**
-   * @brief Returns the number of bytes available to read from stderr.
+   * @brief Returns the number of buffered bytes available to read from stderr.
    *
-   * @return Bytes available in the stderr buffer.
+   * @return Bytes available on stderr.
    */
   [[nodiscard]] size_t bytes_available_stderr() const;
 
   /**
-   * @brief Returns @c true if a complete newline-terminated line is available on stdout.
+   * @brief Reports whether a newline-terminated line is fully buffered on stdout.
    *
-   * @return @c true if at least one line can be read.
+   * @return @c true when @c read_line_stdout() will deliver a complete line.
    */
   [[nodiscard]] bool can_read_line_stdout() const;
 
   /**
-   * @brief Returns @c true if a complete newline-terminated line is available on stderr.
+   * @brief Reports whether a newline-terminated line is fully buffered on stderr.
    *
-   * @return @c true if at least one line can be read.
+   * @return @c true when @c read_line_stderr() will deliver a complete line.
    */
   [[nodiscard]] bool can_read_line_stderr() const;
 
   /**
-   * @brief Reads one line from stdout into @p line.
+   * @brief Reads one buffered line from stdout.
    *
-   * @param line  Output string. Includes the trailing newline when one is buffered;
-   *              if buffered data has no newline, that partial data is returned.
-   * @return @c true if any stdout data was read.
+   * @param line  Destination string; receives buffered data including a trailing newline
+   *              when one was buffered.
+   * @return @c true when at least one byte was copied into @p line.
    */
   bool read_line_stdout(std::string& line);
 
   /**
-   * @brief Reads one line from stderr into @p line.
+   * @brief Reads one buffered line from stderr.
    *
-   * @param line  Output string. Includes the trailing newline when one is buffered;
-   *              if buffered data has no newline, that partial data is returned.
-   * @return @c true if any stderr data was read.
+   * @param line  Destination string; receives buffered data including a trailing newline
+   *              when one was buffered.
+   * @return @c true when at least one byte was copied into @p line.
    */
   bool read_line_stderr(std::string& line);
 
   /**
-   * @brief Reads up to @p max_size bytes from stdout into @p buffer.
+   * @brief Reads up to @p max_size bytes of buffered stdout into @p buffer.
    *
-   * @param buffer    Destination vector.
-   * @param max_size  Maximum bytes to read.
-   * @return Number of bytes actually read.
+   * @param buffer    Destination byte vector.
+   * @param max_size  Upper bound on bytes to copy.
+   * @return Number of bytes actually copied.
    */
   size_t read_stdout(std::vector<uint8_t>& buffer, size_t max_size);
 
   /**
-   * @brief Reads up to @p max_size bytes from stderr into @p buffer.
+   * @brief Reads up to @p max_size bytes of buffered stderr into @p buffer.
    *
-   * @param buffer    Destination vector.
-   * @param max_size  Maximum bytes to read.
-   * @return Number of bytes actually read.
+   * @param buffer    Destination byte vector.
+   * @param max_size  Upper bound on bytes to copy.
+   * @return Number of bytes actually copied.
    */
   size_t read_stderr(std::vector<uint8_t>& buffer, size_t max_size);
 
   /**
-   * @brief Reads all available stdout data into @p buffer (byte vector overload).
+   * @brief Drains all buffered stdout into @p buffer.
    *
-   * @param buffer  Destination vector; existing content is replaced.
-   * @return @c true if any data was available.
+   * @param buffer  Destination byte vector; replaced.
+   * @return @c true when any data was copied.
    */
   bool read_all_output(std::vector<uint8_t>& buffer);
 
   /**
-   * @brief Reads all available stderr data into @p buffer (byte vector overload).
+   * @brief Drains all buffered stderr into @p buffer.
    *
-   * @param buffer  Destination vector; existing content is replaced.
-   * @return @c true if any data was available.
+   * @param buffer  Destination byte vector; replaced.
+   * @return @c true when any data was copied.
    */
   bool read_all_error(std::vector<uint8_t>& buffer);
 
   /**
-   * @brief Reads all available stdout and stderr data into @p buffer (byte vector overload).
+   * @brief Drains all buffered stdout and stderr into @p buffer.
    *
-   * @param buffer  Destination vector; existing content is replaced.
-   * @return @c true if any data was available.
+   * @param buffer  Destination byte vector; replaced.
+   * @return @c true when any data was copied.
    */
   bool read_all(std::vector<uint8_t>& buffer);
 
   /**
-   * @brief Reads all available stdout data into @p str.
+   * @brief Drains all buffered stdout into @p str.
    *
-   * @param str  Destination string.
-   * @return @c true if any data was available.
+   * @param str  Destination string; replaced.
+   * @return @c true when any data was copied.
    */
   bool read_all_output(std::string& str);
 
   /**
-   * @brief Reads all available stderr data into @p str.
+   * @brief Drains all buffered stderr into @p str.
    *
-   * @param str  Destination string.
-   * @return @c true if any data was available.
+   * @param str  Destination string; replaced.
+   * @return @c true when any data was copied.
    */
   bool read_all_error(std::string& str);
 
   /**
-   * @brief Reads all available stdout and stderr data into @p str.
+   * @brief Drains all buffered stdout and stderr into @p str.
    *
-   * @param str  Destination string.
-   * @return @c true if any data was available.
+   * @param str  Destination string; replaced.
+   * @return @c true when any data was copied.
    */
   bool read_all(std::string& str);
 
   /**
-   * @brief Writes @p buffer to the child's stdin.
+   * @brief Writes a byte buffer to the child's stdin.
    *
-   * @param buffer     Data to write.
-   * @param timeout_ms Maximum time to wait for the write to complete.  Default: @c kDefaultWriteTimeoutMs.
+   * @param buffer     Bytes to write.
+   * @param timeout_ms Maximum wait in milliseconds.  Default: @c kDefaultWriteTimeoutMs.
    * @return Number of bytes actually written.
    */
   size_t write(const std::vector<uint8_t>& buffer, int timeout_ms = kDefaultWriteTimeoutMs);
@@ -569,41 +575,37 @@ class VLINK_EXPORT Process {
    * @brief Writes a string to the child's stdin.
    *
    * @param str        String to write.
-   * @param timeout_ms Maximum time to wait.  Default: @c kDefaultWriteTimeoutMs.
+   * @param timeout_ms Maximum wait in milliseconds.  Default: @c kDefaultWriteTimeoutMs.
    * @return Number of bytes actually written.
    */
   size_t write(const std::string& str, int timeout_ms = kDefaultWriteTimeoutMs);
 
   /**
-   * @brief Closes the write channel (stdin pipe), signalling EOF to the child.
+   * @brief Closes the stdin pipe, signalling EOF to the child.
    */
   void close_write_channel();
 
   /**
-   * @brief Synchronously executes a program and waits for it to finish.
+   * @brief Synchronously executes a program and returns its exit code.
    *
    * @details
-   * Blocks until the program exits or @p timeout_ms elapses.  Returns the exit code.
-   * Stdout and stderr are discarded.
+   * Standard output and standard error are discarded.  Returns @c -1 when the launch
+   * fails or the timeout elapses.
    *
    * @param program     Path to the executable.
-   * @param arguments   Command-line arguments.  Default: empty.
-   * @param timeout_ms  Maximum wait time.  Default: @c kDefaultExecuteTimeoutMs (30 s).
-   * @return Exit code, or -1 on timeout or start failure.
+   * @param arguments   Argument vector.  Default: empty.
+   * @param timeout_ms  Maximum wait in milliseconds.  Default: @c kDefaultExecuteTimeoutMs.
+   * @return Exit code on success, or @c -1 on failure.
    */
   static int execute(const std::string& program, const std::vector<std::string>& arguments = {},
                      int timeout_ms = kDefaultExecuteTimeoutMs);
 
   /**
-   * @brief Starts a program in the background and returns immediately.
-   *
-   * @details
-   * The started process is completely detached from the calling process.
-   * No handle is returned; the process runs until it exits on its own.
+   * @brief Launches a program detached from the calling process and returns immediately.
    *
    * @param program    Path to the executable.
-   * @param arguments  Command-line arguments.  Default: empty.
-   * @return @c true if the process was successfully started.
+   * @param arguments  Argument vector.  Default: empty.
+   * @return @c true when the OS reports a successful launch.
    */
   static bool start_detached(const std::string& program, const std::vector<std::string>& arguments = {});
 

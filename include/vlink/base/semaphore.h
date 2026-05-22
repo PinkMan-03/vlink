@@ -23,44 +23,47 @@
 
 /**
  * @file semaphore.h
- * @brief In-process counting semaphore with optional timeout.
+ * @brief Counting semaphore confined to a single process.
  *
  * @details
- * @c Semaphore provides classic P/V (acquire/release) semaphore semantics
- * within a single process.  It is built on @c std::mutex and @c std::condition_variable
- * (via the VLink @c ConditionVariable, which uses @c CLOCK_MONOTONIC to avoid NTP
- * clock-jump issues on Linux).
+ * @c vlink::Semaphore offers classic Dijkstra P/V semantics for in-process synchronisation,
+ * built on top of @c std::mutex and the project @c ConditionVariable (which uses
+ * @c CLOCK_MONOTONIC on Linux so NTP-induced jumps do not skew @c wait timeouts).  It is
+ * the right primitive for permit-style throttling, bounded-queue back-pressure, and
+ * producer/consumer handoff.
  *
- * Typical use cases:
- * - Limiting concurrent access to a resource pool.
- * - Signalling between a producer and one or more consumers.
- * - Throttling task submission to a bounded work queue.
+ * Wait/post interaction between two threads:
+ *
+ * @verbatim
+ *   Producer                        Consumer
+ *      |                               |
+ *      | release(n) -- counter+=n ---> |
+ *      |                               | acquire(m): blocks while counter<m
+ *      |                               | counter -= m; resumes
+ * @endverbatim
  *
  * @note
- * - @c acquire() blocks the caller until at least the requested number of permits is available.
- * - @c release() is safe to call from any thread.  It is NOT
- *   async-signal-safe because it acquires @c std::mutex internally; do not
- *   call it from a signal handler.
- * - @c reset() with @c interrupt_waiters == @c true is a disruptive operation
- *   that wakes all blocked @c acquire() callers and returns @c false to them.
- *   Use it only during controlled shutdown.
- * - This is an in-process semaphore.  For cross-process synchronisation, use
- *   @c SysSemaphore.
+ * - @c release() acquires the internal mutex, so it must not be called from a signal
+ *   handler.  Use @c SysSemaphore or @c sem_post directly for signal-context posts.
+ * - @c reset(true) wakes every blocked waiter and returns @c false to them; use only
+ *   during controlled shutdown.
  *
  * @par Example
  * @code
- * vlink::Semaphore sem(0);  // start at 0
+ * vlink::Semaphore sem(0);
  *
- * // Producer:
- * do_work();
- * sem.release();  // signal one consumer
+ * std::thread producer([&] {
+ *   do_work();
+ *   sem.release();
+ * });
  *
- * // Consumer:
- * if (sem.acquire(1, 100)) {  // wait up to 100 ms
+ * if (sem.acquire(1, 100)) {
  *   consume_result();
  * } else {
  *   handle_timeout();
  * }
+ *
+ * producer.join();
  * @endcode
  */
 
@@ -74,79 +77,76 @@ namespace vlink {
 
 /**
  * @class Semaphore
- * @brief In-process counting semaphore with optional acquire timeout.
+ * @brief In-process counting semaphore with an optional acquire timeout.
  *
  * @details
- * The internal counter is initialised via the constructor and can be
- * atomically decremented (@c acquire) or incremented (@c release).
+ * The internal counter starts at the value supplied to the constructor; @c acquire
+ * decrements it (blocking when not enough permits are available) and @c release
+ * increments it while waking blocked acquirers.
  */
 class VLINK_EXPORT Semaphore final {
  public:
   /**
-   * @brief Sentinel value for @c acquire() meaning "wait indefinitely".
+   * @brief Sentinel value for @c acquire() meaning wait indefinitely.
    */
   static constexpr int kInfinite{-1};
 
   /**
-   * @brief Constructs a @c Semaphore with an initial counter value.
+   * @brief Constructs a semaphore with the given initial permit count.
    *
-   * @param count  Initial number of available permits (default: 0).
+   * @param count  Initial permit count.  Default: @c 0.
    */
   explicit Semaphore(size_t count = 0) noexcept;
 
   /**
-   * @brief Destructor.  Wakes all blocked acquirers before destruction.
+   * @brief Destructor.  Wakes every blocked acquirer before tearing down internal state.
    */
   ~Semaphore() noexcept;
 
   /**
-   * @brief Decrements the semaphore counter by @p n, blocking until permits
-   *        are available.
+   * @brief Decrements the counter by @p n, blocking when not enough permits are available.
    *
    * @details
-   * If the counter is less than @p n, the caller is blocked until enough
-   * @c release() calls bring the counter up.  A timeout causes the function
-   * to return @c false without decrementing the counter.
+   * The call blocks while the counter is less than @p n.  A timeout returns @c false
+   * without modifying the counter.  When @c reset(true) is invoked while a thread is
+   * blocked, the wait returns @c false and the counter is restored to the initial value.
    *
-   * @param n           Number of permits to acquire (default: 1).
-   * @param timeout_ms  Maximum time to wait in milliseconds.
-   *                    Use @c kInfinite (-1) to wait indefinitely (default).
-   * @return @c true if the permits were acquired, @c false on timeout or
-   *         if the semaphore was reset with @p interrupt_waiters == @c true.
+   * @param n           Number of permits requested.  Default: @c 1.
+   * @param timeout_ms  Maximum wait in milliseconds; @c kInfinite waits forever.
+   * @return @c true when the permits were acquired; @c false on timeout or reset.
    */
   bool acquire(size_t n = 1, int timeout_ms = kInfinite) noexcept;
 
   /**
-   * @brief Increments the semaphore counter by @p n, waking blocked acquirers.
+   * @brief Increments the counter by @p n and wakes blocked acquirers.
    *
    * @details
-   * Increments the counter under the mutex and then broadcasts to all blocked
-   * @c acquire() callers; each will re-check whether enough permits are available.
+   * Broadcasts the condition variable so every blocked acquirer can re-evaluate the
+   * permit count.  Safe to call from any thread.
    *
-   * @param n  Number of permits to release (default: 1).
+   * @param n  Number of permits to add.  Default: @c 1.
    */
   void release(size_t n = 1) noexcept;
 
   /**
-   * @brief Resets the semaphore counter to its initial (constructor-provided) value.
+   * @brief Restores the counter to the initial value supplied to the constructor.
    *
    * @details
-   * If @p interrupt_waiters is @c true, all threads blocked in @c acquire()
-   * are woken and their calls return @c false.  Use this during shutdown to
-   * unblock consumers cleanly.
+   * When @p interrupt_waiters is @c true every blocked acquirer is woken and its call
+   * returns @c false, which is the recommended way to release waiters during shutdown.
    *
-   * @param interrupt_waiters  If @c true, wake all blocked acquirers (default: false).
+   * @param interrupt_waiters  When @c true, wakes blocked acquirers.  Default: @c false.
    */
   void reset(bool interrupt_waiters = false) noexcept;
 
   /**
-   * @brief Returns the current value of the semaphore counter.
+   * @brief Returns a non-atomic snapshot of the current counter value.
    *
    * @details
-   * The returned value is a snapshot; it may change before the caller can use it.
-   * Intended for diagnostic and logging purposes only.
+   * The value may change immediately after the call returns; treat the result as a
+   * diagnostic-only hint.
    *
-   * @return Current counter value.
+   * @return Current permit count snapshot.
    */
   [[nodiscard]] size_t get_count() const noexcept;
 

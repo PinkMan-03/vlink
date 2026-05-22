@@ -23,34 +23,39 @@
 
 /**
  * @file calculate_sample.h
- * @brief Per-GUID cumulative sample loss tracker for VLink subscribers.
+ * @brief Per-publisher gap detection used to expose sample loss statistics to subscribers.
  *
  * @details
- * @c CalculateSample maintains per-sender (GUID) sequence-number state to
- * detect gaps in the message stream.  It is used by DDS and other transports
- * that carry monotonically-increasing sequence numbers with their messages.
+ * This is an internal implementation header used by the public subscriber / getter
+ * templates and their backend @c NodeImpl classes; it is not part of the user API.
+ * @c CalculateSample inspects the monotonic sequence numbers attached to incoming
+ * frames and accumulates how many samples have been expected and how many have
+ * been skipped, on a per-sender basis.
+ *
+ * @par Role
+ * | Caller                                   | What it does with @c CalculateSample           |
+ * | ---------------------------------------- | ---------------------------------------------- |
+ * | @c SubscriberImpl / @c GetterImpl        | Owns one instance when latency tracking is on. |
+ * | Transport backend receive thread         | Calls @c update(seq, guid) for every frame.    |
+ * | @c get_lost() / proxy / discovery layer  | Reads cumulative counters for reporting.       |
+ *
+ * @par Sizing summary
+ * Counters are stored per GUID in a hash map, so memory grows linearly with the
+ * number of observed senders.  Each entry contains three @c uint64_t values, and
+ * the table is guarded by a @c std::shared_mutex so reads from multiple reader
+ * threads do not contend with each other.
  *
  * @par Algorithm
- * For each GUID, the tracker records:
- * - @c first -- the first sequence number seen from this sender.
- * - @c expected -- the next sequence number expected.
- * - @c lost -- cumulative count of skipped sequence numbers.
+ * - The first call for a GUID seeds @c first and @c expected with the observed
+ *   sequence number and records zero loss.
+ * - Subsequent in-order frames increment @c expected by one.
+ * - When @c seq is ahead of @c expected by less than @c UINT32_MAX, the gap is
+ *   added to @c lost and @c expected jumps to @c seq + 1.
+ * - A gap of @c UINT32_MAX or larger is treated as a sender restart and the
+ *   state is re-seeded with no extra loss recorded.
  *
- * On each @c update(seq, guid) call:
- * - If @c expected == 0 or the gap looks like a reset, the state is
- *   re-initialised (no loss recorded for the first message).
- * - Otherwise, @c lost is incremented by the difference
- *   @c (seq - expected), and @c expected is set to @c seq + 1.
- *
- * @par Thread Safety
- * All public methods are thread-safe; @c update() uses an exclusive lock and
- * @c get_total() / @c get_lost() use a shared lock.
- *
- * @note
- * - A gap larger than @c UINT32_MAX between consecutive sequence numbers is
- *   treated as a counter reset rather than a loss event.
- * - @c get_total() returns the sum over all GUIDs of
- *   @c (expected - first), i.e. the number of expected messages.
+ * @note @c get_total() returns the sum of @c (expected - first) across all
+ *       GUIDs; @c get_lost() returns the sum of @c lost counters.
  */
 
 #pragma once
@@ -65,35 +70,34 @@ namespace vlink {
 
 /**
  * @class CalculateSample
- * @brief Thread-safe, per-GUID cumulative sample loss counter.
+ * @brief Tracks expected and lost sample counts grouped by sender GUID.
  *
  * @details
- * Instantiated once per @c SubscriberImpl or @c GetterImpl that has
- * latency/loss tracking enabled.  The @c guid parameter allows a single
- * subscriber to track messages from multiple publishers independently.
+ * One instance is created per subscriber / getter when latency-and-loss tracking
+ * is enabled.  The @c guid parameter of @c update() lets a single receiver
+ * account for multiple senders without their streams interfering.
  */
 class VLINK_EXPORT CalculateSample final {
  public:
   /**
-   * @brief Default constructor.
+   * @brief Constructs an empty counter.
    */
   CalculateSample() noexcept;
 
   /**
-   * @brief Destructor.
+   * @brief Releases all per-sender state.
    */
   ~CalculateSample() noexcept;
 
   /**
-   * @brief Processes an incoming sequence number for the given sender.
+   * @brief Records a sequence number received from @p guid.
    *
    * @details
-   * Detects gaps in the sequence and accumulates the loss count.
-   * Out-of-order or wrap-around sequences larger than @c UINT32_MAX are
-   * treated as resets and do not increment the loss counter.
+   * Updates the per-sender counters according to the algorithm described at file
+   * scope.  Acquires the exclusive side of the shared mutex.
    *
-   * @param seq   Sequence number of the received message.
-   * @param guid  Sender identifier (GUID).  Use @c 0 for single-sender streams.
+   * @param seq   Sequence number reported by the transport.
+   * @param guid  Sender identifier; pass @c 0 when there is exactly one source.
    */
   void update(uint64_t seq, uint64_t guid = 0) noexcept;
 
@@ -101,20 +105,17 @@ class VLINK_EXPORT CalculateSample final {
    * @brief Returns the total number of expected samples across all senders.
    *
    * @details
-   * Computed as the sum of @c (expected - first) for every tracked GUID.
-   * This includes both successfully delivered and lost samples.
+   * Computed as the sum of @c (expected - first) over every tracked GUID.  The
+   * value includes both received and lost samples.
    *
-   * @return Total expected sample count, or 0 if no data has been received.
+   * @return Number of expected samples; @c 0 when no data has been observed yet.
    */
   [[nodiscard]] uint64_t get_total() const noexcept;
 
   /**
    * @brief Returns the cumulative number of lost samples across all senders.
    *
-   * @details
-   * Accumulated from every gap detected since the last reset.
-   *
-   * @return Total lost sample count.
+   * @return Aggregate loss count since construction.
    */
   [[nodiscard]] uint64_t get_lost() const noexcept;
 

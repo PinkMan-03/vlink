@@ -23,60 +23,106 @@
 
 /**
  * @file object_array.h
- * @brief Zero-copy 3-D object detection / tracking result array for VLink transport.
+ * @brief Zero-copy variable-length array of fixed-size 3-D detection / tracking records.
  *
  * @details
- * @c ObjectArray carries a variable-length list of fixed-size @c Object
- * records produced by 3-D perception, multi-sensor fusion, or tracking
- * pipelines.  Each @c Object captures pose, dimensions, kinematics,
- * classification, tracking identity, and covariance for one obstacle.  The
- * container struct is 112 bytes and each @c Object record is 144 bytes; both
- * are verified at compile time via @c static_assert.  @c Object is
- * intentionally @c alignas(4) (not 8): the wire payload starts at offset
- * @c 4 + @c 112 = @c 116, which is only 4-byte-aligned, so a typed
- * @c objects() pointer would risk SIGBUS on strict-alignment architectures
- * if @c Object required 8-byte alignment.  All record fields are at most
- * 4 bytes wide, so 4-byte alignment is sufficient.
+ * @c ObjectArray is the canonical message produced by 3-D perception, sensor
+ * fusion, and multi-object tracking pipelines.  It packs a homogeneous array
+ * of @c Object records, each capturing the pose, dimensions, kinematics,
+ * classification, identity, and covariance of one obstacle.  A 40-byte
+ * @c Header prefix carries sequencing and dual-timestamp metadata.
  *
- * @par Binary wire format
+ * @par Container vs. record layout
+ * The container struct is 112 bytes; each @c Object record is 144 bytes.
+ * Both sizes are locked by @c static_assert.  @c Object intentionally uses
+ * 4-byte alignment because the wire payload starts at offset 116 (which is
+ * only 4-byte-aligned), so a typed @c objects() pointer would risk SIGBUS on
+ * strict-alignment architectures if @c Object required 8-byte alignment.
+ *
+ * @par Object schema
+ * | Field                     | Type                | Meaning                                       |
+ * | ------------------------- | ------------------- | --------------------------------------------- |
+ * | @c label                  | @c char[32]         | Class name (e.g. "car", "pedestrian")         |
+ * | @c position[3]            | @c float            | Centre in metres (world frame)                |
+ * | @c yaw                    | @c float            | Heading in radians (REP-103)                  |
+ * | @c size[3]                | @c float            | Length, width, height in metres               |
+ * | @c yaw_rate               | @c float            | Angular velocity in rad/s                     |
+ * | @c velocity[3]            | @c float            | Linear velocity in m/s                        |
+ * | @c score                  | @c float            | Detection confidence in [0, 1]                |
+ * | @c acceleration[3]        | @c float            | Linear acceleration in m/s^2                  |
+ * | @c existence_probability  | @c float            | Existence probability in [0, 1]               |
+ * | @c position_covariance[6] | @c float            | Upper triangle of 3x3 covariance              |
+ * | @c class_id               | @c uint32_t         | Numeric class identifier                      |
+ * | @c track_id               | @c uint32_t         | Tracking id (0 = unassociated detection)      |
+ * | @c age                    | @c uint32_t         | Tracking age in frames                        |
+ * | @c num_observations       | @c uint32_t         | Cumulative observation count                  |
+ * | @c motion_state           | @c MotionState      | Stationary / moving / stopped / parked        |
+ * | @c source_type            | @c SourceType       | LiDAR / camera / radar / fusion / ultrasonic  |
+ * | @c subtype_id             | @c uint16_t         | Fine-grained subtype                          |
+ * | @c reserved32             | @c uint32_t         | Reserved (wire-locked)                        |
+ *
+ * @par Wire format
+ * Both the container and the @c Object record are POD; @c memcpy is the
+ * canonical serialiser.  The @c sizeof values are locked by @c static_assert
+ * and form a permanent contract: @c vlink::zerocopy::* containers offer NO
+ * forward and NO backward binary compatibility, and every field including
+ * reserved bytes is part of the wire contract.
  * @code
- * [ magic_begin (4) | ObjectArray struct (112) | Object[0..count) (count*144) | magic_end (4) ]
+ * static_assert(sizeof(ObjectArray) == 112, "Sizeof must be 112 bytes.");
+ * static_assert(sizeof(ObjectArray::Object) == 144, "Sizeof must be 144 bytes.");
  * @endcode
- * The struct block is a raw snapshot of the 64-bit ABI layout used by this
- * library; receivers must parse it through @c operator<< and must not treat
- * embedded pointer/ownership fields as portable wire values.
  *
- * @par Usage
+ * @par Memory layout
+ * @code
+ * Offset  Size  Field
+ * ------  ----  --------------------------
+ *      0    40  Header   header
+ *     40     8  uint8_t* data_
+ *     48     8  size_t   capacity_
+ *     56     8  uint64_t update_time_ns_
+ *     64    16  char     source_id_[16]
+ *     80     4  uint32_t channel_
+ *     84     4  uint32_t freq_
+ *     88     4  uint32_t count_
+ *     92     4  uint32_t pack_size_
+ *     96     1  bool     is_owner_
+ *     97     1  uint8_t  reserved8_
+ *     98     2  uint16_t reserved16_
+ *    100     4  uint32_t reserved32_
+ *    104     4  uint32_t reserved2_
+ *    108     4  uint32_t reserved3_
+ * ------  ----  --------------------------
+ *  Total   112  bytes (alignas 8)
+ *
+ * Wire envelope:
+ * [ magic_begin (4) | ObjectArray (112) | Object[0..count) (count*144) | magic_end (4) ]
+ * @endcode
+ *
+ * @par Reserved bytes
+ * @c reserved8_, @c reserved16_, @c reserved32_, @c reserved2_, @c reserved3_
+ * are exposed through @c get_reserved* helpers and survive @c clear() and
+ * the copy / move helpers so producers can stamp minor flags.  None of these
+ * slots may be repurposed by application code: future library revisions may
+ * bind them to real fields, silently breaking peers that abused the slot.
+ *
+ * @par Example
  * @code
  * vlink::zerocopy::ObjectArray arr;
- * arr.create(256);                              // pre-allocate 256 slots
+ * arr.create(256);
  * arr.set_source_id("fusion_v2");
  *
- * vlink::zerocopy::ObjectArray::Object obj;        // public POD -- assign fields directly
+ * vlink::zerocopy::ObjectArray::Object obj;
  * std::strncpy(obj.label, "car", sizeof(obj.label) - 1);
- * obj.position[0] = 12.0f;
- * obj.position[1] = 0.3f;
- * obj.position[2] = 0.0f;
- * obj.size[0] = 4.5f;
- * obj.size[1] = 1.8f;
- * obj.size[2] = 1.6f;
- * obj.yaw = 0.1f;
- * obj.velocity[0] = 8.5f;
- * obj.class_id = 1;
- * obj.track_id = 42;
+ * obj.position[0] = 12.0F;
+ * obj.size[0]     = 4.5F;
+ * obj.velocity[0] = 8.5F;
+ * obj.class_id    = 1;
+ * obj.track_id    = 42;
  * arr.push_value(obj);
  *
  * vlink::Bytes wire;
  * arr >> wire;
- *
- * vlink::zerocopy::ObjectArray arr2;
- * arr2 << wire;
  * @endcode
- *
- * @note
- * - 32-bit architectures emit a compile-time warning and are not supported.
- * - After @c operator<<, the data pointer references memory inside the
- *   source @c Bytes.  The @c Bytes must outlive the @c ObjectArray.
  */
 
 #pragma once
@@ -93,344 +139,375 @@ namespace zerocopy {
 
 /**
  * @struct ObjectArray
- * @brief Zero-copy variable-length array of 3-D detection / tracking objects.
+ * @brief 112-byte POD container holding a packed array of 144-byte @c Object records.
  *
  * @details
- * Stores a packed buffer of homogeneous @c Object records.  The container
- * struct is 112 bytes on 64-bit targets with a 15-byte reserved tail.
+ * The container size is locked at 112 bytes on 64-bit targets via
+ * @c static_assert.  Records share a single owned allocation so a freshly
+ * deserialised array can return a typed @c objects() pointer that addresses
+ * the wire buffer in place.
  */
 struct VLINK_EXPORT_AND_ALIGNED(8) ObjectArray final {
   /**
-   * @brief Motion / kinematic state of a tracked object.
+   * @brief Motion / kinematic state classification for a tracked object.
    */
   enum MotionState : uint8_t {
-    kMotionUnknown = 0,     ///< Unknown.
-    kMotionStationary = 1,  ///< Stationary (parked / fixed obstacle).
+    kMotionUnknown = 0,     ///< Unknown / uninitialised state.
+    kMotionStationary = 1,  ///< Stationary obstacle (never expected to move).
     kMotionMoving = 2,      ///< Actively moving.
     kMotionStopped = 3,     ///< Temporarily stopped (e.g. at a red light).
     kMotionParked = 4,      ///< Long-term parked vehicle.
   };
 
   /**
-   * @brief Source / origin sensor of a detection.
+   * @brief Origin sensor / pipeline that produced the detection.
    */
   enum SourceType : uint8_t {
-    kSourceUnknown = 0,     ///< Unknown.
+    kSourceUnknown = 0,     ///< Unknown / uninitialised source.
     kSourceLidar = 1,       ///< LiDAR-only detection.
     kSourceCamera = 2,      ///< Camera-only detection.
     kSourceRadar = 3,       ///< Radar-only detection.
     kSourceFusion = 4,      ///< Multi-sensor fusion result.
-    kSourceUltrasonic = 5,  ///< Ultrasonic sensor.
+    kSourceUltrasonic = 5,  ///< Ultrasonic-based detection.
   };
 
   /**
    * @struct Object
-   * @brief Fixed-size 3-D object record (144 bytes).
+   * @brief 144-byte POD record describing one detection / track.
    *
    * @details
-   * Public POD that captures pose, dimensions, kinematics, classification,
-   * and tracking metadata for one detection / track.  All members are
-   * directly accessible; populate by assigning fields and pushing with
-   * @c ObjectArray::push_value.
+   * Public POD; assign fields directly and append with
+   * @c ObjectArray::push_value.  The record uses 4-byte alignment because the
+   * containing payload starts at a 4-byte-aligned offset within the wire
+   * envelope, ensuring typed access stays safe on strict-alignment CPUs.
    */
   struct VLINK_EXPORT_AND_ALIGNED(4) Object final {
     /**
-     * @brief Default constructor -- zero-initialises all fields.
-     *
-     * @details
-     * Verifies via @c static_assert that the struct is exactly 144 bytes.
+     * @brief Default-constructs a zeroed record and asserts the 144-byte contract.
      */
     Object() noexcept;
 
-    char label[32]{0};                         ///< NUL-terminated class name (e.g. "car", "pedestrian").
+    char label[32]{0};                         ///< NUL-terminated class label (e.g. @c "car").
     float position[3]{0};                      ///< Centre position in metres (world frame).
-    float yaw{0};                              ///< Yaw angle in radians (REP-103).
-    float size[3]{0};                          ///< Bounding-box dimensions: length, width, height in metres.
-    float yaw_rate{0};                         ///< Yaw rate in radians per second.
+    float yaw{0};                              ///< Heading in radians (REP-103).
+    float size[3]{0};                          ///< Length, width, height bounding-box extents in metres.
+    float yaw_rate{0};                         ///< Heading rate in radians per second.
     float velocity[3]{0};                      ///< Linear velocity in metres per second.
-    float score{0};                            ///< Detection score in [0, 1].
+    float score{0};                            ///< Detection confidence in [0, 1].
     float acceleration[3]{0};                  ///< Linear acceleration in metres per second squared.
     float existence_probability{0};            ///< Existence probability in [0, 1].
-    float position_covariance[6]{0};           ///< Upper-triangle of the 3x3 position covariance: xx,xy,xz,yy,yz,zz.
+    float position_covariance[6]{0};           ///< Upper-triangle of 3x3 position covariance (xx,xy,xz,yy,yz,zz).
     uint32_t class_id{0};                      ///< Numeric class identifier.
-    uint32_t track_id{0};                      ///< Tracking identifier (0 for unassociated detection).
+    uint32_t track_id{0};                      ///< Tracking identifier; 0 marks an unassociated detection.
     uint32_t age{0};                           ///< Tracking age in frames.
-    uint32_t num_observations{0};              ///< Cumulative observation count.
-    MotionState motion_state{kMotionUnknown};  ///< Motion / kinematic state tag.
-    SourceType source_type{kSourceUnknown};    ///< Source / origin sensor tag.
-    uint16_t subtype_id{0};                    ///< Fine-grained subtype identifier (e.g. sedan vs. SUV).
-    uint32_t reserved32{0};                    ///< Reserved for future extension.
+    uint32_t num_observations{0};              ///< Cumulative observation count for this track.
+    MotionState motion_state{kMotionUnknown};  ///< Motion / kinematic classification.
+    SourceType source_type{kSourceUnknown};    ///< Producing sensor or pipeline.
+    uint16_t subtype_id{0};                    ///< Fine-grained subtype (e.g. sedan vs SUV).
+    uint32_t reserved32{0};                    ///< Reserved (wire-locked); do not repurpose.
   };
 
   /**
-   * @brief Default constructor.
-   *
-   * @details
-   * Verifies via @c static_assert that the container is exactly 112 bytes
-   * and that @c Object is exactly 144 bytes on 64-bit platforms.  32-bit
-   * architectures emit a compile-time warning.
+   * @brief Default-constructs an empty array and asserts the 112-byte container contract.
    */
   ObjectArray() noexcept;
 
   /**
-   * @brief Destructor -- frees the owned record buffer if @c is_owner() is @c true.
+   * @brief Frees the owned record buffer when @c is_owner() is @c true.
    */
   ~ObjectArray() noexcept;
 
   /**
-   * @brief Copy constructor -- performs a deep copy of @p target.
+   * @brief Deep-copies @p target into a freshly allocated array.
+   *
+   * @param target Source array to clone.
    */
   ObjectArray(const ObjectArray& target) noexcept;
 
   /**
-   * @brief Move constructor -- transfers ownership from @p target.
+   * @brief Steals @p target's allocation and metadata; @p target ends empty.
+   *
+   * @param target Source array moved from.
    */
   ObjectArray(ObjectArray&& target) noexcept;
 
   /**
-   * @brief Copy-assignment operator -- deep-copies @p target.
+   * @brief Deep-copy-assigns @p target; self-assignment is a no-op.
+   *
+   * @param target Source array to clone.
+   * @return Reference to @c *this.
    */
   ObjectArray& operator=(const ObjectArray& target) noexcept;
 
   /**
-   * @brief Move-assignment operator -- transfers ownership from @p target.
+   * @brief Move-assigns @p target; self-assignment is a no-op.
+   *
+   * @param target Source array moved from.
+   * @return Reference to @c *this.
    */
   ObjectArray& operator=(ObjectArray&& target) noexcept;
 
   /**
-   * @brief Deserialises an @c ObjectArray from a @c Bytes wire buffer.
+   * @brief Deserialises an array from @p bytes using zero-copy borrowing semantics.
    *
-   * @details
-   * Zero-copy: the record pointer references memory inside @p bytes.
+   * @param bytes Wire buffer previously produced by @c operator>>.
+   * @return @c true on success; @c false on magic mismatch or size mismatch.
    */
   bool operator<<(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Serialises this @c ObjectArray into a @c Bytes wire buffer.
+   * @brief Serialises the struct snapshot plus record buffer into @p bytes.
+   *
+   * @param bytes Output buffer; resized automatically when too small.
+   * @return Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
 
   /**
-   * @brief Checks whether @p bytes contains a valid @c ObjectArray wire buffer.
+   * @brief Validates that @p bytes carries a well-formed @c ObjectArray envelope.
+   *
+   * @param bytes Wire buffer to inspect.
+   * @return @c true when both magic sentinels match and the minimum size holds.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Returns the total serialised byte count for this array.
+   * @brief Total bytes that @c operator>> would write for this array.
+   *
+   * @return @c sizeof(magic_begin) + @c sizeof(ObjectArray) + @c count * @c pack_size + @c sizeof(magic_end).
    */
   [[nodiscard]] size_t get_serialized_size() const noexcept;
 
   /**
-   * @brief Returns @c true when the record buffer is present and non-empty.
+   * @brief Whether the record buffer pointer is non-null and the array holds at least one record.
+   *
+   * @return @c true when the array holds usable records.
    */
   [[nodiscard]] bool is_valid() const noexcept;
 
   /**
-   * @brief Borrows the record buffer from @p target without copying.
+   * @brief Borrows @p target's record buffer without copying.
    *
-   * @details
-   * Reserved fields are left unchanged.
+   * @param target Source array whose buffer must outlive @c *this.
+   * @return @c false on self-borrow, otherwise @c true.
    */
   bool shallow_copy(const ObjectArray& target) noexcept;
 
   /**
-   * @brief Deep-copies the record buffer from @p target.
+   * @brief Allocates (or reuses) an owned buffer and copies @p target's records.
    *
-   * @details
-   * If @c *this already owns a buffer whose capacity matches @c target's
-   * @c count * @c pack_size, the data is copied in place; otherwise a new
-   * buffer is allocated sized to the target's current logical content.
-   * Reserved fields are left unchanged.
+   * @param target Source array to clone.
+   * @return @c false on self-copy, otherwise @c true.
    */
   bool deep_copy(const ObjectArray& target) noexcept;
 
   /**
-   * @brief Transfers ownership from @p target.
+   * @brief Transfers ownership from @p target; @p target ends empty.
    *
-   * @details
-   * Reserved fields are left unchanged in both objects.
+   * @param target Source array moved from.
+   * @return @c false on self-move, otherwise @c true.
    */
   bool move_copy(ObjectArray& target) noexcept;
 
   /**
-   * @brief Allocates an owned record buffer sized to @p count Objects.
+   * @brief Pre-allocates capacity for @p count records and resets the logical count.
    *
-   * @details
-   * Frees any existing owned buffer.  Sets @c pack_size to @c sizeof(Object)
-   * and capacity to @c count * @c sizeof(Object).  Sets @c count to 0.
-   *
-   * @param count Maximum number of Objects to pre-allocate.  Must be non-zero.
-   * @return       @c false if @p count is zero, otherwise @c true.
+   * @param count Maximum number of records; must be non-zero.
+   * @return @c false when @p count is zero, otherwise @c true.
    */
   bool create(size_t count) noexcept;
 
   /**
-   * @brief Releases owned resources and resets metadata and @c header.
-   *
-   * @details
-   * Reserved fields are left unchanged.
+   * @brief Releases the owned buffer (if any) and resets metadata except reserved fields.
    */
   void clear() noexcept;
 
   /**
-   * @brief Appends one @c Object record at the end of the buffer.
+   * @brief Appends a record at the end of the buffer.
    *
    * @param object Source record.
-   * @return        @c false on capacity overflow / invalid state.
+   * @return @c false on capacity overflow or invalid state.
    */
   bool push_value(const Object& object) noexcept;
 
   /**
-   * @brief Overwrites the record at @p index with @p object.
+   * @brief Overwrites the record at @p index.
    *
-   * @param index Zero-based slot index.  Must be < @c count().
+   * @param index Zero-based slot index; must be less than @c count().
    * @param object New record contents.
-   * @return        @c false on out-of-range / invalid state.
+   * @return @c false on out-of-range or invalid state.
    */
   bool set_value(uint32_t index, const Object& object) noexcept;
 
   /**
-   * @brief Reads the record at @p index into @p object.
+   * @brief Reads the record at @p index into @p object (zeroed on out-of-range).
    *
-   * @return @c false on out-of-range; @p object is zeroed.
+   * @param index Zero-based slot index.
+   * @param object Destination.
+   * @return @c false on out-of-range.
    */
   bool get_value(uint32_t index, Object& object) const noexcept;
 
   /**
    * @brief Returns the record at @p index by value (zero-initialised on out-of-range).
+   *
+   * @param index Zero-based slot index.
+   * @return Copy of the record, or a zero-initialised @c Object when out of range.
    */
   [[nodiscard]] Object get_value(uint32_t index) const noexcept;
 
   /**
    * @brief Resets the logical record count without reallocating.
    *
-   * @param count New logical count.  Must not exceed allocated capacity.
-   * @return       @c false on capacity overflow.
+   * @param count New logical count; must not exceed allocated capacity.
+   * @return @c false on capacity overflow.
    */
   bool resize(uint32_t count) noexcept;
 
   /**
-   * @brief Returns the map state timestamp in nanoseconds since epoch.
+   * @brief Producer-side timestamp recording when the array was assembled.
+   *
+   * @return Stored nanosecond timestamp.
    */
   [[nodiscard]] uint64_t update_time_ns() const noexcept;
 
   /**
-   * @brief Returns the source / producer module identifier.
+   * @brief Producer / module identifier (e.g. @c "fusion_v2").
+   *
+   * @return Non-owning view into the embedded buffer.
    */
   [[nodiscard]] std::string_view source_id() const noexcept;
 
   /**
-   * @brief Returns the sensor / producer channel identifier.
+   * @brief Sensor / producer channel identifier.
+   *
+   * @return Stored channel id.
    */
   [[nodiscard]] uint32_t channel() const noexcept;
 
   /**
-   * @brief Returns the nominal publish frequency in Hz.
+   * @brief Nominal publish frequency in Hz.
+   *
+   * @return Stored value.
    */
   [[nodiscard]] uint32_t freq() const noexcept;
 
   /**
-   * @brief Returns the current Object count.
+   * @brief Logical record count currently stored.
+   *
+   * @return Number of populated records.
    */
   [[nodiscard]] uint32_t count() const noexcept;
 
   /**
-   * @brief Returns the byte size of one Object record.
+   * @brief Byte size of one @c Object record (always @c sizeof(Object)).
+   *
+   * @return Record stride.
    */
   [[nodiscard]] uint32_t pack_size() const noexcept;
 
   /**
-   * @brief Returns a read-only pointer to the Object at @p index.
+   * @brief Read-only pointer to the @c Object at @p index.
    *
-   * @return @c nullptr on out-of-range / invalid state.
+   * @param index Zero-based slot index (default 0 returns the array base).
+   * @return Typed pointer, or @c nullptr on out-of-range / invalid state.
    */
   [[nodiscard]] const Object* objects(uint32_t index = 0) const noexcept;
 
   /**
-   * @brief Returns a read-only pointer to the contiguous record buffer.
+   * @brief Read-only pointer to the raw contiguous record buffer.
+   *
+   * @return Byte pointer to the first record.
    */
   [[nodiscard]] const uint8_t* data() const noexcept;
 
   /**
-   * @brief Returns the buffer byte capacity.
+   * @brief Total byte capacity of the allocated record buffer.
+   *
+   * @return Capacity in bytes, or 0 when no buffer is allocated.
    */
   [[nodiscard]] size_t capacity() const noexcept;
 
   /**
-   * @brief Returns @c true if this object owns its record buffer.
+   * @brief Whether this array owns its record buffer.
+   *
+   * @return @c true when the destructor would free the buffer.
    */
   [[nodiscard]] bool is_owner() const noexcept;
 
   /**
-   * @brief Sets the map state timestamp in nanoseconds since epoch.
+   * @brief Stores the producer-side timestamp.
+   *
+   * @param update_time_ns Timestamp in nanoseconds.
    */
   void set_update_time_ns(uint64_t update_time_ns) noexcept;
 
   /**
-   * @brief Sets the source / producer module identifier.
+   * @brief Stores the producer / module identifier (truncated to @c sizeof(source_id) - 1 bytes).
+   *
+   * @param source_id Identifier string.
    */
   void set_source_id(std::string_view source_id) noexcept;
 
   /**
-   * @brief Sets the sensor / producer channel identifier.
+   * @brief Stores the sensor / producer channel identifier.
+   *
+   * @param channel Channel id.
    */
   void set_channel(uint32_t channel) noexcept;
 
   /**
-   * @brief Sets the nominal publish frequency in Hz.
+   * @brief Stores the nominal publish frequency.
+   *
+   * @param freq Frequency in Hz.
    */
   void set_freq(uint32_t freq) noexcept;
 
   /**
-   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   * @brief Mutable accessor for the primary 32-bit reserved slot (compatibility alias).
    *
-   * @details
-   * Compatibility alias for @c get_reserved32().  Reserved fields are left
-   * unchanged by @c clear() and the copy/move helpers, and are included in the
-   * binary wire format.
-   *
-   * @return Mutable reference to the primary 32-bit reserved field.
+   * @return Reference to @c reserved32_.
    */
   uint32_t& get_reserved() noexcept { return reserved32_; }
 
   /**
-   * @brief Returns a mutable reference to the 8-bit reserved field.
+   * @brief Mutable accessor for the 8-bit reserved slot.
    *
-   * @return Mutable reference to the 8-bit reserved field.
+   * @return Reference to @c reserved8_.
    */
   uint8_t& get_reserved8() noexcept { return reserved8_; }
 
   /**
-   * @brief Returns a mutable reference to the 16-bit reserved field.
+   * @brief Mutable accessor for the 16-bit reserved slot.
    *
-   * @return Mutable reference to the 16-bit reserved field.
+   * @return Reference to @c reserved16_.
    */
   uint16_t& get_reserved16() noexcept { return reserved16_; }
 
   /**
-   * @brief Returns a mutable reference to the primary 32-bit reserved field.
+   * @brief Mutable accessor for the primary 32-bit reserved slot.
    *
-   * @return Mutable reference to the primary 32-bit reserved field.
+   * @return Reference to @c reserved32_.
    */
   uint32_t& get_reserved32() noexcept { return reserved32_; }
 
   /**
-   * @brief Returns a mutable reference to the second 32-bit reserved field.
+   * @brief Mutable accessor for the second 32-bit reserved slot.
    *
-   * @return Mutable reference to the second 32-bit reserved field.
+   * @return Reference to @c reserved2_.
    */
   uint32_t& get_reserved2() noexcept { return reserved2_; }
 
   /**
-   * @brief Returns a mutable reference to the third 32-bit reserved field.
+   * @brief Mutable accessor for the third 32-bit reserved slot.
    *
-   * @return Mutable reference to the third 32-bit reserved field.
+   * @return Reference to @c reserved3_.
    */
   uint32_t& get_reserved3() noexcept { return reserved3_; }
 
-  Header header;  ///< Sequencing and timestamp metadata for this array.
+  Header header;  ///< Sequencing and timestamp metadata prefix.
 
-  static constexpr bool kZerocopyTypes{true};  ///< Internal marker for VLink zero-copy type traits.
+  static constexpr bool kZerocopyTypes{true};  ///< Marker probed by the VLink type-trait machinery.
 
  private:
   uint8_t* data_{nullptr};

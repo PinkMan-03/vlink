@@ -23,49 +23,64 @@
 
 /**
  * @file setter.h
- * @brief Type-safe field-model writer for VLink topics.
+ * @brief Write-side primitive of the VLink field communication model.
  *
  * @details
- * @c Setter<ValueT, SecT> is the write side of the VLink field model.
- * Each call to @c set() serialises the value and writes it to the transport
- * as the new "latest value" for the topic.  All @c Getter nodes on the same
- * URL will be notified of the update.
+ * @c Setter\<ValueT, SecT\> publishes the latest value for a field topic.
+ * Every call to @c set() updates the locally cached value and emits the new
+ * serialised payload over the transport.  When a late @c Getter joins after
+ * the setter has already written, an internally registered @c sync()
+ * callback resends the cached value so the late peer receives the current
+ * state immediately.
  *
- * @par Field Model Overview
+ * The class is a thin, header-only template wrapper around @c SetterImpl.
+ *
+ * @par Field-model Data Flow
+ * @verbatim
+ *   Setter<ValueT>             Transport Back-end             Getter<ValueT>
+ *   --------------             ------------------             ---------------
+ *      | set(v)                       |                              |
+ *      |  cache value                 |                              |
+ *      |  Serializer::serialize       |                              |
+ *      |----------------------------->|--- latest-value frame ------>|
+ *      |                              |  (overwrites any previous)   |
+ *      |                              |                              |--> callback(v)
+ *      |                              |                              |--> get() => v
+ *      | <-- late joiner sync ------- | <-- sync() fired by impl --- |
+ *      | re-emit cached value         |                              |
+ *      |----------------------------->|----------------------------->|
+ * @endverbatim
+ *
+ * @par Setter vs Publisher
+ * | Feature                  | @c Setter\<T\>                          | @c Publisher\<T\>              |
+ * | ------------------------ | --------------------------------------- | ------------------------------ |
+ * | Transport role tag       | @c kSetter                              | @c kPublisher                  |
+ * | Latest-value retention   | Re-sent to late-joining getters         | No re-send to late subscribers |
+ * | Sync-on-connect callback | Yes (registered inside @c init())       | No                             |
+ * | Cross-role bridge        | @c mark_as_publisher()                  | @c mark_as_setter()            |
+ *
+ * @par Durability and Persistence Modes
+ * @c Setter inherits durability behaviour from the transport's effective
+ * @c Qos profile.  Common configurations:
+ *
+ * | Durability mode      | Behaviour                                                  |
+ * | -------------------- | ---------------------------------------------------------- |
+ * | @c kVolatile         | Cached in-process only; re-sent on local @c sync() hook.   |
+ * | @c kTransientLocal   | Cached inside the transport writer for late subscribers.   |
+ * | @c kTransient        | Persisted in an external durability service (DDS only).    |
+ * | @c kPersistent       | Persisted to stable storage (DDS only).                    |
+ *
+ * @par Usage Example
  * @code
- *  Setter<T>                 Transport Back-end              Getter<T>
- *      |                          |                               |
- *      |-- set(value) ----------> |                               |
- *      |   serialize(value)       |                               |
- *      |                          |-- latest-value delivery ----> |
- *      |                          |  (overwrites previous)        |--> callback(value)
- *      |                          |                               |--> get() => value
+ * vlink::Setter<MyStruct> setter("dds://vehicle/gear");
+ * setter.set(MyStruct{3, "Drive"});
+ *
+ * // A Getter that connects afterwards still receives the cached value:
+ * vlink::Getter<MyStruct> getter("dds://vehicle/gear");
+ * if (auto v = getter.get()) { use(*v); }
  * @endcode
  *
- * @par Key Differences: Setter vs Publisher
- * | Feature                  | @c Setter<T>                         | @c Publisher<T>                |
- * | ------------------------ | ------------------------------------ | ------------------------------ |
- * | Transport role           | @c kSetter                           | @c kPublisher                  |
- * | Value retention          | Last value re-sent to late getters   | No re-send to late subs        |
- * | Sync callback on connect | Yes -- @c sync() callback            | No                             |
- * | Cross-transport use      | As publisher: @c mark_as_publisher() | As setter: @c mark_as_setter() |
- *
- * @par Sync on Late Connect
- * When a @c Getter connects after the @c Setter has already written, the transport
- * fires the @c sync() callback registered internally.  The @c Setter re-sends
- * its cached value so the late @c Getter receives the current state immediately:
- * @code
- * Setter<int> s("shm://my_field");
- * s.set(42);          // Getter joins later and immediately receives 42
- * @endcode
- * @par Usage
- * @code
- * Setter<MyStruct> setter("dds://vehicle/gear");
- * setter.set(MyStruct{3, "Drive"});  // write a new field value
- * @endcode
- *
- * @tparam ValueT  Value type.  Must satisfy @c Serializer::is_supported().
- * @tparam SecT    Security mode; defaults to @c SecurityType::kWithoutSecurity.
+ * @see getter.h, publisher.h, node.h, extension/qos.h
  */
 
 #pragma once
@@ -83,43 +98,43 @@ namespace vlink {
 
 /**
  * @class Setter
- * @brief Type-safe field writer for the VLink field communication model.
+ * @brief Type-safe latest-value writer for the VLink field communication model.
  *
- * @tparam ValueT  Value type to write.
- * @tparam SecT    Security mode.
+ * @details
+ * Inherits the full @c Node API and adds field-specific operations: cached
+ * @c set(), automatic late-joiner sync via an internally registered
+ * @c sync() callback, and bridging hooks to behave as a plain publisher
+ * on transports that do not natively differentiate the two roles.
+ *
+ * @tparam ValueT  C++ value type. Must satisfy @c Serializer::is_supported().
+ * @tparam SecT    Security mode; defaults to @c SecurityType::kWithoutSecurity.
  */
 template <typename ValueT, SecurityType SecT = SecurityType::kWithoutSecurity>
 class Setter : public Node<SetterImpl, SecT> {
  public:
-  /** @brief Unique-pointer alias. */
-  using UniquePtr = std::unique_ptr<Setter<ValueT, SecT>>;
+  using UniquePtr = std::unique_ptr<Setter<ValueT, SecT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<Setter<ValueT, SecT>>;  ///< Owning shared-pointer alias.
 
-  /** @brief Shared-pointer alias. */
-  using SharedPtr = std::shared_ptr<Setter<ValueT, SecT>>;
-
-  /** @brief Node role identifier (@c kSetter). */
-  static constexpr ImplType kImplType = kSetter;
-
-  /** @brief Serializer type resolved at compile time from @c ValueT. */
-  static constexpr Serializer::Type kValueType = Serializer::get_type_of<ValueT>();
+  static constexpr ImplType kImplType = kSetter;                                     ///< Node role tag (@c kSetter).
+  static constexpr Serializer::Type kValueType = Serializer::get_type_of<ValueT>();  ///< Codec resolved from @c ValueT.
 
   static_assert(Serializer::is_supported(kValueType), "<ValueT> is not a supported Serializer type.");
 
   /**
-   * @brief Creates a @c Setter on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c Setter and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new setter.
+   * @param url_str  Field URL such as @c "shm://vehicle/gear".
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new setter.
    */
   [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c Setter on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c Setter and wraps it in a @c std::shared_ptr.
    *
    * @param url_str  Field URL string.
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new setter.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new setter.
    */
   [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, InitType type = InitType::kWithInit);
 
@@ -127,13 +142,13 @@ class Setter : public Node<SetterImpl, SecT> {
    * @brief Constructs a setter from a typed transport configuration object.
    *
    * @details
-   * Accepts any @c Conf-derived configuration.  After @c init(), registers an
-   * internal @c sync() callback with the transport so that when a late @c Getter
-   * connects the cached value is re-sent automatically.
+   * Accepts any @c Conf-derived configuration.  Following @c init() the
+   * setter registers a transport-level @c sync() callback that re-emits the
+   * cached value whenever a late @c Getter connects.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT  Concrete configuration type derived from @c Conf.
+   * @param conf    Populated configuration aggregate.
+   * @param type    Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
@@ -142,68 +157,67 @@ class Setter : public Node<SetterImpl, SecT> {
   /**
    * @brief Constructs a setter from a URL string.
    *
-   * @param url_str  Field URL (e.g. @c "dds://vehicle/gear").
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param url_str  Field URL such as @c "dds://vehicle/gear".
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   explicit Setter(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Destroys the setter, calling @c deinit() to drain any in-flight transport
-   *        callbacks before this @c Setter's locked state is destroyed.
+   * @brief Destroys the setter and drains in-flight transport callbacks.
    *
    * @details
-   * Mirrors the lifecycle contract used by @c Client and @c Getter: without this
-   * destructor the @c sync() callback installed in @c init() can fire on the
-   * transport thread after @c mtx_ / @c value_ have already been destroyed.
+   * Required so the @c sync() callback installed by @c init() cannot fire on
+   * the transport thread after this setter's mutex and cached value have
+   * already been destroyed.  Mirrors the lifecycle contract of @c Client and
+   * @c Getter.
    */
   ~Setter() override;
 
   /**
-   * @brief Initializes the setter transport and registers the late-getter sync callback.
+   * @brief Initialises the setter and registers the late-getter @c sync() hook.
    *
    * @details
-   * Calls the base @c Node initialization, then installs a transport @c sync()
-   * callback that re-sends the cached latest value when a new @c Getter joins
-   * after this setter has already been written to.
+   * Calls the base @c Node initialisation, then installs a transport-level
+   * callback that resends the cached value whenever a new @c Getter joins
+   * after this setter has already been written.
    *
-   * @return @c true on first initialisation; @c false if already initialised.
+   * @return @c true on first successful initialisation; @c false otherwise.
    */
   bool init() override;
 
   /**
-   * @brief Deinitializes the setter and releases the underlying transport resources.
+   * @brief Deinitialises the setter and releases the underlying transport resources.
    *
    * @details
-   * Delegates to the base @c Node deinitialization path. After deinitialization,
-   * the setter stops participating in transport sync and write operations until
-   * it is initialized again.
+   * Delegates to the base @c Node teardown path.  After deinitialisation the
+   * setter no longer participates in @c sync() or writes until @c init() is
+   * called again.
    *
-   * @return @c true on first deinitialisation; @c false if not initialised.
+   * @return @c true on first successful deinitialisation; @c false if not initialised.
    */
   bool deinit() override;
 
   /**
-   * @brief Writes a new field value and notifies all connected @c Getter nodes.
+   * @brief Writes a new field value and emits it to every connected @c Getter.
    *
    * @details
-   * Caches @p value internally (guarded by mutex), then serializes and writes
-   * it to the transport.  If security is enabled the serialized bytes are
-   * encrypted before transmission.  The cached value is automatically re-sent
-   * when a late @c Getter connects.
+   * Caches @p value under @c mtx_, then serialises and writes it via the
+   * transport.  When security is enabled the serialised payload is encrypted
+   * before transmission.  The cached value is automatically re-emitted when
+   * a late @c Getter joins (see @c init()).
    *
-   * @param value  The new field value to write.
+   * @param value  New field value to publish.
    */
   void set(const ValueT& value);
 
   /**
-   * @brief Changes this setter's role to @c kPublisher (event-emitter).
+   * @brief Promotes this setter to behave as a @c Publisher at the transport layer.
    *
    * @details
-   * Updates @c impl_->impl_type from @c kSetter to @c kPublisher so that
-   * event-model transport semantics are applied (no last-value retention).
-   * If called after @c init(), the extension is automatically reinitialised.
-   * Used when a @c Setter should behave as a plain publisher on transports
-   * that do not natively distinguish the two roles.
+   * Switches @c impl_type from @c kSetter to @c kPublisher so that
+   * event-mode semantics are applied (no latest-value retention).
+   * Reinitialises the transport extension if called post-@c init().  Useful
+   * on transports that do not natively distinguish the two roles.
    */
   void mark_as_publisher();
 
@@ -218,31 +232,28 @@ class Setter : public Node<SetterImpl, SecT> {
 
 /**
  * @class SecuritySetter
- * @brief Convenience alias for @c Setter with message security enabled.
+ * @brief Convenience alias of @c Setter with per-message encryption enabled.
  *
  * @details
- * Equivalent to @c Setter<ValueT, SecurityType::kWithSecurity>.  Encrypts
- * each outgoing value using the configured security key or callbacks.
+ * Equivalent to @c Setter\<ValueT, SecurityType::kWithSecurity\>.  Each
+ * outgoing payload is encrypted before transmission.
  *
  * @tparam ValueT  Value type to write.
  */
 template <typename ValueT>
 class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
  public:
-  /** @brief Unique-pointer alias. */
-  using UniquePtr = std::unique_ptr<SecuritySetter<ValueT>>;
-
-  /** @brief Shared-pointer alias. */
-  using SharedPtr = std::shared_ptr<SecuritySetter<ValueT>>;
+  using UniquePtr = std::unique_ptr<SecuritySetter<ValueT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<SecuritySetter<ValueT>>;  ///< Owning shared-pointer alias.
 
   /**
-   * @brief Creates a @c SecuritySetter on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c SecuritySetter and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Field URL string (e.g. @c "shm://vehicle/gear").
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new setter.
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
+   * @param url_str  Field URL string.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new secure setter.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -250,13 +261,13 @@ class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c SecuritySetter on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c SecuritySetter and wraps it in a @c std::shared_ptr.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new setter.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new secure setter.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -264,12 +275,13 @@ class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecuritySetter from a typed transport configuration object.
+   * @brief Constructs a @c SecuritySetter from a typed configuration object.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default; empty uses the built-in default symmetric slot).
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT           Configuration type derived from @c Conf.
+   * @tparam SecurityConfigT Forwardable @c Security::Config compatible type.
+   * @param conf     Populated configuration aggregate.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename SecurityConfigT = Security::Config,
@@ -277,18 +289,18 @@ class SecuritySetter : public Setter<ValueT, SecurityType::kWithSecurity> {
   explicit SecuritySetter(const ConfT& conf, SecurityConfigT&& sec_cfg = {}, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecuritySetter and installs the security configuration in place.
+   * @brief Constructs a @c SecuritySetter from a URL string and installs the security configuration.
    *
    * @details
-   * Always builds the base @c Setter with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
-   * @c NodeImpl::security was populated successfully; finally calls @c init()
-   * unless the caller requests deferred initialisation.
+   * Builds the base @c Setter in @c kWithoutInit mode, installs @p sec_cfg
+   * via @c enable_security(), then calls @c init() unless deferred.  When
+   * @c enable_security() fails to produce a usable @c NodeImpl::security the
+   * subsequent @c init() will fail.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Field URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>

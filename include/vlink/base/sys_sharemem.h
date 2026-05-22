@@ -23,54 +23,64 @@
 
 /**
  * @file sys_sharemem.h
- * @brief Named cross-process shared memory region.
+ * @brief Named cross-process shared-memory region.
  *
  * @details
- * @c SysSharemem wraps the POSIX shared-memory API (@c shm_open + @c mmap) on
- * Linux/macOS and the Win32 @c CreateFileMapping / @c MapViewOfFile API on
- * Windows to provide a named shared memory region that multiple processes can
- * map into their address space simultaneously.
+ * @c vlink::SysSharemem wraps the platform's shared-memory API: @c shm_open + @c mmap on
+ * POSIX targets, @c CreateFileMapping + @c MapViewOfFile on Windows.  The region appears
+ * in the kernel namespace under a caller-chosen name and any process that knows the name
+ * can map it into its own address space.
  *
- * Lifecycle:
- * -# Construct a @c SysSharemem object.
- * -# Creator process: call @c create(name, size) to allocate and map the region.
- * -# Peer processes: call @c attach(name) to map the existing region.
- * -# Access the raw memory via @c data().
- * -# Call @c detach(force) to unmap.  If @c force is @c true, POSIX backends
- *    also unlink the backing object from the OS namespace.
- * -# The destructor calls @c detach() automatically with @c force == @c false.
+ * Memory layout exposed through @c data() and @c size():
  *
- * Access modes:
+ * @verbatim
+ *   +---------------------------------------------------+
+ *   | byte 0                                            |
+ *   |   user payload (size = total bytes returned by    |
+ *   |   size())                                         |
+ *   | byte size-1                                       |
+ *   +---------------------------------------------------+
+ * @endverbatim
  *
- * | Mode        | Description                                       |
- * | ----------- | ------------------------------------------------- |
- * | kReadOnly   | Maps with PROT_READ (no write access)             |
- * | kReadWrite  | Maps with PROT_READ | PROT_WRITE (default)        |
+ * No internal header is reserved; the entire mapping is user payload.  Place any
+ * synchronisation primitive (mutex, atomic counters, ring buffer indices) in the user
+ * region or in a companion @c SysSemaphore.
+ *
+ * Lifecycle states observed by the wrapper:
+ *
+ * | State        | Entered by              | @c is_attached() | @c data()             |
+ * | ------------ | ----------------------- | ---------------- | --------------------- |
+ * | Detached     | Construction, @c detach | @c false         | @c nullptr            |
+ * | Created      | @c create()             | @c true          | Pointer to mapping    |
+ * | Attached     | @c attach()             | @c true          | Pointer to mapping    |
+ *
+ * Access modes accepted by @c create() and @c attach():
+ *
+ * | Mode             | POSIX flag          | Effect                              |
+ * | ---------------- | ------------------- | ----------------------------------- |
+ * | @c kReadOnly     | @c O_RDONLY         | Maps with @c PROT_READ              |
+ * | @c kReadWrite    | @c O_RDWR           | Maps with @c PROT_READ + PROT_WRITE |
  *
  * @note
- * - POSIX shared-memory names must start with '/' (e.g., @c "/vlink_cam0").
- *   On Windows any non-empty name is valid.
- * - A newly created region is provided by the OS mapping backend and is zero-filled
- *   on the supported POSIX/Windows implementations.
- * - Concurrent access from multiple processes requires external synchronisation
- *   (e.g., @c SysSemaphore or a mutex in the shared region itself).
- * - @c size() returns 0 when not attached.
+ * - POSIX names must begin with @c '/'; Windows accepts arbitrary non-empty strings.
+ * - The kernel zero-fills newly created regions on the supported POSIX/Windows backends.
+ * - Cross-process consistency requires external synchronisation.
  *
  * @par Example
  * @code
- * // Process A (creator):
+ * // Process A (creator)
  * vlink::SysSharemem shm;
- * shm.create("/vlink_frame", 1024 * 1024);  // 1 MB
+ * shm.create("/vlink_frame", 1024 * 1024);
  * auto* frame = static_cast<FrameHeader*>(shm.data());
  * frame->seq = 0;
- * sem.release();  // signal Process B
  *
- * // Process B (consumer):
+ * // Process B (consumer)
  * vlink::SysSharemem shm;
  * shm.attach("/vlink_frame");
- * sem.acquire();
  * const auto* frame = static_cast<const FrameHeader*>(shm.data());
  * process_frame(*frame);
+ *
+ * shm.detach();
  * @endcode
  */
 
@@ -86,109 +96,95 @@ namespace vlink {
 
 /**
  * @class SysSharemem
- * @brief Named cross-process shared memory backed by the OS IPC layer.
+ * @brief Named cross-process shared-memory region with read-only or read-write mappings.
  *
  * @details
- * Provides a typed @c data() pointer into a shared memory region that is
- * accessible by any process that attaches the same name.
+ * Manages one mapping at a time; call @c detach() before re-attaching to a different region.
  */
 class VLINK_EXPORT SysSharemem final {
  public:
   /**
-   * @brief Access mode for the shared memory mapping.
+   * @enum Mode
+   * @brief Access mode applied to the mapping.
    *
-   * @note The enum names mirror POSIX @c O_RDONLY / @c O_RDWR semantics.
-   *       On Linux and macOS the implementation uses @c shm_open with the
-   *       appropriate flags; on Windows it maps to @c CreateFileMapping /
-   *       @c MapViewOfFile page-protection constants.  The observable
-   *       behaviour (read-only vs. read-write access) is identical across
-   *       all supported platforms.
+   * @details
+   * Enumerator names mirror the POSIX @c O_RDONLY / @c O_RDWR open flags.  On Windows the
+   * implementation translates these to the equivalent @c CreateFileMapping / @c MapViewOfFile
+   * page-protection constants; the observable behaviour is identical across platforms.
    */
   enum Mode : uint8_t {
-    kReadOnly = 0,  ///< Read-only access (no write permitted).
-    kReadWrite = 1  ///< Read-write access.
+    kReadOnly = 0,  ///< Read-only mapping; writes through @c data() are undefined.
+    kReadWrite = 1  ///< Read-write mapping (default).
   };
 
   /**
-   * @brief Default constructor.  The object is not attached until @c create()
-   *        or @c attach() is called.
+   * @brief Constructs a wrapper in the detached state.
    */
   SysSharemem();
 
   /**
-   * @brief Destructor.  Calls @c detach(false) if still attached.
+   * @brief Destructor.  Invokes @c detach(false) when the wrapper is still attached.
    */
   ~SysSharemem();
 
   /**
-   * @brief Creates a new named shared memory region of the given size and maps it.
+   * @brief Creates and maps a new shared-memory region of @p size bytes under @p name.
    *
    * @details
-   * Fails if a region with the same name already exists.  The supported
-   * POSIX/Windows backends provide a zero-filled new region.
+   * Fails when a region with @p name already exists in the kernel namespace.  The supported
+   * POSIX/Windows backends provide zero-initialised storage.
    *
-   * @param name  OS name for the shared memory object (POSIX: must start with '/').
-   * @param size  Size of the region in bytes.
-   * @param mode  Access mode (default: @c kReadWrite).
-   * @return @c true on success, @c false on failure.
+   * @param name  Kernel-name for the region.  POSIX must begin with @c '/'.
+   * @param size  Region size in bytes.
+   * @param mode  Access mode for the mapping.  Default: @c kReadWrite.
+   * @return @c true on success.
    */
   bool create(const std::string& name, size_t size, Mode mode = kReadWrite);
 
   /**
-   * @brief Attaches to an existing named shared memory region.
+   * @brief Attaches to an existing shared-memory region previously created with the same name.
    *
-   * @details
-   * The region must have been created by another process (or an earlier call
-   * to @c create()) before @c attach() can succeed.
-   *
-   * @param name  OS name of the shared memory object.
-   * @param mode  Access mode (default: @c kReadWrite).
-   * @return @c true on success, @c false if the region does not exist or
-   *         access is denied.
+   * @param name  Kernel-name of the region.
+   * @param mode  Access mode for the mapping.  Default: @c kReadWrite.
+   * @return @c true on success.
    */
   bool attach(const std::string& name, Mode mode = kReadWrite);
 
   /**
-   * @brief Unmaps the shared memory region and optionally unlinks the OS object.
+   * @brief Unmaps the region and optionally unlinks the kernel name.
    *
-   * @details
-   * After @c detach(), @c is_attached() returns @c false and @c data() returns
-   * @c nullptr.
-   *
-   * @param force  If @c true, POSIX backends unlink the backing OS object.
-   *               Set @c false to merely unmap without destroying the object
-   *               (other processes keep access). On Windows this only closes
-   *               the local mapping handle. Default: @c true.
-   * @return @c true on success, @c false if not attached or unmap failed.
+   * @param force  When @c true, POSIX backends call @c shm_unlink so the region is removed
+   *               from the kernel namespace.  Other processes that still hold mappings keep
+   *               them.  Windows merely closes the local mapping handle.  Default: @c true.
+   * @return @c true on success.
    */
   bool detach(bool force = true);
 
   /**
-   * @brief Returns @c true if the region is currently mapped.
+   * @brief Reports whether the wrapper currently owns a mapping.
    *
-   * @return @c true if attached (mapped), @c false otherwise.
+   * @return @c true after a successful @c create or @c attach.
    */
   [[nodiscard]] bool is_attached() const;
 
   /**
-   * @brief Returns a writable pointer to the beginning of the shared memory region.
+   * @brief Returns a writable pointer to the start of the mapping.
    *
-   * @return Pointer to the mapped region, or @c nullptr if not attached or in
-   *         read-only mode (use the @c const overload for read-only access).
+   * @return Mapping base pointer; @c nullptr when detached or in read-only mode.
    */
   [[nodiscard]] void* data();
 
   /**
-   * @brief Returns a read-only pointer to the beginning of the shared memory region.
+   * @brief Returns a read-only pointer to the start of the mapping.
    *
-   * @return Const pointer to the mapped region, or @c nullptr if not attached.
+   * @return Const mapping base pointer; @c nullptr when detached.
    */
   [[nodiscard]] const void* data() const;
 
   /**
-   * @brief Returns the size of the mapped region in bytes.
+   * @brief Returns the size of the mapping in bytes.
    *
-   * @return Region size in bytes, or 0 if not attached.
+   * @return Region size; @c 0 when detached.
    */
   [[nodiscard]] size_t size() const;
 

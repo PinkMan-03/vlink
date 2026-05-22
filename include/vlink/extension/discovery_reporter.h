@@ -23,27 +23,49 @@
 
 /**
  * @file discovery_reporter.h
- * @brief Process-level discovery reporter that broadcasts node metadata to DiscoveryViewer instances.
+ * @brief Process-wide discovery broadcaster that advertises live VLink endpoints.
  *
  * @details
- * @c DiscoveryReporter runs as a background @c MessageLoop and periodically reports the
- * list of active @c NodeImpl endpoints (publishers, subscribers, clients, servers, etc.)
- * to any @c DiscoveryViewer instances on the same host or network.
+ * @c DiscoveryReporter is the announce side of the VLink discovery subsystem.  It runs
+ * on a private @c MessageLoop and emits periodic UDP multicast (default @c 239.255.0.100)
+ * payloads that describe every @c NodeImpl currently registered in the process: their
+ * URLs, communication kind, host name, PID, application name and an optional CPU usage
+ * sample.  Listeners on the network -- typically @c DiscoveryViewer instances or the
+ * @c vlink-cli tool -- consume those payloads to rebuild a live endpoint topology.
  *
- * Internally it:
- * 1. Collects all registered @c NodeImpl objects.
- * 2. Serialises their metadata (URL, type, process info, CPU profiler data) into a discovery message.
- * 3. Sends the message via UDP multicast/broadcast (default address @c 239.255.0.100).
- * 4. Can send an offline notification on destruction when offline reporting is compiled in
- *    (it is disabled in the default build).
+ * Discovery flow:
  *
- * A process-global singleton is available via @c global_get(); it is created on first use
- * and destroyed with the process.
+ * @verbatim
+ *   NodeImpl::ctor  ----> DiscoveryReporter::add()
+ *                              |
+ *                              v
+ *                        +-----------+   periodic timer    UDP multicast
+ *                        |  loop     | ------------------> 239.255.0.100
+ *                        +-----------+
+ *                              ^                                  |
+ *                              |                                  v
+ *   NodeImpl::dtor  ----> remove()                          DiscoveryViewer
+ * @endverbatim
  *
- * @note
- * - @c add() and @c remove() are called automatically by @c NodeImpl constructors and destructors.
- * - Users generally do not need to interact with @c DiscoveryReporter directly.
- * - The reporter uses UDP multicast/broadcast for discovery, not any VLink transport backend.
+ * The singleton is owned by the VLink runtime: @c global_get() lazily creates the
+ * reporter on first call and the process tears it down at exit.  @c add() and
+ * @c remove() are invoked automatically by every @c NodeImpl constructor/destructor;
+ * normal user code should rarely touch this class directly.
+ *
+ * @par Example
+ * @code
+ * // Disable discovery entirely:
+ * //   export VLINK_DISCOVER_DISABLE=1
+ *
+ * // Tooling code path (e.g. vlink-cli): just consume the singleton.
+ * if (auto* reporter = vlink::DiscoveryReporter::global_get(); reporter != nullptr) {
+ *   reporter->async_run();   // started automatically in normal runtimes
+ * }
+ * @endcode
+ *
+ * @note Discovery rides on a dedicated UDP socket and is independent of any VLink
+ * transport backend (intra/shm/dds/zenoh/...).  Set @c VLINK_DISCOVER_DISABLE=1 to opt
+ * out for a given process.
  */
 
 #pragma once
@@ -60,59 +82,60 @@ class NodeImpl;
 
 /**
  * @class DiscoveryReporter
- * @brief Background @c MessageLoop that reports active nodes to the discovery subsystem.
+ * @brief Periodic multicast broadcaster of the process's active VLink endpoints.
  *
  * @details
- * Automatically started and stopped by the VLink runtime.  Callers should not need to
- * manage this object directly unless building custom tooling.
+ * Lifecycle is normally managed by the VLink runtime.  Custom tooling may construct an
+ * additional instance but most consumers rely on @c global_get() instead.
  */
 class VLINK_EXPORT DiscoveryReporter : public MessageLoop {
  public:
   /**
-   * @brief Returns the process-global @c DiscoveryReporter singleton.
+   * @brief Returns the lazily-created process-global reporter.
    *
    * @details
-   * Created on first call.  The singleton is destroyed when the process exits.
+   * Returns @c nullptr when the environment variable @c VLINK_DISCOVER_DISABLE is set to
+   * @c "1", in which case discovery is suppressed for the whole process.
    *
-   * @return Raw pointer to the global @c DiscoveryReporter, or @c nullptr when
-   *         @c VLINK_DISCOVER_DISABLE=1 disables discovery.
+   * @return Raw pointer to the global reporter, or @c nullptr when discovery is disabled.
    */
   static DiscoveryReporter* global_get();
 
   /**
-   * @brief Constructs the reporter, socket, and periodic report timer.
+   * @brief Builds the reporter, opens its UDP socket and arms the periodic timer.
    *
    * @details
-   * The message loop is not started by the constructor; the global singleton calls
-   * @c async_run() after construction.
+   * The @c MessageLoop is left idle; callers are responsible for calling @c async_run()
+   * (the global singleton does this automatically).
    */
   DiscoveryReporter();
 
   /**
-   * @brief Destructor -- stops the loop and releases the UDP socket.
+   * @brief Stops the loop and releases the UDP socket.
    *
    * @details
-   * An offline notification is sent only when offline reporting is compiled in.
+   * An offline notification is only emitted when offline reporting is compiled in; the
+   * default build omits it.
    */
   ~DiscoveryReporter() override;
 
   /**
-   * @brief Registers a @c NodeImpl endpoint for periodic reporting.
+   * @brief Registers a node so that subsequent broadcasts include it.
    *
    * @details
-   * Called automatically by @c NodeImpl on construction.
+   * Invoked automatically by @c NodeImpl's constructor.
    *
-   * @param node  Node to add.
+   * @param node Node endpoint to track.
    */
   void add(NodeImpl* node);
 
   /**
-   * @brief Unregisters a @c NodeImpl endpoint from periodic reporting.
+   * @brief Unregisters a node so that subsequent broadcasts exclude it.
    *
    * @details
-   * Called automatically by @c NodeImpl on destruction.
+   * Invoked automatically by @c NodeImpl's destructor.
    *
-   * @param node  Node to remove.
+   * @param node Node endpoint to drop.
    */
   void remove(NodeImpl* node);
 

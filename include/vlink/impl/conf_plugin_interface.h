@@ -23,41 +23,66 @@
 
 /**
  * @file conf_plugin_interface.h
- * @brief Plugin ABI for dynamically loaded transport @c Conf factories.
+ * @brief Stable ABI implemented by transport plugins that ship a @c Conf factory.
  *
  * @details
- * @c ConfPluginInterface is the abstract C++ interface that every externally loaded
- * VLink transport plugin must implement.  Plugins are shared libraries discovered at
- * runtime via the @c VLINK_URL_PLUGINS environment variable (or the
- * @c Url::init_plugins() call).
+ * This is an internal implementation header used by the URL routing layer and by
+ * third-party transport plugins; it is not part of the public application API.
+ * External plugins are shared libraries discovered at runtime through either the
+ * @c VLINK_URL_PLUGINS environment variable or an explicit @c Url::init_plugins()
+ * call.  Each plugin exports exactly one concrete subclass of
+ * @c ConfPluginInterface; the runtime asks it for its @c TransportType and uses
+ * @c create() to obtain a fresh @c Conf instance when a URL with that transport
+ * is constructed.
  *
- * @par Plugin Discovery and Loading
- * When a @c Url is constructed and the built-in transport table does not recognise the
- * transport field in the URL, @c Url::load_for_plugin() looks up a plugin that
- * registered the matching @c TransportType.  If found, @c create() is called to
- * obtain a fresh @c Conf instance for that transport.
+ * @par Plugin contract
+ * | Member                          | Required          | Description                                       |
+ * | ------------------------------- | ----------------- | ------------------------------------------------- |
+ * | @c VLINK_PLUGIN_REGISTER(iface) | Yes               | Tags the interface with a stable plugin id.       |
+ * | @c VLINK_PLUGIN_DECLARE(...)    | Yes (in @c .cc)   | Exports the create / destroy plugin entry points. |
+ * | @c get_transport_type() const   | Override          | Reports the @c TransportType the plugin handles.  |
+ * | @c create() const               | Override          | Allocates a new transport @c Conf instance.       |
  *
- * @par Implementing a Plugin
+ * @par Lifecycle
  * @code
- *   // In your plugin shared library:
- *   struct MyTransportPlugin final : public vlink::ConfPluginInterface {
- *     VLINK_PLUGIN_REGISTER(ConfPluginInterface)
- *     vlink::TransportType get_transport_type() const override {
- *       return vlink::TransportType::kMyCustomTransport;
- *     }
- *     std::unique_ptr<vlink::Conf> create() const override {
- *       return std::make_unique<MyTransportConf>();
- *     }
- *   };
- *   VLINK_PLUGIN_DECLARE(MyTransportPlugin, 1, 0)
+ *     +-----------+          +--------------+          +-----------------+
+ *     | Url::ctor | -------> | init_plugins | -------> | dlopen library  |
+ *     +-----------+          +------+-------+          +--------+--------+
+ *                                   |                           |
+ *                                   |                           v
+ *                                   |               +-----------------------+
+ *                                   |               | Plugin::create_object |
+ *                                   |               +-----------+-----------+
+ *                                   |                           |
+ *                                   v                           v
+ *                          +----------------+          +------------------+
+ *                          | load_for_plugin| -------> | plugin->create() |
+ *                          +----------------+          +--------+---------+
+ *                                                               |
+ *                                                               v
+ *                                                        +-------------+
+ *                                                        | unique<Conf>|
+ *                                                        +-------------+
  * @endcode
  *
- * @note The @c VLINK_PLUGIN_DECLARE macro (from @c base/plugin.h) exports the
- *       create/destroy entry points needed for the plugin loader to locate and
- *       instantiate this type.
+ * @par Example
+ * @code
+ * struct MyTransportPlugin final : public vlink::ConfPluginInterface {
+ *   VLINK_PLUGIN_REGISTER(ConfPluginInterface)
  *
- * @note Implementations must be stateless; @c create() may be called multiple times
- *       to produce independent @c Conf objects for different @c Url instances.
+ *   vlink::TransportType get_transport_type() const override {
+ *     return vlink::TransportType::kMyCustomTransport;
+ *   }
+ *
+ *   std::unique_ptr<vlink::Conf> create() const override {
+ *     return std::make_unique<MyTransportConf>();
+ *   }
+ * };
+ * VLINK_PLUGIN_DECLARE(MyTransportPlugin, 1, 0)
+ * @endcode
+ *
+ * @note Implementations must remain stateless because @c create() may be invoked
+ *       repeatedly to serve several independent @c Url instances.
  */
 
 #pragma once
@@ -71,15 +96,13 @@ namespace vlink {
 
 /**
  * @struct ConfPluginInterface
- * @brief Pure-virtual plugin interface for external transport @c Conf factories.
+ * @brief Stateless factory contract that external transport plugins must implement.
  *
  * @details
- * Each VLink transport plugin exports exactly one concrete subclass of this
- * interface.  @c VLINK_PLUGIN_REGISTER tags the base type with a stable plugin
- * id; the concrete subclass exports its create/destroy entry points via
- * @c VLINK_PLUGIN_DECLARE in its translation unit.  The VLink runtime then
- * loads the plugin shared library, instantiates the concrete subclass and
- * queries it for the supported transport backend and new @c Conf objects.
+ * Subclasses are loaded from shared libraries by the VLink runtime when a URL
+ * uses a transport that is not built in.  The interface intentionally exposes
+ * only the two queries needed by @c Url::load_for_plugin(); plugin-specific
+ * state lives inside the @c Conf instances returned by @c create().
  */
 struct ConfPluginInterface {
   VLINK_PLUGIN_REGISTER(ConfPluginInterface)
@@ -91,25 +114,24 @@ struct ConfPluginInterface {
 
  public:
   /**
-   * @brief Returns the transport backend handled by this plugin.
+   * @brief Reports the transport identifier this plugin can produce confs for.
    *
    * @details
-   * Called by @c Url::load_for_plugin() to determine whether this plugin supports
-   * the transport of the URL being constructed.
+   * Called by @c Url::load_for_plugin() to match URL transports to loaded
+   * plugins.  The same identifier may be returned by at most one plugin.
    *
-   * @return The @c TransportType enumeration value identifying the transport backend.
+   * @return @c TransportType value covered by this plugin.
    */
   [[nodiscard]] virtual TransportType get_transport_type() const = 0;
 
   /**
-   * @brief Creates and returns a new transport @c Conf instance.
+   * @brief Allocates a fresh transport @c Conf instance.
    *
    * @details
-   * Called once per @c Url construction that matches this plugin's transport.  The
-   * returned object must be fully initialised and ready for @c parse() calls.
-   * Ownership is transferred to the caller via @c unique_ptr.
+   * Invoked once per @c Url constructor whose transport matches the plugin.
+   * The returned object must be ready to receive @c parse() calls immediately.
    *
-   * @return A heap-allocated @c Conf subclass specific to this transport.
+   * @return Heap-allocated transport @c Conf owned by the caller.
    */
   [[nodiscard]] virtual std::unique_ptr<Conf> create() const = 0;
 

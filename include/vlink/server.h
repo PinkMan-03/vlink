@@ -23,66 +23,77 @@
 
 /**
  * @file server.h
- * @brief Type-safe method-model server (handler side) for VLink RPC.
+ * @brief Handler-side primitive of the VLink method (RPC) communication model.
  *
  * @details
- * @c Server<ReqT, RespT, SecT> is the handler side of the VLink method model.
- * It registers a callback that is invoked for each incoming request and
- * optionally fills a response.
+ * @c Server\<ReqT, RespT, SecT\> registers a handler for inbound RPC requests
+ * issued by matching @c Client instances.  Three handler styles are
+ * supported: fire-and-forget (no response), synchronous request/response,
+ * and deferred asynchronous reply.  Codec selection for both the request
+ * and the response payload is resolved at compile time.
  *
- * @par Method Model Overview
- * @code
- *  Client<Req,Resp>                                       Server<Req,Resp>
- *      |                   Transport Back-end                   |
- *      |-- invoke(req) -------> |                               |
- *      |   serialize(req)       |-- request delivery ---------> |
- *      |                        |                               |--> callback(req, resp)
- *      |                        | <-- reply(resp) ------------- |
- *      |   deserialize(resp)    | <-- response delivery ------- |
- *      |<-- resp ----------------                               |
- * @endcode
+ * The class is a thin, header-only template wrapper around @c ServerImpl.
  *
- * @par Three Listen Modes
- * | Method                                    | When to use                            |
- * | ----------------------------------------- | -------------------------------------- |
- * | @c listen(ReqCallback)                    | Fire-and-forget.                       |
- * | @c listen(ReqRespCallback)                | Synchronous reply inside the callback. |
- * | @c listen_for_reply(ReqAsyncRespCallback) | Async reply via @c reply().            |
+ * @par Request / Response Sequence
+ * @verbatim
+ *   Client<Req,Resp>           Transport Back-end           Server<Req,Resp>
+ *   -----------------          ------------------           -----------------
+ *      | invoke(req)                  |                            |
+ *      |----------------------------->|  serialised request        |
+ *      |                              |--------------------------->|
+ *      |                              |                            |  handler
+ *      |                              |                            |  fills resp
+ *      |                              |                            |   (sync mode)
+ *      |                              |                            |     -- or --
+ *      |                              |                            |  store req_id
+ *      |                              |                            |  reply(req_id, resp)
+ *      |                              |                            |   (async mode)
+ *      |                              |  serialised response       |
+ *      |                              |<---------------------------|
+ *      | deserialised response        |                            |
+ *      |<-----------------------------|                            |
+ * @endverbatim
+ *
+ * @par Three Listen-Handler Variants
+ * | Method                                    | Handler signature              | Semantics                     |
+ * | ----------------------------------------- | ------------------------------ | ----------------------------- |
+ * | @c listen(ReqCallback)                    | @c void(const ReqT&)           | Fire-and-forget; no response. |
+ * | @c listen(ReqRespCallback)                | @c void(const ReqT&, RespT&)   | Synchronous fill of @c resp.  |
+ * | @c listen_for_reply(ReqAsyncRespCallback) | @c void(uint64_t req_id, Req&) | Deferred reply via @c reply.  |
  *
  * @par Synchronous Reply Example
  * @code
- * Server<Req, Resp> server("dds://my_service");
- * server.listen([](const Req& req, Resp& resp) {
- *     resp.result = process(req);       // fill resp inside callback
+ * vlink::Server<Req, Resp> svr("dds://compute/sum");
+ * svr.listen([](const Req& q, Resp& r) {
+ *   r.value = q.a + q.b;
  * });
  * @endcode
  *
- * @par Asynchronous Reply Example
+ * @par Deferred Asynchronous Reply Example
  * @code
- * Server<Req, Resp> server("dds://my_service");
- * uint64_t saved_req_id = 0;
- * server.listen_for_reply([&saved_req_id](uint64_t req_id, const Req& req) {
- *     saved_req_id = req_id;            // save request ID for later
+ * vlink::Server<Req, Resp> svr("dds://compute/sum");
+ * uint64_t pending = 0;
+ * svr.listen_for_reply([&](uint64_t id, const Req& q) {
+ *   pending = id;
+ *   schedule_async_work(q);
  * });
- * // ... later, from any thread:
- * server.reply(saved_req_id, Resp{...});
+ *
+ * // ...some time later, from any thread:
+ * svr.reply(pending, Resp{result});
  * @endcode
  *
- * @par Fire-and-forget Example (no response)
+ * @par Fire-and-Forget Example
  * @code
- * Server<Req> server("dds://my_service");   // RespT defaults to EmptyType
- * server.listen([](const Req& req) {
- *     handle(req);
- * });
+ * vlink::Server<Req> svr("dds://logger/push");   // RespT defaults to EmptyType
+ * svr.listen([](const Req& q) { write_log(q); });
  * @endcode
  *
- * @note Calling @c listen() / @c listen_for_reply() more than once is fatal.
- *       @c reply() must only be called after @c listen_for_reply(); calling it
- *       after a synchronous @c listen() triggers a fatal log.
+ * @note Calling @c listen() or @c listen_for_reply() more than once is a
+ *       fatal error.  @c reply() must only be used following
+ *       @c listen_for_reply(); calling it after a synchronous @c listen()
+ *       triggers a fatal log.
  *
- * @tparam ReqT  Request message type.  Must satisfy @c Serializer::is_supported().
- * @tparam RespT Response message type.  Defaults to @c Traits::EmptyType (no response).
- * @tparam SecT  Security mode; defaults to @c SecurityType::kWithoutSecurity.
+ * @see client.h, node.h, serializer.h, base/functional.h
  */
 
 #pragma once
@@ -99,66 +110,59 @@ namespace vlink {
 
 /**
  * @class Server
- * @brief Type-safe server for the VLink method (RPC) communication model.
+ * @brief Type-safe RPC handler for the VLink method communication model.
  *
- * @tparam ReqT  Request type.
- * @tparam RespT Response type (defaults to @c Traits::EmptyType -- no response).
- * @tparam SecT  Security mode.
+ * @details
+ * Inherits the full @c Node API and adds handler-side operations:
+ * three @c listen() variants and the deferred @c reply() entry point.  The
+ * transport implementation (@c ServerImpl) is selected by the URL scheme or
+ * by the typed configuration object supplied at construction time.
+ *
+ * @tparam ReqT   Request message type. Must satisfy @c Serializer::is_supported().
+ * @tparam RespT  Response message type.  Defaults to @c Traits::EmptyType (no response).
+ * @tparam SecT   Security mode; defaults to @c SecurityType::kWithoutSecurity.
  */
 template <typename ReqT, typename RespT = Traits::EmptyType, SecurityType SecT = SecurityType::kWithoutSecurity>
 class Server : public Node<ServerImpl, SecT> {
  public:
-  /** @brief Unique-pointer alias. */
-  using UniquePtr = std::unique_ptr<Server<ReqT, RespT, SecT>>;
-
-  /** @brief Shared-pointer alias. */
-  using SharedPtr = std::shared_ptr<Server<ReqT, RespT, SecT>>;
-
-  /** @brief Fire-and-forget callback -- no response (@c RespT must be @c EmptyType). */
-  using ReqCallback = Function<void(const ReqT&)>;
-
-  /** @brief Synchronous callback -- response filled in-place inside the callback. */
-  using ReqRespCallback = Function<void(const ReqT&, RespT&)>;
+  using UniquePtr = std::unique_ptr<Server<ReqT, RespT, SecT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<Server<ReqT, RespT, SecT>>;  ///< Owning shared-pointer alias.
+  using ReqCallback = Function<void(const ReqT&)>;               ///< Fire-and-forget handler signature.
+  using ReqRespCallback = Function<void(const ReqT&, RespT&)>;   ///< Synchronous fill-response handler.
 
   /**
-   * @brief Asynchronous callback -- response sent later via @c reply(req_id, resp).
+   * @brief Handler signature for deferred asynchronous replies.
    *
    * @details
-   * The first parameter is the opaque request ID that must be passed to
-   * @c reply() to deliver the response to the waiting client.
+   * Receives the opaque @c req_id assigned by the framework alongside the
+   * incoming request.  The handler must eventually call @c reply(req_id, resp)
+   * from any thread to deliver the response.
    */
   using ReqAsyncRespCallback = Function<void(uint64_t, const ReqT&)>;
 
-  /** @brief Node role identifier (@c kServer). */
-  static constexpr ImplType kImplType = kServer;
-
-  /** @brief @c true when @c RespT is not @c EmptyType (server has a response). */
-  static constexpr bool kHasResp = !std::is_same_v<RespT, Traits::EmptyType>;
-
-  /** @brief Serializer type for @c ReqT. */
-  static constexpr Serializer::Type kReqType = Serializer::get_type_of<ReqT>();
-
-  /** @brief Serializer type for @c RespT. */
-  static constexpr Serializer::Type kRespType = Serializer::get_type_of<RespT>();
+  static constexpr ImplType kImplType = kServer;                                   ///< Node role tag (@c kServer).
+  static constexpr bool kHasResp = !std::is_same_v<RespT, Traits::EmptyType>;      ///< @c true when response produced.
+  static constexpr Serializer::Type kReqType = Serializer::get_type_of<ReqT>();    ///< Codec for the request.
+  static constexpr Serializer::Type kRespType = Serializer::get_type_of<RespT>();  ///< Codec for the response.
 
   static_assert(Serializer::is_supported(kReqType), "<ReqT> is not a supported Serializer type.");
   static_assert(!kHasResp || Serializer::is_supported(kRespType), "<RespT> is not a supported Serializer type.");
 
   /**
-   * @brief Creates a @c Server on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c Server and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Service URL string (e.g. @c "dds://my_service").
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new server.
+   * @param url_str  Service URL such as @c "dds://my_service".
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new server.
    */
   [[nodiscard]] static UniquePtr create_unique(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c Server on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c Server and wraps it in a @c std::shared_ptr.
    *
    * @param url_str  Service URL string.
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new server.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new server.
    */
   [[nodiscard]] static SharedPtr create_shared(const std::string& url_str, InitType type = InitType::kWithInit);
 
@@ -166,12 +170,12 @@ class Server : public Node<ServerImpl, SecT> {
    * @brief Constructs a server from a typed transport configuration object.
    *
    * @details
-   * Accepts any @c Conf-derived configuration.  A compile-time @c static_assert
-   * verifies the configuration supports the server role.
+   * Accepts any @c Conf-derived configuration.  A compile-time check
+   * enforces that the configuration permits the server role.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT  Concrete configuration type derived from @c Conf.
+   * @param conf    Populated configuration aggregate.
+   * @param type    Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename = std::enable_if_t<std::is_base_of_v<Conf, ConfT>>>
@@ -180,62 +184,63 @@ class Server : public Node<ServerImpl, SecT> {
   /**
    * @brief Constructs a server from a URL string.
    *
-   * @param url_str  Service URL (e.g. @c "someip://30490/0x1/my_method").
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param url_str  Service URL such as @c "someip://30490/0x1/my_method".
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   explicit Server(const std::string& url_str, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Registers a fire-and-forget request callback (no response).
+   * @brief Installs a fire-and-forget request handler.
    *
    * @details
-   * Only valid when @c RespT == @c EmptyType (enforced by @c static_assert).
-   * The callback is invoked for every incoming request; no reply is sent.
-   * Calling @c listen() more than once is a fatal error.
+   * Only available when @c RespT == @c EmptyType (enforced by
+   * @c static_assert).  The handler is invoked for every received request
+   * and no response is produced.
    *
-   * @param callback  @c void(const ReqT&) invoked for each request.
-   * @return          @c true if registration succeeded; @c false on error.
+   * @param callback  @c void(const ReqT&) handler.
+   * @return          @c true if registration succeeded.
    */
   bool listen(ReqCallback&& callback);
 
   /**
-   * @brief Registers a synchronous request/response callback.
+   * @brief Installs a synchronous request/response handler.
    *
    * @details
-   * Only valid when @c kHasResp is @c true (enforced by @c static_assert).
-   * The callback must fill @p resp before returning.  The framework
-   * serialises and sends the response immediately after the callback returns.
+   * Only available when @c kHasResp is @c true.  The handler must populate
+   * @c resp before returning; the framework serialises @c resp immediately
+   * and emits the reply on the underlying transport.
    *
-   * @param callback  @c void(const ReqT&, RespT&) -- fills @c resp in-place.
-   * @return          @c true if registration succeeded; @c false on error.
+   * @param callback  @c void(const ReqT&, RespT&) handler that fills @c resp.
+   * @return          @c true if registration succeeded.
    */
   bool listen(ReqRespCallback&& callback);
 
   /**
-   * @brief Registers an asynchronous request callback (reply sent later).
+   * @brief Installs a handler that defers the reply via @c reply().
    *
    * @details
-   * Only valid when @c kHasResp is @c true (enforced by @c static_assert).
-   * The callback receives an opaque @c req_id.  The handler must eventually
-   * call @c reply(req_id, resp) from any thread to send the response.
+   * Only available when @c kHasResp is @c true.  The handler receives an
+   * opaque @c req_id and the deserialised request.  The handler must
+   * eventually invoke @c reply(req_id, resp) -- from any thread -- to send
+   * the response back to the waiting client.
    *
-   * @param callback  @c void(uint64_t req_id, const ReqT&) -- stores @c req_id for later.
-   * @return          @c true if registration succeeded; @c false on error.
+   * @param callback  @c void(uint64_t, const ReqT&) handler.
+   * @return          @c true if registration succeeded.
    */
   bool listen_for_reply(ReqAsyncRespCallback&& callback);
 
   /**
-   * @brief Sends an asynchronous response for a previously received request.
+   * @brief Emits the asynchronous response for a previously received request.
    *
    * @details
-   * Must only be called after @c listen_for_reply() (calling after a synchronous
-   * @c listen() triggers a fatal log).  The @p req_id must match the value
-   * passed to the async callback; an unrecognised ID may be rejected or ignored
-   * by the transport backend.
+   * Must be paired with @c listen_for_reply(); calling @c reply() after a
+   * synchronous @c listen() triggers a fatal log.  The @c req_id must match
+   * the value passed to the async handler.  Unknown IDs may be silently
+   * rejected by the active transport.
    *
-   * @param req_id  Opaque request identifier received in the async callback.
-   * @param resp    Response value to serialise and send back to the client.
-   * @return        @c true if the transport accepted the response; @c false on error.
+   * @param req_id  Opaque identifier received in the async handler.
+   * @param resp    Response value to serialise and emit.
+   * @return        @c true if the transport accepted the response.
    */
   bool reply(uint64_t req_id, const RespT& resp);
 
@@ -250,33 +255,30 @@ class Server : public Node<ServerImpl, SecT> {
 
 /**
  * @class SecurityServer
- * @brief Convenience alias for @c Server with message security enabled.
+ * @brief Convenience alias of @c Server with per-message encryption enabled.
  *
  * @details
- * Equivalent to @c Server<ReqT, RespT, SecurityType::kWithSecurity>.
- * Each incoming request is decrypted before dispatch to the callback, and
- * each outgoing response is encrypted before transmission.
+ * Equivalent to @c Server\<ReqT, RespT, SecurityType::kWithSecurity\>.  Each
+ * incoming request is decrypted before dispatch to the handler, and each
+ * outgoing response is encrypted before transmission.
  *
- * @tparam ReqT  Request type.
- * @tparam RespT Response type (defaults to @c Traits::EmptyType).
+ * @tparam ReqT   Request message type.
+ * @tparam RespT  Response message type. Defaults to @c Traits::EmptyType.
  */
 template <typename ReqT, typename RespT = Traits::EmptyType>
 class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
  public:
-  /** @brief Unique-pointer alias. */
-  using UniquePtr = std::unique_ptr<SecurityServer<ReqT, RespT>>;
-
-  /** @brief Shared-pointer alias. */
-  using SharedPtr = std::shared_ptr<SecurityServer<ReqT, RespT>>;
+  using UniquePtr = std::unique_ptr<SecurityServer<ReqT, RespT>>;  ///< Owning unique-pointer alias.
+  using SharedPtr = std::shared_ptr<SecurityServer<ReqT, RespT>>;  ///< Owning shared-pointer alias.
 
   /**
-   * @brief Creates a @c SecurityServer on the heap wrapped in a @c unique_ptr.
+   * @brief Heap-allocates a @c SecurityServer and wraps it in a @c std::unique_ptr.
    *
-   * @param url_str  Service URL string (e.g. @c "dds://my_service").
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c UniquePtr owning the new server.
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
+   * @param url_str  Service URL string.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c UniquePtr to the new secure server.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -284,13 +286,13 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Creates a @c SecurityServer on the heap wrapped in a @c shared_ptr.
+   * @brief Heap-allocates a @c SecurityServer and wraps it in a @c std::shared_ptr.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
-   * @return         @c SharedPtr owning the new server.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
+   * @return         Owning @c SharedPtr to the new secure server.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>
@@ -298,12 +300,13 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
                                                InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecurityServer from a typed transport configuration object.
+   * @brief Constructs a @c SecurityServer from a typed configuration object.
    *
-   * @tparam ConfT  @c Conf-derived configuration type.
-   * @param conf    Populated configuration object.
-   * @param sec_cfg Security configuration aggregate (empty by default; empty uses the built-in default symmetric slot).
-   * @param type    @c kWithInit to call @c init() immediately (default).
+   * @tparam ConfT           Configuration type derived from @c Conf.
+   * @tparam SecurityConfigT Forwardable @c Security::Config compatible type.
+   * @param conf     Populated configuration aggregate.
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename ConfT, typename SecurityConfigT = Security::Config,
@@ -311,18 +314,18 @@ class SecurityServer : public Server<ReqT, RespT, SecurityType::kWithSecurity> {
   explicit SecurityServer(const ConfT& conf, SecurityConfigT&& sec_cfg = {}, InitType type = InitType::kWithInit);
 
   /**
-   * @brief Constructs a @c SecurityServer and installs the security configuration in place.
+   * @brief Constructs a @c SecurityServer from a URL string and installs the security configuration.
    *
    * @details
-   * Always builds the base @c Server with @c InitType::kWithoutInit, then
-   * forwards @p sec_cfg into @c enable_security().  @c init() requires that
-   * @c NodeImpl::security was populated successfully; finally calls @c init()
-   * unless the caller requests deferred initialisation.
+   * Builds the base @c Server in @c kWithoutInit mode, installs @p sec_cfg
+   * via @c enable_security(), then calls @c init() unless deferred.  When
+   * @c enable_security() fails to produce a usable @c NodeImpl::security the
+   * subsequent @c init() will fail.
    *
+   * @tparam SecurityConfigT  Forwardable @c Security::Config compatible type.
    * @param url_str  Service URL string.
-   * @param sec_cfg  Security configuration aggregate (empty by default; empty uses the built-in default symmetric
-   * slot).
-   * @param type     @c kWithInit to call @c init() immediately (default).
+   * @param sec_cfg  Security configuration; empty uses the default symmetric slot.
+   * @param type     Whether to call @c init() inline; default is @c InitType::kWithInit.
    */
   // NOLINTNEXTLINE(modernize-use-constraints)
   template <typename SecurityConfigT = Security::Config>

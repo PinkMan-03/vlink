@@ -23,55 +23,83 @@
 
 /**
  * @file proxy_data.h
- * @brief Zero-copy proxy message envelope carrying raw payload plus routing metadata.
+ * @brief Routing envelope used by the VLink proxy / monitoring path.
  *
  * @details
- * @c ProxyData is used by the VLink proxy layer to bundle a serialised message
- * with its routing context (URL, serialisation type, source hostname) and
- * control fields (control ID, mode, timestamp, sequence number) into a single
- * flat allocation.
+ * @c ProxyData bundles a serialised user payload with the metadata that the
+ * VLink proxy subsystem needs to forward the message across hosts: topic URL,
+ * serialisation type label, source hostname, plus control fields (control id,
+ * mode, microsecond timestamp, sequence number, coarse schema family).  All
+ * variable-length regions share a single owned allocation so a freshly
+ * deserialised envelope can expose each region as a @c string_view or
+ * shallow @c Bytes without further allocation.
  *
- * The struct is exactly 80 bytes on 64-bit platforms.  Internally a single
- * owned buffer is laid out as:
+ * | Region    | Meaning                                              |
+ * | --------- | ---------------------------------------------------- |
+ * | raw       | Serialised user message bytes                        |
+ * | url       | Topic URL (e.g. @c "dds://my/topic")                 |
+ * | ser       | Serialisation type label (e.g. @c "proto.MyMsg")     |
+ * | hostname  | Source machine identifier (optional)                 |
  *
+ * @par Wire format
+ * @c ProxyData is POD; @c memcpy serialises the struct.  The @c sizeof value
+ * is locked by @c static_assert and forms a permanent contract: the
+ * @c vlink::zerocopy::* containers have NO forward or backward binary
+ * compatibility across releases.  Pointer / ownership fields inside the wire
+ * snapshot must NEVER be interpreted by remote consumers.
  * @code
- * [ raw data | url string | ser type string | hostname string ]
+ * static_assert(sizeof(ProxyData) == 80, "Sizeof must be 80 bytes.");
  * @endcode
  *
- * Position and length of each region are stored as @c uint32_t fields in the
- * struct itself so that after binary round-trip the sub-buffers can be accessed
- * as @c std::string_view without additional allocation.
- *
- * @par Binary wire format
+ * @par Memory layout
  * @code
- * [ magic_begin (4) | ProxyData struct (80) | variable payload | magic_end (4) ]
+ * Offset  Size  Field
+ * ------  ----  ---------------------------------
+ *      0     8  uint8_t* data_
+ *      8     8  size_t   size_
+ *     16     4  uint32_t control_id_
+ *     20     4  uint32_t mode_
+ *     24     8  int64_t  timestamp_
+ *     32     8  int64_t  seq_
+ *     40     4  uint32_t data_pos_
+ *     44     4  uint32_t data_size_
+ *     48     4  uint32_t url_pos_
+ *     52     4  uint32_t url_size_
+ *     56     4  uint32_t ser_pos_
+ *     60     4  uint32_t ser_size_
+ *     64     4  uint32_t hostname_pos_
+ *     68     4  uint32_t hostname_size_
+ *     72     4  uint32_t schema_
+ *     76     1  bool     is_owner_
+ *     77     3  (tail padding to align(8))
+ * ------  ----  ---------------------------------
+ *  Total    80  bytes (alignas 8)
+ *
+ * Wire envelope:
+ * [ magic_begin (4) | ProxyData struct (80) | raw | url | ser | hostname | magic_end (4) ]
  * @endcode
- * The struct block is a raw snapshot of the 64-bit ABI layout used by this
- * library; receivers must parse it through @c operator<< and must not treat
- * embedded pointer/ownership fields as portable wire values.
  *
- * @par Usage
+ * @par Reserved bytes
+ * The 3-byte tail padding between @c is_owner_ and the trailing alignment is
+ * implicit reserved space; it is observable through @c sizeof and is locked
+ * by the static assertion.  No bit of this padding may be repurposed without
+ * a coordinated wire-format revision.
+ *
+ * @par Example
  * @code
- * vlink::zerocopy::ProxyData pd;
- * pd.set_control_id(42);
- * pd.set_timestamp(get_time_us());
- * pd.create(raw_bytes, "dds://my/topic", "demo.proto.PointCloud",
- *           static_cast<uint32_t>(SchemaType::kProtobuf), "host01");
+ * vlink::zerocopy::ProxyData envelope;
+ * envelope.set_control_id(42);
+ * envelope.set_timestamp(vlink::time_us());
+ * envelope.create(payload, "dds://lidar/top", "proto.PointCloud",
+ *                 static_cast<uint32_t>(SchemaType::kProtobuf), "host-a");
  *
  * vlink::Bytes wire;
- * pd >> wire;                         // serialise
+ * envelope >> wire;
  *
- * vlink::zerocopy::ProxyData pd2;
- * pd2 << wire;                        // deserialise (zero-copy, borrows wire)
- * auto url = pd2.url();               // std::string_view into wire
+ * vlink::zerocopy::ProxyData rx;
+ * rx << wire;
+ * auto url = rx.url();
  * @endcode
- *
- * @note
- * - 32-bit architectures emit a compile-time warning and are not supported.
- * - After @c operator<<, all sub-buffer string_views reference memory inside
- *   the source @c Bytes.  The @c Bytes must outlive the @c ProxyData.
- * - @c is_valid() performs an additional internal consistency check that all
- *   position + size values are contiguous and sum correctly.
  */
 
 #pragma once
@@ -87,325 +115,258 @@ namespace zerocopy {
 
 /**
  * @struct ProxyData
- * @brief Proxy routing envelope: raw payload bundled with URL, serialisation type, and hostname.
+ * @brief 80-byte POD envelope packing payload, URL, serialisation type and host string.
  *
  * @details
- * Used internally by the VLink proxy subsystem.  The struct is 80 bytes on
- * 64-bit targets.  The variable-length tail buffer is allocated once by
- * @c create() and is contiguous:
- * @c [raw | url | ser | hostname].
+ * Used internally by the VLink proxy / monitoring layer.  All four variable
+ * regions share one allocation laid out as @c [raw | url | ser | hostname]
+ * so deserialisation is zero-copy and string accessors point straight into
+ * the source wire buffer.
  */
 struct VLINK_EXPORT_AND_ALIGNED(8) ProxyData final {
   /**
-   * @brief Default constructor.
-   *
-   * @details
-   * Verifies via @c static_assert that the struct is exactly 80 bytes on
-   * 64-bit platforms.
+   * @brief Default-constructs an empty envelope and asserts the 80-byte contract.
    */
   ProxyData() noexcept;
 
   /**
-   * @brief Destructor -- frees the owned tail buffer if @c is_owner() is @c true.
+   * @brief Frees the owned tail buffer when @c is_owner() is @c true.
    */
   ~ProxyData() noexcept;
 
   /**
-   * @brief Copy constructor -- deep-copies @p target.
+   * @brief Deep-copies @p target into a freshly allocated envelope.
    *
-   * @param target Source to copy.
+   * @param target Source envelope to clone.
    */
   ProxyData(const ProxyData& target) noexcept;
 
   /**
-   * @brief Move constructor -- transfers ownership from @p target.
+   * @brief Steals @p target's allocation and metadata; @p target ends empty.
    *
-   * @details
-   * After the call @p target is empty and does not own any buffer.
-   *
-   * @param target Source to move from.
+   * @param target Source envelope moved from.
    */
   ProxyData(ProxyData&& target) noexcept;
 
   /**
-   * @brief Copy-assignment operator.
+   * @brief Deep-copy-assigns @p target; self-assignment is a no-op.
    *
-   * @param target Source to copy.  Self-assignment is a no-op.
-   * @return        Reference to @c *this.
+   * @param target Source envelope to clone.
+   * @return Reference to @c *this.
    */
   ProxyData& operator=(const ProxyData& target) noexcept;
 
   /**
-   * @brief Move-assignment operator.
+   * @brief Move-assigns @p target; self-assignment is a no-op.
    *
-   * @param target Source to move.  Self-assignment is a no-op.
-   * @return        Reference to @c *this.
+   * @param target Source envelope moved from.
+   * @return Reference to @c *this.
    */
   ProxyData& operator=(ProxyData&& target) noexcept;
 
   /**
-   * @brief Deserialises a @c ProxyData from a @c Bytes wire buffer.
+   * @brief Deserialises an envelope from @p bytes with zero-copy borrowing semantics.
    *
-   * @details
-   * Validates magic-number sentinels and the internal region layout
-   * (positions and sizes must be contiguous and sum to @c size_).
-   * The tail buffer pointer references memory inside @p bytes (zero-copy);
-   * @p bytes must outlive this @c ProxyData.
-   *
-   * @param bytes Buffer produced by @c operator>>.
-   * @return       @c true on success; @c false on magic-number mismatch,
-   *               size inconsistency, or invalid region layout.
+   * @param bytes Wire buffer previously produced by @c operator>>.
+   * @return @c true on success; @c false on magic mismatch or region inconsistency.
    */
   bool operator<<(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Serialises this @c ProxyData into a @c Bytes wire buffer.
+   * @brief Serialises the struct snapshot plus tail buffer into @p bytes.
    *
-   * @details
-   * Writes the magic-number envelope, this object's raw struct snapshot, and
-   * the tail payload into @p bytes, resizing it as needed.
-   *
-   * @param bytes Output buffer (reallocated automatically if necessary).
-   * @return       Always @c true.
+   * @param bytes Output buffer; reallocated automatically when undersized.
+   * @return Always @c true.
    */
   bool operator>>(Bytes& bytes) const noexcept;
 
   /**
-   * @brief Returns the proxy control identifier.
+   * @brief Proxy control identifier set by @c set_control_id().
    *
-   * @return Value set by @c set_control_id().
+   * @return Stored control id.
    */
   [[nodiscard]] uint32_t control_id() const noexcept;
 
   /**
-   * @brief Returns the proxy operation mode.
+   * @brief Proxy operation mode set by @c set_mode().
    *
-   * @return Value set by @c set_mode().
+   * @return Stored mode value.
    */
   [[nodiscard]] uint32_t mode() const noexcept;
 
   /**
-   * @brief Returns the message timestamp in microseconds.
+   * @brief Microsecond-resolution timestamp set by @c set_timestamp().
    *
-   * @return Value set by @c set_timestamp().
+   * @return Timestamp.
    */
   [[nodiscard]] int64_t timestamp() const noexcept;
 
   /**
-   * @brief Returns the message sequence number.
+   * @brief Sequence number set by @c set_seq().
    *
-   * @return Value set by @c set_seq().
+   * @return Sequence number.
    */
   [[nodiscard]] int64_t seq() const noexcept;
 
   /**
-   * @brief Returns the coarse schema family carried with this payload.
+   * @brief Coarse schema family tag set by @c set_schema().
    *
-   * @return Numeric @c SchemaType value stored by @c set_schema().
+   * @return Numeric @c SchemaType value.
    */
   [[nodiscard]] uint32_t schema() const noexcept;
 
   /**
-   * @brief Returns a shallow @c Bytes view of the raw message payload.
+   * @brief Shallow @c Bytes view of the raw payload region (no copy).
    *
-   * @details
-   * The returned @c Bytes points into the internal tail buffer without
-   * copying.  For owned objects the view is tied to this @c ProxyData; for
-   * borrowed or deserialised objects it is also tied to the source object or
-   * source @c Bytes backing buffer.
-   *
-   * @return Shallow @c Bytes of the raw payload, or empty if not set.
+   * @return @c Bytes pointing into the internal tail buffer; lifetime tracks @c *this.
    */
   [[nodiscard]] Bytes raw() const noexcept;
 
   /**
-   * @brief Returns the topic URL as a @c string_view.
+   * @brief View of the URL region within the internal tail buffer.
    *
-   * @details
-   * Points into the internal tail buffer.  For owned objects the lifetime is
-   * tied to this @c ProxyData; for borrowed or deserialised objects it is also
-   * tied to the source object or source @c Bytes backing buffer.
-   *
-   * @return View of the URL string, or empty if not set.
+   * @return Non-owning view, or empty when no URL was provided.
    */
   [[nodiscard]] std::string_view url() const noexcept;
 
   /**
-   * @brief Returns the serialisation type string as a @c string_view.
+   * @brief View of the serialisation-type region within the internal tail buffer.
    *
-   * @details
-   * For example @c "demo.proto.PointCloud" or @c "demo.fbs.CameraFrame".
-   * Points into the internal tail buffer.  For borrowed or deserialised
-   * objects, the original backing buffer must remain alive.
-   *
-   * @return View of the serialisation type string, or empty if not set.
+   * @return Non-owning view, or empty when no serialisation label was provided.
    */
   [[nodiscard]] std::string_view ser() const noexcept;
 
   /**
-   * @brief Returns the source hostname as a @c string_view.
+   * @brief View of the optional source hostname region.
    *
-   * @details
-   * Optional field; empty if not provided to @c create().
-   * Points into the internal tail buffer.  For borrowed or deserialised
-   * objects, the original backing buffer must remain alive.
-   *
-   * @return View of the hostname string, or empty if not set.
+   * @return Non-owning view, or empty when no hostname was provided.
    */
   [[nodiscard]] std::string_view hostname() const noexcept;
 
   /**
-   * @brief Sets the proxy control identifier.
+   * @brief Stores the proxy control identifier.
    *
-   * @param control_id Control identifier value.
+   * @param control_id Identifier value.
    */
   void set_control_id(uint32_t control_id) noexcept;
 
   /**
-   * @brief Sets the proxy operation mode.
+   * @brief Stores the proxy operation mode.
    *
    * @param mode Mode value.
    */
   void set_mode(uint32_t mode) noexcept;
 
   /**
-   * @brief Sets the message timestamp in microseconds.
+   * @brief Stores the microsecond-resolution timestamp.
    *
-   * @param timestamp Timestamp value (microseconds since epoch).
+   * @param timestamp Timestamp value.
    */
   void set_timestamp(int64_t timestamp) noexcept;
 
   /**
-   * @brief Sets the message sequence number.
+   * @brief Stores the message sequence number.
    *
    * @param seq Sequence number.
    */
   void set_seq(int64_t seq) noexcept;
 
   /**
-   * @brief Sets the coarse schema family associated with the payload.
+   * @brief Stores the coarse schema family tag.
    *
    * @param schema Numeric @c SchemaType value.
    */
   void set_schema(uint32_t schema) noexcept;
 
   /**
-   * @brief Checks whether @p bytes contains a valid @c ProxyData wire buffer.
+   * @brief Validates that @p bytes carries a well-formed @c ProxyData envelope.
    *
-   * @details
-   * Verifies minimum buffer size and both magic-number sentinels.
-   *
-   * @param bytes Buffer to validate.
-   * @return       @c true if magic numbers match and size is sufficient.
+   * @param bytes Wire buffer to inspect.
+   * @return @c true on magic match and minimum-size check.
    */
   [[nodiscard]] static bool check_valid(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Returns the total serialised byte count for this @c ProxyData.
+   * @brief Total bytes that @c operator>> writes for this envelope.
    *
-   * @details
-   * Equals: @c sizeof(magic_begin) + @c sizeof(ProxyData) + @c size() + @c sizeof(magic_end)
-   *
-   * @return Total bytes written by @c operator>>.
+   * @return @c sizeof(magic_begin) + @c sizeof(ProxyData) + @c size() + @c sizeof(magic_end).
    */
   [[nodiscard]] size_t get_serialized_size() const noexcept;
 
   /**
-   * @brief Returns @c true when all internal region positions and sizes are consistent.
+   * @brief Validates that internal region positions and sizes are consistent.
    *
    * @details
-   * Checks that raw, url, ser, and hostname regions are contiguous and that
-   * their combined size equals the tail buffer size.  Also requires a non-null
-   * data pointer and non-zero total size.
+   * Confirms the four sub-regions are contiguous, sum to @c size(), and the
+   * data pointer is non-null.  Useful after @c operator<< when forwarding
+   * untrusted input.
    *
-   * @return @c true when the object holds valid, usable data.
+   * @return @c true when the layout is internally consistent.
    */
   [[nodiscard]] bool is_valid() const noexcept;
 
   /**
-   * @brief Borrows the tail buffer from @p target without copying.
+   * @brief Borrows @p target's tail buffer without copying.
    *
-   * @details
-   * Sets metadata and pointer to match @p target; @c is_owner() becomes
-   * @c false.  Any previously owned buffer is freed.  The target backing
-   * buffer must outlive this borrowed envelope.
-   *
-   * @param target Source to borrow from.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source envelope; its backing buffer must outlive @c *this.
+   * @return @c false on self-borrow, otherwise @c true.
    */
   bool shallow_copy(const ProxyData& target) noexcept;
 
   /**
-   * @brief Deep-copies the tail buffer from @p target.
+   * @brief Allocates (or reuses) an owned buffer and clones @p target's payload.
    *
-   * @details
-   * Allocates a new buffer of the same size and copies the payload.  If
-   * @c *this already owns a same-size buffer the data is copied in-place.
-   *
-   * @param target Source to copy.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source envelope to clone.
+   * @return @c false on self-copy, otherwise @c true.
    */
   bool deep_copy(const ProxyData& target) noexcept;
 
   /**
-   * @brief Transfers ownership from @p target to @c *this.
+   * @brief Transfers ownership from @p target; @p target ends empty.
    *
-   * @details
-   * After the call @p target is empty.
-   *
-   * @param target Source to move from.
-   * @return        @c false if @p target == @c *this, otherwise @c true.
+   * @param target Source envelope moved from.
+   * @return @c false on self-move, otherwise @c true.
    */
   bool move_copy(ProxyData& target) noexcept;
 
   /**
-   * @brief Constructs the envelope by packing all fields into a single allocation.
+   * @brief Builds the envelope by packing all four regions into a single allocation.
    *
    * @details
-   * Allocates a buffer of size @c raw.size() + url.size() + ser.size() + hostname.size()
-   * and copies each region in order.  Any previously owned buffer is freed first.
-   * If any region length or the total length exceeds @c UINT32_MAX, the object
-   * is cleared and no buffer is retained.  This function has no return code;
-   * callers that accept dynamic input should check @c is_valid() or @c size()
-   * afterwards.  A total length of zero leaves the object invalid.
+   * Allocates @c raw.size() + @c url.size() + @c ser.size() + @c hostname.size()
+   * bytes and copies each region in order.  If any region (or the total) would
+   * exceed @c UINT32_MAX the envelope is cleared.  Callers passing dynamic
+   * input must verify success via @c is_valid() or @c size().
    *
-   * @param raw Raw serialised message payload.
-   * @param url Topic URL string (e.g., @c "dds://my/topic").
-   * @param ser Serialisation type (e.g., @c "demo.proto.PointCloud").
-   * @param schema Coarse schema family, typically a @c SchemaType value.
-   * @param hostname Optional source hostname; empty if not provided.
+   * @param raw Raw payload bytes.
+   * @param url Topic URL string.
+   * @param ser Serialisation type label.
+   * @param schema Optional coarse schema family tag.
+   * @param hostname Optional source hostname.
    */
   void create(const Bytes& raw, std::string_view url, std::string_view ser, uint32_t schema = 0,
               std::string_view hostname = {}) noexcept;
 
   /**
-   * @brief Releases all resources and resets all fields to zero.
+   * @brief Frees the owned buffer (if any) and zeroes every field.
    */
   void clear() noexcept;
 
   /**
-   * @brief Returns the total tail buffer size in bytes.
+   * @brief Total size of the variable-length tail buffer.
    *
-   * @details
-   * Equals the sum of the raw payload, URL, serialisation type, and hostname
-   * sizes.
-   *
-   * @return Total variable-length buffer size, or 0 if empty.
+   * @return Byte count, or 0 when empty.
    */
   [[nodiscard]] size_t size() const noexcept;
 
   /**
-   * @brief Returns @c true if this object owns its tail buffer.
+   * @brief Whether this envelope currently owns its tail buffer.
    *
-   * @details
-   * Owned buffers are freed in the destructor.  Borrowed buffers (from
-   * @c shallow_copy or @c operator<<) are not freed.
-   *
-   * @return @c true when memory ownership is held.
+   * @return @c true when the destructor would free the buffer.
    */
   [[nodiscard]] bool is_owner() const noexcept;
 
-  static constexpr bool kZerocopyTypes{true};  ///< Internal marker for VLink zero-copy type traits.
+  static constexpr bool kZerocopyTypes{true};  ///< Marker probed by the VLink type-trait machinery.
 
  private:
   uint8_t* data_{nullptr};

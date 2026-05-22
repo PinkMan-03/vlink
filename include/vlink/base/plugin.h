@@ -23,42 +23,42 @@
 
 /**
  * @file plugin.h
- * @brief Type-safe dynamic plugin loader with version checking and lifecycle management.
+ * @brief Strongly-typed shared-library plugin loader with ID and version verification.
  *
  * @details
- * @c Plugin wraps @c dlopen / @c LoadLibrary to load shared libraries that implement a
- * given abstract C++ interface.  Each plugin library must use the @c VLINK_PLUGIN_DECLARE
- * macro to export @c vlink_plugin_create and @c vlink_plugin_destroy entry points.
+ * @c vlink::Plugin wraps the host platform's dynamic-library API (@c dlopen / @c LoadLibrary)
+ * and resolves the @c vlink_plugin_create / @c vlink_plugin_destroy entry points exported
+ * by every plugin built with @c VLINK_PLUGIN_DECLARE.  Plugin implementations are bound to
+ * an abstract interface type so the loader can verify the ABI contract before any virtual
+ * call crosses the library boundary.
  *
- * Plugin ID:
- * Every interface type @c T has a unique ID derived from its demangled type name (via
- * @c NameDetector::get<T>()) or from a user-supplied literal (via @c VLINK_PLUGIN_REGISTER_BY_ID).
- * The @c Plugin loader verifies that the ID embedded in the shared library matches the
- * caller's expected interface type before returning a @c shared_ptr<T>.
+ * Plugin lifecycle observed by the loader:
  *
- * Version checking:
- * The caller specifies a required major/minor version.  @c process_plugin_internal() performs
- * the check inside the library's entry point and returns @c nullptr if the versions are
- * incompatible, preventing ABI mismatches.
+ * @verbatim
+ *     load() ---> open() ---> create() ---> in use ---+
+ *       ^                                             |
+ *       |                                             v
+ *     clear() <--- close() <--- destroy() <--- unload()
+ * @endverbatim
  *
- * Lifecycle:
- * - @c load<T>() opens the library, calls @c vlink_plugin_create, and wraps the result in
- *   a @c shared_ptr<T> with a custom deleter that calls @c vlink_plugin_destroy.
- * - @c unload<T>() decrements the reference count; the library is closed when the count
- *   reaches zero.
- * - @c clear() unloads all libraries.
+ * Interface / implementation contract:
  *
- * Macros (defined in this header):
+ * | Side               | Required macro                              | Result                       |
+ * | ------------------ | ------------------------------------------- | ---------------------------- |
+ * | Abstract interface | @c VLINK_PLUGIN_REGISTER                    | Plugin ID = demangled name   |
+ * | Abstract interface | @c VLINK_PLUGIN_REGISTER_BY_ID(_, "id")     | Plugin ID = literal string   |
+ * | Concrete impl .cc  | @c VLINK_PLUGIN_DECLARE(Impl, major, minor) | Exports create/destroy ABI   |
  *
- * | Macro                             | Purpose                                         |
- * | --------------------------------- | ----------------------------------------------- |
- * | @c VLINK_PLUGIN_REGISTER          | In concrete class: derive plugin ID from type   |
- * | @c VLINK_PLUGIN_REGISTER_BY_ID    | In concrete class: use a literal string as ID   |
- * | @c VLINK_PLUGIN_DECLARE           | In .cpp: export create/destroy entry points     |
+ * @par Version verification
+ * @c process_plugin_internal() runs inside the plugin entry point and verifies that the
+ * plugin ID matches and that the plugin's major version equals the host's required major
+ * and the plugin's minor is no lower than the host's required minor.  Mismatches return
+ * @c nullptr from @c vlink_plugin_create() so an incompatible binary never crosses the
+ * vtable boundary.
  *
  * @par Example
  * @code
- * // Interface header (my_plugin.h):
+ * // Interface (header):
  * class MyPlugin {
  *   VLINK_PLUGIN_REGISTER(MyPlugin)
  *  public:
@@ -66,7 +66,7 @@
  *   virtual void do_work() = 0;
  * };
  *
- * // Implementation .cpp (my_plugin_impl.cpp):
+ * // Implementation (.cc):
  * class MyPluginImpl : public MyPlugin {
  *   VLINK_PLUGIN_REGISTER(MyPlugin)
  *  public:
@@ -74,10 +74,9 @@
  * };
  * VLINK_PLUGIN_DECLARE(MyPluginImpl, 1, 0)
  *
- * // Loader:
+ * // Host:
  * vlink::Plugin plugin;
- * auto impl = plugin.load<MyPlugin>("my_plugin_impl", 1, 0);
- * if (impl) {
+ * if (auto impl = plugin.load<MyPlugin>("my_plugin_impl", 1, 0)) {
  *   impl->do_work();
  * }
  * @endcode
@@ -97,13 +96,13 @@
 
 /**
  * @def VLINK_PLUGIN_CREATE_FUNC_NAME
- * @brief Name of the plugin creation entry point exported by @c VLINK_PLUGIN_DECLARE.
+ * @brief Symbol name of the plugin construction entry point exported by @c VLINK_PLUGIN_DECLARE.
  */
 #define VLINK_PLUGIN_CREATE_FUNC_NAME vlink_plugin_create
 
 /**
  * @def VLINK_PLUGIN_DESTROY_FUNC_NAME
- * @brief Name of the plugin destruction entry point exported by @c VLINK_PLUGIN_DECLARE.
+ * @brief Symbol name of the plugin destruction entry point exported by @c VLINK_PLUGIN_DECLARE.
  */
 #define VLINK_PLUGIN_DESTROY_FUNC_NAME vlink_plugin_destroy
 
@@ -113,73 +112,73 @@ struct PluginEntry;
 
 /**
  * @class Plugin
- * @brief Type-safe dynamic plugin loader with version verification and lifecycle management.
+ * @brief Manager that loads, tracks and unloads shared-library plugins by interface type.
  *
  * @details
- * Loads one or more shared library plugins by interface type @c T.
- * Multiple distinct interface types may be loaded by a single @c Plugin instance.
+ * A single @c Plugin instance can host multiple distinct interface types simultaneously
+ * and tracks each loaded library so repeated @c load() calls share the underlying
+ * @c dlopen handle.  All operations are thread safe through the internal implementation.
  */
 class VLINK_EXPORT Plugin final {
  public:
   /**
-   * @brief Opaque handle to a loaded shared library object (used internally).
+   * @brief Opaque handle to a loaded shared library; treated as a token by the public API.
    */
   using Handle = void*;
 
   /**
-   * @brief Constructs a @c Plugin manager with an empty library registry.
+   * @brief Constructs an empty plugin manager with no libraries loaded.
    */
   Plugin();
 
   /**
-   * @brief Destructor.  Calls @c clear() to unload all still-loaded libraries.
+   * @brief Destroys the plugin manager and unloads every still-resident library via @c clear().
    */
   ~Plugin();
 
   /**
-   * @brief Sets the log level used for plugin load/unload diagnostics.
+   * @brief Sets the verbosity level used for plugin diagnostic messages.
    *
-   * @param level  Logger level.
+   * @param level  Logger level to apply to plugin load/unload tracing.
    */
   void set_log_level(Logger::Level level);
 
   /**
-   * @brief Returns the current log level for plugin diagnostics.
+   * @brief Returns the verbosity level currently used for plugin diagnostics.
    *
-   * @return Current log level.
+   * @return Current logger level.
    */
   [[nodiscard]] Logger::Level get_log_level() const;
 
   /**
-   * @brief Returns the default search path list for finding plugin shared libraries.
+   * @brief Returns the default ordered search path used when locating plugin libraries.
    *
    * @details
-   * Includes the executable directory, the system library directories, and
-   * the current working directory.
+   * The list contains, in priority order, the executable directory, the system library
+   * directories appropriate for the platform, and the current working directory.
    *
-   * @return Deque of directory path strings to search in order.
+   * @return Deque of directory paths searched left to right.
    */
   [[nodiscard]] static std::deque<std::string> default_search_path();
 
   /**
-   * @brief Loads a plugin implementing interface @c T from a shared library.
+   * @brief Loads a shared library that implements interface @c T and returns a tracked handle.
    *
    * @details
-   * -# Resolves the library file by searching @p search_paths for a file whose name
-   *    matches @p lib_name (with platform-appropriate prefix/suffix).
-   * -# Opens the library with @c dlopen (or @c LoadLibrary on Windows).
-   * -# Calls the @c vlink_plugin_create entry point with version and ID information.
-   * -# Returns a @c shared_ptr<T> whose custom deleter calls @c vlink_plugin_destroy.
+   * The loader appends the platform's library prefix/suffix to @p lib_name, scans
+   * @p search_paths, opens the first matching file, invokes the @p function_name entry
+   * point with the caller's ID and version, and finally wraps the returned object pointer
+   * in a @c shared_ptr<T> whose deleter invokes @c vlink_plugin_destroy.
    *
-   * @tparam T             Interface type.  Must have a @c get_plugin_id() static method
-   *                       (inserted by @c VLINK_PLUGIN_REGISTER or @c VLINK_PLUGIN_REGISTER_BY_ID).
-   * @param lib_name       File name of the shared library (without prefix/suffix).
-   * @param version_major  Required major version.
-   * @param version_minor  Required minor version.
-   * @param dir_name       Optional explicit directory to search first.  Default: empty.
-   * @param search_paths   Ordered list of directories to search.  Default: @c default_search_path().
-   * @param function_name  Name of the creation entry point.  Default: @c vlink_plugin_create.
-   * @return @c shared_ptr<T> on success, or @c nullptr on failure.
+   * @tparam T             Interface type carrying @c get_plugin_id() (added by
+   *                       @c VLINK_PLUGIN_REGISTER or @c VLINK_PLUGIN_REGISTER_BY_ID).
+   * @param lib_name       Library file name without prefix/suffix.
+   * @param version_major  Required interface major version.
+   * @param version_minor  Required interface minor version.
+   * @param dir_name       Optional directory searched before @p search_paths.
+   * @param search_paths   Ordered fallback search list.  Default: @c default_search_path().
+   * @param function_name  Symbol name of the construction entry point.
+   * @return @c shared_ptr<T> owning the plugin instance, or @c nullptr on failure.
    */
   template <class T>
   [[nodiscard]] std::shared_ptr<T> load(
@@ -188,73 +187,67 @@ class VLINK_EXPORT Plugin final {
       const std::string& function_name = VLINK_MACRO_STRING_GET(VLINK_PLUGIN_CREATE_FUNC_NAME));
 
   /**
-   * @brief Unloads the plugin library for interface @c T.
+   * @brief Removes a previously loaded plugin from the registry.
    *
    * @details
-   * Removes the library from the internal registry and decrements the reference count.
-   * The library is actually closed when all @c shared_ptr instances to the plugin object
-   * are destroyed.
+   * The shared library is finally unmapped once every @c shared_ptr returned by
+   * @c load() has been destroyed; this call only releases the tracker entry.
    *
-   * @tparam T       Interface type.
-   * @param lib_name Library file name used during @c load().
-   * @return @c true if the library was found and unloaded.
+   * @tparam T       Interface type used during the original @c load() call.
+   * @param lib_name Library file name passed to @c load().
+   * @return @c true when the registry entry existed and was removed.
    */
   template <class T>
   bool unload(const std::string& lib_name);
 
   /**
-   * @brief Returns @c true if the plugin for interface @c T is currently loaded.
+   * @brief Reports whether a plugin for interface @c T is currently registered.
    *
-   * @tparam T       Interface type.
-   * @param lib_name Library file name used during @c load().
-   * @return @c true if loaded.
+   * @tparam T       Interface type used during the original @c load() call.
+   * @param lib_name Library file name passed to @c load().
+   * @return @c true when the registry entry is present.
    */
   template <class T>
   [[nodiscard]] bool has_loaded(const std::string& lib_name);
 
   /**
-   * @brief Returns the composite key used internally to identify a (library, interface) pair.
+   * @brief Builds the composite key used internally to identify a (library, interface) pair.
    *
    * @details
-   * The key is @c lib_name + "@" + T::get_plugin_id().
+   * The key has the form @c lib_name + "@" + T::get_plugin_id() so the same shared library
+   * can be loaded twice when consumed via two different interfaces.
    *
    * @tparam T       Interface type.
    * @param lib_name Library file name.
-   * @return Composite ID string.
+   * @return Composite identifier string.
    */
   template <class T>
   [[nodiscard]] std::string get_plugin_complex_id(const std::string& lib_name);
 
   /**
-   * @brief Unloads all loaded plugin libraries.
-   *
-   * @details
-   * Equivalent to calling @c unload<T>(lib_name) for every previously loaded plugin.
+   * @brief Unloads every library currently tracked by this manager.
    */
   void clear();
 
   /**
-   * @brief Internal entry-point handler called from @c VLINK_PLUGIN_DECLARE.
+   * @brief Internal version/ID gate invoked from the @c VLINK_PLUGIN_DECLARE entry point.
    *
    * @details
-   * Validates the plugin ID and the major/minor version exported by the
-   * plugin against the values required by the caller, emitting diagnostic
-   * messages gated by @p log_level (i.e. @p log_level filters the
-   * info/error output produced by this function — it does **not** propagate
-   * or configure the logger level inside the plugin module).  Should not be
-   * called directly by user code.
+   * Compares the plugin's exported ID and version against the host's expectations, emitting
+   * informational or error diagnostics gated by @p log_level.  User code should never call
+   * this function directly.  @p log_level only filters this function's own output and is
+   * not propagated into the plugin module's runtime logger.
    *
-   * @param lib_name             Library name (for logging).
-   * @param local_plugin_id      ID exported by the plugin implementation.
-   * @param local_version_major  Major version exported by the plugin.
-   * @param local_version_minor  Minor version exported by the plugin.
-   * @param target_plugin_id     ID expected by the caller (from @c T::get_plugin_id()).
-   * @param target_version_major Major version required by the caller.
-   * @param target_version_minor Minor version required by the caller.
-   * @param log_level            Threshold used to gate this function's own
-   *                             diagnostic output (@c kInfo / @c kError).
-   * @return @c true if and only if the IDs match and the local version satisfies
-   *         @c major == @c target_major and @c minor >= @c target_minor.
+   * @param lib_name             Library file name (used as a tag in diagnostic output).
+   * @param local_plugin_id      Plugin ID compiled into the plugin binary.
+   * @param local_version_major  Major version compiled into the plugin binary.
+   * @param local_version_minor  Minor version compiled into the plugin binary.
+   * @param target_plugin_id     Plugin ID required by the host caller.
+   * @param target_version_major Major version required by the host caller.
+   * @param target_version_minor Minor version required by the host caller.
+   * @param log_level            Threshold used to filter this function's own diagnostics.
+   * @return @c true when IDs match and @c local_major @c == @c target_major and
+   *         @c local_minor @c >= @c target_minor.
    */
   static bool process_plugin_internal(const std::string& lib_name, const std::string& local_plugin_id,
                                       uint16_t local_version_major, uint16_t local_version_minor,
@@ -337,15 +330,16 @@ inline std::string Plugin::get_plugin_complex_id(const std::string& lib_name) {
 #endif
 
 /**
- * @brief Macro to register a plugin, automatically deriving its ID from the interface type name.
+ * @def VLINK_PLUGIN_REGISTER(InterfaceType)
+ * @brief Declares a plugin's identity from the demangled name of its abstract interface.
  *
- * This macro should be used within the definition of a concrete plugin class.
- * It defines a static constexpr member function `get_plugin_id()` that returns
- * the name of the `InterfaceType` as the plugin's ID.
- * It also includes a static assertion to ensure that the `InterfaceType` is an abstract class.
+ * @details
+ * Injects a @c static @c constexpr @c get_plugin_id() member that returns the demangled
+ * name of @p InterfaceType.  Static assertions enforce that the interface is abstract
+ * and exposes a virtual destructor so polymorphic delete across the library boundary
+ * is well defined.
  *
- * @param InterfaceType The abstract interface class that the plugin implements.
- * The plugin ID will be derived from the name of this type.
+ * @param InterfaceType  Abstract interface class the plugin implements.
  */
 #define VLINK_PLUGIN_REGISTER(InterfaceType)                                                                         \
  public:                                                                                                             \
@@ -356,15 +350,16 @@ inline std::string Plugin::get_plugin_complex_id(const std::string& lib_name) {
   }
 
 /**
- * @brief Macro to register a plugin with a specific, user-provided ID.
+ * @def VLINK_PLUGIN_REGISTER_BY_ID(InterfaceType, PluginID)
+ * @brief Declares a plugin's identity from an explicit literal string.
  *
- * This macro should be used within the definition of a concrete plugin class when you
- * want to explicitly specify the plugin's ID, rather than deriving it from the interface type name.
- * It defines a static constexpr member function `get_plugin_id()` that returns the provided `PluginID`.
- * It also includes a static assertion to ensure that the `InterfaceType` is an abstract class.
+ * @details
+ * Same contract as @c VLINK_PLUGIN_REGISTER but @c get_plugin_id() returns @p PluginID
+ * instead of the demangled type name, which is useful when the plugin ID must remain
+ * stable across refactors that rename the interface class.
  *
- * @param InterfaceType The abstract interface class that the plugin implements.
- * @param PluginID      The string literal to be used as the plugin's unique identifier.
+ * @param InterfaceType  Abstract interface class the plugin implements.
+ * @param PluginID       Literal string used as the plugin identity.
  */
 #define VLINK_PLUGIN_REGISTER_BY_ID(InterfaceType, PluginID)                                                         \
  public:                                                                                                             \
@@ -375,14 +370,18 @@ inline std::string Plugin::get_plugin_complex_id(const std::string& lib_name) {
   }
 
 /**
- * @brief Declares a plugin creation and destruction interface.
+ * @def VLINK_PLUGIN_DECLARE(ImplementType, VersionMajor, VersionMinor)
+ * @brief Emits the @c extern @c "C" construction and destruction entry points exported by a plugin module.
  *
- * This macro declares the plugin entry points for creating and destroying the plugin interface.
- * These functions are used by the `Plugin` class to load and unload the plugin.
+ * @details
+ * The construction entry point validates the plugin ID and major/minor version against
+ * the caller's expectations via @c Plugin::process_plugin_internal() and returns a new
+ * instance of @p ImplementType only when the contract holds.  The destruction entry point
+ * deletes the implementation pointer.
  *
- * @param ImplementType The concrete class implementing the plugin interface.
- * @param VersionMajor The major version number of the plugin.
- * @param VersionMinor The minor version number of the plugin.
+ * @param ImplementType  Concrete class implementing the abstract interface.
+ * @param VersionMajor   Major version exposed by this plugin binary.
+ * @param VersionMinor   Minor version exposed by this plugin binary.
  */
 #define VLINK_PLUGIN_DECLARE(ImplementType, VersionMajor, VersionMinor)                                         \
   extern "C" {                                                                                                  \

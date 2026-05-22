@@ -23,53 +23,56 @@
 
 /**
  * @file format.h
- * @brief Lightweight header-only @c {} placeholder formatter with no dynamic allocation.
+ * @brief Minimal heap-free @c {} placeholder formatter for the logger hot path.
  *
  * @details
- * This namespace provides a minimal subset of std::format-compatible formatting for use
- * inside the VLink logger hot path where the standard format header may be unavailable (C++17) or too
- * heavyweight.  All formatting writes through a stack-allocated writer or a user-supplied
- * output iterator and never touches the heap.
+ * VLink targets C++17 first; @c std::format is unavailable on that baseline and far heavier on
+ * older standards.  This header provides a focused subset of std::format-style formatting that
+ * writes through a stack-allocated buffer or a user-supplied output iterator, never allocates,
+ * and dispatches via a compile-time type tag rather than a virtual call chain.
  *
- * Supported argument types:
+ * @par Supported argument types
  *
- * | C++ type                        | Format token  | Example output      |
- * | ------------------------------- | ------------- | ------------------- |
- * | int / short / signed char       | @c {}         | @c 42               |
- * | unsigned / unsigned short / ... | @c {}         | @c 42               |
- * | long / long long                | @c {}         | @c 123456789        |
- * | unsigned long / long long       | @c {}         | @c 123456789        |
- * | bool                            | @c {}         | @c true / @c false  |
- * | char                            | @c {}         | @c A                |
- * | float / double                  | @c {}         | @c 3.14             |
- * | const char* / char*             | @c {}         | @c hello            |
- * | std::string / std::string_view  | @c {}         | @c hello            |
- * | T* (any pointer)                | @c {}         | @c 0x7ffe1234       |
- * | enum (any)                      | @c {}         | underlying int      |
+ * | C++ type                              | Format token | Example output     |
+ * | ------------------------------------- | ------------ | ------------------ |
+ * | @c signed @c char / @c short / @c int | @c {}        | @c 42              |
+ * | @c unsigned @c char / ...             | @c {}        | @c 42              |
+ * | @c long / @c long @c long             | @c {}        | @c 123456789       |
+ * | @c unsigned @c long / @c long @c long | @c {}        | @c 123456789       |
+ * | @c bool                               | @c {}        | @c true / @c false |
+ * | @c char                               | @c {}        | @c A               |
+ * | @c float / @c double                  | @c {}        | @c 3.14            |
+ * | @c const @c char* / @c char*          | @c {}        | @c hello           |
+ * | @c std::string / @c std::string_view  | @c {}        | @c hello           |
+ * | @c T* (any pointer)                   | @c {}        | @c 0x7ffe1234      |
+ * | @c enum                               | @c {}        | underlying integer |
  *
- * Placeholder syntax:
- * - @c {} -- consume arguments in order.
- * - @c {0}, @c {1}, ... -- explicit positional indexing.
- * - @c {{ / @c }} -- literal brace.
+ * @par Placeholder syntax
  *
- * Public API:
- * - @c format_to_n(out, n, fmt, args...) -- writes at most @p n chars into a @c char* buffer.
- * - @c format_to(out[N], fmt, args...) -- writes into a fixed array.
- * - @c format_to(iterator, fmt, args...) -- writes to an output iterator.
+ * | Token                | Meaning                                     |
+ * | -------------------- | ------------------------------------------- |
+ * | @c {}                | Consume the next argument in order          |
+ * | @c {0}, @c {1}, ...  | Explicit positional index                   |
+ * | @c {{ / @c }}        | Literal opening / closing brace             |
  *
- * @note
- * - Float and double are formatted via @c snprintf with @c "%g".  There is no
- *   precision specifier in the placeholder syntax.
- * - Custom types (those not listed above) trigger a @c static_assert at compile time.
- * - Truncated @c format_to_n results set the @c truncated flag in the returned struct.
+ * @par Public API
+ *
+ * | Function                          | Output target                  | Truncation flag |
+ * | --------------------------------- | ------------------------------ | --------------- |
+ * | @c format_to_n(out, n, fmt, ...)  | @c char* buffer with cap @p n  | yes             |
+ * | @c format_to(out[N], fmt, ...)    | Fixed-size array               | yes             |
+ * | @c format_to(it, fmt, ...)        | Output iterator                | no              |
  *
  * @par Example
  * @code
- * char buf[128];
- * auto result = vlink::format::format_to_n(buf, sizeof(buf) - 1, "x={} y={}", 3, 4.5);
- * buf[result.size] = '\0';
- * // buf == "x=3 y=4.5"
+ *   char buf[128];
+ *   auto result = vlink::format::format_to_n(buf, sizeof(buf) - 1, "x={} y={}", 3, 4.5);
+ *   buf[result.size] = '\0';
+ *   // buf == "x=3 y=4.5"
  * @endcode
+ *
+ * @note Floats and doubles use @c "%g" via @c snprintf; there is no precision modifier in the
+ *       placeholder syntax.  Unsupported argument types trigger a compile-time @c static_assert.
  */
 
 #pragma once
@@ -88,7 +91,7 @@ namespace vlink {
 
 /**
  * @namespace vlink::format
- * @brief Lightweight header-only @c {} placeholder formatter.
+ * @brief Minimal allocation-free @c {} placeholder formatter.
  */
 namespace format {
 
@@ -590,13 +593,14 @@ class FormatWriter {
 
 /**
  * @struct FString
- * @brief Compile-time format string wrapper that carries type information about arguments.
+ * @brief Compile-time format-string wrapper carrying the expected argument list.
  *
  * @details
- * Acts as a thin @c std::string_view wrapper tagged with the argument type list.
- * This enables type-safe format_to_n / format_to calls without dynamic dispatch.
+ * Wraps a @c std::string_view tagged with the argument types so a call site is type-checked
+ * implicitly without runtime dispatch.  Constructible directly from string literals so format
+ * arguments accept @c "fmt" without a cast.
  *
- * @tparam ArgsT  Argument types (unused at runtime but encode the expected argument list).
+ * @tparam ArgsT  Argument types expected by the format string (compile-time only).
  */
 template <typename... ArgsT>
 struct FString {
@@ -621,38 +625,34 @@ struct FString {
 };
 
 /**
- * @brief Alias for @c FString used as the type of format-string parameters.
+ * @brief Convenience alias used as the formal type of format-string parameters.
  *
- * @details
- * @c format_string<ArgsT...> is the type of the format argument in @c format_to_n
- * and @c format_to.  Constructed implicitly from string literals.
- *
- * @tparam ArgsT  Expected argument types (for documentation; not enforced at runtime).
+ * @tparam ArgsT  Expected argument types.
  */
 template <typename... ArgsT>
 using format_string = typename FString<ArgsT...>::t;
 
 /**
  * @struct FormatToNResult
- * @brief Result type for @c format_to_n, carrying the output pointer, written size and truncation flag.
+ * @brief Return type of @c format_to_n; carries the end iterator, total size and truncation flag.
  *
- * @tparam OutputItT  Output iterator or pointer type.
+ * @tparam OutputItT  Iterator or pointer type used for output.
  */
 template <typename OutputItT>
 struct FormatToNResult {
-  OutputItT out;          ///< Pointer/iterator one past the last written character.
-  size_t size{0};         ///< Total number of characters that would have been written (may exceed n).
-  bool truncated{false};  ///< @c true if the output was truncated because @c size > n.
+  OutputItT out;          ///< Iterator one past the last written character.
+  size_t size{0};         ///< Total characters that the format would have written.
+  bool truncated{false};  ///< @c true when the output was truncated because @c size > @c n.
 };
 
 /**
  * @struct FormatToResult
- * @brief Result type for the fixed-array overload of @c format_to.
+ * @brief Return type of the fixed-array @c format_to overload.
  */
 struct FormatToResult {
   char* out;       ///< Pointer one past the last written character.
-  size_t size;     ///< Total characters that would have been written.
-  bool truncated;  ///< @c true if output was truncated.
+  size_t size;     ///< Total characters that the format would have written.
+  bool truncated;  ///< @c true when the output was truncated.
 };
 
 ////////////////////////////////////////////////////////////////
@@ -660,63 +660,59 @@ struct FormatToResult {
 ////////////////////////////////////////////////////////////////
 
 /**
- * @brief Creates a type-erased argument store from a variadic argument list.
+ * @brief Builds a type-erased argument store from a parameter pack.
  *
  * @tparam ArgsT  Argument types.
- * @param args    Arguments to capture.
- * @return @c FormatArgStore containing the erased argument values.
+ * @param args    Argument values.
+ * @return Argument store usable by the format engine.
  */
 template <typename... ArgsT>
 inline detail::FormatArgStore<char, detail::RemoveCvref<ArgsT>...> make_format_args(const ArgsT&... args);
 
 /**
- * @brief Formats arguments into a @c char* buffer, writing at most @p n characters.
+ * @brief Formats @p args into @p out, writing at most @p n characters.
  *
  * @details
- * Placeholders (@c {}) in @p fmt are replaced in order by the corresponding argument from
- * @p args.  If more characters would be produced than @p n, output is truncated and the
- * returned @c truncated flag is set.  The caller must null-terminate the output if needed.
+ * Placeholders in @p fmt are substituted with @p args in order.  When the produced text would
+ * exceed @p n the output is truncated and @c truncated is set to @c true.  The caller is
+ * responsible for null termination if needed.
  *
  * @tparam ArgsT  Argument types (deduced).
- * @param out     Destination buffer.  Must have capacity of at least @p n bytes.
- * @param n       Maximum number of characters to write (not counting a null terminator).
- * @param fmt     Format string with @c {} placeholders.
- * @param args    Format arguments.
- * @return @c FormatToNResult with the end pointer, total size and truncation flag.
+ * @param out   Destination buffer with capacity of at least @p n bytes.
+ * @param n     Maximum characters to write, not counting a null terminator.
+ * @param fmt   Format string with @c {} placeholders.
+ * @param args  Arguments to substitute.
+ * @return @c FormatToNResult describing the end iterator, total size and truncation flag.
  */
 template <typename... ArgsT>
 inline FormatToNResult<char*> format_to_n(char* out, size_t n, format_string<ArgsT...> fmt, const ArgsT&... args);
 
 /**
- * @brief Formats arguments into a fixed-size char array.
- *
- * @details
- * The array size @p N is deduced automatically.  Equivalent to
- * @c format_to_n(out, N, fmt, args...).
+ * @brief Formats @p args into a fixed-size character array; equivalent to @c format_to_n.
  *
  * @tparam NumT   Array size (deduced).
  * @tparam ArgsT  Argument types.
- * @param out     Destination char array.
- * @param fmt     Format string.
- * @param args    Format arguments.
- * @return @c FormatToResult with end pointer, total size and truncation flag.
+ * @param out   Destination array.
+ * @param fmt   Format string.
+ * @param args  Arguments to substitute.
+ * @return @c FormatToResult describing the end pointer, total size and truncation flag.
  */
 template <size_t NumT, typename... ArgsT>
 inline FormatToResult format_to(char (&out)[NumT], format_string<ArgsT...> fmt, const ArgsT&... args);
 
 /**
- * @brief Formats arguments to an output iterator.
+ * @brief Formats @p args through an output iterator.
  *
  * @details
- * Writes each character via @c *out++ = c.  The iterator must model the
- * @c OutputIterator concept (assignable and dereferenceable).
+ * Writes each character via @c *out++ = @c c.  The iterator must satisfy the OutputIterator
+ * concept; arrays are explicitly excluded so the fixed-array overload wins overload resolution.
  *
  * @tparam OutputItT  Output iterator type.
  * @tparam ArgsT      Argument types.
- * @param out         Destination output iterator.
- * @param fmt         Format string with @c {} placeholders.
- * @param args        Format arguments.
- * @return The iterator one past the last written character.
+ * @param out   Destination iterator.
+ * @param fmt   Format string.
+ * @param args  Arguments to substitute.
+ * @return Iterator one past the last written character.
  */
 template <typename OutputItT, typename... ArgsT,
           // NOLINTNEXTLINE(modernize-use-constraints)

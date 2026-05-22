@@ -35,7 +35,6 @@
 
 namespace vlink {
 
-// Subscriber<MsgT>
 template <typename MsgT, SecurityType SecT>
 inline typename Subscriber<MsgT, SecT>::UniquePtr Subscriber<MsgT, SecT>::create_unique(const std::string& url_str,
                                                                                         InitType type) {
@@ -230,7 +229,6 @@ inline bool Subscriber<MsgT, SecT>::listen_intra(MsgCallback&& callback) {
   return ret;
 }
 
-// SecuritySubscriber<MsgT>
 template <typename MsgT>
 template <typename SecurityConfigT>
 inline typename SecuritySubscriber<MsgT>::UniquePtr SecuritySubscriber<MsgT>::create_unique(const std::string& url_str,

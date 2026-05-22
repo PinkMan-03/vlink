@@ -23,55 +23,50 @@
 
 /**
  * @file mpmc_queue.h
- * @brief Lock-free bounded multi-producer multi-consumer queue with optional blocking behaviour.
+ * @brief Bounded lock-free multi-producer multi-consumer ring buffer with optional cv blocking.
  *
  * @details
- * @c MpmcQueue<T> is a fixed-capacity, cache-line-aligned, lock-free MPMC ring buffer
- * based on a turn-counting algorithm.  Each slot contains an atomic turn counter that
- * tracks whether the slot is empty (ready for a producer) or full (ready for a consumer).
+ * @c MpmcQueue is a fixed-capacity ring buffer based on a turn-counter algorithm.  Each slot
+ * holds a per-slot atomic @c turn counter that encodes whether the slot is currently empty
+ * (ready for a producer) or full (ready for a consumer).
  *
- * Concurrency model:
- * - Producers atomically increment @c head_ to claim a slot, then wait until
- *   @c chunk.turn == turn(head) * 2 (slot is empty) before constructing the value.
- * - Consumers atomically increment @c tail_ to claim a slot, then wait until
- *   @c chunk.turn == turn(tail) * 2 + 1 (slot is full) before moving the value out.
- * - All waits spin for @c kFirstSpinTimes (32) iterations before calling @c yield_cpu().
+ * @par Algorithm summary
+ *  - Producers atomically increment @c head_ to claim a slot and spin until
+ *    @c chunk.turn @c == @c turn(head) @c * @c 2 (slot empty), then construct the value and
+ *    publish @c turn @c = @c turn(head) @c * @c 2 @c + @c 1 (slot full).
+ *  - Consumers atomically increment @c tail_ to claim a slot and spin until
+ *    @c chunk.turn @c == @c turn(tail) @c * @c 2 @c + @c 1 (slot full), then move the value
+ *    out and publish @c turn @c = @c turn(tail) @c * @c 2 @c + @c 2 (slot empty for next round).
+ *  - Spinning runs for @c kFirstSpinTimes (@c 32) iterations before calling @c yield_cpu.
+ *  - The struct is cache-line aligned: @c head_, @c tail_ and each @c Chunk live in dedicated
+ *    64-byte regions to avoid false sharing.
  *
- * Behaviour modes:
+ * @par Producer / consumer guarantees
  *
- * | Behavior              | Effect on emplace/push              | Effect on pop                    |
- * | --------------------- | ----------------------------------- | -------------------------------- |
- * | @c kNoBehavior        | No notification                     | No blocking                      |
- * | @c kConditionBehavior | Signals @c cv_not_empty_ on push    | Signals @c cv_not_full_ on pop   |
- *
- * @c kConditionBehavior enables @c wait_not_empty() and @c wait_not_full() to wake correctly.
- * Use it with @c kBlockStrategy message loops.
- *
- * Cache-line alignment:
- * - @c head_ and @c tail_ are each aligned to 64 bytes to prevent false sharing.
- * - Each @c Chunk slot is also 64-byte aligned.
- * - The queue object itself is a multiple of 64 bytes.
- *
- * @note
- * - @c emplace() / @c pop() block indefinitely (spinning) until a slot is available.
- *   For bounded producers, use @c try_emplace() / @c try_push() instead.
- * - @c notify_to_quit() sets a quit flag and wakes all blocked @c wait_not_empty() /
- *   @c wait_not_full() calls.  After calling this, further pushes are silently dropped.
- * - Capacity must be >= 1; passing 0 throws @c std::invalid_argument.
- * - The @c VLINK_NO_INSTRUMENT attribute suppresses GCC's @c -finstrument-functions on Linux.
+ * | Behaviour             | Push contract                                | Pop contract                            |
+ * | --------------------- | -------------------------------------------- | --------------------------------------- |
+ * | @c kNoBehavior        | No notification on success or failure        | Spin-wait only                          |
+ * | @c kConditionBehavior | Acquire @c cv_mtx_, notify @c not_empty      | Wake @c not_full waiter on pop          |
+ * | Blocking variants     | @c emplace / @c push spin until success      | @c pop spins until a slot is full       |
+ * | Non-blocking variants | @c try_emplace / @c try_push return on full  | @c try_pop returns false on empty       |
+ * | Quit signal           | @c notify_to_quit drops further pushes       | Pop returns without value once quit set |
  *
  * @par Example
  * @code
- * vlink::MpmcQueue<int> q(1024);
+ *   vlink::MpmcQueue<int> q(1024);
  *
- * // Producer thread:
- * q.push<vlink::MpmcQueue<int>::kConditionBehavior>(42);
+ *   // Producer:
+ *   q.push<vlink::MpmcQueue<int>::kConditionBehavior>(42);
  *
- * // Consumer thread:
- * q.wait_not_empty();
- * int val;
- * q.pop<vlink::MpmcQueue<int>::kConditionBehavior>(val);
+ *   // Consumer:
+ *   q.wait_not_empty();
+ *   int val = 0;
+ *   q.pop<vlink::MpmcQueue<int>::kConditionBehavior>(val);
  * @endcode
+ *
+ * @note @c emplace / @c pop block by spinning; for bounded producers prefer the @c try_* forms.
+ *       Capacity must be @c >= @c 1 (otherwise @c std::invalid_argument is thrown).
+ *       @c notify_to_quit gracefully drains pending waiters and silently drops further pushes.
  */
 
 #pragma once
@@ -100,147 +95,95 @@ namespace vlink {
 
 /**
  * @class MpmcQueueBase
- * @brief Non-template base of @c MpmcQueue: owns all element-type-independent state and
- *        provides capacity / size / wait / quit operations.
+ * @brief Non-template base class that owns every element-type-independent piece of state.
  *
  * @details
- * Holds the cache-line-aligned @c head_ / @c tail_ cursors, the condition-variable
- * pair used by @c kConditionBehavior, the quit flag, the shared capacity, and a raw
- * @c void* slot for the @c Chunk array storage.  The element type @c T -- the
- * @c Chunk struct definition, the per-slot turn counter, and the @c emplace / @c pop
- * value-moving operations -- lives in @c MpmcQueue<T>, which accesses the slots
- * by typed cast of the @c chunk_storage_ pointer.
- *
- * Field order and alignment exactly mirror the historical single-class layout so that
- * @c sizeof(MpmcQueue<T>) and the offsets of @c head_, @c chunk_, @c tail_, and
- * @c quit_flag_ are preserved byte-for-byte.
+ * Hosts the cache-line aligned @c head_ / @c tail_ cursors, the optional condition variables,
+ * the quit flag, the shared capacity and the @c void* slot for the @c Chunk array storage.
+ * The element type @c T -- including the @c Chunk struct and the move / destroy plumbing --
+ * lives in @c MpmcQueue<T>, which accesses slots via a typed cast of @c chunk_storage_.
  */
 class VLINK_EXPORT MpmcQueueBase {
  public:
   /**
-   * @brief Controls whether condition-variable notifications are sent on push/pop.
+   * @brief Per-call notification behaviour selector.
    *
    * @details
-   * Selected via the @c BehaviorT template argument to @c emplace / @c push / @c pop /
-   * @c try_*.  Use @c kConditionBehavior when consumers / producers may block on
-   * @c wait_not_empty() / @c wait_not_full(); otherwise the cv_not_*_ notify calls
-   * are pure overhead and @c kNoBehavior is preferred.
-   *
-   * Effects:
-   * - @c kNoBehavior: push and pop perform no condition-variable notification.
-   * - @c kConditionBehavior: push acquires @c cv_mtx_ and notifies @c cv_not_empty_; pop acquires
-   *   @c cv_mtx_ and notifies @c cv_not_full_.
+   * Selected via the @c BehaviorT template argument to @c emplace / @c push / @c pop and the
+   * @c try_* variants.  Use @c kConditionBehavior whenever consumers or producers may block on
+   * @c wait_not_empty / @c wait_not_full; otherwise the cv notifications are pure overhead.
    */
   enum Behavior : uint8_t { kNoBehavior = 0, kConditionBehavior = 1 };
 
   /**
-   * @brief Returns the fixed capacity of the queue.
+   * @brief Returns the fixed capacity chosen at construction.
    *
-   * @details
-   * The capacity is set at construction time and never changes.  Safe to call
-   * without holding any lock; it reads the immutable @c capacity_ field.
-   *
-   * @return Number of slots reserved at construction (>= 1).
+   * @return Slot count (always @c >= @c 1).
    */
   [[nodiscard]] size_t capacity() const noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Returns an approximation of the current number of elements.
+   * @brief Returns an approximate count of currently enqueued elements.
    *
    * @details
-   * Computes @c head_ - @c tail_ using acquire loads of both cursors.  Because
-   * each cursor is updated atomically by a different set of threads (head_ by
-   * producers, tail_ by consumers), the two snapshots may not be coherent, so
-   * the returned value is generally a near-current approximation.
+   * Computes @c head_ @c - @c tail_ using acquire loads of both cursors; concurrent updates
+   * may produce a slightly stale value.  @p real @c == @c true retries up to 50 times until
+   * the @c tail_ reading is stable, at the cost of latency.  The result is clamped at @c 0
+   * to suppress transient @c head_ @c < @c tail_ wrap-arounds.
    *
-   * When @p real is @c true, this function retries up to 50 times (yielding the
-   * CPU between attempts) until two consecutive @c tail_ reads match, giving a
-   * more stable snapshot at the cost of additional latency.  When @p real is
-   * @c false (the default), a single non-retrying read pair is used -- cheaper
-   * but more racy.
-   *
-   * In both modes the result is clamped at zero (@c head_ < @c tail_ is briefly
-   * observable under concurrent updates and is reported as 0 rather than a
-   * huge unsigned wraparound).
-   *
-   * @param real  If @c true, retries up to 50 times for stability.  Default: @c false.
+   * @param real  When @c true, retries for a stable snapshot.  Default: @c false.
    * @return Approximate number of enqueued elements.
    */
   [[nodiscard]] size_t size(bool real = false) const noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Returns @c true if the queue appears to be empty.
+   * @brief Returns @c true when the queue appears empty.
    *
-   * @details
-   * Defined as @c size(real) == 0.  Subject to the same coherence caveats as
-   * @c size().  Useful for fast polling loops with @c kNoBehavior; for
-   * blocking semantics prefer @c wait_not_empty().
-   *
-   * @param real  If @c true, uses the retrying @c size() variant.  Default: @c false.
-   * @return @c true if no elements are currently enqueued (approximately).
+   * @param real  Pass @c true to use the retrying @c size variant.
+   * @return @c true when no elements are currently enqueued (approximately).
    */
   [[nodiscard]] bool empty(bool real = false) const noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Returns @c true if the queue appears to be full.
+   * @brief Returns @c true when the queue appears full.
    *
-   * @details
-   * Defined as @c size(real) >= @c capacity().  Subject to the same coherence
-   * caveats as @c size().  For blocking semantics on the producer side prefer
-   * @c wait_not_full().
-   *
-   * @param real  If @c true, uses the retrying @c size() variant.  Default: @c false.
-   * @return @c true if the number of enqueued elements is at least @c capacity().
+   * @param real  Pass @c true to use the retrying @c size variant.
+   * @return @c true when the queue is at or above capacity.
    */
   [[nodiscard]] bool is_full(bool real = false) const noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Blocks until the queue is not empty (or a timeout elapses).
+   * @brief Blocks until the queue is non-empty or @p timeout elapses.
    *
    * @details
-   * Fast path: if @c empty(true) is @c false, returns @c true immediately.
-   * Slow path: acquires @c cv_mtx_ and waits on @c cv_not_empty_, woken by
-   * producers that push under @c kConditionBehavior or by @c notify_to_quit().
+   * Fast path: returns immediately when @c empty(true) is @c false.  Slow path: waits on
+   * @c cv_not_empty until a producer publishes under @c kConditionBehavior or
+   * @c notify_to_quit fires.
    *
-   * If @p timeout is @c std::chrono::milliseconds(0) the wait is unbounded;
-   * any positive value imposes a maximum wait.  Returns @c false when the
-   * timeout expires without the queue becoming non-empty, or when
-   * @c notify_to_quit() has been called.
-   *
-   * @param timeout  Maximum wait duration; 0 means wait forever.  Default: 0.
-   * @return @c true if the queue became non-empty, @c false on timeout or quit.
+   * @param timeout  Maximum wait; @c 0 means wait forever.  Default: @c 0.
+   * @return @c true when the queue became non-empty; @c false on timeout or quit.
    */
   bool wait_not_empty(std::chrono::milliseconds timeout = std::chrono::milliseconds(0)) noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Blocks until the queue has space (or a timeout elapses).
+   * @brief Blocks until the queue has free space or @p timeout elapses.
    *
    * @details
-   * Mirror of @c wait_not_empty() for producers: fast-returns @c true if
-   * @c is_full(true) is @c false, otherwise waits on @c cv_not_full_ until a
-   * consumer pops under @c kConditionBehavior or @c notify_to_quit() is
-   * called.
+   * Mirror of @c wait_not_empty for producers; waits on @c cv_not_full.
    *
-   * @param timeout  Maximum wait duration; 0 means wait forever.  Default: 0.
-   * @return @c true if space became available, @c false on timeout or quit.
+   * @param timeout  Maximum wait; @c 0 means wait forever.  Default: @c 0.
+   * @return @c true when space became available; @c false on timeout or quit.
    */
   bool wait_not_full(std::chrono::milliseconds timeout = std::chrono::milliseconds(0)) noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Signals all blocked @c wait_not_empty() / @c wait_not_full() callers to exit.
+   * @brief Signals graceful shutdown to every waiter and rejects further pushes.
    *
    * @details
-   * Sets the internal quit flag (release order) and broadcasts both condition
-   * variables.  After this call:
-   * - All currently blocked @c wait_not_empty / @c wait_not_full calls return @c false.
-   * - All subsequent @c emplace / @c push calls are silently dropped (no slot is claimed).
-   * - @c try_pop returns @c false without modifying its output.  @c pop returns
-   *   without modifying its output if it observes the quit flag while waiting for
-   *   a claimed empty slot; if a claimed slot is already full, it may still consume it.
-   * - @c try_emplace / @c try_push return @c false.
-   *
-   * Intended for graceful shutdown of producer / consumer loops.  Safe to call
-   * multiple times; subsequent calls are no-ops aside from re-broadcasting.
+   * Sets the internal quit flag with release ordering and broadcasts both condition variables.
+   * Existing @c wait_not_empty / @c wait_not_full calls return @c false; subsequent
+   * @c emplace / @c push silently drop their payload; @c try_pop returns @c false without
+   * touching the output.  Safe to call multiple times.
    */
   void notify_to_quit() noexcept VLINK_NO_INSTRUMENT;
 
@@ -284,45 +227,38 @@ class VLINK_EXPORT MpmcQueueBase {
 
 /**
  * @class MpmcQueue
- * @brief Fixed-capacity, lock-free, cache-line-aligned MPMC ring buffer.
+ * @brief Fixed-capacity lock-free MPMC ring buffer over @c T.
  *
- * @tparam T  Element type.  Must be movable.
+ * @details
+ * Allocates @c capacity @c + @c 1 cache-line-aligned slots, validates alignment, and provides
+ * per-slot turn counters for non-blocking enqueue / dequeue.  Element type must be movable.
+ *
+ * @tparam T  Element type stored in each slot.
  */
 template <typename T>
 class MpmcQueue : public MpmcQueueBase {
  public:
   /**
-   * @brief Constructs a @c MpmcQueue with the given fixed capacity.
+   * @brief Constructs a queue with the given fixed capacity.
    *
    * @details
-   * Allocates @c capacity + 1 cache-line-aligned @c Chunk slots from the
-   * platform's aligned allocator (@c std::allocator<Chunk> when @c __cpp_aligned_new
-   * is available, otherwise a @c posix_memalign / @c _aligned_malloc fallback).
-   * The extra trailing slot acts as a guard so producers / consumers can
-   * compute @c idx() without wrapping mid-call.
+   * Allocates @c capacity @c + @c 1 slots via the aligned allocator (extra trailing guard slot
+   * keeps index arithmetic simple).  Validates that the allocation is aligned to
+   * @c kInterferenceSize bytes; misaligned allocations throw @c std::bad_alloc.  Each slot's
+   * turn counter is default-initialised to zero.
    *
-   * Validates that the allocated pointer is itself aligned to
-   * @c kInterferenceSize (64 bytes); on misalignment the allocation is
-   * released and @c std::bad_alloc is thrown.  Each chunk's turn counter is
-   * default-initialised to 0.
-   *
-   * @param capacity  Maximum number of elements.  Must be >= 1.
-   * @throws std::invalid_argument if @p capacity < 1.
-   * @throws std::bad_alloc        if the chunk array allocation failed or returned a misaligned pointer.
+   * @param capacity  Maximum number of elements; must be @c >= @c 1.
+   * @throws std::invalid_argument when @p capacity is below @c 1.
+   * @throws std::bad_alloc       when allocation fails or returns a misaligned pointer.
    */
   explicit MpmcQueue(size_t capacity) VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Destructor.  Destroys any elements still in the queue.
+   * @brief Destructor; destroys still-occupied slots and releases the chunk array.
    *
    * @details
-   * Walks the chunk array and calls @c Chunk::~Chunk() on each entry; the
-   * @c Chunk destructor in turn destroys its stored @c T object if and only if the slot's turn
-   * counter has its low bit set (i.e. the slot is "full").  Then the chunk
-   * array is returned to the allocator.
-   *
-   * Not thread-safe with respect to concurrent producers / consumers; the
-   * caller must ensure no other thread is using the queue at destruction.
+   * Not thread-safe with concurrent producers or consumers; the caller must quiesce the queue
+   * before destruction.
    */
   ~MpmcQueue() noexcept VLINK_NO_INSTRUMENT;
 
@@ -330,125 +266,82 @@ class MpmcQueue : public MpmcQueueBase {
    * @brief In-place constructs an element and blocks until a slot is available.
    *
    * @details
-   * Claims the next slot by atomically incrementing @c head_, then spins on
-   * the slot's turn counter until it reaches @c turn(head) * 2 (i.e. the
-   * previous consumer of this index has finished).  Spinning runs for up to
-   * @c kFirstSpinTimes (32) iterations before yielding the CPU between
-   * checks.
-   *
-   * Once the slot is ready, constructs @c T in place via @c chunk.construct(args...)
-   * and bumps the turn counter to @c turn(head) * 2 + 1 (slot full).
-   *
-   * If @c BehaviorT == @c kConditionBehavior, additionally:
-   * - Before claiming the slot, calls @c wait_not_full(0) so producers block
-   *   until a consumer makes space rather than busy-spinning on full slots.
-   * - After publishing the element, takes @c cv_mtx_ and notifies one
-   *   @c wait_not_empty waiter.
-   *
-   * Silently returns (dropping the would-be element and leaving the claimed
-   * slot in its previous state) if @c notify_to_quit() has been called,
-   * either before the claim or during the spin.
+   * Claims the next slot via @c head_.fetch_add and spins on the turn counter until the slot
+   * is empty.  When @c BehaviorT is @c kConditionBehavior the producer first awaits free space
+   * via @c wait_not_full and notifies one @c wait_not_empty waiter after publishing.  Returns
+   * silently when @c notify_to_quit is observed.
    *
    * @tparam BehaviorT  Notification behaviour.  Default: @c kNoBehavior.
-   * @tparam Args       Argument types forwarded to @c T's constructor.
-   * @param args        Arguments forwarded to construct the @c T instance.
+   * @tparam Args       Constructor argument types forwarded to @c T.
+   * @param args        Arguments forwarded to @c T 's constructor.
    */
   template <Behavior BehaviorT = kNoBehavior, typename... Args>
   void emplace(Args&&... args) noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief In-place constructs an element without blocking.
+   * @brief Non-blocking in-place construction.
    *
    * @details
-   * Reads @c head_ (acquire) and inspects the candidate slot's turn counter.
-   * If the slot is ready (turn == @c turn(head) * 2) attempts to commit the
-   * claim via @c head_.compare_exchange_strong; on success constructs the
-   * element and publishes (turn = @c turn(head) * 2 + 1).  If the CAS fails,
-   * re-reads @c head_ and retries; if @c head_ has not advanced and the slot
-   * is not ready, the queue is full and @c false is returned.
-   *
-   * If @c BehaviorT == @c kConditionBehavior, on successful publish takes
-   * @c cv_mtx_ and notifies one @c wait_not_empty waiter.
-   *
-   * Returns @c false immediately if @c notify_to_quit() has been called.
+   * Reads @c head_, attempts a CAS to claim the slot and retries when the head moves; returns
+   * @c false when the queue is full or @c notify_to_quit has been observed.  On success
+   * publishes the slot and, when @c BehaviorT is @c kConditionBehavior, notifies a waiter.
    *
    * @tparam BehaviorT  Notification behaviour.  Default: @c kNoBehavior.
-   * @tparam Args       Argument types forwarded to @c T's constructor.
-   * @param args        Arguments forwarded to construct the @c T instance.
-   * @return @c true if the element was enqueued; @c false if the queue was full
-   *         or @c notify_to_quit() was called.
+   * @tparam Args       Constructor argument types forwarded to @c T.
+   * @param args        Arguments forwarded to @c T 's constructor.
+   * @return @c true on successful enqueue; @c false on full queue or quit.
    */
   template <Behavior BehaviorT = kNoBehavior, typename... Args>
   [[nodiscard]] bool try_emplace(Args&&... args) noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Pushes a value (by perfect forwarding) and blocks until a slot is available.
+   * @brief Pushes a perfect-forwarded value, blocking until a slot is available.
    *
    * @details
-   * Convenience wrapper that forwards to @c emplace<BehaviorT>(std::forward<P>(v)).
-   * Behaviour, blocking semantics, and quit handling are identical to @c emplace.
+   * Wrapper around @c emplace<BehaviorT>(std::forward<P>(v)).
    *
    * @tparam BehaviorT  Notification behaviour.  Default: @c kNoBehavior.
-   * @tparam P          Value type (lvalue or rvalue reference).
-   * @param v           Value to push; perfect-forwarded to @c T's constructor.
+   * @tparam P          Value type accepted by @c T 's constructor.
+   * @param v  Value to push.
    */
   template <Behavior BehaviorT = kNoBehavior, typename P>
   void push(P&& v) noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Pushes a value without blocking; returns @c false if the queue is full.
-   *
-   * @details
-   * Convenience wrapper that forwards to @c try_emplace<BehaviorT>(std::forward<P>(v)).
+   * @brief Non-blocking push wrapper around @c try_emplace.
    *
    * @tparam BehaviorT  Notification behaviour.  Default: @c kNoBehavior.
-   * @tparam P          Value type (lvalue or rvalue reference).
-   * @param v           Value to push; perfect-forwarded to @c T's constructor.
-   * @return @c true if pushed; @c false if the queue was full or quit was signalled.
+   * @tparam P          Value type accepted by @c T 's constructor.
+   * @param v  Value to push.
+   * @return @c true on successful enqueue; @c false on full queue or quit.
    */
   template <Behavior BehaviorT = kNoBehavior, typename P>
   [[nodiscard]] bool try_push(P&& v) noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Pops a value by move and blocks until an element is available.
+   * @brief Pops a value by move; blocks until an element is available.
    *
    * @details
-   * Mirror of @c emplace: claims the next slot by incrementing @c tail_, spins
-   * until the slot's turn counter reaches @c turn(tail) * 2 + 1 (slot full),
-   * then moves the stored @c T into @p v, calls the chunk's @c destroy() to
-   * destroy the slot's @c T, and bumps the turn counter to @c turn(tail) * 2 + 2
-   * (slot empty, ready for the next round).
-   *
-   * If @c BehaviorT == @c kConditionBehavior, after consuming, takes
-   * @c cv_mtx_ and notifies one @c wait_not_full waiter.
-   *
-   * If @c notify_to_quit() has been called during the spin, returns without
-   * modifying @p v; the claimed slot is left for cleanup by the queue's
-   * destructor.
+   * Claims the next slot via @c tail_.fetch_add, spins until the slot is full, moves the value
+   * into @p v and republishes the slot as empty.  When @c BehaviorT is @c kConditionBehavior
+   * a @c wait_not_full waiter is notified.  Returns without altering @p v when
+   * @c notify_to_quit is observed mid-wait.
    *
    * @tparam BehaviorT  Notification behaviour.  Default: @c kNoBehavior.
-   * @param v           Output reference assigned via @c std::move from the slot.
+   * @param v  Destination assigned via @c std::move.
    */
   template <Behavior BehaviorT = kNoBehavior>
   void pop(T& v) noexcept VLINK_NO_INSTRUMENT;
 
   /**
-   * @brief Pops a value without blocking; returns @c false if the queue is empty.
+   * @brief Non-blocking pop; returns @c false when the queue is empty.
    *
    * @details
-   * Reads @c tail_ (acquire) and inspects the candidate slot's turn counter.
-   * If the slot is full attempts to commit the claim via CAS; on success moves
-   * the @c T into @p v, destroys the slot's contents, and advances the turn
-   * counter.  If the CAS fails, re-reads @c tail_ and retries; if @c tail_
-   * has not advanced and the slot is not full, the queue is empty and
-   * @c false is returned.
-   *
-   * Returns @c false immediately if @c notify_to_quit() has been called.
+   * Uses CAS retry on @c tail_; @p v is untouched on failure.
    *
    * @tparam BehaviorT  Notification behaviour.  Default: @c kNoBehavior.
-   * @param v           Output reference assigned via @c std::move on success;
-   *                    untouched on failure.
-   * @return @c true if an element was popped; @c false if empty or quit signalled.
+   * @param v  Destination assigned via @c std::move on success.
+   * @return @c true on successful pop; @c false on empty or quit.
    */
   template <Behavior BehaviorT = kNoBehavior>
   [[nodiscard]] bool try_pop(T& v) noexcept VLINK_NO_INSTRUMENT;

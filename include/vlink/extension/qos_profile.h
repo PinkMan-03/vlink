@@ -23,47 +23,60 @@
 
 /**
  * @file qos_profile.h
- * @brief Pre-defined QoS profiles for common VLink communication patterns.
+ * @brief Curated catalogue of pre-built @c Qos instances for common VLink workloads.
  *
  * @details
- * The @c QosProfile namespace provides a set of ready-to-use @c Qos constant instances
- * covering the most common autonomy and embedded system use cases. Each profile has
- * @c valid = @c true and can be passed directly to any VLink endpoint.
+ * Picking the right @c Qos for a topic involves balancing reliability, history depth,
+ * durability, publish mode and priority.  This file declares thirteen ready-to-use
+ * @c constexpr profiles inside @c vlink::QosProfile, each tuned for a specific class of
+ * traffic encountered in autonomy and embedded stacks.  Every profile is constructed
+ * with @c valid set to @c true and can be passed straight to any VLink endpoint or
+ * registered with a transport (@c DdsConf::register_qos) before being referenced from
+ * a URL.
  *
- * Available profiles:
+ * Profile catalogue (use-case oriented):
  *
- * | Profile    | Reliability | History        | Durability     | PubMode | Priority   | Use case                    |
- * | ---------- | ----------  | -------------- | -------------- | ------- | ---------- | --------------------------- |
- * | kEvent     | Reliable    | KeepLast(10)   | Volatile       | Sync    | RealTime   | Discrete control events     |
- * | kMethod    | Reliable    | KeepAll        | Volatile       | Sync    | High       | RPC request/response        |
- * | kField     | Reliable    | KeepLast(1)    | TransientLocal | Sync    | High       | Latest-value state sync     |
- * | kSensor    | BestEffort  | KeepLast(20)   | Volatile       | ASync   | Normal     | High-rate sensor data       |
- * | kParameter | Reliable    | KeepLast(1000) | Volatile       | Sync    | Normal     | Configuration parameters    |
- * | kService   | Reliable    | KeepLast(10)   | TransientLocal | Sync    | Normal     | Service discovery           |
- * | kClock     | BestEffort  | KeepLast(1)    | Volatile       | ASync   | Low        | Time synchronisation        |
- * | kStatic    | Reliable    | KeepAll        | TransientLocal | Sync    | Normal     | Static/slow-changing data   |
- * | kLight     | Reliable    | KeepLast(1)    | Volatile       | ASync   | High       | Lightweight fast messaging  |
- * | kPoor      | BestEffort  | KeepLast(5)    | Volatile       | ASync   | Background | Low-priority best-effort    |
- * | kBetter    | BestEffort  | KeepLast(50)   | Volatile       | Sync    | RealTime   | High-throughput best-effort |
- * | kBest      | Reliable    | KeepLast(200)  | Volatile       | Sync    | RealTime   | High-throughput reliable    |
- * | kLarge     | Reliable    | KeepLast(500)  | Volatile       | Sync    | Low        | Large payload transfers     |
+ * | Profile        | Reliability      | History        | Durability      | PublishMode | Priority   |
+ * | -------------- | ---------------- | -------------- | --------------- | ----------- | ---------- |
+ * | @c kEvent      | Reliable         | KeepLast(10)   | Volatile        | Sync        | RealTime   |
+ * | @c kMethod     | Reliable         | KeepAll        | Volatile        | Sync        | High       |
+ * | @c kField      | Reliable         | KeepLast(1)    | TransientLocal  | Sync        | High       |
+ * | @c kSensor     | BestEffort       | KeepLast(20)   | Volatile        | ASync       | Normal*    |
+ * | @c kParameter  | Reliable         | KeepLast(1000) | Volatile        | Sync        | Normal     |
+ * | @c kService    | Reliable         | KeepLast(10)   | TransientLocal  | Sync        | Normal     |
+ * | @c kClock      | BestEffort       | KeepLast(1)    | Volatile        | ASync       | Low        |
+ * | @c kStatic     | Reliable         | KeepAll        | TransientLocal  | Sync        | Normal     |
+ * | @c kLight      | Reliable         | KeepLast(1)    | Volatile        | ASync       | High       |
+ * | @c kPoor       | BestEffort       | KeepLast(5)    | Volatile        | ASync       | Background |
+ * | @c kBetter     | BestEffort       | KeepLast(50)   | Volatile        | Sync        | RealTime   |
+ * | @c kBest       | Reliable         | KeepLast(200)  | Volatile        | Sync        | RealTime   |
+ * | @c kLarge      | Reliable (HB500) | KeepLast(500)  | Volatile        | Sync        | Low        |
  *
- * @par Lookup by name
- * @c get_available_qos_map() returns an @c unordered_map from profile name string to @c Qos,
- * enabling runtime profile selection.  Built-in profile names are accepted directly in URLs
- * (e.g. @c "?qos=sensor"); custom @c Qos values must first be registered with the transport
- * via @c register_qos before being referenced from a URL:
+ * @c kSensor* is dispatched as express (the @c is_express flag is set).  Use-case mapping:
+ * @c kEvent = discrete control events, @c kMethod = RPC, @c kField = latest-value state sync,
+ * @c kSensor = high-rate sensors, @c kParameter = slow config, @c kService = discovery,
+ * @c kClock = time sync, @c kStatic = maps / calibration, @c kLight = small frequent traffic,
+ * @c kPoor = low-priority telemetry, @c kBetter = best-effort throughput,
+ * @c kBest = reliable throughput, @c kLarge = large payload (heartbeat 500 ms).
+ *
+ * @par Looking profiles up by name
  * @code
- * auto& qos_map = vlink::QosProfile::get_available_qos_map();
- * auto it = qos_map.find("sensor");
- * if (it != qos_map.end()) {
- *     vlink::DdsConf::register_qos("my_sensor", it->second);
+ * const auto& qos_map = vlink::QosProfile::get_available_qos_map();
+ *
+ * if (auto it = qos_map.find("sensor"); it != qos_map.end()) {
+ *   vlink::DdsConf::register_qos("my_sensor_qos", it->second);
  * }
  * @endcode
  *
- * @par Direct usage
+ * @par Using a profile by URL
  * @code
+ * // Built-in names are recognised directly in URLs:
  * auto pub = vlink::Publisher<MyMsg>::create_unique("dds://sensor_data?qos=sensor");
+ *
+ * // Or apply a profile programmatically:
+ * vlink::Qos qos = vlink::QosProfile::kField;
+ * qos.history.depth = 5;        // tweak the depth before use
+ * vlink::DdsConf::register_qos("my_field_qos", qos);
  * @endcode
  */
 
@@ -79,11 +92,12 @@ namespace vlink {
 
 /**
  * @namespace vlink::QosProfile
- * @brief Pre-built @c Qos constant instances covering common communication patterns.
+ * @brief Pre-built @c Qos constants for common autonomy and embedded workloads.
  *
  * @details
- * All profiles have @c valid = @c true.  Choose the profile that best matches your
- * use case, or customise a copy for specific requirements.
+ * Every constant in this namespace carries @c valid = @c true and is safe to pass
+ * directly to any VLink endpoint or to register with a transport.  Pick the closest
+ * profile for your traffic and customise a copy if you need finer control.
  *
  * @see Qos, get_available_qos_map()
  */
@@ -92,8 +106,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepLast(10), Volatile, Sync, RealTime priority.
  *
- * @details Designed for discrete control events where delivery must be guaranteed
- * and late arrivals are acceptable up to a depth of 10.
+ * @details Designed for discrete control events where delivery must be guaranteed and
+ * a small backlog of late arrivals is acceptable.
  */
 [[maybe_unused]] static inline constexpr Qos kEvent{
     "event",
@@ -115,8 +129,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepAll, Volatile, Sync, High priority.
  *
- * @details Designed for RPC-style request/response (Method model).
- * KeepAll ensures no request is dropped even under load.
+ * @details Designed for RPC-style request/response flows.  KeepAll ensures no request
+ * is dropped even under sustained load.
  */
 [[maybe_unused]] static inline constexpr Qos kMethod{
     "method",
@@ -138,8 +152,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepLast(1), TransientLocal, Sync, High priority.
  *
- * @details Designed for Field model (Getter/Setter) where only the latest value matters
- * and late-joining subscribers must receive the last published value.
+ * @details Designed for Field model traffic where only the latest value matters but
+ * late-joining subscribers must still receive that latest value on demand.
  */
 [[maybe_unused]] static inline constexpr Qos kField{
     "field",
@@ -159,10 +173,10 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 };
 
 /**
- * @brief BestEffort, KeepLast(20), Volatile, ASync, Normal priority, express.
+ * @brief BestEffort, KeepLast(20), Volatile, ASync, Normal priority, express delivery.
  *
  * @details Designed for high-rate sensor streams (LiDAR, camera, IMU) where throughput
- * is more important than delivery guarantees.  Express mode hints for minimal queuing delay.
+ * dominates and a few dropped samples are preferable to back-pressure.
  */
 [[maybe_unused]] static inline constexpr Qos kSensor{
     "sensor",
@@ -184,8 +198,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepLast(1000), Volatile, Sync, Normal priority.
  *
- * @details Designed for configuration parameters that change infrequently but must
- * be delivered reliably with a large history window.
+ * @details Designed for configuration parameters that change rarely but must be
+ * delivered reliably and accumulate a deep history for late inspection.
  */
 [[maybe_unused]] static inline constexpr Qos kParameter{
     "parameter",
@@ -207,8 +221,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepLast(10), TransientLocal, Sync, Normal priority.
  *
- * @details Designed for service discovery and advertisement where late joiners
- * must see the current service registry.
+ * @details Designed for service registration and discovery messages where late joiners
+ * must see the current set of advertised services.
  */
 [[maybe_unused]] static inline constexpr Qos kService{
     "service",
@@ -230,8 +244,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief BestEffort, KeepLast(1), Volatile, ASync, Low priority.
  *
- * @details Designed for time synchronisation broadcasts where the newest value
- * is always more useful than older ones and missing a tick is acceptable.
+ * @details Designed for periodic time synchronisation broadcasts where only the most
+ * recent tick has value and an occasional skipped tick is harmless.
  */
 [[maybe_unused]] static inline constexpr Qos kClock{
     "clock",
@@ -253,8 +267,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepAll, TransientLocal, Sync, Normal priority.
  *
- * @details Designed for slowly-changing or static data (maps, calibration files) that
- * must be fully received by any late-joining subscriber.
+ * @details Designed for largely static datasets (HD maps, calibration tables) that
+ * any late-joining subscriber must receive in full.
  */
 [[maybe_unused]] static inline constexpr Qos kStatic{
     "static",
@@ -276,8 +290,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepLast(1), Volatile, ASync, High priority.
  *
- * @details Designed for lightweight, frequent messages where only the latest value
- * is needed and asynchronous delivery provides low overhead.
+ * @details Designed for small frequent messages where only the latest value matters
+ * and asynchronous delivery keeps CPU overhead low.
  */
 [[maybe_unused]] static inline constexpr Qos kLight{
     "light",
@@ -299,8 +313,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief BestEffort, KeepLast(5), Volatile, ASync, Background priority.
  *
- * @details Designed for low-priority non-critical data streams where some loss
- * is acceptable and the lowest possible CPU overhead is desired.
+ * @details Designed for low-priority telemetry and diagnostics where any sample loss
+ * is acceptable and the goal is to minimise CPU and bandwidth impact.
  */
 [[maybe_unused]] static inline constexpr Qos kPoor{
     "poor",
@@ -322,8 +336,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief BestEffort, KeepLast(50), Volatile, Sync, RealTime priority.
  *
- * @details Designed for high-throughput best-effort streams that benefit from
- * a larger history buffer and real-time dispatch priority.
+ * @details Designed for high-throughput best-effort streams that benefit from a deeper
+ * buffer and real-time dispatch priority.
  */
 [[maybe_unused]] static inline constexpr Qos kBetter{
     "better",
@@ -345,8 +359,8 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 /**
  * @brief Reliable, KeepLast(200), Volatile, Sync, RealTime priority.
  *
- * @details Designed for high-throughput reliable streams with a large history buffer.
- * Combines reliability guarantees with synchronous sending for predictable latency.
+ * @details Designed for high-throughput reliable streams that require predictable
+ * latency, pairing reliability with synchronous publishing and a deep buffer.
  */
 [[maybe_unused]] static inline constexpr Qos kBest{
     "best",
@@ -366,10 +380,10 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 };
 
 /**
- * @brief Reliable, KeepLast(500), Volatile, Sync, Low priority, extended heartbeat.
+ * @brief Reliable, KeepLast(500), Volatile, Sync, Low priority with extended heartbeat.
  *
- * @details Designed for large payload transfers (maps, point clouds, images) where
- * a large history window and extended heartbeat interval accommodate slower transport.
+ * @details Designed for large payload transfers (maps, point clouds, images) where a
+ * large buffer and a relaxed 500 ms heartbeat accommodate slower transport pipelines.
  */
 [[maybe_unused]] static inline constexpr Qos kLarge{
     "large",
@@ -389,14 +403,13 @@ namespace QosProfile {  // NOLINT(readability-identifier-naming)
 };
 
 /**
- * @brief Returns a reference to the global map of all named QoS profiles.
+ * @brief Returns the name-to-@c Qos lookup table containing every profile in this namespace.
  *
  * @details
- * The map is keyed by the profile name string (e.g., @c "sensor", @c "event") and maps
- * to the corresponding @c Qos constant.  The map is populated with all profiles defined
- * in this namespace and is safe to query from any thread after construction.
+ * The map is keyed by profile name (e.g. @c "sensor", @c "event") and is safe to read
+ * concurrently from any thread once initialised.
  *
- * @return Const reference to an @c unordered_map<string, Qos> of all available profiles.
+ * @return Constant reference to the global @c unordered_map<string, Qos>.
  */
 [[nodiscard]] VLINK_EXPORT const std::unordered_map<std::string, Qos>& get_available_qos_map() noexcept;
 

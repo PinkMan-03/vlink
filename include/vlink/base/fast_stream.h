@@ -23,38 +23,46 @@
 
 /**
  * @file fast_stream.h
- * @brief A high-performance @c std::ostream backed by a resizable @c std::string buffer.
+ * @brief Allocation-light @c std::ostream backed by a growable string buffer.
  *
  * @details
- * @c FastStream is a specialised output stream designed for zero-copy, low-latency
- * log formatting inside the VLink Logger.  It inherits from @c std::ostream, so any
- * standard stream manipulator or @c operator<< overload works transparently.
+ * @c FastStream is the zero-copy log assembly buffer used inside the VLink logger.  Inheriting
+ * from @c std::ostream means every @c operator<< overload and manipulator works unchanged; the
+ * difference lies in the @c StringBuf backing storage and in @c take_view, which yields a
+ * @c std::string_view directly into the buffer for hand-off to the active sink without an
+ * intermediate copy.
  *
- * Key design points:
- * - Backed by an internal @c StringBuf that stores data in a @c std::string
- *   (avoids heap fragmentation for short messages via a pre-allocated capacity).
- * - @c take_view() returns a @c std::string_view into the internal buffer,
- *   enabling zero-copy hand-off to the logger sink without an extra copy.
- * - @c write_raw() bypasses @c std::ostream formatting and writes bytes directly
- *   into the underlying buffer, suitable for pre-formatted C-strings.
- * - Default capacity is 256 bytes; the buffer grows by doubling until it
- *   exceeds 8 KiB (@c kMaxExpandSize), after which growth is linear in
- *   @c kMaxExpandSize-sized increments.  @c shrink_to_fit() trims the
- *   vector's implementation capacity to its current backing size.
+ * @par Supported operators
  *
- * @note
- * - @c FastStream is @b not thread-safe.  Each thread should own its own instance,
- *   which is the pattern used by the Logger (thread_local FastStream).
- * - Calling @c take_view() invalidates any previously taken view after the next
- *   write or explicit @c reset().  Do not hold views across multiple log calls.
+ * | Operation             | Source                           | Notes                                           |
+ * | --------------------- | -------------------------------- | ----------------------------------------------- |
+ * | @c operator<<         | @c std::ostream interface        | All integral, floating, pointer types           |
+ * | Standard manipulators | @c std::ios_base::fmtflags etc.  | @c std::hex, @c std::setw, @c std::setfill, ... |
+ * | @c write_raw          | direct buffer write              | Bypasses locale and format flags                |
+ * | @c append_to          | append current contents          | Does not reset the buffer                       |
+ * | @c take_view          | hand-off as @c string_view       | View invalidated by the next write              |
+ *
+ * @par Growth policy
+ *
+ * | Stage              | Capacity                          |
+ * | ------------------ | --------------------------------- |
+ * | Initial            | @c kDefaultCapacity (@c 256)      |
+ * | Doubling           | until @c kMaxExpandSize (@c 8192) |
+ * | Linear increments  | @c kMaxExpandSize step thereafter |
  *
  * @par Example
  * @code
- * vlink::FastStream stream;
- * stream << "sensor_id=" << 42 << " value=" << 3.14;
- * std::string_view view = stream.take_view();  // view valid until next write
- * write_to_sink(view);
+ *   vlink::FastStream stream;
+ *   stream << "sensor_id=" << 42 << " value=" << 3.14;
+ *   std::string_view view = stream.take_view();  // valid until next write
+ *   write_to_sink(view);
+ *   stream.reset();
+ *
+ *   stream.write_raw("LITERAL", 7);              // bypass formatting
  * @endcode
+ *
+ * @note Not thread-safe; the logger keeps one @c FastStream per thread via @c thread_local.
+ *       Views returned by @c take_view become invalid on the next stream operation or @c reset.
  */
 
 #pragma once
@@ -69,98 +77,90 @@ namespace vlink {
 
 /**
  * @class FastStream
- * @brief High-performance @c std::ostream with an embedded resizable string buffer.
+ * @brief Logger-friendly @c std::ostream with a custom growable string buffer.
  *
  * @details
- * Used internally by @c Logger to accumulate a single log message and hand it
- * off to the sink as a @c std::string_view without an extra copy.  All
- * @c std::ostream formatting (hex, precision, fill, etc.) is supported.
+ * Routes every write through an embedded @c StringBuf that owns a @c std::string.  The buffer
+ * grows by doubling up to 8 KiB and by linear 8 KiB increments thereafter.  @c take_view yields
+ * a non-owning view into the buffer, so a single log line incurs at most one allocation when
+ * the buffer must grow and zero allocations on the steady-state path.
  */
 class VLINK_EXPORT FastStream : public std::ostream {
  public:
   /**
-   * @brief Constructs a @c FastStream with a default initial buffer capacity.
+   * @brief Constructs the stream with the default initial backing capacity.
    *
    * @details
-   * The default capacity is 256 bytes.  The buffer grows automatically when
-   * the message length exceeds the current capacity.
+   * Initial capacity is @c kDefaultCapacity (@c 256 bytes); the buffer grows on demand.
    */
   FastStream() noexcept;
 
   /**
-   * @brief Destructor.  Releases the internal string buffer.
+   * @brief Destructor; releases the underlying string buffer.
    */
   ~FastStream() noexcept override;
 
   /**
-   * @brief Clears all buffered content and resets the stream error state.
+   * @brief Empties the buffer and clears the stream's error state.
    *
    * @details
-   * After @c reset() the stream is ready to receive a new message.  The
-   * allocated memory of the underlying buffer is retained (no deallocation).
+   * Retains the allocated capacity so subsequent messages avoid reallocation.
    */
   void reset() noexcept;
 
   /**
-   * @brief Appends the current buffered content to an existing @c std::string.
+   * @brief Appends the current buffer contents to @p target without resetting the stream.
    *
-   * @details
-   * The internal buffer is @b not reset after this call.  Use this method when
-   * the content needs to be collected into an external string incrementally.
-   *
-   * @param target  The string to which buffered content is appended.
+   * @param target  Destination string; contents are appended in place.
    */
   void append_to(std::string& target) const noexcept;
 
   /**
-   * @brief Returns a @c std::string_view of the current buffer contents.
+   * @brief Returns a non-owning view of the current buffer contents.
    *
    * @details
-   * The stream is not reset by this call.  The returned view remains valid only
-   * until the next write to the stream or an explicit @c reset().  This is the
-   * primary zero-copy hand-off mechanism used by the Logger.
+   * Primary zero-copy hand-off used by the logger.  The view remains valid until the next write
+   * to this stream or an explicit @c reset.
    *
-   * @warning
-   * Do not store the returned view beyond the lifetime of the next stream
-   * operation.  Treating it as a persistent string leads to undefined behaviour.
+   * @warning Do not retain the view beyond the next stream operation; doing so dereferences
+   *          freed or moved storage.
    *
-   * @return A @c std::string_view over the internal buffer content.
+   * @return View covering the current buffer.
    */
   std::string_view take_view();
 
   /**
-   * @brief Returns the current number of bytes stored in the buffer.
+   * @brief Returns the number of bytes currently held in the buffer.
    *
-   * @return Number of bytes written since the last @c reset().
+   * @return Buffer length in bytes.
    */
   [[nodiscard]] size_t size() const noexcept;
 
   /**
-   * @brief Returns the current allocated capacity of the internal buffer in bytes.
+   * @brief Returns the current allocated capacity of the backing buffer.
    *
    * @return Capacity in bytes.
    */
   [[nodiscard]] size_t capacity() const noexcept;
 
   /**
-   * @brief Trims the internal vector capacity to the current backing size.
+   * @brief Trims the underlying buffer to its current backing size.
    *
    * @details
-   * This does not shrink to the current formatted message length; the backing
-   * size is kept and the write pointer is reset to the beginning.
+   * Does not shrink to the formatted message length; the put pointer is reset to the start.
    */
   void shrink_to_fit() noexcept;
 
   /**
-   * @brief Writes raw bytes directly into the buffer, bypassing @c std::ostream formatting.
+   * @brief Writes raw bytes into the buffer without going through @c std::ostream formatting.
    *
    * @details
-   * This is faster than @c std::ostream::write for pre-formatted C-strings
-   * because it avoids locale and format-flag overhead.
+   * Faster than @c std::ostream::write for pre-formatted C strings because it skips the locale
+   * and format-flag plumbing.
    *
-   * @param data  Pointer to the bytes to write.  Must not be null if @p len > 0.
+   * @param data  Source pointer; non-null when @p len is non-zero.
    * @param len   Number of bytes to write.
-   * @return A reference to @c *this to support chaining.
+   * @return Reference to @c *this for chaining.
    */
   FastStream& write_raw(const char* data, size_t len);
 

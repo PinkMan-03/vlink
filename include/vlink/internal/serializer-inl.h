@@ -41,7 +41,6 @@
 
 // NOLINTBEGIN
 
-// fastcdr
 #if __has_include(<fastcdr/Cdr.h>)
 [[maybe_unused]] static constexpr bool kVlinkHasFastcdr = true;
 
@@ -76,7 +75,6 @@ class Cdr {
 }  // namespace eprosima::fastcdr
 #endif
 
-// protobuf
 #if __has_include(<google/protobuf/message_lite.h>)
 [[maybe_unused]] static constexpr bool kVlinkHasProtobuf = true;
 
@@ -111,7 +109,6 @@ struct Arena {
 
 #endif
 
-// flatbuffers
 #if __has_include(<flatbuffers/flatbuffers.h>)
 [[maybe_unused]] static constexpr bool kVlinkHasFlatbuffers = true;
 

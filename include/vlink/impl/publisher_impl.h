@@ -23,32 +23,46 @@
 
 /**
  * @file publisher_impl.h
- * @brief Abstract base class for all transport-specific publisher implementations.
+ * @brief Transport-neutral base class for every event-model publisher implementation.
  *
  * @details
- * @c PublisherImpl is the intermediate layer between the generic @c Publisher<T> template
- * and a concrete transport backend (e.g. @c DdsPublisherImpl, @c ShmPublisherImpl).
- * It inherits from @c NodeImpl and adds publish-side semantics:
+ * This is an internal implementation header used by the public @c Publisher
+ * template; applications should depend on @c publisher.h.  @c PublisherImpl
+ * extends @c NodeImpl with the publish-side bookkeeping that lets a transport
+ * detect subscriber presence and dispatch payloads either as serialised bytes
+ * (the common case) or as zero-copy in-process @c IntraData (only the intra
+ * backend overrides that path).
  *
- * - Subscriber discovery and change notification via @c detect_subscribers() /
- *   @c update_subscribers().
- * - Blocking wait for at least one subscriber with @c wait_for_subscribers().
- * - Two write overloads: serialised @c Bytes for network transports and zero-copy
- *   @c IntraData for the @c intra:// backend.
+ * @par ImplType
+ * The constructor stamps @c impl_type with @c kPublisher, allowing discovery
+ * and recording layers to label the produced frames correctly.
  *
- * @par Subscriber Discovery Flow
- * @code
- *   // Transport detects subscriber appearance or disappearance:
- *   publisher_impl->update_subscribers();
- *   //   -> compares has_subscribers() against cached state
- *   //   -> notifies the condition variable
- *   //   -> fires the ConnectCallback registered via detect_subscribers()
- * @endcode
+ * @par Lifecycle
+ * - Construction stamps the impl type and prepares the helper state.
+ * - The public @c Publisher template calls @c init() once the conf is wired.
+ * - @c detect_subscribers() may be installed at any time; if a subscriber is
+ *   already known it fires once immediately.
+ * - @c write() (overload chosen by the user) produces frames until @c interrupt()
+ *   is called, after which @c reset_interrupted() can be used to resume.
  *
- * @note Concrete subclasses must implement @c has_subscribers() and
- *       @c write(const Bytes&).  @c write(const IntraData&) is only overridden by
- *       the @c intra:// backend; all other transports inherit the base no-op that
- *       logs a warning and returns @c false.
+ * @par Role table
+ * | Capability                  | Owner                                                 |
+ * | --------------------------- | ----------------------------------------------------- |
+ * | Serialised write path       | Subclass override of @c write(const Bytes&)           |
+ * | Zero-copy intra write       | @c IntraPublisherImpl override of @c write(IntraData) |
+ * | Subscriber presence query   | Subclass override of @c has_subscribers()             |
+ * | Presence change publishing  | @c update_subscribers() in this class                 |
+ * | Wait-for-subscriber gate    | @c wait_for_subscribers() / helper CV                 |
+ *
+ * @par Internal API contract
+ * | Method                                | Default                 | Subclass duty              |
+ * | ------------------------------------- | ----------------------- | -------------------------- |
+ * | @c has_subscribers() const            | Pure virtual            | Query transport            |
+ * | @c write(const Bytes&)                | Pure virtual            | Publish wire frame         |
+ * | @c write(const IntraData&)            | Warns, returns @c false | Only intra:// overrides    |
+ * | @c detect_subscribers(cb)             | Stores callback         | Usually inherited          |
+ * | @c wait_for_subscribers(timeout)      | Helper CV wait          | Usually inherited          |
+ * | @c update_subscribers()               | Implemented here        | Call from transport thread |
  */
 
 #pragma once
@@ -62,121 +76,106 @@ namespace vlink {
 
 /**
  * @class PublisherImpl
- * @brief Transport-agnostic base for publisher node implementations.
+ * @brief Publish-side base shared by every transport-specific publisher.
  *
  * @details
- * Provides the subscriber-detection infrastructure (condition variable + callback)
- * used by @c Publisher<T>::wait_for_subscribers() and
- * @c Publisher<T>::detect_subscribers().  Concrete backends override
- * @c has_subscribers() to query the transport layer and call @c update_subscribers()
- * whenever the subscriber count changes.
+ * Owns the helper condition variable and connect-callback storage that back
+ * @c Publisher<T>::wait_for_subscribers() and
+ * @c Publisher<T>::detect_subscribers().  Transports invoke
+ * @c update_subscribers() from their discovery threads whenever the subscriber
+ * count flips between zero and non-zero.
  */
 class VLINK_EXPORT PublisherImpl : public NodeImpl {
  public:
   /**
-   * @brief Destructor.
+   * @brief Releases the helper state.
    */
   ~PublisherImpl() override;
 
   /**
-   * @brief Interrupts the publisher, waking any blocked @c wait_for_subscribers() call.
+   * @brief Wakes waiters and forwards the interrupt to @c NodeImpl.
    *
    * @details
-   * Calls @c NodeImpl::interrupt() to set the interrupted flag, then
-   * @c notify_all() on the internal condition variable so that any thread blocked
-   * in @c wait_for_subscribers() returns immediately with @c false.
+   * Marks the node interrupted and notifies the helper condition variable so
+   * pending @c wait_for_subscribers() calls return @c false promptly.
    */
   void interrupt() override;
 
   /**
-   * @brief Registers a callback to be fired when the subscriber presence changes.
+   * @brief Registers @p callback to fire when subscriber presence changes.
    *
    * @details
-   * The @p callback is stored and invoked with @c true when the first subscriber
-   * appears and @c false when the last one disconnects.  If subscribers are already
-   * present at registration time the callback is fired immediately with @c true
-   * before this function returns.
+   * The callback is invoked with @c true when the first subscriber appears and
+   * with @c false after the last one drops.  When subscribers are already
+   * known at registration time the callback is primed with @c true before
+   * this function returns.
    *
-   * @param callback  Callable @c void(bool) to invoke on subscriber change.
+   * @param callback  Callable @c void(bool) describing the new presence.
    */
   virtual void detect_subscribers(ConnectCallback&& callback);
 
   /**
-   * @brief Blocks until at least one subscriber is present or the timeout elapses.
+   * @brief Blocks until at least one subscriber is reachable or @p timeout elapses.
    *
    * @details
-   * Returns immediately if @c has_subscribers() is already @c true.  Otherwise
-   * waits on an internal condition variable that is notified by
-   * @c update_subscribers() and @c interrupt().
+   * Returns immediately when @c has_subscribers() already reports @c true.
+   * Negative timeouts (e.g. @c Timeout::kInfinite) wait indefinitely.
    *
-   * - @p timeout < 0 (e.g. @c Timeout::kInfinite): waits indefinitely.
-   * - @p timeout >= 0: returns @c false if no subscriber arrives within the period.
-   *
-   * @param timeout  Maximum time to wait; negative value means wait forever.
-   * @return         @c true if a subscriber was detected; @c false on timeout
-   *                 or interruption.
+   * @param timeout  Wait budget; negative disables the deadline.
+   * @return @c true when a subscriber arrived in time; @c false otherwise.
    */
   virtual bool wait_for_subscribers(std::chrono::milliseconds timeout);
 
   /**
-   * @brief Returns @c true when at least one subscriber is currently connected.
+   * @brief Reports whether at least one subscriber is currently connected.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  Called by
-   * @c wait_for_subscribers() and @c update_subscribers() to determine whether
-   * the subscriber presence state has changed.
+   * Pure virtual; subclasses query their discovery handle.  Used by both
+   * @c wait_for_subscribers() and @c update_subscribers() to detect state
+   * transitions.
    *
-   * @return @c true if one or more subscribers are connected; @c false otherwise.
+   * @return @c true when a subscriber is reachable.
    */
   [[nodiscard]] virtual bool has_subscribers() const = 0;
 
   /**
-   * @brief Publishes a serialised message to all connected subscribers.
+   * @brief Publishes a serialised payload to every connected subscriber.
    *
    * @details
-   * Must be implemented by each concrete transport backend.  @p msg_data contains
-   * the fully serialised payload produced by @c Serializer::serialize().
+   * Pure virtual.  @p msg_data is produced by @c Serializer::serialize() at
+   * the public layer.
    *
-   * @param msg_data  Serialised message bytes to transmit.
-   * @return          @c true if the message was delivered (or queued) successfully;
-   *                  @c false on error.
+   * @param msg_data  Serialised payload bytes.
+   * @return @c true when the frame was successfully delivered or queued.
    */
   virtual bool write(const Bytes& msg_data) = 0;
 
   /**
-   * @brief Publishes an in-process zero-copy message.
+   * @brief Publishes an in-process payload without serialisation.
    *
    * @details
-   * Used exclusively on the @c intra:// transport to pass @c IntraData directly
-   * to subscribers in the same process without serialisation.  The default
-   * implementation logs a warning and returns @c false; only @c IntraPublisherImpl
-   * overrides this method.
+   * Default implementation warns and returns @c false; only
+   * @c IntraPublisherImpl forwards the shared payload directly to co-located
+   * subscribers.
    *
-   * @param intra_data  Shared pointer to the in-process message payload.
-   * @return            @c true if the message was delivered; @c false if this
-   *                    transport does not support @c IntraData.
+   * @param intra_data  Shared payload pointer.
+   * @return @c true when the message was dispatched; @c false otherwise.
    */
   virtual bool write(const IntraData& intra_data);
 
   /**
-   * @brief Notifies the subscriber-detection subsystem that subscriber presence may
-   *        have changed.
+   * @brief Notifies the base class that subscriber presence may have changed.
    *
    * @details
-   * Called by the concrete transport backend whenever a subscriber connects or
-   * disconnects.  Compares the current @c has_subscribers() result against the
-   * cached state; if it differs, the condition variable is notified and the
-   * registered @c ConnectCallback is fired.
-   *
-   * @note
-   * This method is intended to be called from the transport's internal discovery
-   * thread, not from user code.
+   * Compares @c has_subscribers() against the helper cache; on a transition
+   * the condition variable is signalled and the stored @c ConnectCallback is
+   * invoked.  Intended for use from transport discovery threads.
    */
   void update_subscribers();
 
  protected:
   /**
-   * @brief Protected constructor; initialises the publisher with @c kPublisher role.
+   * @brief Stamps the node as @c kPublisher and primes the helper state.
    */
   PublisherImpl();
 

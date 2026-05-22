@@ -23,82 +23,115 @@
 
 /**
  * @file node.h
- * @brief Base CRTP template for all VLink communication nodes.
+ * @brief Common CRTP base for every VLink communication primitive.
  *
  * @details
- * @c Node<ImplT, SecT> is the common base class inherited by @c Publisher,
- * @c Subscriber, @c Server, @c Client, @c Setter, and @c Getter.  It owns
- * the transport-specific implementation pointer (@c impl_), drives the node
- * lifecycle, and provides the shared services described below.
+ * @c Node\<ImplT, SecT\> is the polymorphic base class shared by all six
+ * VLink communication primitives.  It owns the transport-specific
+ * implementation pointer (@c impl_), drives the node lifecycle, and exposes
+ * the cross-cutting services that every primitive needs: zero-copy loans,
+ * peer-discovery toggling, message-loop attachment, recording, security
+ * installation, profiling, and SSL/TLS configuration.
  *
- * @par Architecture Overview
- * @code
- * +---------------------------------------------------+
- * |               User Application                    |
- * |  Publisher<T>  Subscriber<T>  Client<Req,Resp>    |
- * |  Server<Req,Resp>  Getter<T>  Setter<T>           |
- * +-------------------+-------------------------------+
- *                     |  inherits
- * +-------------------v-------------------------------+
- * |         Node<ImplT, SecT>                         |
- * |  lifecycle  loans  security  properties  profiler |
- * +-------------------+-------------------------------+
- *                     |  owns (unique_ptr)
- * +-------------------v-------------------------------+
- * |    ImplT  (PublisherImpl / SubscriberImpl / ...)  |
- * +-------------------+-------------------------------+
- *                     |  creates / calls
- * +-------------------v-------------------------------+
- * |         Transport Back-end                        |
- * |   intra   shm   shm2   dds   ddsc   zenoh  ...    |
- * +---------------------------------------------------+
- * @endcode
+ * @par Class Hierarchy
+ * @verbatim
+ *   +--------------------------------------------------------------+
+ *   |                  User-facing primitives                      |
+ *   |  Publisher<T>   Subscriber<T>   Setter<T>    Getter<T>       |
+ *   |  Client<Req,Resp>               Server<Req,Resp>             |
+ *   +-----------------------------+--------------------------------+
+ *                                 | inherits
+ *   +-----------------------------v--------------------------------+
+ *   |                  Node<ImplT, SecT>                           |
+ *   |  lifecycle | loans | properties | profiler | ssl | security  |
+ *   +-----------------------------+--------------------------------+
+ *                                 | owns std::unique_ptr<ImplT>
+ *   +-----------------------------v--------------------------------+
+ *   |     ImplT  (PublisherImpl, SubscriberImpl, SetterImpl, ...)  |
+ *   +-----------------------------+--------------------------------+
+ *                                 | dispatches to transport
+ *   +-----------------------------v--------------------------------+
+ *   |    Transport back-ends                                       |
+ *   |    intra | shm | shm2 | dds | ddsc | zenoh | someip | ...    |
+ *   +--------------------------------------------------------------+
+ * @endverbatim
  *
- * @par Lifecycle
- * | Step               | Method                | Notes                                       |
- * | ------------------ | --------------------- | ------------------------------------------- |
- * | Construction       | constructor           | Parses URL, creates impl via Conf factory.  |
- * | Initialisation     | @c init()             | Calls impl init + init_ext, sets loan flag. |
- * | Use                | publish/listen/invoke | Normal operation.                           |
- * | Interrupt          | @c interrupt()        | Unblocks any blocking wait immediately.     |
- * | De-initialisation  | @c deinit()           | Calls interrupt(), then impl deinit.        |
- * | Destruction        | destructor            | Calls @c deinit() automatically.            |
+ * @par Lifecycle State Diagram
+ * @verbatim
+ *      +------------+    constructor    +------------+    init()    +------------+
+ *      | (uninited) |------------------>|  parsed    |------------->|   active   |
+ *      |            |  parse URL / Conf |  (impl_)   |  init_ext    | (using API)|
+ *      +------------+                   +------------+              +------------+
+ *                                              ^                          |
+ *                                              |  re-init()               | interrupt()
+ *                                              |                          v
+ *                                       +------+------+            +-------------+
+ *                                       |  deinited   |<-----------|  blocking   |
+ *                                       |             |  deinit()  |  wait aborts|
+ *                                       +-------------+            +-------------+
+ *                                              |
+ *                                              | destructor (calls deinit if active)
+ *                                              v
+ *                                         destroyed
+ * @endverbatim
+ *
+ * | Step              | Method                  | Notes                                       |
+ * | ----------------- | ----------------------- | ------------------------------------------- |
+ * | Construction      | constructor             | Parses URL, creates impl via Conf factory.  |
+ * | Initialisation    | @c init()               | Runs impl init + init_ext, samples loans.   |
+ * | Active            | publish / listen / ...  | Normal operation.                           |
+ * | Interrupt         | @c interrupt()          | Aborts blocking waits immediately.          |
+ * | Deinitialisation  | @c deinit()             | interrupt() then impl deinit + deinit_ext.  |
+ * | Destruction       | destructor              | Auto-deinits if still active.               |
+ *
+ * @par ImplType Roles
+ * | @c ImplType         | Primitive that uses it      | Direction      |
+ * | ------------------- | --------------------------- | -------------- |
+ * | @c kPublisher       | @c Publisher\<T\>           | Event write    |
+ * | @c kSubscriber      | @c Subscriber\<T\>          | Event read     |
+ * | @c kClient          | @c Client\<Req,Resp\>       | RPC caller     |
+ * | @c kServer          | @c Server\<Req,Resp\>       | RPC handler    |
+ * | @c kSetter          | @c Setter\<T\>              | Field write    |
+ * | @c kGetter          | @c Getter\<T\>              | Field read     |
  *
  * @par Deferred Initialisation
  * @code
- * Publisher<MyMsg> pub("dds://topic", InitType::kWithoutInit);
- * pub.set_ser_type("my.custom.Type");   // configure before init
+ * vlink::Publisher<MyMsg> pub("dds://topic", vlink::InitType::kWithoutInit);
+ * pub.set_ser_type("my.custom.Type");
+ * pub.set_discovery_enabled(false);
  * pub.init();
  * @endcode
  *
  * @par Security
- * Enable per-message encryption by using the @c Security* aliases.  The
- * @c Security::Config aggregate is the second constructor argument; there is
- * no runtime setter.  Omitting the argument, or passing an empty config, uses
- * the built-in default symmetric slot when built-in algorithms are enabled:
+ * Use the @c Security* primitive aliases to enable per-message encryption.
+ * The @c Security::Config aggregate is passed as the second constructor
+ * argument; omitting it (or passing an empty aggregate) uses the built-in
+ * default symmetric slot:
  * @code
- * Security::Config cfg;
+ * vlink::Security::Config cfg;
  * cfg.key = "my-secret";
- * SecurityPublisher<MyMsg> pub("shm://topic", cfg);
+ * vlink::SecurityPublisher<MyMsg> pub("shm://topic", cfg);
  * @endcode
- * @note @c intra:// and @c dds:// with CDR serialisation do NOT support security;
- *       using a Security* node there leaves no usable security object for init.
+ *
+ * @note @c intra:// and @c dds:// CDR payloads do not support per-message
+ *       security; constructing a @c Security* primitive there is a fatal.
  *
  * @par Zero-copy Loans
- * On loan-capable transports, a loaned buffer avoids extra copies.  The exact
- * support is reported by the active transport implementation (for example
- * shm/shm2, and Zenoh when SHM support is available):
+ * On loan-capable transports the loan API avoids extra copies:
  * @code
- * Publisher<Bytes> pub("shm://topic");
+ * vlink::Publisher<vlink::Bytes> pub("shm://topic");
  * if (pub.is_support_loan()) {
- *     Bytes buf = pub.loan(sizeof(MyStruct));
- *     // fill buf ...
- *     pub.publish(buf);   // loan is returned automatically
+ *   vlink::Bytes buf = pub.loan(payload_size);
+ *   write_into(buf);
+ *   pub.publish(buf);  // loan is returned automatically
  * }
  * @endcode
  *
- * @tparam ImplT  Concrete transport implementation (must inherit @c NodeImpl).
+ * @tparam ImplT  Concrete transport implementation derived from @c NodeImpl.
  * @tparam SecT   Security mode: @c kWithoutSecurity (default) or @c kWithSecurity.
+ *
+ * @see publisher.h, subscriber.h, client.h, server.h, getter.h, setter.h,
+ *      extension/security.h, extension/ssl_options.h
  */
 
 #pragma once
@@ -116,79 +149,77 @@ namespace vlink {
 
 /**
  * @class Node
- * @brief Transport-agnostic CRTP base for all VLink communication nodes.
+ * @brief Transport-agnostic CRTP base for all VLink communication primitives.
  *
  * @details
- * All six VLink communication primitives inherit from this template.
- * It manages the @c ImplT implementation pointer and provides the shared
- * API surface described in the file-level documentation above.
+ * Provides the lifecycle, loan, security, property, profiler, message-loop,
+ * recording, discovery, and TLS APIs shared by every primitive in the
+ * library.  Subclasses fill in the role-specific operations (publish,
+ * listen, invoke, set, get, etc.).
  *
- * @tparam ImplT  Concrete impl class (e.g. @c PublisherImpl, @c GetterImpl).
+ * @tparam ImplT  Concrete implementation class (e.g. @c PublisherImpl).
  * @tparam SecT   Security mode (@c kWithoutSecurity or @c kWithSecurity).
  */
 template <typename ImplT, SecurityType SecT>
 class Node {
  public:
-  /**
-   * @brief Callback type for node status-change notifications.
-   */
-  using StatusCallback = NodeImpl::StatusCallback;
+  using StatusCallback = NodeImpl::StatusCallback;  ///< Handler signature for status-change notifications.
 
   /**
    * @brief Initialises the node and its transport back-end.
    *
    * @details
    * Uses an atomic compare-exchange to guard against double-initialisation.
-   * On success: calls @c impl_->init(), @c impl_->init_ext(), and queries
-   * the transport for zero-copy loan support.  Calling @c init() on an
-   * already-initialised node is a no-op that returns @c false.
+   * On success the method runs @c impl_->init() then @c impl_->init_ext()
+   * and finally samples the transport's loan capability flag.  Calling
+   * @c init() on an already-initialised node is a no-op.
    *
    * @return @c true on first successful initialisation; @c false otherwise.
    */
   virtual bool init();
 
   /**
-   * @brief Shuts down the node and releases all transport resources.
+   * @brief Tears the node down and releases all transport resources.
    *
    * @details
-   * Uses an atomic compare-exchange to prevent double-deinit.  Calls
-   * @c interrupt() first, then @c impl_->deinit() and @c impl_->deinit_ext().
-   * When safe-quit mode is active the deinit sequence runs under the quit mutex.
-   * The destructor calls @c deinit() automatically, so explicit calls are only
-   * needed for early shutdown.
+   * Atomically guards against double-deinit, then runs @c interrupt(),
+   * @c impl_->deinit_ext(), and @c impl_->deinit().  When safe-quit mode is
+   * active the sequence runs under the safe-quit mutex.  The destructor
+   * calls this automatically so explicit calls are only required for early
+   * shutdown.
    *
    * @return @c true on first successful deinit; @c false if not initialised.
    */
   virtual bool deinit();
 
   /**
-   * @brief Unblocks any active blocking wait on this node.
+   * @brief Aborts any blocking wait on this node.
    *
    * @details
-   * Signals the internal interrupted flag and wakes the condition variable so
-   * that calls such as @c wait_for_subscribers(), @c wait_for_connected(), and
-   * @c wait_for_value() return immediately with @c false.  @c Getter overrides
-   * this to additionally wake its own blocking condition variable used by
+   * Signals the internal interrupted flag and notifies the condition
+   * variable so that @c wait_for_subscribers(), @c wait_for_connected(), and
+   * @c wait_for_value() return immediately with @c false.  @c Getter
+   * overrides this to additionally wake its own condition variable used by
    * @c wait_for_value().
    */
   virtual void interrupt();
 
   /**
-   * @brief Returns @c true if @c init() has been successfully called.
+   * @brief Reports whether @c init() has been successfully called.
    *
-   * @return @c true when the node is in the initialised state.
+   * @return @c true when the node is currently in the initialised state.
    */
   [[nodiscard]] bool has_inited() const;
 
   /**
-   * @brief Returns @c true if the transport supports zero-copy loaned buffers.
+   * @brief Reports whether the transport supports zero-copy loaned buffers.
    *
    * @details
-   * This delegates to the active transport implementation.  When loans are
-   * supported, @c publish() / @c set() / @c reply() will automatically use them
-   * to avoid an extra memory copy.
+   * Delegates to the transport implementation.  When loans are supported,
+   * @c publish() / @c set() / @c reply() automatically use them to avoid an
+   * extra memory copy.
    *
-   * @return @c true if @c loan() / @c return_loan() are meaningful.
+   * @return @c true if @c loan() / @c return_loan() are meaningful for this transport.
    */
   [[nodiscard]] bool is_support_loan() const;
 
@@ -197,21 +228,21 @@ class Node {
    *
    * @details
    * Returns a @c Bytes backed by transport-managed memory of @p size bytes.
-   * The caller must either pass it to a publish/write/reply call (which
-   * returns the loan automatically) or call @c return_loan() explicitly.
-   * Returns an empty @c Bytes on failure or if the transport has no loan pool.
+   * The caller must either pass it to a publish/write call (which returns
+   * the loan automatically) or call @c return_loan() explicitly.  Returns
+   * an empty @c Bytes on failure or when the transport has no loan pool.
    *
-   * @param size  Requested size in bytes (@c 0 is valid for empty messages).
-   * @return      Loaned @c Bytes, or empty @c Bytes on failure.
+   * @param size  Requested byte count; @c 0 is valid for empty messages.
+   * @return      Loaned @c Bytes, or an empty @c Bytes on failure.
    */
   [[nodiscard]] Bytes loan(int64_t size);
 
   /**
-   * @brief Returns a previously loaned buffer back to the transport pool.
+   * @brief Returns a previously loaned buffer to the transport pool.
    *
    * @details
-   * Must be called if a loaned buffer obtained via @c loan() is not consumed by
-   * a publish/write call.  Failing to return a loan can exhaust the shared
+   * Must be called whenever a loan obtained via @c loan() is not consumed by
+   * a publish/write call; failing to return loans can exhaust the shared
    * memory pool.
    *
    * @param bytes  The loaned @c Bytes to return.
@@ -220,21 +251,21 @@ class Node {
   bool return_loan(const Bytes& bytes);
 
   /**
-   * @brief Enables or disables manual-unloan mode for zero-copy receives.
+   * @brief Toggles manual-unloan mode for zero-copy receives.
    *
    * @details
-   * In manual-unloan mode the user is responsible for calling @c return_loan()
-   * after consuming received data.  The base implementation logs a warning;
-   * only @c Subscriber and @c Getter override this method.
+   * In manual mode the user must call @c return_loan() after consuming each
+   * received buffer.  The base implementation logs a warning; only
+   * @c Subscriber and @c Getter provide a meaningful override.
    *
    * @param manual_unloan  @c true to enable; @c false for automatic (default).
    */
   virtual void set_manual_unloan(bool manual_unloan);
 
   /**
-   * @brief Returns @c true if manual-unloan mode is active.
+   * @brief Reports whether manual-unloan mode is currently active.
    *
-   * @return @c true if @c set_manual_unloan(true) was called.
+   * @return @c true if @c set_manual_unloan(true) was invoked.
    */
   [[nodiscard]] virtual bool is_manual_unloan() const;
 
@@ -242,38 +273,38 @@ class Node {
    * @brief Suspends message delivery on this node.
    *
    * @details
-   * Behaviour is transport-dependent: some back-ends buffer incoming messages
-   * while suspended; others drop them.  Pair with @c resume() to re-enable.
+   * Transport-dependent behaviour: some back-ends buffer incoming messages
+   * while suspended, others drop them.  Pair with @c resume().
    *
-   * @return @c true if suspension succeeded; @c false on error.
+   * @return @c true if suspension succeeded.
    */
   bool suspend();
 
   /**
-   * @brief Resumes message delivery after a @c suspend().
+   * @brief Resumes message delivery after a prior @c suspend().
    *
-   * @return @c true if resumption succeeded; @c false on error.
+   * @return @c true if resumption succeeded.
    */
   bool resume();
 
   /**
-   * @brief Returns @c true if the node is currently suspended.
+   * @brief Reports whether the node is currently suspended.
    *
    * @return @c true while @c suspend() is in effect.
    */
   [[nodiscard]] bool is_suspend() const;
 
   /**
-   * @brief Attaches the node to a @c MessageLoop for callback dispatching.
+   * @brief Attaches the node to a @c MessageLoop for callback dispatch.
    *
    * @details
-   * After attachment, incoming-message callbacks are posted to @p message_loop
-   * rather than invoked on the transport thread.  This serialises delivery to
-   * the loop's thread, which is useful for single-threaded application code.
+   * After attachment, inbound callbacks are posted onto @p message_loop
+   * rather than invoked on the transport delivery thread.  This serialises
+   * dispatch onto the loop's thread, which is convenient for
+   * single-threaded user code.
    *
    * @param message_loop  Pointer to the target @c MessageLoop.
-   * @return              @c true on success; @c false if a @c MessageLoop is
-   *                      already attached.
+   * @return              @c true on success; @c false if a loop is already attached.
    */
   bool attach(class MessageLoop* message_loop);
 
@@ -281,66 +312,65 @@ class Node {
    * @brief Detaches the node from its current @c MessageLoop.
    *
    * @details
-   * After detachment, callbacks are again invoked on the transport thread.
+   * After detachment the callback returns to running on the transport
+   * delivery thread.
    *
    * @return @c true on success; @c false if no loop was attached.
    */
   bool detach();
 
   /**
-   * @brief Returns the @c MessageLoop this node is attached to.
+   * @brief Returns the @c MessageLoop this node is currently attached to.
    *
    * @return Pointer to the attached @c MessageLoop, or @c nullptr.
    */
   [[nodiscard]] class MessageLoop* get_message_loop() const;
 
   /**
-   * @brief Returns the abstract node handle for graph introspection.
+   * @brief Returns the abstract-graph handle for runtime topology inspection.
    *
    * @details
-   * The @c AbstractNode pointer can be used with @c AbstractFactory to query
-   * peer nodes in the same transport graph, or passed to the proxy monitoring
-   * API for runtime topology inspection.
+   * The @c AbstractNode pointer is usable with @c AbstractFactory and the
+   * proxy monitoring API to enumerate peer nodes in the same transport
+   * graph.
    *
    * @return Non-owning pointer to the @c AbstractNode, or @c nullptr if the
-   *         transport back-end does not expose an @c AbstractNode.
+   *         transport does not expose one.
    */
   [[nodiscard]] const AbstractNode* get_abstract_node() const;
 
   /**
-   * @brief Returns the current status object for the specified status type.
+   * @brief Retrieves the current status object for the requested category.
    *
    * @details
-   * Returns a polymorphic status shared pointer.  The concrete type and set of
-   * available types depend on the active transport.  If the transport does not
-   * support the requested @p type, a @c Status::Unknown instance is returned
-   * and a warning is logged.
+   * Returns a polymorphic shared pointer.  The concrete type and set of
+   * supported categories depend on the active transport; an unsupported
+   * @p type yields a @c Status::Unknown instance and logs a warning.
    *
-   * @param type  Category of status to retrieve.
-   * @return      Shared pointer to status data; returns @c Status::Unknown
-   *              when the transport does not support the query.
+   * @param type  Status category to retrieve.
+   * @return      Shared pointer to status data, or @c Status::Unknown when unsupported.
    */
   [[nodiscard]] Status::BasePtr get_status(Status::Type type) const;
 
   /**
-   * @brief Registers a handler called when the node's status changes.
+   * @brief Registers a handler invoked whenever the node's status changes.
    *
    * @details
-   * Only one handler can be registered; subsequent calls replace the previous
-   * one.  The handler is invoked with a @c Status::BasePtr describing the new
-   * state (e.g. connected, disconnected, error).
+   * Only one handler can be registered at a time; subsequent calls replace
+   * the previous handler.  The handler receives a @c Status::BasePtr
+   * describing the new state (connected, disconnected, error, etc.).
    *
-   * @param callback  Callable @c void(const Status::BasePtr&) invoked on status changes.
+   * @param callback  @c void(const Status::BasePtr&) handler.
    */
   void register_status_handler(StatusCallback&& callback);
 
   /**
-   * @brief Sets a transport-specific key-value property on the node.
+   * @brief Sets a transport-specific string-keyed property.
    *
    * @details
-   * Provides an extensibility mechanism for back-end-specific tuning knobs
-   * that do not have dedicated API methods.  Recognised keys depend on the
-   * active transport.
+   * Extensibility mechanism for back-end-specific tuning knobs that do not
+   * have a dedicated method.  Recognised keys depend on the active
+   * transport.
    *
    * @param prop   Property key string.
    * @param value  Property value string.
@@ -348,15 +378,15 @@ class Node {
   void set_property(const std::string& prop, const std::string& value);
 
   /**
-   * @brief Retrieves a transport-specific property value.
+   * @brief Retrieves a previously set transport-specific property value.
    *
    * @param prop  Property key string.
-   * @return      Property value string; empty if key is not recognised.
+   * @return      Property value string; empty if the key is unknown.
    */
   [[nodiscard]] std::string get_property(const std::string& prop) const;
 
   /**
-   * @brief Returns the @c TransportType of the transport this node is bound to.
+   * @brief Returns the @c TransportType this node is bound to.
    *
    * @return Enumerator such as @c kDds, @c kShm, @c kIntra, etc.
    */
@@ -367,74 +397,71 @@ class Node {
    *
    * @details
    * Non-empty only when the node was constructed via a URL string or @c Url
-   * object; typed @c ConfT-based construction leaves this string empty.
+   * object; typed @c ConfT-based construction leaves this empty.
    *
-   * @return Reference to the URL (e.g. @c "dds://vehicle/speed").
+   * @return Const reference to the URL string.
    */
   [[nodiscard]] const std::string& get_url() const;
 
   /**
-   * @brief Sets the filesystem path for message bag recording.
+   * @brief Enables recording of inbound or outbound messages to a bag file.
    *
    * @details
-   * Enables recording of each published/received message to a bag file.
-   * Not supported on @c intra:// or @c dds:// CDR nodes (triggers fatal log).
+   * Not supported on @c intra:// or @c dds:// CDR nodes (triggers a fatal log).
+   * Supported file suffixes are @c .vdb, @c .vdbx, @c .vcap, and @c .vcapx;
+   * unsupported suffixes silently disable recording.
    *
-   * @param path  Bag file path. Supported suffixes are @c .vdb, @c .vdbx,
-   *              @c .vcap and @c .vcapx; unsupported suffixes disable recording.
+   * @param path  Bag file path on disk.
    */
   void set_record_path(const std::string& path);
 
   /**
-   * @brief Overrides the runtime wire metadata for this node.
+   * @brief Overrides the runtime wire-metadata identifiers for this node.
    *
    * @details
-   * @p ser_type stores the concrete runtime type identifier, while
-   * @p schema_type stores the coarse decoder family used by discovery, proxy,
-   * and bag metadata. When @p schema_type is @c SchemaType::kUnknown (the
-   * default), the node does not explicitly override the current family; in
-   * that mode it keeps the existing protobuf / flatbuffers family unless the
-   * new @p ser_type itself clearly implies @c kRaw or @c kZeroCopy. Passing
-   * an empty @p ser_type clears both fields.
+   * @p ser_type holds the concrete runtime type identifier; @p schema_type
+   * holds the coarse decoder family used by discovery, proxy, and bag
+   * metadata.  When @p schema_type is @c SchemaType::kUnknown (the default)
+   * the existing family is preserved unless @p ser_type clearly implies
+   * @c kRaw or @c kZeroCopy.  Passing an empty @p ser_type clears both
+   * fields.
    *
-   * If called after @c init(), the transport extension is restarted once so
+   * If invoked post-@c init() the transport extension is restarted so that
    * external metadata stays in sync.
    *
-   * @param ser_type     Concrete serialisation type identifier, or empty to clear the current metadata.
-   * @param schema_type  Explicit coarse schema family to expose; default
-   *                     @c kUnknown preserves the current family unless
-   *                     @p ser_type implies a different one.
+   * @param ser_type     Concrete runtime type identifier, or empty to clear.
+   * @param schema_type  Optional explicit schema family; default preserves the current family.
    */
   void set_ser_type(const std::string& ser_type, SchemaType schema_type = SchemaType::kUnknown);
 
   /**
-   * @brief Returns the current serialisation type string.
+   * @brief Returns the current concrete runtime type identifier.
    *
-   * @return Reference to the type string stored in the impl.
+   * @return Const reference to the type identifier string.
    */
   [[nodiscard]] const std::string& get_ser_type() const;
 
   /**
    * @brief Returns the current coarse schema family.
    *
-   * @return The schema family stored in the node implementation.
+   * @return The @c SchemaType stored on the implementation.
    */
   [[nodiscard]] SchemaType get_schema_type() const;
 
   /**
-   * @brief Enables or disables peer-discovery on this node.
+   * @brief Toggles peer-discovery on this node.
    *
    * @details
-   * Disabling discovery reduces CPU and network overhead for nodes that never
-   * need to locate peers.  If called after @c init(), the transport extension
-   * is automatically reinitialised to apply the change.
+   * Disabling discovery reduces CPU and network overhead for nodes that
+   * never need to locate peers.  Reinitialises the transport extension if
+   * invoked post-@c init() so the change takes effect immediately.
    *
    * @param enable  @c true (default) to enable discovery; @c false to disable.
    */
   void set_discovery_enabled(bool enable);
 
   /**
-   * @brief Returns @c true if peer-discovery is currently enabled.
+   * @brief Reports whether peer-discovery is currently enabled.
    *
    * @return @c true if discovery is active.
    */
@@ -445,34 +472,34 @@ class Node {
    *
    * @details
    * Required when @c MsgT is a raw Protobuf pointer type (e.g. @c MyProto*).
-   * The arena must outlive this node.  Forgetting to bind an arena for
-   * proto-pointer types causes a fatal log on the first received message.
+   * The arena must outlive this node.  Forgetting to bind an arena before
+   * the first received message triggers a fatal log.
    *
-   * @param proto_arena  Pointer to a @c google::protobuf::Arena instance (as @c void*).
+   * @param proto_arena  Pointer to a @c google::protobuf::Arena instance (typed as @c void*).
    */
   void bind_proto_arena(void* proto_arena);
 
   /**
-   * @brief Returns the cumulative CPU usage ratio for this node.
+   * @brief Returns the cumulative CPU-usage ratio sampled by the profiler.
    *
    * @details
-   * Returns the percentage of wall-clock time that this node has spent in
-   * active publish/receive operations since the profiler was started.
-   * Available only when the CPU profiler is built in (i.e. @c VLINK_DISABLE_PROFILER
-   * is not defined) and global profiling is enabled via the @c VLINK_PROFILER_ENABLE
-   * environment variable.  Returns @c -1.0 if no profiler is attached to the impl.
+   * Reports the percentage of wall-clock time this node has spent in active
+   * publish or receive code since the profiler was started.  Available only
+   * when the CPU profiler is built in (@c VLINK_DISABLE_PROFILER not
+   * defined) and global profiling is enabled via the @c VLINK_PROFILER_ENABLE
+   * environment variable.  Returns @c -1.0 if no profiler is attached.
    *
-   * @return CPU usage percentage [0.0, 100.0], or @c -1.0 if unavailable.
+   * @return CPU usage percentage in @c [0.0, 100.0]; @c -1.0 if unavailable.
    */
   [[nodiscard]] double get_cpu_usage() const;
 
   /**
-   * @brief Returns @c true if safe-quit mode is currently active.
+   * @brief Reports whether safe-quit mode is currently active.
    *
    * @details
-   * Safe-quit mode holds a @c std::mutex around all user callbacks and around
-   * @c deinit(), preventing use-after-free races when a node is destroyed while
-   * a callback is in flight.
+   * Safe-quit mode holds a @c std::mutex around user callbacks and around
+   * @c deinit() to prevent use-after-free races when a node is destroyed
+   * while a callback is in flight.
    *
    * @return @c true if the safe-quit mutex is engaged.
    */
@@ -482,10 +509,10 @@ class Node {
    * @brief Enables or disables safe-quit mode.
    *
    * @details
-   * When @p safety_quit is @c true, an internal @c std::mutex is allocated and
-   * locked around every callback invocation and around @c deinit().  Enable
-   * this when the node's lifetime is shorter than the callback's scope.  There
-   * is a small synchronisation overhead; avoid enabling it on hot paths.
+   * When enabled, an internal @c std::mutex is allocated and locked around
+   * every callback invocation and around @c deinit().  Enable when the
+   * node's lifetime is shorter than the callback scope.  There is a small
+   * synchronisation overhead; avoid enabling it on hot paths.
    *
    * @param safety_quit  @c true to enable; @c false to disable (default).
    */
@@ -496,22 +523,21 @@ class Node {
    *
    * @details
    * Merges the fields of @p options into the node's internal property map
-   * via @c SslOptions::parse_to().  The transport back-end reads the
-   * resulting @c ssl.* properties during @c init() to set up a TLS
-   * connection.  This method must be called **before** @c init() for the
-   * settings to take effect.
+   * via @c SslOptions::parse_to().  The transport reads the resulting
+   * @c ssl.* properties during @c init() to set up the TLS connection, so
+   * this method must be called before @c init() for the settings to take
+   * effect.
    *
    * SSL is considered enabled when @c SslOptions::is_valid() returns
-   * @c true (i.e. at least @c ca_file or @c cert_file is non-empty).
-   * Not all back-ends support TLS; see the @c SslOptions file-level
-   * documentation for the per-backend compatibility table.
-   *
-   * This call is thread-safe; the property map is updated under a mutex.
+   * @c true (i.e. at least @c ca_file or @c cert_file is non-empty).  Not
+   * all back-ends support TLS; see @c SslOptions for the per-backend
+   * compatibility table.  Thread-safe -- the property map is updated under
+   * a mutex.
    *
    * @par Example
    * @code
-   * Publisher<MyMsg> pub("mqtt://sensor/data", InitType::kWithoutInit);
-   * SslOptions ssl;
+   * vlink::Publisher<MyMsg> pub("mqtt://sensor/data", vlink::InitType::kWithoutInit);
+   * vlink::SslOptions ssl;
    * ssl.ca_file   = "/etc/certs/ca.pem";
    * ssl.cert_file = "/etc/certs/client.pem";
    * ssl.key_file  = "/etc/certs/client-key.pem";
@@ -519,7 +545,7 @@ class Node {
    * pub.init();
    * @endcode
    *
-   * @param options  The SSL/TLS configuration to apply.
+   * @param options  SSL/TLS configuration to apply.
    *
    * @see SslOptions, set_property()
    */
@@ -534,28 +560,24 @@ class Node {
    * @brief Installs a @c Security configuration before transport initialisation.
    *
    * @details
-   * Internal helper used by @c SecurityPublisher / @c SecuritySubscriber /
-   * @c SecurityServer / @c SecurityClient / @c SecuritySetter /
-   * @c SecurityGetter constructors after @c impl_ is created and before
-   * @c init().  Delegates default handling, validation, and storage to
-   * @c NodeImpl::enable_security().
+   * Internal helper used by the @c Security* primitive constructors after
+   * @c impl_ has been created but before @c init().  Delegates default
+   * handling, validation, and storage to @c NodeImpl::enable_security().
    *
    * @param cfg  Security configuration aggregate.
-   * @return     @c true when @p cfg, including the empty default case, is usable
-   *             for this node role and transport.
+   * @return     @c true when @p cfg (including the default empty case) is usable for this role / transport.
    */
   bool enable_security(const Security::Config& cfg);
 
   /**
-   * @brief Move-overload for construction-time security installation.
+   * @brief Move overload for construction-time security installation.
    *
    * @details
-   * Used when an internal caller owns the config and can pass it through to
-   * @c NodeImpl::enable_security(Security::Config&&) without an extra copy.
+   * Used when an internal caller owns the config and can forward it without
+   * an extra copy.
    *
    * @param cfg  Security configuration aggregate to consume.
-   * @return     @c true when @p cfg, including the empty default case, is usable
-   *             for this node role and transport.
+   * @return     @c true when @p cfg (including the default empty case) is usable for this role / transport.
    */
   bool enable_security(Security::Config&& cfg);
 
@@ -570,7 +592,7 @@ class Node {
   bool is_manual_unloan_{false};
 
   std::atomic_bool has_inited_{false};
-  std::optional<std::mutex> quit_mtx_;  ///< Optional safe-quit mutex guarding callbacks and teardown.
+  std::optional<std::mutex> quit_mtx_;
 
   std::unique_ptr<ImplT> impl_;
 

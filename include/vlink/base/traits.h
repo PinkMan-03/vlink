@@ -23,50 +23,44 @@
 
 /**
  * @file traits.h
- * @brief Compile-time type-trait utilities used internally by VLink.
+ * @brief Compile-time type-trait helpers used across the VLink codebase.
  *
  * @details
- * The @c vlink::Traits namespace collects a set of small, self-contained
- * template meta-programming helpers that are used throughout the VLink codebase
- * to detect type properties at compile time.  They follow the same conventions
- * as the C++ standard library @c type_traits header.
+ * @c vlink::Traits collects a small set of self-contained template meta-functions that
+ * extend the C++ standard @c <type_traits>.  Every helper follows the standard pattern of
+ * either inheriting from @c std::true_type / @c std::false_type or returning a @c bool
+ * from a @c constexpr function.  The macro @c VLINK_HAS_MEMBER ties into
+ * @c has_member to detect named data or function members at compile time.
  *
- * All helpers are either:
- * - Struct templates inheriting from @c std::true_type / @c std::false_type, or
- * - @c constexpr functions returning @c bool.
+ * Trait reference:
  *
- * | Helper              | Description                                                           |
- * | ------------------- | --------------------------------------------------------------------- |
- * | EmptyType           | An empty tag type used as a placeholder                               |
- * | ExpectFalse         | Always evaluates to std::false_type (useful in static_assert)         |
- * | Callable            | Detects whether T is callable with no arguments                       |
- * | Assignable          | Detects whether OT is assignable from T                               |
- * | EqualityComparable  | Detects whether OT supports == with T                                 |
- * | GreaterComparable   | Detects whether OT supports less-than and greater-than with T         |
- * | Operatorable        | Detects whether OT supports stream insertion and extraction with T    |
- * | IsAtomic            | Detects whether T is a std::atomic specialization                     |
- * | IsSharedPtr         | Detects whether T is a std::shared_ptr specialization                 |
- * | RemoveSharedPtr     | Strips the std::shared_ptr wrapper to obtain the element type         |
- * | has_member          | Compile-time SFINAE check for an accessible data member               |
- * | is_non_char_ptr     | True when T decays to a non-char pointer                              |
- * | is_integer          | True for integer types excluding bool, char, and signed/unsigned char |
- * | is_floating         | True for floating-point types                                         |
+ * | Helper                  | What it detects                                                  |
+ * | ----------------------- | ---------------------------------------------------------------- |
+ * | @c EmptyType            | An empty tag type used as a no-op placeholder.                   |
+ * | @c ExpectFalse<T>       | Always @c std::false_type; used for dependent @c static_assert.  |
+ * | @c Callable<T>          | @c T can be invoked with no arguments.                           |
+ * | @c Assignable<OT,T>     | @c OT can be assigned a value of type @c T.                      |
+ * | @c EqualityComparable   | @c OT supports @c operator== with @c T.                          |
+ * | @c GreaterComparable    | @c OT supports both @c operator< and @c operator> with @c T.     |
+ * | @c Operatorable<OT,T>   | @c OT supports stream insertion and extraction with @c T.        |
+ * | @c IsAtomic<T>          | @c T is a @c std::atomic specialisation.                         |
+ * | @c IsSharedPtr<T>       | @c T is a @c std::shared_ptr (or derived) specialisation.        |
+ * | @c RemoveSharedPtr<T>   | Removes a single @c std::shared_ptr wrapper from @c T.           |
+ * | @c has_member<T>(f)     | Compile-time member-access probe used by @c VLINK_HAS_MEMBER.    |
+ * | @c is_non_char_ptr<T>() | @c T decays to a pointer other than @c char*.                    |
+ * | @c is_integer<T>()      | @c T is an integer excluding @c bool and the @c char variants.   |
+ * | @c is_floating<T>()     | @c T is a floating-point type.                                   |
  *
- * @note
- * These utilities live in the @c vlink::Traits namespace (note the capital T).
- * @c VLINK_HAS_MEMBER is the corresponding macro wrapper for has_member.
- *
- * @par Example: checking for a data member at compile time
+ * @par Example
  * @code
- * struct Foo { int bar; };
- * struct Baz {};
+ * struct Foo { int bar; void baz() {} };
  *
- * // Data-member check (preferred form):
  * static_assert( VLINK_HAS_MEMBER(Foo, bar));
- * static_assert(!VLINK_HAS_MEMBER(Baz, bar));
+ * static_assert(!VLINK_HAS_MEMBER(Foo, qux));
+ * static_assert( VLINK_HAS_MEMBER(Foo, baz()));
  *
- * // To check for a callable member, use call syntax:
- * // static_assert(VLINK_HAS_MEMBER(Foo, method_name()));
+ * static_assert(vlink::Traits::Callable<decltype([] {})>::value);
+ * static_assert(vlink::Traits::IsAtomic<std::atomic<int>>::value);
  * @endcode
  */
 
@@ -86,37 +80,33 @@ namespace Traits {  // NOLINT(readability-identifier-naming)
 
 /**
  * @struct EmptyType
- * @brief An empty tag type used as a neutral placeholder in template meta-programming.
+ * @brief Empty tag type used wherever a type parameter must be supplied but carries no payload.
  *
  * @details
- * Used in places where a type parameter must be provided but carries no data,
- * for example as the default detail type in the Logger.
+ * Acts as the default detail type in places such as the Logger so the meta-programming
+ * machinery has a single concrete identity to bind to.
  */
 struct EmptyType {};
 
 /**
  * @struct ExpectFalse
- * @brief A type trait that always evaluates to @c std::false_type.
+ * @brief Type trait that always derives from @c std::false_type for any @p T.
  *
  * @details
- * Useful inside @c static_assert to produce a dependent false, which
- * prevents the compiler from instantiating the primary template when
- * a specialization was expected.
+ * Used inside @c static_assert to produce a dependent false expression, which prevents
+ * the compiler from instantiating a primary template when only a specialisation is
+ * valid.
  *
- * @tparam T  Any type (the value is always false regardless of T).
+ * @tparam T  Arbitrary placeholder type; the value is always false.
  */
 template <typename T>
 struct ExpectFalse : std::false_type {};
 
 /**
  * @struct Callable
- * @brief Detects whether type @p T is callable with no arguments.
+ * @brief Detects whether @p T can be invoked with no arguments.
  *
- * @details
- * Inherits from @c std::true_type when @c T can be called as @c t() (i.e.,
- * a function pointer, lambda, functor, or @c std::function).
- *
- * @tparam T  The type to test.
+ * @tparam T  Type to probe.
  */
 template <typename T, typename = void>
 struct Callable : std::false_type {};
@@ -126,13 +116,10 @@ struct Callable<T, std::void_t<decltype(std::declval<T>()())>> : std::true_type 
 
 /**
  * @struct Assignable
- * @brief Detects whether an object of type @p OT can be assigned a value of type @p T.
+ * @brief Detects whether a value of type @p T can be assigned to an instance of @p OT.
  *
- * @details
- * Inherits from @c std::true_type when the expression @c ot = t is well-formed.
- *
- * @tparam OT  The target (left-hand side) type.
- * @tparam T   The source (right-hand side) type.
+ * @tparam OT  Target type on the left of @c =.
+ * @tparam T   Source type on the right of @c =.
  */
 template <typename OT, typename T, typename = void>
 struct Assignable : std::false_type {};
@@ -142,13 +129,10 @@ struct Assignable<OT, T, std::void_t<decltype(std::declval<OT&>() = std::declval
 
 /**
  * @struct EqualityComparable
- * @brief Detects whether @p OT supports the @c == operator with @p T.
+ * @brief Detects whether @p OT supports @c operator== with @p T.
  *
- * @details
- * Inherits from @c std::true_type when @c ot == t is a well-formed expression.
- *
- * @tparam OT  The left-hand side type.
- * @tparam T   The right-hand side type.
+ * @tparam OT  Left-hand side type.
+ * @tparam T   Right-hand side type.
  */
 template <typename OT, typename T, typename = void>
 struct EqualityComparable : std::false_type {};
@@ -158,14 +142,10 @@ struct EqualityComparable<OT, T, std::void_t<decltype(std::declval<OT>() == std:
 
 /**
  * @struct GreaterComparable
- * @brief Detects whether @p OT supports both less-than and greater-than operators with @p T.
+ * @brief Detects whether @p OT supports both @c operator< and @c operator> with @p T.
  *
- * @details
- * Inherits from @c std::true_type when both comparison expressions are
- * well-formed expressions.
- *
- * @tparam OT  The left-hand side type.
- * @tparam T   The right-hand side type.
+ * @tparam OT  Left-hand side type.
+ * @tparam T   Right-hand side type.
  */
 template <typename OT, typename T, typename = void>
 struct GreaterComparable : ExpectFalse<OT> {};
@@ -178,14 +158,10 @@ struct GreaterComparable<
 
 /**
  * @struct Operatorable
- * @brief Detects whether @p OT supports stream insertion and extraction with @p T.
+ * @brief Detects whether @p OT supports stream insertion (<<) and extraction (>>) with @p T.
  *
- * @details
- * Inherits from @c std::true_type when both stream expressions are
- * well-formed expressions.  Primarily used to detect stream-compatible types.
- *
- * @tparam OT  The stream type.
- * @tparam T   The value type.
+ * @tparam OT  Stream-like type.
+ * @tparam T   Value type appearing on the right of the stream operator.
  */
 template <typename OT, typename T, typename = void>
 struct Operatorable : ExpectFalse<OT> {};
@@ -197,12 +173,9 @@ struct Operatorable<OT, T,
 
 /**
  * @struct IsAtomic
- * @brief Detects whether type @p T is a @c std::atomic specialization.
+ * @brief Detects whether @p T is a @c std::atomic specialisation.
  *
- * @details
- * Inherits from @c std::true_type only for std::atomic specializations.
- *
- * @tparam T  The type to test.
+ * @tparam T  Candidate type.
  */
 template <typename T>
 struct IsAtomic : std::false_type {};
@@ -212,13 +185,9 @@ struct IsAtomic<std::atomic<T>> : std::true_type {};
 
 /**
  * @struct IsSharedPtr
- * @brief Detects whether type @p T is a @c std::shared_ptr specialization.
+ * @brief Detects whether @p T is (or derives from) a @c std::shared_ptr specialisation.
  *
- * @details
- * Inherits from @c std::true_type when @p T is (or derives from)
- * @c std::shared_ptr specializations.
- *
- * @tparam T  The type to test.
+ * @tparam T  Candidate type.
  */
 template <typename T, typename = void>
 struct IsSharedPtr : std::false_type {};
@@ -229,36 +198,35 @@ struct IsSharedPtr<T, std::void_t<typename T::element_type>>
 
 /**
  * @struct RemoveSharedPtr
- * @brief Strips @c std::shared_ptr to obtain the underlying element type.
+ * @brief Removes a single @c std::shared_ptr wrapper from @p T, leaving non-pointer types unchanged.
  *
  * @details
- * When @p T is a @c std::shared_ptr, @c RemoveSharedPtr<T>::Type is the
- * contained element type.  Otherwise @c Type is @p T itself.
+ * When @p T is a @c std::shared_ptr, @c Type is the contained element type; otherwise
+ * @c Type is @p T verbatim.
  *
- * @tparam T  The type from which to remove the shared_ptr wrapper.
+ * @tparam T  Source type.
  */
 template <typename T, bool = IsSharedPtr<T>::value>
 struct RemoveSharedPtr {
-  using Type = T; /**< The type without std::shared_ptr. */
+  using Type = T;  ///< Resolved type after optional shared_ptr removal.
 };
 
 template <typename T>
 struct RemoveSharedPtr<T, true> {
-  using Type = typename T::element_type; /**< The type without std::shared_ptr. */
+  using Type = typename T::element_type;  ///< Element type unwrapped from the shared_ptr.
 };
 
 /**
- * @brief Checks whether type @p T has a member expression accessible via @p f.
+ * @brief Compile-time probe that succeeds when @p f is a well-formed expression on a default-constructed @p T.
  *
  * @details
- * This function is used as a building block for @c VLINK_HAS_MEMBER.  It returns
- * @c true when invoking the lambda @p f with a default-constructed @c T succeeds
- * (i.e., the member is accessible at compile time).
+ * Used as a building block for @c VLINK_HAS_MEMBER.  The lambda passed as @p f must take a
+ * forwarding reference and reference the candidate member with @c decltype-style sfinae.
  *
- * @tparam T  The type to probe.
- * @tparam F  A callable that takes a @c T and accesses the member of interest.
- * @param  f  A lambda of the form @c [](auto&& obj) -> decltype((void)(obj.member), 0) { return 0; }
- * @return @c true if the member is accessible, @c false otherwise.
+ * @tparam T  Probed type.
+ * @tparam F  Lambda type.
+ * @param  f  Probe lambda.
+ * @return @c true when the lambda is well-formed for @p T, @c false otherwise.
  *
  * @note Prefer the @c VLINK_HAS_MEMBER macro for member-name checks.
  */
@@ -277,9 +245,10 @@ template <typename>
  * @brief Returns @c true when @p T decays to a pointer type other than @c char*.
  *
  * @details
- * Used inside VLink serialisation to distinguish raw data pointers from C-strings.
+ * Used internally by VLink serialisation to distinguish raw data pointers from
+ * C-strings.
  *
- * @tparam T  The type to test.
+ * @tparam T  Type under test.
  * @return @c true for non-char pointer types.
  */
 template <typename T>
@@ -289,16 +258,14 @@ template <typename T>
 }
 
 /**
- * @brief Returns @c true when @p T is an integer type excluding @c bool and
- *        all @c char variants.
+ * @brief Returns @c true for plain integer types, excluding @c bool and every @c char variant.
  *
  * @details
- * Matches @c short, @c int, @c long, @c long long, and their unsigned
- * counterparts.  Explicitly excludes @c bool, @c char, @c signed char,
- * and @c unsigned char.
+ * Accepts @c short, @c int, @c long, @c long @c long and their unsigned counterparts.
+ * Explicitly rejects @c bool, @c char, @c signed @c char and @c unsigned @c char.
  *
- * @tparam T  The type to test.
- * @return @c true for plain integer types.
+ * @tparam T  Type under test.
+ * @return @c true for the accepted integer set.
  */
 template <typename T>
 [[nodiscard]] static constexpr bool is_integer() {
@@ -308,13 +275,10 @@ template <typename T>
 }
 
 /**
- * @brief Returns @c true when @p T is a floating-point type.
+ * @brief Returns @c true when @p T is a floating-point type after stripping CV qualifiers.
  *
- * @details
- * Matches @c float, @c double, and @c long double (with CV qualifiers stripped).
- *
- * @tparam T  The type to test.
- * @return @c true for floating-point types.
+ * @tparam T  Type under test.
+ * @return @c true for @c float, @c double, @c long @c double.
  */
 template <typename T>
 [[nodiscard]] static constexpr bool is_floating() {
@@ -331,27 +295,22 @@ template <typename T>
 
 /**
  * @def VLINK_HAS_MEMBER(T, member)
- * @brief Checks at compile time whether type @p T has an accessible **data member** named @p member.
+ * @brief Compile-time check that @p T has an accessible member named @p member.
  *
  * @details
- * Expands to a @c constexpr boolean expression (true/false) evaluated at compile time.
- * Internally delegates to @c vlink::Traits::has_member.
+ * Expands to a @c constexpr boolean expression.  Use call syntax (@c member()) to probe
+ * for a member function rather than a data member.  Internally delegates to
+ * @c vlink::Traits::has_member.
  *
- * To detect a **callable member** (member function), append @c () to the name:
- * @code
- * VLINK_HAS_MEMBER(T, method_name())  // checks for callable member
- * @endcode
- *
- * @param T       The type to inspect.
- * @param member  The unquoted data member name to look for.  For member functions,
- *                use @c member() call syntax (see above).
+ * @param T       Type to inspect.
+ * @param member  Member name (or @c member() for a callable probe).
  *
  * @par Example
  * @code
  * struct Foo { int bar; void baz() {} };
- * static_assert( VLINK_HAS_MEMBER(Foo, bar));    // data member: OK
- * static_assert(!VLINK_HAS_MEMBER(Foo, qux));    // absent member: OK
- * static_assert( VLINK_HAS_MEMBER(Foo, baz()));  // callable member: OK
+ * static_assert( VLINK_HAS_MEMBER(Foo, bar));
+ * static_assert(!VLINK_HAS_MEMBER(Foo, qux));
+ * static_assert( VLINK_HAS_MEMBER(Foo, baz()));
  * @endcode
  */
 #define VLINK_HAS_MEMBER(T, member) \

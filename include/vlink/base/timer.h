@@ -23,39 +23,39 @@
 
 /**
  * @file timer.h
- * @brief Event-loop-driven periodic/one-shot timer with configurable priority.
+ * @brief MessageLoop-driven periodic or one-shot timer with priority support.
  *
  * @details
- * @c Timer integrates with a @c MessageLoop to deliver callbacks on its thread.
- * Unlike platform timers, the callback runs serially with all other tasks posted to
- * the same loop, so no extra synchronisation is needed inside the callback.
+ * @c vlink::Timer dispatches its callback on a @c MessageLoop thread, so the callback
+ * runs serially with every other task posted to the same loop and no additional
+ * synchronisation is required inside the callback body.
+ *
+ * Timer modes determined by @c loop_count:
+ *
+ * | Mode      | @c loop_count value | Behaviour                                    |
+ * | --------- | ------------------- | -------------------------------------------- |
+ * | One-shot  | @c 1                | Fires exactly once after one full interval   |
+ * | Counted   | @c 2 ... @c INT_MAX | Fires the configured number of times         |
+ * | Repeating | @c kInfinite (-1)   | Fires forever until @c stop() is called      |
  *
  * Key features:
- * - Repeating or one-shot mode (@c kInfinite for loop_count means repeat forever).
- * - Optional strict mode: if the loop is busy and the next tick is missed, strict mode
- *   fires the missed callbacks immediately to maintain the schedule.
- * - Priority support for @c kPriorityType message loops.
- * - When @c interval_ms is zero, the internal tick interval falls back to @c kMinInterval (10000 ns = 10 us)
- *   to prevent busy-wait overhead from a zero interval.
- * - A detached @c Timer does not fire until attached to a loop via @c attach().
+ * - Strict mode: when the loop falls behind, missed ticks are dispatched immediately on
+ *   the next iteration so the long-term cadence is preserved.
+ * - Configurable dispatch priority for use with @c kPriorityType message loops.
+ * - When @c interval_ms is @c 0 the internal interval clamps to @c kMinInterval
+ *   (10000 ns = 10 us) to avoid pathological busy-spinning.
+ * - The static @c call_once() helper posts a fire-and-forget one-shot without managing a
+ *   @c Timer object.
  *
- * Lifecycle:
- * -# Construct a @c Timer (with or without a @c MessageLoop).
- * -# Optionally call @c attach() to bind to a loop.
- * -# Call @c start() to arm the timer.
- * -# Call @c stop() to disarm; @c restart() to reset the countdown.
- * -# Destruction automatically calls @c stop() and @c detach().
- *
- * @note
- * - When its @c MessageLoop is destroyed, a timer is detached/cleared so it
- *   can no longer fire on that loop; this does not call @c stop() on the timer.
- * - @c call_once() is a convenience factory for fire-and-forget one-shot timers.
+ * @par Lifecycle
+ * Construct -> @c attach() (if not done at construction) -> @c start() -> repeated ticks
+ * -> @c stop() / @c restart() / destruction.
  *
  * @par Example
  * @code
  * vlink::MessageLoop loop;
- * vlink::Timer timer(&loop, 500, vlink::Timer::kInfinite, []() {
- *   // called every 500 ms on the loop thread
+ * vlink::Timer timer(&loop, 500, vlink::Timer::kInfinite, [] {
+ *   handle_tick();
  * });
  * timer.start();
  * loop.run();
@@ -75,192 +75,170 @@ namespace vlink {
 
 /**
  * @class Timer
- * @brief Event-loop-driven repeating or one-shot timer.
+ * @brief Periodic or one-shot timer that fires on an associated @c MessageLoop thread.
  *
  * @details
- * Callbacks are dispatched on the thread of the associated @c MessageLoop.
+ * Owns an internal implementation that integrates with the loop's tick scheduling so the
+ * callback runs in-line with every other task posted to the loop.
  */
 class VLINK_EXPORT Timer final {
  public:
   /**
-   * @brief Callback type invoked on each timer tick.
+   * @brief Callback signature invoked on every tick.
    */
   using Callback = MoveFunction<void()>;
 
   /**
-   * @brief Sentinel loop count meaning repeat indefinitely.
+   * @brief Sentinel @c loop_count value meaning fire forever.
    */
   static constexpr int kInfinite{-1};
 
   /**
-   * @brief Constructs a detached timer with the default interval and no callback.
+   * @brief Constructs a detached timer with a 1000 ms interval and no callback.
    *
    * @details
-   * Must be configured with @c attach() and @c set_callback() before @c start()
-   * can fire.  The initial interval is 1000 ms.
+   * Use @c attach() and @c set_callback() before @c start().
    */
   explicit Timer();
 
   /**
    * @brief Constructs a timer attached to @p message_loop with the default interval and no callback.
    *
-   * @param message_loop  The @c MessageLoop to deliver callbacks on.
+   * @param message_loop  Loop that will dispatch ticks.
    */
   explicit Timer(class MessageLoop* message_loop);
 
   /**
-   * @brief Constructs and fully configures a timer attached to a loop.
+   * @brief Constructs a fully configured timer attached to a loop.
    *
-   * @param message_loop  The @c MessageLoop to deliver callbacks on.
-   * @param interval_ms   Tick interval in milliseconds.  When zero, the internal tick interval falls back
-   *                      to @c kMinInterval (10000 ns = 10 us).
-   * @param loop_count    Number of times to fire (@c kInfinite for indefinite repeat).  Default: @c kInfinite.
-   * @param callback      Callback to invoke on each tick.  Default: nullptr.
+   * @param message_loop  Loop that will dispatch ticks.
+   * @param interval_ms   Tick interval in milliseconds; @c 0 clamps to @c kMinInterval.
+   * @param loop_count    Number of ticks to fire; @c kInfinite repeats forever.  Default: @c kInfinite.
+   * @param callback      Callback to install.  Default: empty.
    */
   explicit Timer(class MessageLoop* message_loop, uint32_t interval_ms, int32_t loop_count = kInfinite,
                  Callback&& callback = nullptr);
 
   /**
-   * @brief Constructs a timer without attaching it to a loop.
+   * @brief Constructs a detached timer with explicit interval and loop count.
    *
-   * @details
-   * Call @c attach() before @c start().
-   *
-   * @param interval_ms  Tick interval in milliseconds.
-   * @param loop_count   Number of times to fire.  Default: @c kInfinite.
-   * @param callback     Callback to invoke on each tick.  Default: nullptr.
+   * @param interval_ms  Tick interval in milliseconds; @c 0 clamps to @c kMinInterval.
+   * @param loop_count   Number of ticks to fire; @c kInfinite repeats forever.  Default: @c kInfinite.
+   * @param callback     Callback to install.  Default: empty.
    */
   explicit Timer(uint32_t interval_ms, int32_t loop_count = kInfinite, Callback&& callback = nullptr);
 
   /**
-   * @brief Destructor.  Stops the timer and detaches it from the loop.
+   * @brief Destructor.  Calls @c stop() and detaches the timer.
    */
   ~Timer();
 
   /**
-   * @brief Posts a one-shot timer to a @c MessageLoop without creating a @c Timer object.
+   * @brief Posts a fire-and-forget one-shot timer to a loop.
    *
    * @details
-   * The timer fires exactly once after @p interval_ms milliseconds and is then destroyed.
-   * Useful for simple delayed tasks where lifetime management of a @c Timer object is inconvenient.
+   * The timer fires exactly once @p interval_ms milliseconds later and is then destroyed
+   * automatically.  Convenient when lifetime management of a long-lived @c Timer object
+   * would be inconvenient.
    *
-   * @param message_loop  The @c MessageLoop to deliver the callback on.
+   * @param message_loop  Loop that will dispatch the tick.
    * @param interval_ms   Delay in milliseconds.
-   * @param callback      Callback to invoke once.
-   * @param priority      Priority of the timer task.  0 keeps the default timer
-   *                      priority; positive values override it.
-   * @return @c true if the timer was successfully posted.
+   * @param callback      Callback to invoke.
+   * @param priority      Dispatch priority; @c 0 keeps the default.  Default: @c 0.
+   * @return @c true on success.
    */
   static bool call_once(class MessageLoop* message_loop, uint32_t interval_ms, Callback&& callback,
                         uint16_t priority = 0);
 
   /**
-   * @brief Returns @c true if the timer is currently running (armed and has remaining ticks).
+   * @brief Reports whether the timer is currently armed.
    *
-   * @return @c true if the timer is active.
+   * @return @c true when the timer is running.
    */
   [[nodiscard]] bool is_active() const;
 
   /**
-   * @brief Returns @c true if strict mode is enabled.
+   * @brief Reports whether strict catch-up mode is enabled.
    *
-   * @details
-   * In strict mode, missed ticks (due to a busy loop) are fired immediately on the
-   * next loop iteration to compensate for schedule drift.
-   *
-   * @return @c true if strict mode is on.
+   * @return @c true when missed ticks are fired back-to-back.
    */
   [[nodiscard]] bool is_strict() const;
 
   /**
-   * @brief Returns the current tick interval in milliseconds.
+   * @brief Returns the configured tick interval in milliseconds.
    *
-   * @return Interval in milliseconds.
+   * @return Interval.
    */
   [[nodiscard]] uint32_t get_interval() const;
 
   /**
-   * @brief Returns the configured total loop count.
+   * @brief Returns the configured total tick count.
    *
-   * @return Loop count, or @c kInfinite (-1) for indefinite repeat.
+   * @return Loop count; @c kInfinite for indefinite repetition.
    */
   [[nodiscard]] int32_t get_loop_count() const;
 
   /**
-   * @brief Returns the number of remaining ticks before the timer stops automatically.
+   * @brief Returns the number of ticks remaining before automatic stop.
    *
-   * @return Remaining tick count, or @c kInfinite if repeating indefinitely.
+   * @return Remaining tick count; @c kInfinite when repeating forever.
    */
   [[nodiscard]] int32_t get_remain_loop_count() const;
 
   /**
-   * @brief Returns the number of timer ticks scheduled since the last start/restart.
+   * @brief Returns the number of ticks dispatched since the last @c start() or @c restart().
    *
-   * @return Processed tick count, reset by @c stop() and finite-timer completion.
+   * @return Dispatched tick count.
    */
   [[nodiscard]] uint64_t get_invoke_count() const;
 
   /**
-   * @brief Returns the task dispatch priority.
+   * @brief Returns the dispatch priority used with @c kPriorityType loops.
    *
-   * @details
-   * Relevant only when the timer is attached to a @c kPriorityType @c MessageLoop.
-   *
-   * @return Priority value (higher = dispatched sooner).
+   * @return Priority value.
    */
   [[nodiscard]] uint16_t get_priority() const;
 
   /**
-   * @brief Returns the @c MessageLoop this timer is attached to.
+   * @brief Returns the loop the timer is currently attached to.
    *
-   * @return Pointer to the associated loop, or @c nullptr if detached.
+   * @return Loop pointer; @c nullptr when detached.
    */
   [[nodiscard]] class MessageLoop* get_message_loop() const;
 
   /**
-   * @brief Attaches the timer to a @c MessageLoop.
+   * @brief Attaches the timer to @p message_loop.
    *
    * @details
-   * Must be called before @c start() if the timer was constructed without a loop.
-   * @p message_loop must be non-null; a null pointer logs a fatal error and
-   * throws.  If the timer is already attached to a different loop it is detached
-   * first.
+   * Must be called before @c start() when no loop was provided at construction.  A null
+   * pointer logs a fatal error and throws.  Re-attaching detaches from any previous loop.
    *
    * @param message_loop  Loop to attach to.
-   * @return @c true on success; @c false only when loop registration fails.
+   * @return @c true on success.
    */
   bool attach(class MessageLoop* message_loop);
 
   /**
-   * @brief Stops the timer and detaches it from its @c MessageLoop.
-   *
-   * @details
-   * After detaching the timer is inactive and can be re-attached to a different loop.
-   * This explicit @c detach() path calls @c stop() before removing the timer.
+   * @brief Detaches the timer from its loop and stops it first.
    *
    * @return @c true on success.
    */
   bool detach();
 
   /**
-   * @brief Arms and starts the timer.
+   * @brief Arms the timer and starts dispatching ticks.
    *
    * @details
-   * If @p callback is provided it replaces the previously set callback.  Calling
-   * @c start() without a valid stored callback arms the timer state but there is
-   * no user callback to invoke.  Timer delivery also requires a successfully
-   * attached @c MessageLoop.  The first tick fires after one full interval.
+   * When @p callback is non-null it replaces the existing callback.  The first tick fires
+   * after one full interval, not immediately.  Starting a timer with no callback is a
+   * no-op for dispatch purposes.
    *
-   * @param callback  Optional replacement callback.  Default: nullptr (keep existing).
+   * @param callback  Optional callback replacement.  Default: keep the existing callback.
    */
   void start(Callback&& callback = nullptr);
 
   /**
-   * @brief Resets the countdown to zero and continues firing.
-   *
-   * @details
-   * Resets the remaining loop count to the configured @c loop_count, clears
-   * @c get_invoke_count() to zero, and re-arms timing as if newly started.
+   * @brief Resets the tick count and re-arms the timer as if newly started.
    */
   void restart();
 
@@ -268,54 +246,50 @@ class VLINK_EXPORT Timer final {
    * @brief Disarms the timer without destroying it.
    *
    * @details
-   * After @c stop(), @c is_active() returns @c false.  Call @c start() to re-arm.
+   * After @c stop() the timer can be re-armed by another @c start().
    */
   void stop();
 
   /**
-   * @brief Enables or disables strict (catch-up) firing mode.
+   * @brief Enables or disables strict catch-up firing.
    *
-   * @details
-   * When @c true, if the loop was busy and one or more ticks were missed, they are
-   * fired immediately on the next loop iteration.  Default is @c false.
-   *
-   * @param strict  @c true to enable catch-up firing.
+   * @param strict  @c true to fire missed ticks back-to-back.  Default state is @c false.
    */
   void set_strict(bool strict);
 
   /**
-   * @brief Changes the tick interval.
+   * @brief Updates the tick interval.
    *
    * @details
-   * Takes effect immediately for an active timer: the processed tick count is
-   * recalculated against the existing start time and the loop is woken.
-   * When set to zero, the internal tick interval falls back to @c kMinInterval (10000 ns = 10 us).
+   * Takes effect immediately for an active timer: the processed tick count is recomputed
+   * against the existing start time and the loop is woken.  @p interval_ms @c == @c 0
+   * clamps the internal interval to @c kMinInterval (10000 ns = 10 us).
    *
    * @param interval_ms  New interval in milliseconds.
    */
   void set_interval(uint32_t interval_ms);
 
   /**
-   * @brief Changes the total number of ticks.
+   * @brief Updates the total tick count.
    *
-   * @param loop_count  New loop count.  Use @c kInfinite for indefinite repeat.
+   * @param loop_count  New loop count; @c kInfinite for indefinite repetition.
    */
   void set_loop_count(int32_t loop_count);
 
   /**
-   * @brief Replaces the callback invoked on each tick.
+   * @brief Replaces the callback dispatched on every tick.
    *
    * @param callback  New callback.
    */
   void set_callback(Callback&& callback);
 
   /**
-   * @brief Sets the dispatch priority for the timer task.
+   * @brief Updates the dispatch priority.
    *
    * @details
    * Only effective when the associated loop is of type @c kPriorityType.
    *
-   * @param priority  Priority value (higher = earlier dispatch).
+   * @param priority  Priority value; higher fires sooner.
    */
   void set_priority(uint16_t priority);
 

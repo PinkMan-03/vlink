@@ -35,7 +35,6 @@
 
 namespace vlink {
 
-// Getter<ValueT>
 template <typename ValueT, SecurityType SecT>
 inline typename Getter<ValueT, SecT>::UniquePtr Getter<ValueT, SecT>::create_unique(const std::string& url_str,
                                                                                     InitType type) {
@@ -285,7 +284,6 @@ inline void Getter<ValueT, SecT>::listen_bytes(NodeImpl::MsgCallback&& callback)
   });
 }
 
-// SecurityGetter<ValueT>
 template <typename ValueT>
 template <typename SecurityConfigT>
 inline typename SecurityGetter<ValueT>::UniquePtr SecurityGetter<ValueT>::create_unique(const std::string& url_str,

@@ -21,6 +21,26 @@
  * limitations under the License.
  */
 
+/**
+ * @file license_check.h
+ * @brief Internal license-verification helper used by the VLink runtime bootstrap.
+ *
+ * @details
+ * This is a private, non-installed header.  It is consumed only by the VLink library source
+ * and must never be included by application code.  The helper runs an out-of-band
+ * @c MessageLoop that periodically validates the active deployment licence; the exact
+ * verification protocol is intentionally hidden inside the PImpl @c Impl.
+ *
+ * Because the file participates in the security perimeter of the runtime, the public API
+ * exposed by @c LicenseCheck is deliberately narrow:
+ *
+ * | Member       | Role                                                       |
+ * | ------------ | ---------------------------------------------------------- |
+ * | constructor  | Spin up the verification loop and load the licence blob    |
+ * | destructor   | Stop the loop and clear any in-memory credential material  |
+ * | @c do_check  | Execute one verification pass on the calling thread        |
+ */
+
 #pragma once
 
 #include <memory>
@@ -29,12 +49,17 @@
 
 namespace vlink {
 
+/**
+ * @class LicenseCheck
+ * @brief Private MessageLoop driver that validates the runtime licence at start-up and on demand.
+ */
 class LicenseCheck final : protected MessageLoop {
  public:
   LicenseCheck();
 
   ~LicenseCheck() override;
 
+  /** @brief Run a single, synchronous licence-verification pass on the calling thread. */
   void do_check();
 
  private:

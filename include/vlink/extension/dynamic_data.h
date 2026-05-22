@@ -23,48 +23,60 @@
 
 /**
  * @file dynamic_data.h
- * @brief Type-erased data container for runtime serialisation and deserialisation.
+ * @brief Self-describing serialised payload tagged with an inline type name.
  *
  * @details
- * @c DynamicData stores a serialized payload (@c Bytes) together with a type-name tag
- * in a reserved @c kOffset = 20 byte prefix of the buffer.  The type-name string
- * literal, including its trailing NUL, must be shorter than this prefix.  This allows
- * the payload to be transported through channels that do not know the compile-time message
- * type, and later deserialized back to the concrete type.
+ * @c DynamicData carries a serialised VLink-compatible message together with a short
+ * type-name tag inside a single @c Bytes buffer.  The first @c kOffset = 20 bytes of the
+ * buffer hold the type name (NUL-padded), and the remainder holds the payload as produced
+ * by @c Serializer.  This layout lets transports route, log and inspect a payload without
+ * knowing its concrete C++ type at compile time -- the recipient picks the matching
+ * deserialiser at run time using the embedded tag.
  *
- * @par Internal layout
- * @code
- * [ type name (20 bytes max) | serialized payload ]
- * ^--- type_                      ^--- data_.data()
- * @endcode
+ * Supported dynamic categories (chosen automatically by @c Serializer):
  *
- * The type name is stored in-place in the first @c kOffset bytes of the @c Bytes buffer
- * and exposed as a @c std::string_view pointing into that buffer.
+ * | Category   | Examples                          | Notes                                      |
+ * | ---------- | --------------------------------- | ------------------------------------------ |
+ * | Protobuf   | @c MyProto, @c std::shared_ptr<P> | Encoded with the message's wire format     |
+ * | FlatBuffer | @c MyTable, @c FlatPtr<T>         | Encoded via @c FlatBuilder                 |
+ * | POD/Std    | @c int, @c struct Foo (trivial)   | Standard layout copy                       |
+ * | Bytes      | @c vlink::Bytes                   | Stored verbatim                            |
+ * | String     | @c std::string                    | Length-prefixed                            |
+ * | Chars      | @c char[N], @c const char*        | NUL-terminated                             |
+ * | Custom     | Types with explicit @c Serializer | User-provided serialise/deserialise hooks  |
  *
- * @par Restrictions
- * - Cannot serialize or deserialize another @c DynamicData object (static_assert).
- * - Cannot serialize CDR types (static_assert).
- * - The type name string literal (including NUL) must be shorter than @c kOffset (20) bytes (static_assert).
+ * Two categories are forbidden and rejected by @c static_assert: nested @c DynamicData
+ * (avoids recursive type-name layout) and CDR types (their wire format does not allow
+ * the in-place prefix used here).  The type-name literal (including its trailing NUL)
+ * must fit in fewer than @c kOffset bytes.
  *
- * @par Serialisation
+ * Buffer layout:
+ *
+ * @verbatim
+ *   +----------------------------+-----------------------------------------+
+ *   |  type name (20 bytes max)  |  serialised payload                     |
+ *   +----------------------------+-----------------------------------------+
+ *   ^                            ^
+ *   data_.real_data()            data_.real_data() + kOffset
+ * @endverbatim
+ *
+ * @par Example
  * @code
  * vlink::DynamicData dd;
  * MyProtoMsg msg;
  * msg.set_value(42);
- * dd.load("MyProtoMsg", msg);
+ * dd.load("MyProtoMsg", msg);                     // serialise + tag
  *
- * // Store/transport dd ...
+ * // Send over any transport that handles vlink::Bytes:
+ * vlink::Bytes wire;
+ * dd >> wire;
  *
- * MyProtoMsg recovered = dd.as<MyProtoMsg>();
- * @endcode
- *
- * @par Binary transport (operator<< / operator>>)
- * @code
- * vlink::Bytes wire_bytes;
- * dd >> wire_bytes;   // serialize DynamicData to Bytes
- *
- * vlink::DynamicData dd2;
- * dd2 << wire_bytes;  // deserialize Bytes back to DynamicData
+ * vlink::DynamicData received;
+ * received << wire;                               // recover the tagged blob
+ * if (received.get_type() == "MyProtoMsg") {
+ *   MyProtoMsg out = received.as<MyProtoMsg>();   // deserialise
+ *   (void)out;
+ * }
  * @endcode
  */
 
@@ -80,171 +92,139 @@ namespace vlink {
 
 /**
  * @class DynamicData
- * @brief Runtime-typed container that serializes any VLink-compatible message type.
+ * @brief Type-erased wrapper that pairs an inline type name with a serialised payload.
  *
  * @details
- * Uses @c Serializer to pack the message into internal @c Bytes storage.
- * The type tag is embedded in the first @c kOffset bytes of the buffer.
+ * Stores its payload in an internal @c Bytes buffer; the first @c kOffset bytes are
+ * reserved for the type name and exposed through @c get_type() as a @c string_view.
+ * Copy and move operations rebind the view to the local buffer to avoid dangling.
  */
 class VLINK_EXPORT DynamicData final {
  public:
   /**
-   * @brief Constructs an empty @c DynamicData with no payload.
+   * @brief Builds an empty container with no buffer and no type tag.
    */
   DynamicData();
 
   /**
-   * @brief Copy-constructs a @c DynamicData and rebinds the type view.
-   *
-   * The copied @c type_ view points into this object's copied buffer, not the
-   * source object's buffer.
+   * @brief Copies the buffer and rebinds the local type view to point into the new buffer.
    */
   DynamicData(const DynamicData& target);
 
   /**
-   * @brief Move-constructs a @c DynamicData and rebinds the type view.
+   * @brief Adopts the source buffer and rebinds the type view to point at this object's storage.
    *
-   * The moved-to @c type_ view points into this object's buffer.  The moved-from
-   * object is left with an empty type view.
+   * @details
+   * The moved-from object is left in an empty state with no payload and no type tag.
    */
   DynamicData(DynamicData&& target) noexcept;
 
   /**
-   * @brief Copy-assigns a @c DynamicData and rebinds the type view.
-   *
-   * The assigned @c type_ view points into this object's copied buffer, not the
-   * source object's buffer.
+   * @brief Copy-assignment that rebinds the local type view to point into the new buffer.
    */
   DynamicData& operator=(const DynamicData& target);
 
   /**
-   * @brief Move-assigns a @c DynamicData and rebinds the type view.
-   *
-   * The moved-to @c type_ view points into this object's buffer.  The moved-from
-   * object is left with an empty type view.
+   * @brief Move-assignment that rebinds the local type view and empties the source.
    */
   DynamicData& operator=(DynamicData&& target) noexcept;
 
   /**
-   * @brief Serializes @p t with a type-name tag into the internal buffer.
+   * @brief Serialises @p t under the type tag @p type into the internal buffer.
    *
    * @details
-   * The type name is stored in the first @c kOffset bytes of the underlying @c Bytes buffer.
-   * A @c static_assert enforces that @p SizeT < @c kOffset (20).
+   * The type literal (including its trailing NUL) must be shorter than @c kOffset, which
+   * is checked at compile time.  On serialiser failure the container is reset to empty
+   * and an error is logged.
    *
-   * @tparam SizeT  Length of the type-name string literal including NUL.
-   * @tparam T      Message type to serialize (must be supported by @c Serializer).
-   * @param type    Type name string literal, e.g., @c "MyProtoMsg".
-   * @param t       Message instance to serialize.
+   * @tparam SizeT Length of the type-name string literal including the NUL terminator.
+   * @tparam T     Source message type (must be supported by @c Serializer).
+   * @param type   String literal containing the type-name tag.
+   * @param t      Message instance to serialise.
    * @return Reference to @c *this for chaining.
-   *
-   * @note Logs a failure if serialisation returns @c false.
    */
   template <uint8_t SizeT, typename T>
   DynamicData& load(const char (&type)[SizeT], const T& t);
 
   /**
-   * @brief Deserializes the internal buffer into @p t.
+   * @brief Deserialises the stored payload into @p t.
    *
    * @details
-   * Uses @c Serializer to populate @p t from the payload bytes.
-   * Returns @c false if the buffer is empty or deserialisation fails.
+   * Fails when the container is empty or the @c Serializer cannot decode the buffer
+   * (for example because @p T is incompatible with the embedded payload).
    *
-   * @tparam T  Message type to deserialize into.
-   * @param t   Output parameter populated on success.
-   * @return @c true if deserialization succeeded; @c false otherwise.
+   * @tparam T Destination type.
+   * @param t  Output reference populated on success.
+   * @return @c true on success; @c false otherwise.
    */
   template <typename T>
   bool convert(T& t) const;
 
   /**
-   * @brief Deserializes the internal buffer and returns the result by value.
+   * @brief Default-constructs a @p T (or @c shared_ptr<T>) and decodes the payload into it.
    *
-   * @details
-   * Constructs a default @p T (or @c shared_ptr<T> for pointer types) and
-   * calls @c convert().  Returns a default-constructed @p T on failure.
-   *
-   * @tparam T  Message type to deserialize.
-   * @return Deserialized instance, or default-constructed value on failure.
+   * @tparam T Destination type; specialised for @c std::shared_ptr to allocate the inner object.
+   * @return Decoded instance, or a default-constructed @p T when decoding fails.
    */
   template <typename T>
   [[nodiscard]] T as() const;
 
   /**
-   * @brief Returns a const reference to the raw serialized bytes (including type tag).
-   *
-   * @return Internal @c Bytes buffer.
+   * @brief Returns the underlying @c Bytes buffer, including the embedded type name.
    */
   [[nodiscard]] const Bytes& get_data() const;
 
   /**
-   * @brief Returns the type name string embedded in the buffer.
+   * @brief Returns the embedded type name as a view into the internal buffer.
    *
    * @details
-   * Points into the first @c kOffset bytes of the internal @c Bytes buffer.
-   * The view is only valid for the lifetime of this @c DynamicData instance.
-   *
-   * @return @c string_view of the type name.
+   * Only valid for the lifetime of this @c DynamicData instance.
    */
   [[nodiscard]] const std::string_view& get_type() const;
 
   /**
-   * @brief Returns @c true if no payload has been loaded.
-   *
-   * @return @c true if the internal @c Bytes buffer is empty.
+   * @brief Returns whether the internal buffer is empty.
    */
   [[nodiscard]] bool is_empty() const;
 
   /**
-   * @brief Returns @c true if both @c DynamicData objects have identical buffers.
+   * @brief Byte-equality comparison.
    *
-   * @param target  Right-hand side.
-   * @return @c true if the raw bytes are equal.
+   * @return @c true when both buffers hold identical bytes.
    */
   [[nodiscard]] bool operator==(const DynamicData& target) const;
 
   /**
-   * @brief Returns @c true if the objects differ.
-   *
-   * @param target  Right-hand side.
-   * @return @c true if the raw bytes differ.
+   * @brief Byte-inequality comparison.
    */
   [[nodiscard]] bool operator!=(const DynamicData& target) const;
 
   /**
-   * @brief Compile-time trait marker -- returns @c true to identify this as a @c DynamicData type.
-   *
-   * @details
-   * Used internally by @c Serializer via template specialisation detection.
+   * @brief Compile-time trait used by @c Serializer to detect @c DynamicData specialisations.
    *
    * @return Always @c true.
    */
   [[nodiscard]] static constexpr bool is_vlink_dynamic_data();
 
   /**
-   * @brief Returns the byte offset where the serialized payload begins.
-   *
-   * @details
-   * Equal to @c kOffset (20).  The first @c kOffset bytes are reserved for the type name.
-   *
-   * @return Offset value (20).
+   * @brief Returns the byte offset at which the serialised payload begins (= @c kOffset).
    */
   [[nodiscard]] static constexpr uint8_t get_offset();
 
   /**
-   * @brief Deserializes a wire-format @c Bytes blob into this @c DynamicData.
+   * @brief Reconstructs the container from a wire-format @c Bytes blob.
    *
-   * @param bytes  Wire-format bytes produced by @c operator>>.
-   * @return @c true on success; @c false if parsing failed.
+   * @param bytes Wire blob previously produced by @c operator>>.
+   * @return @c true on success.
    */
   bool operator<<(const Bytes& bytes) noexcept;
 
   /**
-   * @brief Serializes this @c DynamicData to a wire-format @c Bytes blob.
+   * @brief Emits the container as a wire-format @c Bytes blob.
    *
-   * @param bytes  Output buffer.
-   * @return @c true on success; @c false if the internal buffer is empty, non-owning,
-   *         or does not include the reserved prefix.
+   * @param bytes Destination buffer.
+   * @return @c true on success; @c false when the internal buffer is empty, non-owning,
+   *         or does not carry the reserved prefix.
    */
   bool operator>>(Bytes& bytes) const noexcept;
 

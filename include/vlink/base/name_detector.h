@@ -23,25 +23,32 @@
 
 /**
  * @file name_detector.h
- * @brief Compile-time type-name and enum-name detection utilities.
+ * @brief Header-only compile-time introspection of type names and enumerator labels.
  *
  * @details
- * Self-contained, header-only @c constexpr API that returns a string view of:
- *  - any type, via @c vlink::NameDetector::get<TypeT>(); and
- *  - any enumerator value within a configurable scanning range, via
- *    @c vlink::NameDetector::get_enum(value).
+ * @c vlink::NameDetector exposes two primitives that resolve human-readable identifiers
+ * at compile time without RTTI or any third-party dependency.  The implementation walks
+ * the textual content of @c __PRETTY_FUNCTION__ on Clang/GCC and @c __FUNCSIG__ on MSVC,
+ * then trims compiler-specific noise so the result is identical across toolchains.
  *
- * The implementation is portable across Clang, GCC and MSVC -- it leans only
- * on the compiler intrinsics @c __PRETTY_FUNCTION__ / @c __FUNCSIG__.  No
- * third-party header is pulled in.
+ * Validation rules applied by the internal @c pretty_name() pass:
+ *
+ * | Rule                                  | Result                                       |
+ * | ------------------------------------- | -------------------------------------------- |
+ * | Begins with a character literal quote | Returns an empty view (not a valid name)     |
+ * | Begins with a digit                   | Returns an empty view (numeric literal)      |
+ * | Contains a trailing parenthesised arg | Strips the argument list before the name     |
+ * | Contains a trailing template list     | Strips the @c "<...>" suffix from the name   |
+ * | Final character is not alnum/under    | Trims back to the last identifier character  |
+ * | First character is not letter/under   | Returns an empty view (rejects the result)   |
  *
  * @par Example
  * @code
  * static_assert(vlink::NameDetector::is_support<MyPlugin>());
- * constexpr std::string_view kTypeName = vlink::NameDetector::get<MyPlugin>();
+ * constexpr std::string_view kName = vlink::NameDetector::get<MyPlugin>();
  *
  * enum class Color { Red, Green, Blue };
- * std::string_view name = vlink::NameDetector::get_enum(Color::Green);  // "Green"
+ * std::string_view label = vlink::NameDetector::get_enum(Color::Green);
  * @endcode
  */
 
@@ -96,59 +103,65 @@ namespace vlink {
 
 /**
  * @namespace vlink::NameDetector
- * @brief Compile-time type-name and enum-name detection utilities.
+ * @brief Compile-time type-name and enum-name reflection primitives.
  */
 namespace NameDetector {  // NOLINT(readability-identifier-naming)
 
 /**
- * @brief Reports whether the running compiler supports type-name extraction.
+ * @brief Reports whether the current toolchain can extract a textual name for @p TypeT.
  *
- * @tparam TypeT  The type being queried.
- * @return @c true iff @c get<TypeT>() will return a meaningful non-empty
- *         name on this compiler.
+ * @tparam TypeT  Type whose support status is queried.
+ * @return @c true when @c get<TypeT>() returns a meaningful non-empty view on this compiler.
  */
 template <typename TypeT>
 [[nodiscard]] constexpr bool is_support() noexcept;
 
 /**
- * @brief Returns the unqualified compile-time name of @p TypeT.
+ * @brief Returns the trimmed compile-time identifier for @p TypeT.
  *
  * @details
- * On Windows, leading @c "struct " and @c "class " prefixes that MSVC may
- * emit are stripped so the returned name matches what Clang / GCC produce.
+ * MSVC inserts a @c "struct " or @c "class " prefix into @c __FUNCSIG__; both are stripped
+ * before the value is returned so the same textual identifier is produced on every supported
+ * toolchain.  The returned view always points at static read-only storage.
  *
- * @tparam TypeT  The type whose name is requested.
- * @return A @c constexpr @c std::string_view referring to static storage.
+ * @tparam TypeT  Type whose identifier is requested.
+ * @return Read-only @c std::string_view with the resolved identifier.
  */
 template <typename TypeT>
 [[nodiscard]] constexpr std::string_view get() noexcept;
 
 /**
- * @brief Returns the source-level identifier of an enumerator value.
+ * @brief Resolves the source identifier of an enumerator literal at compile time.
  *
- * @tparam EnumT  The enumeration type (deduced from @p value).
- * @param  value  The enumerator value to name.
- * @return The enumerator's identifier, or an empty view if @p value is not
- *         a named enumerator within the configured scanning range.
+ * @tparam EnumT  Enumeration type, deduced from @p value.
+ * @param  value  Enumerator value whose label is requested.
+ * @return Identifier text, or an empty view when @p value is outside the configured
+ *         scanning window or is not a named enumerator.
  */
 template <typename EnumT>
 [[nodiscard]] constexpr std::string_view get_enum(EnumT value) noexcept;
 
 /**
  * @namespace vlink::NameDetector::customize
- * @brief Customisation points for @c NameDetector.
+ * @brief Customisation points overriding the default enumerator scanning window.
  *
  * @details
- * Specialise @c EnumRange<EnumT> to widen / narrow the scanning window used
- * by @c get_enum for a specific enum type.
+ * Specialise @c EnumRange<EnumT> on a per-type basis to widen or narrow the
+ * compile-time search bounds used by @c get_enum().
  */
 namespace customize {  // NOLINT(readability-identifier-naming)
 
+/**
+ * @struct EnumRange
+ * @brief Inclusive integer range scanned for @p EnumT enumerator labels.
+ *
+ * @tparam EnumT  Enumeration type for which the range is being customised.
+ */
 template <typename EnumT>
 struct EnumRange {
   static_assert(std::is_enum_v<EnumT>, "vlink::NameDetector::customize::EnumRange requires enum type.");
-  inline static constexpr int kMin = VLINK_NAME_DETECTOR_ENUM_RANGE_MIN;
-  inline static constexpr int kMax = VLINK_NAME_DETECTOR_ENUM_RANGE_MAX;
+  inline static constexpr int kMin = VLINK_NAME_DETECTOR_ENUM_RANGE_MIN;  ///< Inclusive lower scan bound.
+  inline static constexpr int kMax = VLINK_NAME_DETECTOR_ENUM_RANGE_MAX;  ///< Inclusive upper scan bound.
   static_assert(kMax > kMin, "vlink::NameDetector::customize::EnumRange requires kMax > kMin.");
 };
 

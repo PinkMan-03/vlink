@@ -35,7 +35,6 @@
 
 namespace vlink {
 
-// Publisher<MsgT>
 template <typename MsgT, SecurityType SecT>
 inline typename Publisher<MsgT, SecT>::UniquePtr Publisher<MsgT, SecT>::create_unique(const std::string& url_str,
                                                                                       InitType type) {
@@ -215,7 +214,6 @@ inline bool Publisher<MsgT, SecT>::write_intra(const IntraData& intra_data) {
   return this->impl_->write(intra_data);
 }
 
-// SecurityPublisher<MsgT>
 template <typename MsgT>
 template <typename SecurityConfigT>
 inline typename SecurityPublisher<MsgT>::UniquePtr SecurityPublisher<MsgT>::create_unique(const std::string& url_str,
