@@ -112,8 +112,7 @@ struct MessageLoop::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
   alignas(64) std::atomic_bool is_busy{false};
   alignas(64) std::atomic_bool wakeup_pending{false};
   alignas(64) std::atomic_bool lockfree_needs_reset{false};
-  std::shared_ptr<detail::MessageLoopAliveState> alive_state{
-      MemoryResource::make_shared<detail::MessageLoopAliveState>()};
+  std::shared_ptr<MessageLoop::AliveState> alive_state{MemoryResource::make_shared<MessageLoop::AliveState>()};
 
   std::atomic<std::thread::id> thread_id;
   alignas(64) std::atomic_size_t lockfree_task_count{0U};
@@ -607,7 +606,7 @@ uint32_t MessageLoop::get_max_elapsed_time() const { return kMaxElapsedTime; }
 
 bool MessageLoop::is_in_same_thread() const { return impl_->thread_id == std::this_thread::get_id(); }
 
-std::shared_ptr<detail::MessageLoopAliveState> MessageLoop::get_alive_state() const { return impl_->alive_state; }
+std::shared_ptr<MessageLoop::AliveState> MessageLoop::get_alive_state() const { return impl_->alive_state; }
 
 void MessageLoop::on_begin() {
   if (impl_->begin_callback) {

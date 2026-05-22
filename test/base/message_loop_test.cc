@@ -725,7 +725,7 @@ TEST_SUITE("base-MessageLoop") {
   }
 
   TEST_CASE("get_alive_state alive flips to false after loop destruction") {
-    std::shared_ptr<detail::MessageLoopAliveState> state;
+    std::shared_ptr<MessageLoop::AliveState> state;
     {
       MessageLoop loop;
       state = loop.get_alive_state();

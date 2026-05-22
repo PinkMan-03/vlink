@@ -198,7 +198,7 @@ default handle state=0                               # 0=kInvalid
 
 - TaskHandle 内部 State 用 mutex 保护；wait 用 cv 通知。
 - 状态机一旦进入终态不再变化。
-- vlink lock order：`MessageLoopAliveState::mtx → MessageLoop::Impl::mtx → TaskHandle::State::mtx`；callback 在所有 mtx 释放后触发。
+- vlink lock order：`MessageLoop::AliveState::mtx → MessageLoop::Impl::mtx → TaskHandle::State::mtx`；callback 在所有 mtx 释放后触发。
 
 ## 配图
 

@@ -440,14 +440,15 @@ static void resume_failed_later(std::shared_ptr<detail::AwaiterResumeState> stat
   }));
 }
 
-static detail::ResumePostResult post_awaiter_resume(
-    MessageLoop* loop, const std::shared_ptr<vlink::detail::MessageLoopAliveState>& alive_state,
-    const std::shared_ptr<detail::AwaiterResumeState>& state, uint16_t priority) {
+static detail::ResumePostResult post_awaiter_resume(MessageLoop* loop,
+                                                    const std::shared_ptr<MessageLoop::AliveState>& alive_state,
+                                                    const std::shared_ptr<detail::AwaiterResumeState>& state,
+                                                    uint16_t priority) {
   return detail::post_callback_if_alive(loop, alive_state, MoveFunction<void()>([state]() { state->resume_ready(); }),
                                         MoveFunction<void()>([state]() { resume_failed_later(state); }), priority);
 }
 
-static void retry_awaiter_resume(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+static void retry_awaiter_resume(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                                  std::shared_ptr<detail::AwaiterResumeState> state, uint16_t priority) {
   detail::register_future_wait(
       MoveFunction<bool()>([loop, alive_state = std::move(alive_state), state = std::move(state), priority,
@@ -515,7 +516,7 @@ static bool post_owned_resume(MessageLoop& loop, std::coroutine_handle<> handle,
                        MoveFunction<void()>([handle]() { handle.destroy(); }), priority);
 }
 
-static void retry_detached_resume(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+static void retry_detached_resume(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                                   detail::DetachedTask::Handle handle, uint16_t priority) {
   detail::register_future_wait(MoveFunction<bool()>(
       [loop, alive_state = std::move(alive_state), handle, priority, retry_count = 0U]() mutable -> bool {
@@ -649,9 +650,10 @@ void detail::DetachedTask::promise_type::unhandled_exception() noexcept {
 
 detail::DetachedTask detail::co_spawn_void_impl(Task<void> task) { co_await std::move(task); }
 
-detail::ResumePostResult detail::post_callback_if_alive(
-    MessageLoop* loop, const std::shared_ptr<vlink::detail::MessageLoopAliveState>& alive_state,
-    MoveFunction<void()>&& resume_callback, MoveFunction<void()>&& drop_callback, uint16_t priority) {
+detail::ResumePostResult detail::post_callback_if_alive(MessageLoop* loop,
+                                                        const std::shared_ptr<MessageLoop::AliveState>& alive_state,
+                                                        MoveFunction<void()>&& resume_callback,
+                                                        MoveFunction<void()>&& drop_callback, uint16_t priority) {
   if VUNLIKELY (loop == nullptr || !alive_state) {
     if VLIKELY (drop_callback) {
       drop_callback();
@@ -702,7 +704,7 @@ void detail::register_future_wait(MoveFunction<bool()>&& poll) { FutureWaitLoop:
 // ScheduleAwaiter
 ScheduleAwaiter::ScheduleAwaiter() noexcept = default;
 
-ScheduleAwaiter::ScheduleAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+ScheduleAwaiter::ScheduleAwaiter(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                                  std::shared_ptr<detail::AwaiterResumeState> state, uint16_t priority) noexcept
     : loop(loop), alive_state(std::move(alive_state)), state(std::move(state)), priority(priority) {}
 
@@ -753,7 +755,7 @@ void ScheduleAwaiter::await_resume() {
 // YieldAwaiter
 YieldAwaiter::YieldAwaiter() noexcept = default;
 
-YieldAwaiter::YieldAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+YieldAwaiter::YieldAwaiter(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                            std::shared_ptr<detail::AwaiterResumeState> state, uint16_t priority) noexcept
     : loop(loop), alive_state(std::move(alive_state)), state(std::move(state)), priority(priority) {}
 
@@ -804,7 +806,7 @@ void YieldAwaiter::await_resume() {
 // DelayAwaiter
 DelayAwaiter::DelayAwaiter() noexcept = default;
 
-DelayAwaiter::DelayAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+DelayAwaiter::DelayAwaiter(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                            std::shared_ptr<detail::AwaiterResumeState> state, uint32_t ms, uint16_t priority) noexcept
     : loop(loop), alive_state(std::move(alive_state)), state(std::move(state)), ms(ms), priority(priority) {}
 

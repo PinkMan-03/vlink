@@ -112,28 +112,6 @@
 
 namespace vlink {
 
-namespace detail {
-
-/**
- * @struct MessageLoopAliveState
- * @brief Refcounted lifetime gate shared between a @c MessageLoop and cross-thread observers.
- *
- * @details
- * Coroutine adapters and similar bridges that want to post a continuation back onto a loop
- * must verify the loop is still alive.  This struct exposes a mutex and a boolean flag; the
- * destructor of @c MessageLoop flips @c alive to @c false under @c mtx as its very first step,
- * so a caller that holds @c mtx and observes @c alive @c == @c true is guaranteed the loop is
- * still safe to touch.
- *
- * @note Internal helper; obtain via @c MessageLoop::get_alive_state.
- */
-struct MessageLoopAliveState final {
-  std::mutex mtx;                ///< Serialises destruction against observers.
-  std::atomic_bool alive{true};  ///< @c false once the owning loop has begun destruction.
-};
-
-}  // namespace detail
-
 /**
  * @class MessageLoop
  * @brief Serial task dispatcher with selectable queue backend and bounded timer registry.
@@ -185,6 +163,19 @@ class VLINK_EXPORT MessageLoop {
     kTimerPriority = 50,                                     ///< Reserved for timer callbacks.
     kNormalPriority = 100,                                   ///< Default user-task priority.
     kHighestPriority = std::numeric_limits<uint16_t>::max()  ///< Highest priority.
+  };
+
+  /**
+   * @brief Lifetime gate shared with cross-thread observers.
+   *
+   * @details
+   * The destructor of @c MessageLoop flips @c alive to @c false under @c mtx as its very first
+   * step, so a caller that holds @c mtx and observes @c alive @c == @c true is guaranteed the
+   * loop is still safe to touch.  Obtain via @c get_alive_state.
+   */
+  struct AliveState final {
+    std::mutex mtx;
+    std::atomic_bool alive{true};
   };
 
   /**
@@ -493,14 +484,13 @@ class VLINK_EXPORT MessageLoop {
    * @brief Returns the shared lifetime flag used by cross-thread bridges.
    *
    * @details
-   * The returned @c MessageLoopAliveState outlives this loop; its @c alive member flips to
-   * @c false under @c mtx as the very first step of the destructor.  Adapters that need to post
-   * continuations back to this loop should lock @c mtx, re-check @c alive, and only call back
-   * while still holding the lock.
+   * The returned @c AliveState outlives this loop.  Adapters that need to post continuations
+   * back to this loop should lock @c mtx, re-check @c alive, and only call back while still
+   * holding the lock.
    *
    * @return Shared handle; never null while the loop object is alive.
    */
-  [[nodiscard]] std::shared_ptr<detail::MessageLoopAliveState> get_alive_state() const;
+  [[nodiscard]] std::shared_ptr<AliveState> get_alive_state() const;
 
   /**
    * @brief Dispatches a callable to the loop thread and returns a @c std::future for the result.

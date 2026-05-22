@@ -77,7 +77,7 @@
  * there is no custom-allocator template parameter.
  *
  * @par Lock order
- * @c MessageLoopAliveState::mtx -> @c MessageLoop::Impl::mtx -> @c TaskHandle::State::mtx ->
+ * @c MessageLoop::AliveState::mtx -> @c MessageLoop::Impl::mtx -> @c TaskHandle::State::mtx ->
  * awaiter shared-state mutex.  Each awaiter owns its own state object that holds the suspended
  * coroutine handle.  When the target loop closes mid-resume the handle is released on the
  * @c FutureWaitLoop helper thread via a queued retry; callers must therefore not assume
@@ -104,7 +104,7 @@
  * @c MessageLoop::kNormalPriority so default-priority resumes do not sink to the queue tail.
  *
  * @par Alive-state mutex hold time
- * @c post_callback_if_alive acquires @c MessageLoopAliveState::mtx only briefly; the inner
+ * @c post_callback_if_alive acquires @c MessageLoop::AliveState::mtx only briefly; the inner
  * @c post_callback path uses @c TaskOverflowPolicy::kReject so the alive-state mutex is never
  * held across a sleep or backoff.
  *
@@ -569,9 +569,10 @@ inline constexpr uint32_t kMaxResumePostRetry = 30000U;
  * @param priority          Schedule priority; honoured only on @c kPriorityType loops.
  * @return One of @c kPosted, @c kRetry, @c kClosed.
  */
-VLINK_EXPORT ResumePostResult post_callback_if_alive(
-    MessageLoop* loop, const std::shared_ptr<vlink::detail::MessageLoopAliveState>& alive_state,
-    MoveFunction<void()>&& resume_callback, MoveFunction<void()>&& drop_callback, uint16_t priority = 0);
+VLINK_EXPORT ResumePostResult post_callback_if_alive(MessageLoop* loop,
+                                                     const std::shared_ptr<MessageLoop::AliveState>& alive_state,
+                                                     MoveFunction<void()>&& resume_callback,
+                                                     MoveFunction<void()>&& drop_callback, uint16_t priority = 0);
 
 /**
  * @brief Posts the initial resume of a detached coroutine onto @p loop.
@@ -741,7 +742,7 @@ struct VLINK_EXPORT ScheduleAwaiter final {
    * @param state         Shared awaiter resume state.
    * @param priority      Schedule priority for the resume.
    */
-  ScheduleAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+  ScheduleAwaiter(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                   std::shared_ptr<detail::AwaiterResumeState> state, uint16_t priority) noexcept;
 
   /**
@@ -754,11 +755,11 @@ struct VLINK_EXPORT ScheduleAwaiter final {
    */
   ScheduleAwaiter& operator=(ScheduleAwaiter&&) noexcept;
 
-  MessageLoop* loop{nullptr};                                         ///< Target loop on which to resume.
-  std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state;  ///< Target loop's alive-state gate.
-  std::shared_ptr<detail::AwaiterResumeState> state;                  ///< Shared resume state holding the handle.
-  uint16_t priority{0};                                               ///< Schedule priority for the resume.
-  bool failed{false};                                                 ///< Set to @c true if posting ultimately failed.
+  MessageLoop* loop{nullptr};                            ///< Target loop on which to resume.
+  std::shared_ptr<MessageLoop::AliveState> alive_state;  ///< Target loop's alive-state gate.
+  std::shared_ptr<detail::AwaiterResumeState> state;     ///< Shared resume state holding the handle.
+  uint16_t priority{0};                                  ///< Schedule priority for the resume.
+  bool failed{false};                                    ///< Set to @c true if posting ultimately failed.
 
   /**
    * @brief Awaiter readiness hook.
@@ -822,7 +823,7 @@ struct VLINK_EXPORT YieldAwaiter final {
    * @param state         Shared awaiter resume state.
    * @param priority      Schedule priority for the re-post.
    */
-  YieldAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+  YieldAwaiter(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                std::shared_ptr<detail::AwaiterResumeState> state, uint16_t priority) noexcept;
 
   /**
@@ -835,11 +836,11 @@ struct VLINK_EXPORT YieldAwaiter final {
    */
   YieldAwaiter& operator=(YieldAwaiter&&) noexcept;
 
-  MessageLoop* loop{nullptr};                                         ///< Target loop to re-post onto.
-  std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state;  ///< Target loop's alive-state gate.
-  std::shared_ptr<detail::AwaiterResumeState> state;                  ///< Shared resume state holding the handle.
-  uint16_t priority{0};                                               ///< Schedule priority for the re-post.
-  bool failed{false};                                                 ///< Set to @c true if posting ultimately failed.
+  MessageLoop* loop{nullptr};                            ///< Target loop to re-post onto.
+  std::shared_ptr<MessageLoop::AliveState> alive_state;  ///< Target loop's alive-state gate.
+  std::shared_ptr<detail::AwaiterResumeState> state;     ///< Shared resume state holding the handle.
+  uint16_t priority{0};                                  ///< Schedule priority for the re-post.
+  bool failed{false};                                    ///< Set to @c true if posting ultimately failed.
 
   /**
    * @brief Awaiter readiness hook.
@@ -901,7 +902,7 @@ struct VLINK_EXPORT DelayAwaiter final {
    * @param ms            Delay in milliseconds before the resume is posted.
    * @param priority      Schedule priority for the resume.
    */
-  DelayAwaiter(MessageLoop* loop, std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state,
+  DelayAwaiter(MessageLoop* loop, std::shared_ptr<MessageLoop::AliveState> alive_state,
                std::shared_ptr<detail::AwaiterResumeState> state, uint32_t ms, uint16_t priority) noexcept;
 
   /**
@@ -914,12 +915,12 @@ struct VLINK_EXPORT DelayAwaiter final {
    */
   DelayAwaiter& operator=(DelayAwaiter&&) noexcept;
 
-  MessageLoop* loop{nullptr};                                         ///< Target loop to resume on.
-  std::shared_ptr<vlink::detail::MessageLoopAliveState> alive_state;  ///< Target loop's alive-state gate.
-  std::shared_ptr<detail::AwaiterResumeState> state;                  ///< Shared resume state holding the handle.
-  uint32_t ms{0};                                                     ///< Delay in milliseconds.
-  uint16_t priority{0};                                               ///< Schedule priority for the resume.
-  bool failed{false};                                                 ///< Set to @c true if scheduling failed.
+  MessageLoop* loop{nullptr};                            ///< Target loop to resume on.
+  std::shared_ptr<MessageLoop::AliveState> alive_state;  ///< Target loop's alive-state gate.
+  std::shared_ptr<detail::AwaiterResumeState> state;     ///< Shared resume state holding the handle.
+  uint32_t ms{0};                                        ///< Delay in milliseconds.
+  uint16_t priority{0};                                  ///< Schedule priority for the resume.
+  bool failed{false};                                    ///< Set to @c true if scheduling failed.
 
   /**
    * @brief Awaiter readiness hook.

@@ -1,11 +1,11 @@
 <mxfile host="app.diagrams.net" modified="2026-05-14T00:00:00.000Z" agent="Claude" version="24.0.0" type="device">
-  <diagram id="message-loop-alive-state" name="MessageLoopAliveState Sequencing">
+  <diagram id="message-loop-alive-state" name="MessageLoop::AliveState Sequencing">
     <mxGraphModel dx="1100" dy="640" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="640" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
-        <mxCell id="title" value="MessageLoopAliveState &#8212; Cross-Thread Lifetime Gate" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
+        <mxCell id="title" value="MessageLoop::AliveState &#8212; Cross-Thread Lifetime Gate" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=22;fontStyle=1;fontColor=#263238;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="1020" height="32" as="geometry" />
         </mxCell>
         <mxCell id="subtitle" value="Observer locks mtx, re-checks alive, then touches loop while still holding the lock &#160;&#183;&#160; destructor sets alive=false under mtx as the very first step" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=12;fontStyle=2;fontColor=#78909c;" vertex="1" parent="1">

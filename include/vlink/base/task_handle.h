@@ -56,7 +56,7 @@
  * @par Lock ordering
  * @c TaskHandle's internal state mutex is the innermost mutex in the dispatching layer.
  * The expected order is
- * @c MessageLoopAliveState::mtx -> @c MessageLoop::Impl::mtx -> @c TaskHandle::State::mtx.
+ * @c MessageLoop::AliveState::mtx -> @c MessageLoop::Impl::mtx -> @c TaskHandle::State::mtx.
  * @c TaskHandle::cancel() acquires the cancellation source's internal mutex only after
  * releasing the handle mutex, so the cancellation source is never nested inside any
  * dispatching-layer mutex.  Callbacks added through @c cancellation_token() fire outside

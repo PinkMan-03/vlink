@@ -116,11 +116,7 @@ Component.prototype.createOperations = function()
 
         component.addOperation("Execute",
             "bash", "-c",
-            "cd '" + targetDir + "' && " +
-            "shopt -s nullglob; " +
-            "files=(bin/vlink-* bin/*.sh bin/iox-* install.sh uninstall.sh); " +
-            "[ ${#files[@]} -gt 0 ] && chmod +x \"${files[@]}\"; " +
-            "./install.sh",
+            "cd '" + targetDir + "' && chmod +x bin/vlink-* bin/*.sh install.sh uninstall.sh 2>/dev/null && ./install.sh",
             "UNDOEXECUTE",
             "bash", "-c",
             "cd '" + targetDir + "' && ./uninstall.sh");
