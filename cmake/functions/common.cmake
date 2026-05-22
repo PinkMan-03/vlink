@@ -231,7 +231,7 @@ function(vlink_export project_name)
     include(CMakePackageConfigHelpers)
   endif()
   get_target_property(_vlink_export_type ${target} TYPE)
-  if(_vlink_export_type STREQUAL "SHARED_LIBRARY")
+  if(_vlink_export_type MATCHES "^(SHARED_LIBRARY|MODULE_LIBRARY)$")
     set_target_properties(
       ${target} PROPERTIES VERSION ${version} SOVERSION ${vlink_VERSION_MAJOR}.${vlink_VERSION_MINOR}
     )

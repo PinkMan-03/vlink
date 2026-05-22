@@ -169,11 +169,11 @@ cc_library_shared {
     // vendor_available: true,
     srcs: [
         "proxy/proxy_api/*.cc",
-        "proxy/proxy.proto",
     ],
     local_include_dirs: [
         "proxy",
         "include/vlink",
+        "thirdparty/cereal/include",
     ],
     cppflags: [
         "-DVLINK_ENABLE_PROXY",
@@ -187,9 +187,7 @@ cc_library_shared {
         "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
-        "libprotobuf-cpp-lite",
     ],
-    proto: {type: "lite"},
 }
 
 // libvlink-proxy_server
@@ -201,11 +199,11 @@ cc_library_shared {
     // vendor_available: true,
     srcs: [
         "proxy/proxy_server/*.cc",
-        "proxy/proxy.proto",
     ],
     local_include_dirs: [
         "proxy",
         "include/vlink",
+        "thirdparty/cereal/include",
     ],
     cppflags: [
         "-DVLINK_ENABLE_PROXY",
@@ -219,9 +217,7 @@ cc_library_shared {
         "libvlink-intra",
         "libvlink-dds",
         "libvlink-ddsc",
-        "libprotobuf-cpp-lite",
     ],
-    proto: {type: "lite"},
 }
 
 // vlink-proxy
@@ -250,9 +246,7 @@ cc_binary {
         "libvlink-dds",
         "libvlink-ddsc",
         "libvlink-proxy_server",
-        "libprotobuf-cpp-lite",
     ],
-    proto: {type: "lite"},
 }
 
 // vlink-info

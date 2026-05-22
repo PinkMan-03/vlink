@@ -5,7 +5,9 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output/external/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output/external/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output/external/lib)
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 # set(CMAKE_SKIP_INSTALL_RULES ON)
+
 function(export)
 
 endfunction()

@@ -44,8 +44,6 @@
 #include <utility>
 #include <vector>
 
-#include "../proxy_macros.h"
-
 #ifdef _WIN32
 #include <Windows.h>
 #undef min
@@ -57,16 +55,7 @@
 #include <unistd.h>
 #endif
 
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcpp"
-#endif
-
-#if defined(__ANDROID__) && __has_include("./proxy/proxy.pb.h")
-#include "./proxy/proxy.pb.h"
-#else
-#include "./proxy.pb.h"
-#endif
+#include "../proxy_common.h"
 
 namespace vlink {
 
@@ -80,20 +69,15 @@ namespace vlink {
 using RawPub = Publisher<Bytes>;
 using RawSub = Subscriber<Bytes>;
 
-#if VLINK_PROXY_ENABLE_ZEROCOPY_DATA
 using DataPub = Publisher<zerocopy::ProxyData>;
 using DataSub = Subscriber<zerocopy::ProxyData>;
-#else
-using DataPub = Publisher<pb::proxy::Data>;
-using DataSub = Subscriber<pb::proxy::Data>;
-#endif
 
-using TimePub = SecurityPublisher<pb::proxy::Time>;
-using InfoPub = SecurityPublisher<pb::proxy::InfoList>;
-using ControlSub = SecuritySubscriber<pb::proxy::Control>;
+using TimePub = SecurityPublisher<proxy::TimePacket>;
+using InfoPub = SecurityPublisher<proxy::InfoListPacket>;
+using ControlSub = SecuritySubscriber<proxy::ControlPacket>;
 
 #if VLINK_PROXY_ENABLE_HANDSHAKE
-using HandshakeSrv = SecurityServer<pb::proxy::HandshakeReq, pb::proxy::HandshakeResp>;
+using HandshakeSrv = SecurityServer<proxy::HandshakeReqPacket, proxy::HandshakeRespPacket>;
 #endif
 
 struct ProxySubMeta final {
@@ -124,7 +108,7 @@ struct ProxyServerGlobal final {
 // ProxyServer::Impl
 struct ProxyServer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Padding)
   std::atomic<uint32_t> control_id{0};
-  std::atomic<pb::proxy::Mode> mode{pb::proxy::OFFLINE};
+  std::atomic<ProxyAPI::Mode> mode{ProxyAPI::kOffline};
 
   std::string current_host_name;
   std::string current_machine_id;
@@ -182,8 +166,6 @@ struct ProxyServer::Impl final {  // NOLINT(clang-analyzer-optin.performance.Pad
 
 // ProxyServer
 ProxyServer::ProxyServer(const Config& config) : impl_(std::make_unique<Impl>()) {
-  GOOGLE_PROTOBUF_VERIFY_VERSION;
-
   set_name("ProxyServer");
 
   impl_->config = config;
@@ -235,7 +217,7 @@ ProxyServer::~ProxyServer() {
   impl_->discovery_viewer->wait_for_quit();
 
   impl_->control_id = 0;
-  impl_->mode = pb::proxy::OFFLINE;
+  impl_->mode = ProxyAPI::kOffline;
 
   {
     std::lock_guard control_lock(impl_->control_mtx);
@@ -324,21 +306,22 @@ void ProxyServer::init_server() {
   impl_->discovery_viewer = std::make_shared<DiscoveryViewer>(filter_type);
 
   if (impl_->config.direct) {
-    impl_->data_pub = std::make_shared<DataPub>(std::string("shm") + VLINK_PROXY_DATA_SHM_URL_CTX + domain_id_str,
-                                                InitType::kWithoutInit);
-    impl_->data_sub = std::make_shared<DataSub>(std::string("shm") + VLINK_VIEWER_DATA_SHM_URL_CTX + domain_id_str,
+    impl_->data_pub =
+        std::make_shared<DataPub>(proxy::make_url("shm", proxy::kDataShmUrlCtx, domain_id_str), InitType::kWithoutInit);
+    impl_->data_sub = std::make_shared<DataSub>(proxy::make_url("shm", proxy::kViewerDataShmUrlCtx, domain_id_str),
                                                 InitType::kWithoutInit);
   } else {
     if (impl_->config.reliable) {
       impl_->data_pub = std::make_shared<DataPub>(
-          impl_->config.dds_impl + VLINK_PROXY_DATA_RELIABLE_URL_CTX + domain_id_str, InitType::kWithoutInit);
+          proxy::make_url(impl_->config.dds_impl, proxy::kDataReliableUrlCtx, domain_id_str), InitType::kWithoutInit);
       impl_->data_sub = std::make_shared<DataSub>(
-          impl_->config.dds_impl + VLINK_VIEWER_DATA_RELIABLE_URL_CTX + domain_id_str, InitType::kWithoutInit);
+          proxy::make_url(impl_->config.dds_impl, proxy::kViewerDataReliableUrlCtx, domain_id_str),
+          InitType::kWithoutInit);
     } else {
-      impl_->data_pub = std::make_shared<DataPub>(impl_->config.dds_impl + VLINK_PROXY_DATA_URL_CTX + domain_id_str,
-                                                  InitType::kWithoutInit);
-      impl_->data_sub = std::make_shared<DataSub>(impl_->config.dds_impl + VLINK_VIEWER_DATA_URL_CTX + domain_id_str,
-                                                  InitType::kWithoutInit);
+      impl_->data_pub = std::make_shared<DataPub>(
+          proxy::make_url(impl_->config.dds_impl, proxy::kDataUrlCtx, domain_id_str), InitType::kWithoutInit);
+      impl_->data_sub = std::make_shared<DataSub>(
+          proxy::make_url(impl_->config.dds_impl, proxy::kViewerDataUrlCtx, domain_id_str), InitType::kWithoutInit);
     }
   }
 
@@ -348,16 +331,16 @@ void ProxyServer::init_server() {
     sec_cfg.key = impl_->config.security_key;
   }
 
-  impl_->time_pub = std::make_shared<TimePub>(impl_->config.dds_impl + VLINK_PROXY_TIME_URL_CTX + domain_id_str,
-                                              sec_cfg, InitType::kWithoutInit);
-  impl_->info_pub = std::make_shared<InfoPub>(impl_->config.dds_impl + VLINK_PROXY_INFOLIST_URL_CTX + domain_id_str,
-                                              sec_cfg, InitType::kWithoutInit);
+  impl_->time_pub = std::make_shared<TimePub>(
+      proxy::make_url(impl_->config.dds_impl, proxy::kTimeUrlCtx, domain_id_str), sec_cfg, InitType::kWithoutInit);
+  impl_->info_pub = std::make_shared<InfoPub>(
+      proxy::make_url(impl_->config.dds_impl, proxy::kInfoListUrlCtx, domain_id_str), sec_cfg, InitType::kWithoutInit);
   impl_->control_sub = std::make_shared<ControlSub>(
-      impl_->config.dds_impl + VLINK_PROXY_CONTROL_URL_CTX + domain_id_str, sec_cfg, InitType::kWithoutInit);
+      proxy::make_url(impl_->config.dds_impl, proxy::kControlUrlCtx, domain_id_str), sec_cfg, InitType::kWithoutInit);
 
 #if VLINK_PROXY_ENABLE_HANDSHAKE
   impl_->handshake_srv = std::make_shared<HandshakeSrv>(
-      impl_->config.dds_impl + VLINK_PROXY_HANDSHAKE_URL_CTX + domain_id_str, sec_cfg, InitType::kWithoutInit);
+      proxy::make_url(impl_->config.dds_impl, proxy::kHandshakeUrlCtx, domain_id_str), sec_cfg, InitType::kWithoutInit);
 #endif
 
   impl_->data_pub->set_discovery_enabled(false);
@@ -402,13 +385,13 @@ void ProxyServer::init_server() {
     impl_->handshake_srv->set_property("dds.buf", buf_str);
 #endif
   } else {
-    impl_->data_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
-    impl_->data_sub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
-    impl_->time_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
-    impl_->info_pub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
-    impl_->control_sub->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
+    impl_->data_pub->set_property("dds.buf", std::string(proxy::kSocketBufStr));
+    impl_->data_sub->set_property("dds.buf", std::string(proxy::kSocketBufStr));
+    impl_->time_pub->set_property("dds.buf", std::string(proxy::kSocketBufStr));
+    impl_->info_pub->set_property("dds.buf", std::string(proxy::kSocketBufStr));
+    impl_->control_sub->set_property("dds.buf", std::string(proxy::kSocketBufStr));
 #if VLINK_PROXY_ENABLE_HANDSHAKE
-    impl_->handshake_srv->set_property("dds.buf", VLINK_PROXY_SOCKET_BUF_STR);
+    impl_->handshake_srv->set_property("dds.buf", std::string(proxy::kSocketBufStr));
 #endif
   }
 
@@ -423,13 +406,13 @@ void ProxyServer::init_server() {
     impl_->handshake_srv->set_property("dds.mtu", mtu_str);
 #endif
   } else {
-    impl_->data_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
-    impl_->data_sub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
-    impl_->time_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
-    impl_->info_pub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
-    impl_->control_sub->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
+    impl_->data_pub->set_property("dds.mtu", std::string(proxy::kSocketMtuStr));
+    impl_->data_sub->set_property("dds.mtu", std::string(proxy::kSocketMtuStr));
+    impl_->time_pub->set_property("dds.mtu", std::string(proxy::kSocketMtuStr));
+    impl_->info_pub->set_property("dds.mtu", std::string(proxy::kSocketMtuStr));
+    impl_->control_sub->set_property("dds.mtu", std::string(proxy::kSocketMtuStr));
 #if VLINK_PROXY_ENABLE_HANDSHAKE
-    impl_->handshake_srv->set_property("dds.mtu", VLINK_PROXY_SOCKET_MTU_STR);
+    impl_->handshake_srv->set_property("dds.mtu", std::string(proxy::kSocketMtuStr));
 #endif
   }
 
@@ -455,20 +438,20 @@ void ProxyServer::init_server() {
 #if VLINK_PROXY_ENABLE_HANDSHAKE
   impl_->handshake_srv->init();
 
-  impl_->handshake_srv->listen([this](const pb::proxy::HandshakeReq& req, pb::proxy::HandshakeResp& resp) {
-    resp.set_hostname(impl_->current_host_name);
-    resp.set_machine_id(impl_->current_machine_id);
-    resp.set_version(VLINK_VERSION);
+  impl_->handshake_srv->listen([this](const proxy::HandshakeReqPacket& req, proxy::HandshakeRespPacket& resp) {
+    resp.hostname = impl_->current_host_name;
+    resp.machine_id = impl_->current_machine_id;
+    resp.version = VLINK_VERSION;
 
-    if VUNLIKELY (!req.version().empty() && req.version() != VLINK_VERSION) {
-      CLOG_E("ProxyServer: Reject handshake from %s due to version mismatch (peer=%s, self=%s).",
-             req.hostname().c_str(), req.version().c_str(), VLINK_VERSION);
-      resp.set_result(pb::proxy::HANDSHAKE_VERSION_MISMATCH);
+    if VUNLIKELY (!req.version.empty() && req.version != VLINK_VERSION) {
+      CLOG_E("ProxyServer: Reject handshake from %s due to version mismatch (peer=%s, self=%s).", req.hostname.c_str(),
+             req.version.c_str(), VLINK_VERSION);
+      resp.result = proxy::kHandshakeVersionMismatch;
       return;
     }
 
-    resp.set_result(pb::proxy::HANDSHAKE_OK);
-    resp.set_token(impl_->token);
+    resp.result = proxy::kHandshakeOk;
+    resp.token = impl_->token;
   });
 #endif
 
@@ -497,19 +480,18 @@ void ProxyServer::init_server() {
   impl_->info_timer.start();
 
   impl_->info_pub->detect_subscribers([this](bool connected) {
-    if VUNLIKELY (impl_->mode != pb::proxy::OFFLINE && !connected && !impl_->info_pub->has_subscribers()) {
+    if VUNLIKELY (impl_->mode != ProxyAPI::kOffline && !connected && !impl_->info_pub->has_subscribers()) {
       impl_->discovery_viewer->post_task([this]() {
-        pb::proxy::Control control;
-        control.set_control_id(impl_->control_id);
-        control.set_mode(pb::proxy::OFFLINE);
+        proxy::ControlPacket packet;
+        packet.control_id = impl_->control_id;
+        packet.body.mode = ProxyAPI::kOffline;
 
-        send_control(&control);
+        send_control(&packet);
       });
     }
   });
 
   if (impl_->data_sub->has_inited()) {
-#if VLINK_PROXY_ENABLE_ZEROCOPY_DATA
     impl_->data_sub->listen([this](const zerocopy::ProxyData& t_data) {
       if VUNLIKELY (ProxyServerGlobal::get().has_quit) {
         return;
@@ -519,15 +501,15 @@ void ProxyServer::init_server() {
         return;
       }
 
-      if VUNLIKELY (impl_->mode != pb::proxy::PLAY && impl_->mode != pb::proxy::EDIT &&
-                    impl_->mode != pb::proxy::AUTO && impl_->mode != pb::proxy::AUTO_AND_OBSERVE_ALL) {
+      if VUNLIKELY (impl_->mode != ProxyAPI::kPlay && impl_->mode != ProxyAPI::kEdit &&
+                    impl_->mode != ProxyAPI::kAuto && impl_->mode != ProxyAPI::kAutoAndObserveAll) {
         return;
       }
 
       const auto schema = SchemaData::is_valid_type(static_cast<SchemaType>(t_data.schema()))
                               ? static_cast<SchemaType>(t_data.schema())
                               : SchemaType::kUnknown;
-      const auto ser = std::string(t_data.ser());
+      auto ser = std::string(t_data.ser());
 
       if VUNLIKELY (ser.empty() || schema == SchemaType::kUnknown) {
         return;
@@ -535,7 +517,7 @@ void ProxyServer::init_server() {
 
       if (!impl_->config.direct) {
         if (impl_->config.async) {
-          post_task([this, t_data, ser, schema]() {
+          post_task([this, t_data, ser = std::move(ser), schema]() {
             std::shared_lock lock(impl_->pubs_mtx);
             auto iter = impl_->pub_ptr_map.find(std::string(t_data.url()));
 
@@ -571,84 +553,22 @@ void ProxyServer::init_server() {
         }
       }
     });
-#else
-    impl_->data_sub->listen([this](const pb::proxy::Data& data) {
-      if VUNLIKELY (ProxyServerGlobal::get().has_quit) {
-        return;
-      }
-
-      if VUNLIKELY (data.control_id() != impl_->control_id) {
-        return;
-      }
-
-      if VUNLIKELY (impl_->mode != pb::proxy::PLAY && impl_->mode != pb::proxy::EDIT &&
-                    impl_->mode != pb::proxy::AUTO && impl_->mode != pb::proxy::AUTO_AND_OBSERVE_ALL) {
-        return;
-      }
-
-      const auto schema = SchemaData::is_valid_type(static_cast<SchemaType>(data.schema()))
-                              ? static_cast<SchemaType>(data.schema())
-                              : SchemaType::kUnknown;
-
-      if VUNLIKELY (data.ser().empty() || schema == SchemaType::kUnknown) {
-        return;
-      }
-
-      if (!impl_->config.direct) {
-        if (impl_->config.async) {
-          post_task([this, data, schema]() {
-            std::shared_lock lock(impl_->pubs_mtx);
-            auto iter = impl_->pub_ptr_map.find(data.url());
-
-            if VUNLIKELY (iter == impl_->pub_ptr_map.end()) {
-              return;
-            }
-
-            if VUNLIKELY (!iter->second || iter->second->get_ser_type() != data.ser() ||
-                          iter->second->get_schema_type() != schema) {
-              return;
-            }
-
-            if VLIKELY (iter->second->has_subscribers()) {
-              iter->second->publish(Bytes::from_string(data.raw()), true);
-            }
-          });
-        } else {
-          std::shared_lock lock(impl_->pubs_mtx);
-          auto iter = impl_->pub_ptr_map.find(data.url());
-
-          if VUNLIKELY (iter == impl_->pub_ptr_map.end()) {
-            return;
-          }
-
-          if VUNLIKELY (!iter->second || iter->second->get_ser_type() != data.ser() ||
-                        iter->second->get_schema_type() != schema) {
-            return;
-          }
-
-          if VLIKELY (iter->second->has_subscribers()) {
-            iter->second->publish(Bytes::from_string(data.raw()), true);
-          }
-        }
-      }
-    });
-#endif
   }
 
-  impl_->control_sub->listen([this](const pb::proxy::Control& control) {
+  impl_->control_sub->listen([this](const proxy::ControlPacket& packet) {
     if VUNLIKELY (ProxyServerGlobal::get().has_quit) {
       return;
     }
 
 #if VLINK_PROXY_ENABLE_HANDSHAKE
-    if VUNLIKELY (control.token() != impl_->token) {
+    if VUNLIKELY (packet.token != impl_->token) {
       CLOG_E("ProxyServer: Reject control with mismatched token (control_id=%u).",
-             static_cast<uint32_t>(control.control_id()));
+             static_cast<uint32_t>(packet.control_id));
       return;
     }
 #endif
 
-    impl_->discovery_viewer->post_task([this, control]() { send_control(&control); });
+    impl_->discovery_viewer->post_task([this, packet]() { send_control(&packet); });
   });
 
   impl_->discovery_viewer->async_run();
@@ -674,42 +594,43 @@ void ProxyServer::send_time() {
     return;
   }
 
-  pb::proxy::Time time;
-  time.set_control_id(impl_->control_id);
-  time.set_mode(impl_->mode);
+  proxy::TimePacket time;
+  time.control_id = impl_->control_id;
+  time.mode = impl_->mode;
 
-  time.set_reliable_mode(impl_->config.reliable);
-  time.set_tcp_mode(impl_->config.enable_tcp);
-  time.set_direct_mode(impl_->config.direct);
-  time.set_version(VLINK_VERSION);
-  time.set_hostname(impl_->current_host_name);
-  time.set_machine_id(impl_->current_machine_id);
+  time.reliable_mode = impl_->config.reliable;
+  time.tcp_mode = impl_->config.enable_tcp;
+  time.direct_mode = impl_->config.direct;
+  time.version = VLINK_VERSION;
+  time.hostname = impl_->current_host_name;
+  time.machine_id = impl_->current_machine_id;
 #if VLINK_PROXY_ENABLE_HANDSHAKE
-  time.set_token(impl_->token);
+  time.token = impl_->token;
 #endif
 
-  time.set_cpu_usage(Utils::get_cpu_usage());
-  time.set_memory_usage(Utils::get_memory_usage());
+  time.cpu_usage = Utils::get_cpu_usage();
+  time.memory_usage = Utils::get_memory_usage();
 
-  time.set_sys_time(ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMicro, false));
-  time.set_boot_time(static_cast<uint64_t>(impl_->boot_elapsed.get()));
+  time.sys_time = ElapsedTimer::get_sys_timestamp(ElapsedTimer::kMicro, false);
+  time.boot_time = static_cast<uint64_t>(impl_->boot_elapsed.get());
 
   impl_->time_pub->publish(time, true);
 }
 
 void ProxyServer::send_control(const void* control_data) {
-  auto& control = *static_cast<pb::proxy::Control*>(const_cast<void*>(control_data));
-  const auto next_mode = control.mode();
+  const auto& packet = *static_cast<const proxy::ControlPacket*>(control_data);
+  const auto& body = packet.body;
+  const auto next_mode = body.mode;
 
   switch (next_mode) {
-    case pb::proxy::OFFLINE:
-    case pb::proxy::OBSERVE_ONE:
-    case pb::proxy::OBSERVE_ALL:
-    case pb::proxy::RECORD:
-    case pb::proxy::PLAY:
-    case pb::proxy::EDIT:
-    case pb::proxy::AUTO:
-    case pb::proxy::AUTO_AND_OBSERVE_ALL:
+    case ProxyAPI::kOffline:
+    case ProxyAPI::kObserveOne:
+    case ProxyAPI::kObserveAll:
+    case ProxyAPI::kRecord:
+    case ProxyAPI::kPlay:
+    case ProxyAPI::kEdit:
+    case ProxyAPI::kAuto:
+    case ProxyAPI::kAutoAndObserveAll:
       break;
     default:
       CLOG_E("ProxyServer: Unsupported control mode %d.", static_cast<int>(next_mode));
@@ -720,61 +641,37 @@ void ProxyServer::send_control(const void* control_data) {
   std::unordered_map<std::string, ProxySubMeta> next_sub_meta_map;
   std::unordered_map<std::string, ProxySubMeta> next_pub_meta_map;
 
-  if VUNLIKELY (next_mode != pb::proxy::OFFLINE) {
-    next_sub_urls.reserve(control.sub_url_list().size());
-    next_sub_meta_map.reserve(control.sub_url_list().size());
-    next_pub_meta_map.reserve(control.pub_url_list().size());
+  if VUNLIKELY (next_mode != ProxyAPI::kOffline) {
+    next_sub_urls.reserve(body.url_meta_list.size());
+    next_sub_meta_map.reserve(body.url_meta_list.size());
+    next_pub_meta_map.reserve(body.url_meta_list.size());
 
-    for (int i = 0; i < control.sub_url_list().size(); ++i) {
-      const auto& url = control.sub_url_list()[i];
-
-      if (url.empty()) {
+    for (const auto& url_meta : body.url_meta_list) {
+      if (url_meta.url.empty()) {
         continue;
       }
 
-      next_sub_urls.emplace(url);
+      const auto schema = SchemaData::is_valid_type(url_meta.schema) ? url_meta.schema : SchemaType::kUnknown;
 
-      if (i >= control.sub_ser_list().size() || i >= control.sub_schema_list().size()) {
-        continue;
+      if (url_meta.type == kSubscriber) {
+        next_sub_urls.emplace(url_meta.url);
+
+        if (url_meta.ser.empty() || schema == SchemaType::kUnknown) {
+          continue;
+        }
+
+        next_sub_meta_map.try_emplace(url_meta.url, ProxySubMeta{url_meta.ser, schema});
+      } else if (url_meta.type == kPublisher) {
+        if (url_meta.ser.empty() || schema == SchemaType::kUnknown) {
+          continue;
+        }
+
+        next_pub_meta_map.try_emplace(url_meta.url, ProxySubMeta{url_meta.ser, schema});
       }
-
-      const auto& ser = control.sub_ser_list()[i];
-      const auto schema = SchemaData::is_valid_type(static_cast<SchemaType>(control.sub_schema_list()[i]))
-                              ? static_cast<SchemaType>(control.sub_schema_list()[i])
-                              : SchemaType::kUnknown;
-
-      if (ser.empty() || schema == SchemaType::kUnknown) {
-        continue;
-      }
-
-      next_sub_meta_map.try_emplace(url, ProxySubMeta{ser, schema});
-    }
-
-    for (int i = 0; i < control.pub_url_list().size(); ++i) {
-      const auto& url = control.pub_url_list()[i];
-
-      if (url.empty()) {
-        continue;
-      }
-
-      if (i >= control.pub_ser_list().size() || i >= control.pub_schema_list().size()) {
-        continue;
-      }
-
-      const auto& ser = control.pub_ser_list()[i];
-      const auto schema = SchemaData::is_valid_type(static_cast<SchemaType>(control.pub_schema_list()[i]))
-                              ? static_cast<SchemaType>(control.pub_schema_list()[i])
-                              : SchemaType::kUnknown;
-
-      if (ser.empty() || schema == SchemaType::kUnknown) {
-        continue;
-      }
-
-      next_pub_meta_map.try_emplace(url, ProxySubMeta{ser, schema});
     }
   }
 
-  pb::proxy::Mode last_mode = impl_->mode;
+  ProxyAPI::Mode last_mode = impl_->mode;
   std::unordered_set<std::string> last_sub_urls;
   std::unordered_map<std::string, ProxySubMeta> last_sub_meta_map;
 
@@ -784,10 +681,10 @@ void ProxyServer::send_control(const void* control_data) {
     last_sub_meta_map = impl_->requested_sub_meta_map;
   }
 
-  impl_->control_id = control.control_id();
+  impl_->control_id = packet.control_id;
   impl_->mode = next_mode;
 
-  bool to_update = next_mode != last_mode || next_mode == pb::proxy::RECORD;
+  bool to_update = next_mode != last_mode || next_mode == ProxyAPI::kRecord;
 
   bool sub_meta_changed = next_sub_meta_map.size() != last_sub_meta_map.size();
 
@@ -803,7 +700,7 @@ void ProxyServer::send_control(const void* control_data) {
     }
   }
 
-  if VUNLIKELY (next_mode == pb::proxy::OFFLINE) {
+  if VUNLIKELY (next_mode == ProxyAPI::kOffline) {
     impl_->control_id = 0;
 
     {
@@ -832,19 +729,19 @@ void ProxyServer::send_control(const void* control_data) {
     std::lock_guard control_lock(impl_->control_mtx);
     impl_->sub_urls = next_sub_urls;
     impl_->requested_sub_meta_map = next_sub_meta_map;
-    impl_->filter_by_process = control.filter_by_process();
-    impl_->filter_list = Helpers::get_split_string(control.filter_str(), ' ');
-    impl_->filter_type = control.filter_type();
+    impl_->filter_by_process = body.filter_by_process;
+    impl_->filter_list = Helpers::get_split_string(body.filter_str, ' ');
+    impl_->filter_type = body.filter_type;
   }
 
-  if (next_mode == pb::proxy::RECORD || next_mode == pb::proxy::OBSERVE_ONE || next_mode == pb::proxy::OBSERVE_ALL) {
+  if (next_mode == ProxyAPI::kRecord || next_mode == ProxyAPI::kObserveOne || next_mode == ProxyAPI::kObserveAll) {
     {
       std::lock_guard lock(impl_->pubs_mtx);
       impl_->pub_ptr_map.clear();
     }
 
-    if (next_mode == pb::proxy::OBSERVE_ONE) {
-      if (last_mode == pb::proxy::OBSERVE_ONE) {
+    if (next_mode == ProxyAPI::kObserveOne) {
+      if (last_mode == ProxyAPI::kObserveOne) {
         if (next_sub_urls.empty() || last_sub_urls.empty()) {
           to_update = true;
         } else if (last_sub_urls.size() == 1 && next_sub_urls.size() == 1) {
@@ -860,8 +757,8 @@ void ProxyServer::send_control(const void* control_data) {
     if (sub_meta_changed) {
       to_update = true;
     }
-  } else if (next_mode == pb::proxy::PLAY || next_mode == pb::proxy::EDIT || next_mode == pb::proxy::AUTO ||
-             next_mode == pb::proxy::AUTO_AND_OBSERVE_ALL) {
+  } else if (next_mode == ProxyAPI::kPlay || next_mode == ProxyAPI::kEdit || next_mode == ProxyAPI::kAuto ||
+             next_mode == ProxyAPI::kAutoAndObserveAll) {
     if (!impl_->config.direct) {
       {
         std::lock_guard lock(impl_->pubs_mtx);
@@ -909,7 +806,7 @@ void ProxyServer::send_control(const void* control_data) {
         }
       }
 
-      if (next_mode == pb::proxy::PLAY || next_mode == pb::proxy::EDIT) {
+      if (next_mode == ProxyAPI::kPlay || next_mode == ProxyAPI::kEdit) {
         std::lock_guard subs_lock(impl_->subs_mtx);
         impl_->sub_ptr_map.clear();
       }
@@ -930,10 +827,6 @@ void ProxyServer::send_control(const void* control_data) {
 
 void ProxyServer::update_all() {
   if VUNLIKELY (!impl_->info_pub->has_subscribers()) {
-    // control_id = 0;
-
-    // mode = pb::proxy::OFFLINE;
-
     {
       std::lock_guard pubs_lock(impl_->pubs_mtx);
       impl_->pub_ptr_map.clear();
@@ -953,15 +846,17 @@ void ProxyServer::update_all() {
     return;
   }
 
-  if (impl_->mode != pb::proxy::OBSERVE_ONE && impl_->mode != pb::proxy::OBSERVE_ALL &&
-      impl_->mode != pb::proxy::RECORD && impl_->mode != pb::proxy::AUTO &&
-      impl_->mode != pb::proxy::AUTO_AND_OBSERVE_ALL) {
+  if (impl_->mode != ProxyAPI::kObserveOne && impl_->mode != ProxyAPI::kObserveAll &&
+      impl_->mode != ProxyAPI::kRecord && impl_->mode != ProxyAPI::kAuto &&
+      impl_->mode != ProxyAPI::kAutoAndObserveAll) {
     return;
   }
 
-  pb::proxy::InfoList list;
+  proxy::InfoListPacket packet;
 
   const auto& info_list = impl_->discovery_viewer->get_info_list();
+
+  packet.info_list.reserve(info_list.size());
 
   {
     std::unordered_set<std::string> current_urls;
@@ -1010,8 +905,8 @@ void ProxyServer::update_all() {
 
 #if VLINK_PROXY_ENABLE_FILTER
 
-    if (impl_->mode == pb::proxy::OBSERVE_ONE || impl_->mode == pb::proxy::OBSERVE_ALL ||
-        impl_->mode == pb::proxy::AUTO || impl_->mode == pb::proxy::AUTO_AND_OBSERVE_ALL) {
+    if (impl_->mode == ProxyAPI::kObserveOne || impl_->mode == ProxyAPI::kObserveAll ||
+        impl_->mode == ProxyAPI::kAuto || impl_->mode == ProxyAPI::kAutoAndObserveAll) {
       if (!impl_->filter_list.empty()) {
         bool contains = false;
 
@@ -1147,29 +1042,31 @@ void ProxyServer::update_all() {
     }
 #endif
 
-    auto* ptr = list.add_info_list();
-    ptr->set_type(info.type);
-    ptr->set_url(info.url);
-    ptr->set_ser(info.ser_type);
-    ptr->set_schema(static_cast<uint32_t>(discovered_schema));
-    ptr->set_status(pb::proxy::Status::INVALID);
-    ptr->set_freq(0);
-    ptr->set_rate(0);
+    auto& out_info = packet.info_list.emplace_back();
+    out_info.type = info.type;
+    out_info.url = info.url;
+    out_info.ser = info.ser_type;
+    out_info.schema = discovered_schema;
+    out_info.status = ProxyAPI::kInvalid;
+    out_info.freq = 0;
+    out_info.rate = 0;
+
+    out_info.process_list.reserve(info.process_list.size());
 
     for (const auto& process : info.process_list) {
-      auto* process_ptr = ptr->add_process_list();
-      process_ptr->set_type(process.type);
-      process_ptr->set_host(process.host);
-      process_ptr->set_pid(process.pid);
-      process_ptr->set_name(process.name);
-      process_ptr->set_ip(process.ip);
+      auto& out_process = out_info.process_list.emplace_back();
+      out_process.type = process.type;
+      out_process.host = process.host;
+      out_process.pid = process.pid;
+      out_process.name = process.name;
+      out_process.ip = process.ip;
     }
 
     if ((!(info.type & kPublisher) && !(info.type & kSetter)) ||
         (!impl_->has_intra_bind && impl_->runnable_interface_list.empty() && Url::is_intra_type(info.url))) {
-      ptr->set_status(pb::proxy::Status::INVALID);
-      ptr->set_freq(0);
-      ptr->set_rate(0);
+      out_info.status = ProxyAPI::kInvalid;
+      out_info.freq = 0;
+      out_info.rate = 0;
       continue;
     }
 
@@ -1189,7 +1086,7 @@ void ProxyServer::update_all() {
     }
 
     if (seq > 0 && seq_buffer.size() >= kCounterCache && size_buffer.size() >= kCounterCache) {
-      ptr->set_status(pb::proxy::Status::ACTIVE);
+      out_info.status = ProxyAPI::kActive;
     } else {
       if (elapsed.get() >= kCollectInterval * kCounterCache) {
         seq = 0;
@@ -1200,9 +1097,9 @@ void ProxyServer::update_all() {
         size_buffer.clear();
         lost_buffer.clear();
         lat_buffer.clear();
-        ptr->set_status(pb::proxy::Status::INACTIVE);
+        out_info.status = ProxyAPI::kInActive;
       } else {
-        ptr->set_status(pb::proxy::Status::PENDING);
+        out_info.status = ProxyAPI::kPending;
       }
     }
 
@@ -1216,12 +1113,12 @@ void ProxyServer::update_all() {
 
     bool create = false;
 
-    if (impl_->mode == pb::proxy::OBSERVE_ALL || impl_->mode == pb::proxy::AUTO_AND_OBSERVE_ALL) {
+    if (impl_->mode == ProxyAPI::kObserveAll || impl_->mode == ProxyAPI::kAutoAndObserveAll) {
       create = (ptr_iter == impl_->sub_ptr_map.end());
       stream_meta = ProxySubMeta{info.ser_type, discovered_schema};
       has_stream_meta = !stream_meta.ser.empty() && stream_meta.schema != SchemaType::kUnknown;
-    } else if (impl_->mode == pb::proxy::OBSERVE_ONE || impl_->mode == pb::proxy::RECORD ||
-               impl_->mode == pb::proxy::AUTO) {
+    } else if (impl_->mode == ProxyAPI::kObserveOne || impl_->mode == ProxyAPI::kRecord ||
+               impl_->mode == ProxyAPI::kAuto) {
       std::shared_lock control_lock(impl_->control_mtx);
       if (impl_->sub_urls.count(info.url) == 0) {
         create = false;
@@ -1321,7 +1218,7 @@ void ProxyServer::update_all() {
                 return;
               }
 
-              if (impl_->mode != pb::proxy::AUTO_AND_OBSERVE_ALL && impl_->sub_urls.count(url) == 0) {
+              if (impl_->mode != ProxyAPI::kAutoAndObserveAll && impl_->sub_urls.count(url) == 0) {
                 return;
               }
             }
@@ -1340,7 +1237,6 @@ void ProxyServer::update_all() {
               auto forward_task = [this, control_id = impl_->control_id.load(), mode = impl_->mode.load(),
                                    elapsed = impl_->main_elapsed.get(), seq = current_seq, url, ser, schema,
                                    queued_bytes = std::move(queued_bytes)]() {
-#if VLINK_PROXY_ENABLE_ZEROCOPY_DATA
                 zerocopy::ProxyData t_data;
                 t_data.set_control_id(control_id);
                 t_data.set_mode(mode);
@@ -1350,20 +1246,6 @@ void ProxyServer::update_all() {
                 t_data.create(queued_bytes, url, ser, static_cast<uint32_t>(schema), impl_->current_host_name);
 
                 impl_->data_pub->publish(t_data, true);
-#else
-                pb::proxy::Data data;
-                data.set_control_id(control_id);
-                data.set_mode(mode);
-                data.set_timestamp(elapsed);
-                data.set_url(url);
-                data.set_ser(ser);
-                data.set_schema(static_cast<uint32_t>(schema));
-                data.set_raw(queued_bytes.to_string());
-                data.set_seq(seq);
-                data.set_hostname(impl_->current_host_name);
-
-                impl_->data_pub->publish(data, true);
-#endif
               };
 
               if VUNLIKELY (!post_task(std::move(forward_task))) {
@@ -1371,7 +1253,6 @@ void ProxyServer::update_all() {
                 return;
               }
             } else {
-#if VLINK_PROXY_ENABLE_ZEROCOPY_DATA
               zerocopy::ProxyData t_data;
               t_data.set_control_id(impl_->control_id);
               t_data.set_mode(impl_->mode);
@@ -1381,20 +1262,6 @@ void ProxyServer::update_all() {
               t_data.create(bytes, url, ser, static_cast<uint32_t>(schema), impl_->current_host_name);
 
               impl_->data_pub->publish(t_data, true);
-#else
-              pb::proxy::Data data;
-              data.set_control_id(impl_->control_id);
-              data.set_mode(impl_->mode);
-              data.set_timestamp(impl_->main_elapsed.get());
-              data.set_url(url);
-              data.set_ser(ser);
-              data.set_schema(static_cast<uint32_t>(schema));
-              data.set_raw(bytes.to_string());
-              data.set_seq(current_seq);
-              data.set_hostname(impl_->current_host_name);
-
-              impl_->data_pub->publish(data, true);
-#endif
             }
           }
 
@@ -1436,7 +1303,7 @@ void ProxyServer::update_all() {
     subs_lock.unlock();
 
     if VUNLIKELY (impl_->main_elapsed.get() < 10'000) {
-      ptr->set_status(pb::proxy::Status::PENDING);
+      out_info.status = ProxyAPI::kPending;
       seq = 0;
       lost = 0;
       size = 0;
@@ -1502,18 +1369,18 @@ void ProxyServer::update_all() {
       latency = 0;
     }
 
-    ptr->set_freq(freq);
-    ptr->set_rate(rate);
-    ptr->set_loss(loss);
+    out_info.freq = static_cast<float>(freq);
+    out_info.rate = static_cast<uint64_t>(rate);
+    out_info.loss = static_cast<float>(loss);
 
     if (seq == 0) {
-      ptr->set_latency(-1);
+      out_info.latency = -1;
     } else if (latency > 5000'000'000 || latency < -500'000) {
-      ptr->set_latency(-2);
+      out_info.latency = -2;
     } else if (latency < 0) {
-      ptr->set_latency(0);
+      out_info.latency = 0;
     } else {
-      ptr->set_latency(latency / 1000'000);
+      out_info.latency = static_cast<float>(latency / 1000'000);
     }
 
     seq = 0;
@@ -1521,9 +1388,9 @@ void ProxyServer::update_all() {
     lat = 0;
   }
 
-  list.set_control_id(impl_->control_id);
-  list.set_hostname(impl_->current_host_name);
-  impl_->info_pub->publish(list, true);
+  packet.control_id = impl_->control_id;
+  packet.hostname = impl_->current_host_name;
+  impl_->info_pub->publish(packet, true);
 }
 
 }  // namespace vlink

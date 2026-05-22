@@ -78,7 +78,7 @@ file(GLOB PROJECT_OSG_SRCS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/osg/*.c
 
 add_executable(
   ${PROJECT_NAME}
-  ../proxy/proxy_macros.h
+  ../proxy/proxy_common.h
   ${PROJECT_HDRS}
   ${PROJECT_SRCS}
   ${PROJECT_UIS}

@@ -4,14 +4,6 @@
 
 project(vlink-proxy)
 
-# proto
-if(TARGET protobuf::libprotobuf)
-  set(protobuf_libs protobuf::libprotobuf)
-elseif(TARGET protobuf::libprotobuf-lite)
-  set(protobuf_libs protobuf::libprotobuf-lite)
-endif()
-vlink_generate_cpp(TARGET proxy_gen PROTO ${PROJECT_SOURCE_DIR}/proxy.proto)
-
 # proxy_api
 add_subdirectory(proxy_api)
 
@@ -19,8 +11,7 @@ add_subdirectory(proxy_api)
 add_subdirectory(proxy_server)
 
 # proxy_app
-add_executable(${PROJECT_NAME} proxy_macros.h proxy.cc)
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+add_executable(${PROJECT_NAME} proxy_common.h proxy.cc)
 target_link_libraries(${PROJECT_NAME} PRIVATE vlink::vlink vlink::all)
 target_link_libraries(${PROJECT_NAME} PRIVATE thirdparty::argparse vlink::proxy_server)
 

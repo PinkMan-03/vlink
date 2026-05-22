@@ -30,21 +30,21 @@
 // visualisers, recorders, dashboards, and CLI tools.
 //
 // Two roles are defined:
-//   kController -- may send Control requests; ProxyServer accepts at most one
-//                  controller at a time (token-based handshake) so two
-//                  controllers do not fight over OperationMode.
+//   kController -- may send Control requests; ProxyServer issues a token at
+//                  handshake time so multiple controllers do not fight over
+//                  the active Mode.
 //   kListener   -- read-only; receives info/data the controller has unlocked
 //                  but cannot change the mode.
 //
-// The 8 OperationModes encode "what does the server expose to this client":
-//   kIdle           -- nothing
-//   kObserveTopic   -- info for a subset of topics
-//   kObserveAll     -- info for every topic the server sees
-//   kSubscribeTopic -- data + info for a subset
-//   kSubscribeAll   -- data + info for every topic (firehose)
-//   kPublishTopic   -- ProxyServer relays publishes coming from this client
-//   kProxyTopic     -- bidirectional relay (sub a remote, re-pub locally)
-//   kControl        -- pure command channel (no data)
+// The 8 ProxyAPI::Mode values encode "what does the server expose":
+//   kOffline            -- disconnected; server releases every subscription
+//   kObserveOne         -- observe a single topic from the URL list
+//   kObserveAll         -- observe every discovered topic on the network
+//   kRecord             -- record data from topics in the URL list
+//   kPlay               -- injection/playback, usually fed by recorded data
+//   kEdit               -- forward data injected by the controller
+//   kAuto               -- observe specified URLs + accept controller injection
+//   kAutoAndObserveAll  -- kAuto + observe every topic
 // =============================================================================
 
 #include <vlink/base/logger.h>

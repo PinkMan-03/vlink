@@ -2,6 +2,16 @@
 # Copyright (C) 2026 by Thun Lu. All rights reserved.
 #
 
+# options
+if(ENABLE_CPM)
+  option(ENABLE_CPM_SQLITE3 "Enable cpm build for sqlite3" OFF)
+  option(ENABLE_CPM_OPENSSL "Enable cpm build for openssl" OFF)
+  option(ENABLE_CPM_ZSTD "Enable cpm build for zstd" OFF)
+  option(ENABLE_CPM_PROTOBUF "Enable cpm build for protobuf" ON)
+  option(ENABLE_CPM_FLATBUFFERS "Enable cpm build for flatbuffers" ON)
+endif()
+
+# import cpm
 include(${CMAKE_CURRENT_LIST_DIR}/cpm.cmake)
 if(DEFINED CPM_MODULE_PATH)
   list(APPEND CMAKE_MODULE_PATH ${CPM_MODULE_PATH})
@@ -11,7 +21,9 @@ endif()
 if(UNIX)
   set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 endif()
-if(ENABLE_WHOLE_CPM)
+
+# cpmaddpackage
+if(ENABLE_CPM_ALL OR ENABLE_CPM_SQLITE3)
   cpmaddpackage(
     NAME
     sqlite3
@@ -27,43 +39,8 @@ if(ENABLE_WHOLE_CPM)
     EXCLUDE_FROM_ALL
     ON
   )
-  cpmaddpackage(
-    NAME
-    protobuf
-    URL
-    "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip"
-    OPTIONS
-    "CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF"
-    "CMAKE_POSITION_INDEPENDENT_CODE ON"
-    "BUILD_SHARED_LIBS ON"
-    "protobuf_BUILD_TESTS OFF"
-    "protobuf_BUILD_PROTOC_BINARIES ON"
-    EXCLUDE_FROM_ALL
-    OFF
-  )
-  cpmaddpackage(
-    NAME
-    flatbuffers
-    URL
-    "https://github.com/google/flatbuffers/archive/refs/tags/v25.9.23.zip"
-    OPTIONS
-    "CMAKE_POSITION_INDEPENDENT_CODE ON"
-    "BUILD_SHARED_LIBS ON"
-    "FLATBUFFERS_BUILD_SHAREDLIB ON"
-    "FLATBUFFERS_BUILD_TESTS OFF"
-    "FLATBUFFERS_BUILD_FLATC ON"
-    "FLATBUFFERS_STATIC_FLATC ON"
-    EXCLUDE_FROM_ALL
-    OFF
-  )
-  if(flatbuffers_ADDED
-     AND TARGET flatbuffers_shared
-     AND NOT TARGET flatbuffers::flatbuffers
-  )
-    get_target_property(FLATBUFFERS_INCLUDE_DIR flatbuffers INTERFACE_INCLUDE_DIRECTORIES)
-    target_include_directories(flatbuffers_shared INTERFACE $<BUILD_INTERFACE:${FLATBUFFERS_INCLUDE_DIR}>)
-    add_library(flatbuffers::flatbuffers ALIAS flatbuffers_shared)
-  endif()
+endif()
+if(ENABLE_CPM_ALL OR ENABLE_CPM_OPENSSL)
   cpmaddpackage(
     NAME
     openssl
@@ -89,6 +66,8 @@ if(ENABLE_WHOLE_CPM)
     find_package(OpenSSL QUIET)
     set(OPENSSL_FOUND TRUE)
   endif()
+endif()
+if(ENABLE_CPM_ALL OR ENABLE_CPM_ZSTD)
   cpmaddpackage(
     NAME
     zstd
@@ -115,6 +94,56 @@ if(ENABLE_WHOLE_CPM)
     add_library(zstd::libzstd ALIAS libzstd_static)
   endif()
 endif()
+if(ENABLE_CPM_ALL OR ENABLE_CPM_PROTOBUF)
+  cpmaddpackage(
+    NAME
+    protobuf
+    URL
+    "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip"
+    OPTIONS
+    "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS OFF"
+    "protobuf_BUILD_TESTS OFF"
+    "protobuf_BUILD_PROTOC_BINARIES ON"
+    EXCLUDE_FROM_ALL
+    ON
+  )
+  if(protobuf_ADDED)
+    if(TARGET protoc)
+      set(VLINK_PROTOC_PROGRAM $<TARGET_FILE:protoc>)
+    endif()
+  endif()
+endif()
+if(ENABLE_CPM_ALL OR ENABLE_CPM_FLATBUFFERS)
+  cpmaddpackage(
+    NAME
+    flatbuffers
+    URL
+    "https://github.com/google/flatbuffers/archive/refs/tags/v25.9.23.zip"
+    OPTIONS
+    "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS OFF"
+    "FLATBUFFERS_BUILD_SHAREDLIB OFF"
+    "FLATBUFFERS_BUILD_TESTS OFF"
+    "FLATBUFFERS_BUILD_FLATC ON"
+    "FLATBUFFERS_STATIC_FLATC ON"
+    EXCLUDE_FROM_ALL
+    ON
+  )
+  if(flatbuffers_ADDED
+     AND TARGET flatbuffers
+     AND NOT TARGET flatbuffers::flatbuffers
+  )
+    get_target_property(FLATBUFFERS_INCLUDE_DIR flatbuffers INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(flatbuffers INTERFACE $<BUILD_INTERFACE:${FLATBUFFERS_INCLUDE_DIR}>)
+    add_library(flatbuffers::flatbuffers ALIAS flatbuffers)
+    if(TARGET flatc)
+      set(VLINK_FLATC_PROGRAM $<TARGET_FILE:flatc>)
+    endif()
+  endif()
+endif()
+
+# cpmaddpackage
 cpmaddpackage(
   NAME
   tinyxml2

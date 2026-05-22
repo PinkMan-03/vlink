@@ -1,6 +1,6 @@
 # samples — 围绕具体传输协议的端到端示例
 
-`samples/` 下每个子目录针对一个或多个具体传输后端做完整可运行示例。默认 vlink 构建（`ENABLE_EXAMPLES=ON` 不带 `ENABLE_WHOLE_EXAMPLES`）只编译这一组，因为这里的示例代表"真实可部署"的最小工程。
+`samples/` 下每个子目录针对一个或多个具体传输后端做完整可运行示例。默认 vlink 构建（`ENABLE_EXAMPLES=ON` 不带 `ENABLE_EXAMPLES_ALL`）只编译这一组，因为这里的示例代表"真实可部署"的最小工程。
 
 ## 子示例索引
 

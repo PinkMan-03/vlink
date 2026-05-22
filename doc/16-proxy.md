@@ -61,22 +61,22 @@ VLink 业务节点在启动时通过 `DiscoveryReporter` 以 UDP 组播方式广
 `ProxyAPI::reset_handle()` 阶段依序完成：
 
 1. 构造 / 初始化所有 `Security*` 句柄（`HandshakeCli`、`ControlPub`、`TimeSub`、`InfoSub` 等）。
-2. **启用 `VLINK_PROXY_ENABLE_HANDSHAKE`（默认）时**：调用 `HandshakeCli::invoke(HandshakeReq, HandshakeResp)`：
-   - 客户端提交 `HandshakeReq`（`control_id`、`VLINK_VERSION`、`hostname`、`role`="controller"/"listener"）。
-   - 服务器在构造阶段（`init_server()` 之前）已用 `vlink::Uuid::random_hex()` 签发 128-bit 进程级 token；验证版本一致后回 `HandshakeResp { result=HANDSHAKE_OK, token, version, hostname, machine_id }`。
-   - 客户端在 `token_mtx` 保护下把 `resp.token()` 写入 `impl_->token`。
+2. **启用 `VLINK_PROXY_ENABLE_HANDSHAKE`（默认）时**：调用 `HandshakeCli::invoke(HandshakeReqPacket, HandshakeRespPacket)`：
+   - 客户端提交 `HandshakeReqPacket`（`control_id`、`VLINK_VERSION`、`hostname`、`role`="controller"/"listener"）。
+   - 服务器在构造阶段（`init_server()` 之前）已用 `vlink::Uuid::random_hex()` 签发 128-bit 进程级 token；验证版本一致后回 `HandshakeRespPacket { result=kHandshakeOk, token, version, hostname, machine_id }`。
+   - 客户端在 `token_mtx` 保护下把 `resp.token` 写入 `impl_->token`。
 3. ProxyServer 每秒通过 DDS 安全信道广播：
    - **Time 心跳**：携带 `VLINK_VERSION`、主机名、CPU/内存占用、系统时间（Unix epoch 微秒）、启动时长、以及**服务器签发的 token**。
    - **InfoList**：所有已发现话题的统计数组（url、ser、status、freq、rate、loss、latency、process_list）。
 4. ProxyAPI 收到 Time 心跳后，先校验服务器身份与 `token`，再校验 `control_id`、模式、版本和传输兼容项；全部通过后才触发 `ConnectCallback(true)`。
 
-握手未成功之前 `send_control_sync` 直接拒发（`token` 为空）。Time 监听器先用握手返回的 `hostname/machine_id` 区分服务器身份：身份不一致上报 `kMultiProxyError`（若同时 token 不一致，也会清空本地 token 触发重握手）；身份匹配但 token 失配则清空本地 token 并上报 `kTokenError`，由 1 秒心跳路径自动重握手。版本不符走 `HANDSHAKE_VERSION_MISMATCH` → `kVersionCompError`，与 token 失配区分上报。
+握手未成功之前 `send_control_sync` 直接拒发（`token` 为空）。Time 监听器先用握手返回的 `hostname/machine_id` 区分服务器身份：身份不一致上报 `kMultiProxyError`（若同时 token 不一致，也会清空本地 token 触发重握手）；身份匹配但 token 失配则清空本地 token 并上报 `kTokenError`，由 1 秒心跳路径自动重握手。版本不符走 `kHandshakeVersionMismatch` → `kVersionCompError`，与 token 失配区分上报。
 
 关闭握手时（`VLINK_PROXY_ENABLE_HANDSHAKE = 0`）跳过步骤 2，token 字段保持空串，与早期版本 wire 兼容。
 
 ### 16.4.3 Phase 3: 模式控制
 
-`kController` 角色的客户端通过 `send_control()` 向 ProxyServer 发送 Control 指令，指定工作模式和关注的 URL 列表。**启用握手时每条 Control 都会带上握手得到的 token**，服务器校验 `control.token() == impl_->token` 后才接收，失配直接打 `Reject control with mismatched token` 日志并丢弃。ProxyServer 接收 Control 后按指令订阅 / 取消订阅实际话题。
+`kController` 角色的客户端通过 `send_control()` 向 ProxyServer 发送 Control 指令，指定工作模式和关注的 URL 列表。**启用握手时每条 Control 都会带上握手得到的 token**，服务器校验 `packet.token == impl_->token` 后才接收，失配直接打 `Reject control with mismatched token` 日志并丢弃。ProxyServer 接收 Control 后按指令订阅 / 取消订阅实际话题。
 
 ### 16.4.4 Phase 4: 数据转发
 
@@ -140,7 +140,7 @@ ProxyAPI 客户端通过心跳检测连接状态。若连续 **5 秒** 未收到
 
 1. 运行 `DiscoveryViewer`，枚举 DDS 域内所有活跃的 Publisher/Subscriber/Server/Client/Setter/Getter
 2. 启用握手时(默认),构造阶段经 `vlink::Uuid::random_hex()` **签发 128-bit 进程级 auth-token**,通过 `get_token()` 提供给嵌入式宿主做诊断 / 审计（源码中预留了 `ProxyServer: Auth token issued (prefix=...)` 的诊断日志，默认注释保留，需要时取消注释即可输出 prefix 掩码）
-3. 接收来自 `ProxyAPI` 客户端的握手请求(`HandshakeSrv`),在 `HandshakeResp` 中返回 token；同时校验所有 `Control` 入站的 token,失配丢弃
+3. 接收来自 `ProxyAPI` 客户端的握手请求(`HandshakeSrv`),在 `HandshakeRespPacket` 中返回 token；同时校验所有 `Control` 入站的 token,失配丢弃
 4. 接收来自 `ProxyAPI` 客户端的 `Control` 指令，切换工作模式
 5. 每秒广播一次 `Time` 心跳（携带版本、主机名、CPU 占用、内存占用、时间戳、token）
 6. 每秒广播一次 `InfoList`（各话题的频率、吞吐量、丢包率、延迟统计）
@@ -162,7 +162,7 @@ vlink::ProxyServer server(cfg);
 std::string token = server.get_token();
 ```
 
-- 构造阶段调用 `vlink::Uuid::random_hex()` 一次性签发,后续每个 `Time` 心跳和每条 `HandshakeResp` 都包含该 token。
+- 构造阶段调用 `vlink::Uuid::random_hex()` 一次性签发,后续每个 `Time` 心跳和每条 `HandshakeRespPacket` 都包含该 token。
 - 源码中预留了启动日志 `ProxyServer: Auth token issued (prefix=a1b2c3d4..., length=32).`（只输出 prefix 掩码，完整 token 不输出）。当前默认构建注释保留，需要诊断服务器重启 / token 轮换时可取消 `proxy/proxy_server/proxy_server.cc` 中相应 `CLOG_I` 注释启用。正常客户端**无需也不能手工配置 token**，会通过安全握手 RPC 自动获取。
 - `VLINK_PROXY_ENABLE_HANDSHAKE = 0` 时 `impl_->token` 为空字符串,Time 不带 token,Control 不校验 token；`get_token()` 返回 `""`。
 - 不存在持久化：服务器重启 -> 新 token -> 客户端走自愈路径(见 §16.4.7) 重新握手。
@@ -355,10 +355,10 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 - `ProxyAPI` 内部通过 `TimeSub` 订阅服务器每秒广播的心跳。
 - 若连续 5 秒未收到心跳，判定连接断开，触发 `ConnectCallback(false)`。
 - **握手层** (`VLINK_PROXY_ENABLE_HANDSHAKE` 默认开启)：
-  - `reset_handle()` 阶段经 `SecurityClient<HandshakeReq, HandshakeResp>::invoke()` 拉取 token，默认超时 `VLINK_PROXY_HANDSHAKE_WAIT_MS = 800 ms` + `VLINK_PROXY_HANDSHAKE_INVOKE_MS = 800 ms`。
+  - `reset_handle()` 阶段经 `SecurityClient<HandshakeReqPacket, HandshakeRespPacket>::invoke()` 拉取 token，默认超时 `proxy::kHandshakeWaitMs = 800 ms` + `proxy::kHandshakeInvokeMs = 800 ms`。
   - 握手结果 → `do_handshake(Error& out_err)` 出参语义（与 `proxy_api.cc do_handshake()` 实现一致）：
-    - `out_err = kVersionCompError` —— 服务器回复 `HANDSHAKE_VERSION_MISMATCH`。
-    - `out_err = kTokenError` —— 服务器回复非 `HANDSHAKE_OK` 或返回空 token（如 `HANDSHAKE_INTERNAL_ERROR`）。
+    - `out_err = kVersionCompError` —— 服务器回复 `kHandshakeVersionMismatch`。
+    - `out_err = kTokenError` —— 服务器回复非 `kHandshakeOk` 或返回空 token（如 `kHandshakeInternalError`）。
     - `out_err = kNoError`（**静默重试**） —— `handshake_cli` 尚未 init 完毕、`wait_for_connected` 超时、`invoke()` 超时；这三种情况都视为 RPC 通道未就绪，由心跳路径下个 tick 重试。
   - 心跳路径每秒检查 `impl_->token.empty()`，若为空则再调一次 `do_handshake()`；成功后通常 `process_error(kNoError)` 并补发上一次 `Control`，但当前错误仍为 `kMultiProxyError` 时会等下一条可信 Time 完整通过后再清错。
   - Time 监听器收到身份匹配的 token 失配会清空本地缓存的 token 并上报 `kTokenError`；收到身份不一致的 Time 会优先上报 `kMultiProxyError`，若同时 token 不一致也会清空 token，从而触发心跳层重握手。
@@ -369,41 +369,48 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 
 #### 16.8.6.1 编译开关与默认值
 
+编译期开关（可通过 `target_compile_definitions` 覆盖）：
+
 | 宏 | 默认 | 说明 |
 |----|------|------|
-| `VLINK_PROXY_ENABLE_HANDSHAKE` | `1` | 编译期总开关。设为 0 → 不创建 `HandshakeSrv` / `HandshakeCli`,不打包 token 字段,不进行 token 校验 |
-| `VLINK_PROXY_HANDSHAKE_WAIT_MS` | `800` | `SecurityClient::wait_for_connected` 阶段超时(毫秒) |
-| `VLINK_PROXY_HANDSHAKE_INVOKE_MS` | `800` | `SecurityClient::invoke` 阶段超时(毫秒) |
+| `VLINK_PROXY_ENABLE_HANDSHAKE` | `1` | 设为 0 → 不创建 `HandshakeSrv` / `HandshakeCli`,不打包 token 字段,不进行 token 校验 |
 
-定义于 `proxy/proxy_macros.h`,集成方可在 `target_compile_definitions` 中显式覆盖。
+源码常量（在 `proxy/proxy_common.h` 中以 `static constexpr` 定义，修改需重新编译）：
+
+| 常量 | 默认 | 说明 |
+|------|------|------|
+| `proxy::kHandshakeWaitMs` | `800` | `SecurityClient::wait_for_connected` 阶段超时(毫秒) |
+| `proxy::kHandshakeInvokeMs` | `800` | `SecurityClient::invoke` 阶段超时(毫秒) |
 
 #### 16.8.6.2 数据结构
 
-```proto
-// proxy/proxy.proto
-enum HandshakeResult {
-  HANDSHAKE_OK = 0;
-  HANDSHAKE_VERSION_MISMATCH = 1;
-  HANDSHAKE_INTERNAL_ERROR = 2;
-}
+握手与时钟/控制面消息均为内部 wire 类型,定义在 `proxy/proxy_common.h` 中,使用 cereal `PortableBinaryArchive` 序列化:
 
-message HandshakeReq {
-  uint32 control_id = 1;
-  string version = 2;       // VLINK_VERSION
-  string hostname = 3;
-  string role = 4;          // "controller" / "listener"
-}
+```cpp
+// proxy/proxy_common.h
+enum HandshakeResult : uint8_t {
+  kHandshakeOk = 0,
+  kHandshakeVersionMismatch = 1,
+  kHandshakeInternalError = 2,
+};
 
-message HandshakeResp {
-  HandshakeResult result = 1;
-  string token = 2;         // 32-char lowercase hex, 128-bit
-  string version = 3;
-  string hostname = 4;
-  string machine_id = 5;
-}
+struct HandshakeReqPacket final {
+  uint32_t control_id{0};
+  std::string version;   // VLINK_VERSION
+  std::string hostname;
+  std::string role;      // "controller" / "listener"
+};
+
+struct HandshakeRespPacket final {
+  HandshakeResult result{kHandshakeOk};
+  std::string token;     // 32-char lowercase hex, 128-bit
+  std::string version;
+  std::string hostname;
+  std::string machine_id;
+};
 ```
 
-`Control` 与 `Time` 也各扩了一个 `string token = 41;` 字段,关掉宏时此字段保持空串,不影响 wire 兼容。
+`ControlPacket` 与 `TimePacket` 也各带一个 `std::string token` 字段,关掉宏时此字段保持空串,不影响 wire 兼容。
 
 #### 16.8.6.3 完整时序
 
@@ -682,7 +689,7 @@ api.send_data(data);  // send_data() 同样要求显式传入 ser + schema
 
 ## 16.13 ProxyData 零拷贝传输
 
-当编译时启用 `VLINK_PROXY_ENABLE_ZEROCOPY_DATA`（默认开启），数据通道使用 `zerocopy::ProxyData` 结构体代替 Protobuf 序列化。
+数据通道统一使用 `zerocopy::ProxyData` 结构体在 proxy_server ↔ proxy_api 之间传输,绕开了控制面采用的 cereal 序列化路径。
 
 `ProxyData` 是一个 **80 字节固定头部 + 变长尾部** 的平坦内存结构：
 
@@ -703,7 +710,7 @@ api.send_data(data);  // send_data() 同样要求显式传入 ser + schema
 
 ## 16.14 安全配置
 
-代理系统的 Time、InfoList、Control 三个信道使用 DDS 安全扩展进行加密和认证。
+代理系统的 Handshake、Time、InfoList、Control 四个信道使用 DDS 安全扩展进行加密和认证。
 如果 `security_key` 保持空字符串，服务端和客户端都会使用同一个内置默认安全槽位；生产环境建议显式设置自定义密钥。
 
 ### 16.14.1 配置安全密钥

@@ -99,7 +99,7 @@
             <mxPoint x="540" y="320" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="mhs_req_l" value="HandshakeReq (DDS secure RPC): control_id, version, hostname, role" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#4a148c;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+        <mxCell id="mhs_req_l" value="HandshakeReqPacket (DDS secure RPC): control_id, version, hostname, role" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#4a148c;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
           <mxGeometry x="560" y="304" width="340" height="18" as="geometry" />
         </mxCell>
         <!-- Msg 2.2: Handshake response (server -> client) -->
@@ -109,7 +109,7 @@
             <mxPoint x="920" y="354" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="mhs_resp_l" value="HandshakeResp: result, token (128-bit hex), hostname, machine_id, version" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#4a148c;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+        <mxCell id="mhs_resp_l" value="HandshakeRespPacket: result, token (128-bit hex), hostname, machine_id, version" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=#ffffff;fontSize=10;fontColor=#4a148c;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
           <mxGeometry x="560" y="338" width="340" height="18" as="geometry" />
         </mxCell>
         <!-- Msg 3: Time heartbeat -->

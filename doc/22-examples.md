@@ -55,17 +55,17 @@ VLink 示例目录已重新组织为 **14 个分类**，覆盖从基础库到高
 顶层 `ENABLE_EXAMPLES` **默认关闭**（仅当 `CMAKE_EXPORT_COMPILE_COMMANDS` 或
 `CMAKE_CXX_CLANG_TIDY` 开启时会自动置为 `ON`）。要构建示例，需要显式
 `-DENABLE_EXAMPLES=ON`。在此基础上，`examples/CMakeLists.txt` 再通过
-`ENABLE_WHOLE_EXAMPLES` 控制是否编译全部分类：
+`ENABLE_EXAMPLES_ALL` 控制是否编译全部分类：
 
-- **默认**（`ENABLE_WHOLE_EXAMPLES=OFF`）：仅编译 `samples/` 目录下当前启用的示例目标
-- **完整模式**（`ENABLE_WHOLE_EXAMPLES=ON`）：进入全部 14 个分类，并编译其中当前 CMake 启用的目标
+- **默认**（`ENABLE_EXAMPLES_ALL=OFF`）：仅编译 `samples/` 目录下当前启用的示例目标
+- **完整模式**（`ENABLE_EXAMPLES_ALL=ON`）：进入全部 14 个分类，并编译其中当前 CMake 启用的目标
 
 ```bash
 # 只编译 samples（默认）
 cmake -B build -S . -DENABLE_EXAMPLES=ON
 
 # 编译全部示例
-cmake -B build -S . -DENABLE_EXAMPLES=ON -DENABLE_WHOLE_EXAMPLES=ON
+cmake -B build -S . -DENABLE_EXAMPLES=ON -DENABLE_EXAMPLES_ALL=ON
 ```
 
 ---
@@ -195,7 +195,7 @@ cd /work/vlink
 # 配置（以 Release 为例）
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DENABLE_EXAMPLES=ON \
-      -DENABLE_WHOLE_EXAMPLES=ON
+      -DENABLE_EXAMPLES_ALL=ON
 
 # 编译所有示例
 cmake --build build -j$(nproc)
@@ -447,7 +447,7 @@ URL 格式说明和各传输后端的配置指南。
 
 ![Helloworld Example Flow](images/helloworld-example-flow.png)
 
-`samples/` 目录保留了项目早期的综合示例，每个示例演示完整的端到端场景。启用 `ENABLE_EXAMPLES=ON` 且保持 `ENABLE_WHOLE_EXAMPLES=OFF` 时，会编译 `samples/` 下当前启用的示例目标。
+`samples/` 目录保留了项目早期的综合示例，每个示例演示完整的端到端场景。启用 `ENABLE_EXAMPLES=ON` 且保持 `ENABLE_EXAMPLES_ALL=OFF` 时，会编译 `samples/` 下当前启用的示例目标。
 
 | 示例名          | 目录                           | 涉及传输       | 序列化       | 通信模型                   | 说明                              |
 | --------------- | ------------------------------ | -------------- | ------------ | -------------------------- | --------------------------------- |

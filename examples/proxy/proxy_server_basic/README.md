@@ -6,7 +6,7 @@
 
 - ProxyServer Config 各字段含义。
 - 服务端的核心能力（discovery / handshake / heartbeat / forwarding）。
-- wire 协议中 Time / Info / Data 三种通道的语义。
+- wire 协议中 Handshake / Control / Time / InfoList / Data 五种通道的语义。
 - 单进程单实例约束。
 
 ## 背景与适用场景
@@ -140,8 +140,8 @@ discovered topic: dds://test/topic
 
 ## 设计要点
 
-- Server 内部用三对 DDS Publisher/Subscriber 做 Control / Data / Heartbeat 通道。
-- `HandshakeSrv` 是普通的 vlink Server<HandshakeReq, HandshakeResp>；token 加密后下发。
+- Server 内部用 `HandshakeSrv` / `ControlSub` / `TimePub` / `InfoPub` 四条 DDS 安全控制面信道（其中 Handshake 走 RPC，其余走 pub/sub），加上 `DataPub` / `DataSub` 一对数据面信道。
+- `HandshakeSrv` 是普通的 vlink Server<HandshakeReqPacket, HandshakeRespPacket>；token 加密后下发。
 - 单进程单实例靠静态 atomic 哨兵实现。
 
 ## 配图

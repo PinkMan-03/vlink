@@ -19,7 +19,7 @@ class VLinkConan(ConanFile):
         "shared": [True, False],
         "fPIC": [True, False],
         "enable_cpm": [True, False],
-        "enable_whole_cpm": [True, False],
+        "enable_cpm_all": [True, False],
         "enable_doc": [True, False],
         "enable_cxx_std_20": [True, False],
         "enable_c_api": [True, False],
@@ -57,7 +57,7 @@ class VLinkConan(ConanFile):
         "fPIC": True,
         "shared": False,
         "enable_cpm": False,
-        "enable_whole_cpm": False,
+        "enable_cpm_all": False,
         "enable_doc": False,
         "enable_cxx_std_20": False,
         "enable_c_api": True,
@@ -93,7 +93,7 @@ class VLinkConan(ConanFile):
     }
 
     def set_options(self):
-        if self.options.enable_whole_cpm:
+        if self.options.enable_cpm_all:
             self.options.ENABLE_CPM = True
         if "QT_DIR" in os.environ:
             self.options.enable_viewer = True
@@ -107,7 +107,7 @@ class VLinkConan(ConanFile):
                 self.version = version_file.read().strip()
 
     def requirements(self):
-        if not self.options.enable_cpm and not self.options.enable_whole_cpm:
+        if not self.options.enable_cpm and not self.options.enable_cpm_all:
             self.requires("sqlite3/3.51.3")
             self.requires("openssl/3.0.20")
             self.requires("protobuf/3.21.12")
@@ -115,13 +115,10 @@ class VLinkConan(ConanFile):
             self.requires("fast-dds/2.11.2")
             self.requires("cyclonedds/0.10.5")
             self.requires("iceoryx/2.0.6")
-        elif not self.options.enable_whole_cpm:
+        elif not self.options.enable_cpm_all:
             self.requires("sqlite3/3.51.3")
             self.requires("openssl/3.0.20")
-            self.requires("protobuf/3.21.12")
             self.requires("zstd/1.5.7")
-        if self.options.enable_cli_efbs:
-            self.requires("flatbuffers/25.9.23")
         if self.options.enable_viewer and self.options.enable_viewer_ffmpeg:
             self.requires("ffmpeg/8.1.1")
 
@@ -183,7 +180,7 @@ class VLinkConan(ConanFile):
         tc = CMakeToolchain(self)
         tc.variables["ENABLE_CCACHE_BUILD"]    = "OFF"
         tc.variables["ENABLE_CPM"]             = "ON" if self.options.enable_cpm else "OFF"
-        tc.variables["ENABLE_WHOLE_CPM"]       = "ON" if self.options.enable_whole_cpm else "OFF"
+        tc.variables["ENABLE_CPM_ALL"]         = "ON" if self.options.enable_cpm_all else "OFF"
         tc.variables["ENABLE_DOC"]             = "ON" if self.options.enable_doc else "OFF"
         tc.variables["ENABLE_CXX_STD_20"]      = "ON" if self.options.enable_cxx_std_20 else "OFF"
         tc.variables["ENABLE_C_API"]           = "ON" if self.options.enable_c_api else "OFF"

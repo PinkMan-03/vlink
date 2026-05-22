@@ -38,7 +38,7 @@
 | OpenSSL       | 消息加密（AES）                 | `ENABLE_SECURITY=ON`         | `sudo apt install libssl-dev`                               |
 | SQLite3       | 数据库录包/回放                 | `ENABLE_SQLITE=ON`           | `sudo apt install libsqlite3-dev`                           |
 | zstd          | 数据压缩                        | `ENABLE_ZSTD=ON`             | `sudo apt install libzstd-dev`                              |
-| Protobuf      | `vlink-eproto` / `vlink-dump` / `vlink-proxy` | `ENABLE_CLI_EPROTO` / `ENABLE_CLI_DUMP` / `ENABLE_PROXY` | `sudo apt install libprotobuf-dev protobuf-compiler` |
+| Protobuf      | `vlink-eproto` / `vlink-dump` / `vlink-viewer` / `vlink-webviz` | `ENABLE_CLI_EPROTO` / `ENABLE_CLI_DUMP` / `ENABLE_VIEWER` / `ENABLE_WEBVIZ` | `sudo apt install libprotobuf-dev protobuf-compiler` |
 | FlatBuffers   | `vlink-efbs`                    | `ENABLE_CLI_EFBS=ON`         | `sudo apt install libflatbuffers-dev flatbuffers-compiler`  |
 | Fast-DDS      | DDS 传输后端 (`dds://`)         | 模块依赖                     | 见 [FastDDS 官方文档](https://fast-dds.docs.eprosima.com/)  |
 | CycloneDDS    | DDS 传输后端 (`ddsc://`)        | 模块依赖                     | 见 [CycloneDDS 官方文档](https://github.com/eclipse-cyclonedds/cyclonedds) 或源码编译 |
@@ -186,8 +186,8 @@ cmake -B build -S . -LH
 | `CMAKE_BUILD_TYPE`     | `Release`| STRING | 构建类型：`Release`/`Debug`/`RelWithDebInfo`/`MinSizeRel`      |
 | `ENABLE_CXX_STD_20`    | 自动检测 | BOOL   | 启用 C++20 特性；若编译器支持则自动开启                        |
 | `ENABLE_CCACHE_BUILD`  | `OFF`    | BOOL   | 启用 ccache 编译缓存加速（需要系统安装 ccache）                |
-| `ENABLE_CPM`     | `OFF`    | BOOL   | 启用 CPM（CMake Package Manager）自动下载依赖                  |
-| `ENABLE_WHOLE_CPM` | `OFF`  | BOOL   | 启用 CPM 全量构建（包含传输模块依赖，覆盖 `ENABLE_CPM`） |
+| `ENABLE_CPM`     | `OFF`    | BOOL   | 启用 CPM（CMake Package Manager）下载 Protobuf/FlatBuffers/传输后端依赖     |
+| `ENABLE_CPM_ALL` | `OFF`    | BOOL   | 在 `ENABLE_CPM` 基础上额外把 OpenSSL/SQLite3/zstd 也交给 CPM；隐含启用 `ENABLE_CPM` |
 | `ENABLE_DOC`           | `OFF`    | BOOL   | 构建 Doxygen 文档                                              |
 | `INSTALL_CONFIG_DIR`   | `${CMAKE_INSTALL_SYSCONFDIR}/${PROJECT_NAME}` | STRING | 配置文件安装目录（相对于安装前缀），默认 `etc/vlink` |
 
@@ -200,7 +200,7 @@ cmake -B build -S . -LH
 | `ENABLE_SECURITY`   | `ON`   | OpenSSL                    | 启用消息加密（AES via OpenSSL Crypto）；找不到时自动关闭    |
 | `ENABLE_SQLITE`     | `ON`   | SQLite3                    | 启用 SQLite 数据库支持（录包、数据存储）；找不到时自动关闭  |
 | `ENABLE_ZSTD`       | `ON`   | zstd                       | 启用 Zstandard 压缩（bag 文件压缩等）；找不到时自动关闭     |
-| `ENABLE_PROXY`      | `ON`   | Protobuf + DDS             | 编译代理层（协议桥接）；需要 Protobuf 且至少一种 DDS 后端   |
+| `ENABLE_PROXY`      | `ON`   | DDS                        | 编译代理层（协议桥接）；需要至少一种 DDS 后端               |
 | `ENABLE_VIEWER`     | `OFF`  | Qt + `ENABLE_PROXY`        | 编译可视化查看器；需要 Qt 和代理层                          |
 | `ENABLE_WEBVIZ`     | `OFF`  | `ENABLE_PROXY`             | 编译 WebViz 桥接（Foxglove / Rerun）；依赖代理层            |
 | `ENABLE_COMPLETIONS`| `ON`   | 无                         | 安装 bash / zsh 补全脚本                                    |
@@ -234,7 +234,7 @@ cmake -B build -S . -LH
 | 选项名                  | 默认值                                       | 说明                                                      |
 | ----------------------- | -------------------------------------------- | --------------------------------------------------------- |
 | `ENABLE_EXAMPLES`       | `CMAKE_EXPORT_COMPILE_COMMANDS` 或 `CMAKE_CXX_CLANG_TIDY` 开启时自动 `ON`，其余 `OFF` | 编译 `examples/` 下的示例程序                  |
-| `ENABLE_WHOLE_EXAMPLES` | `OFF`                                        | `ENABLE_EXAMPLES=ON` 时仅构建 `examples/samples/`；再置此项为 `ON` 才会构建全部 14 个示例分类 |
+| `ENABLE_EXAMPLES_ALL` | `OFF`                                        | `ENABLE_EXAMPLES=ON` 时仅构建 `examples/samples/`；再置此项为 `ON` 才会构建全部 14 个示例分类 |
 
 #### 1.3.5.6 日志后端选项
 
@@ -422,7 +422,7 @@ VLink 支持通过 [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) 自动下
 
 #### 1.3.8.1 CPM 基础构建
 
-启用 `ENABLE_CPM=ON` 后，CMake 会通过 CPM 下载并构建基础第三方依赖；OpenSSL、SQLite3、Protobuf、FlatBuffers 等全量依赖位于 `ENABLE_WHOLE_CPM=ON` 分支：
+启用 `ENABLE_CPM=ON` 后，CMake 会通过 CPM 下载并构建以下依赖：Protobuf、FlatBuffers、tinyxml2、cpptoml、foonathan_memory、Fast-CDR、Fast-DDS、CycloneDDS、Iceoryx。OpenSSL、SQLite3、zstd 默认仍由系统/Conan 提供，可通过 `-DENABLE_CPM_OPENSSL=ON` / `-DENABLE_CPM_SQLITE3=ON` / `-DENABLE_CPM_ZSTD=ON` 单独切换，或一次性开启 `ENABLE_CPM_ALL=ON` 全部交给 CPM：
 
 ```bash
 cmake -B build-cpm \
@@ -434,17 +434,17 @@ cmake --build build-cpm -j$(nproc)
 
 #### 1.3.8.2 CPM 全量构建
 
-`ENABLE_WHOLE_CPM=ON` 会同时下载并构建传输模块依赖（Fast-DDS、CycloneDDS、Iceoryx 等）：
+`ENABLE_CPM_ALL=ON` 在 `ENABLE_CPM=ON` 的基础上，额外把 OpenSSL、SQLite3、zstd 也交给 CPM 下载构建（即全部基础依赖都由 CPM 处理，不再依赖系统包）：
 
 ```bash
-cmake -B build-cpm-whole \
+cmake -B build-cpm-all \
     -DCMAKE_BUILD_TYPE=Release \
-    -DENABLE_WHOLE_CPM=ON
+    -DENABLE_CPM_ALL=ON
 
-cmake --build build-cpm-whole -j$(nproc)
+cmake --build build-cpm-all -j$(nproc)
 ```
 
-> 注意：`ENABLE_WHOLE_CPM=ON` 会隐含启用 CPM 构建（CMake 中通过 `OR` 逻辑判断，无需同时设置 `ENABLE_CPM`）。
+> 注意：`ENABLE_CPM_ALL=ON` 会隐含启用 CPM 构建（CMake 中通过 `OR` 逻辑判断，无需同时设置 `ENABLE_CPM`）。
 > 首次编译时会下载大量源码，建议在网络状况良好的环境下使用，或预先配置 CPM 的本地缓存目录：
 >
 > ```bash
@@ -561,8 +561,8 @@ Conan 选项名使用小写下划线命名，与 CMake 选项一一对应：
 | `enable_completions`            | `ENABLE_COMPLETIONS`   | `False` / `ON`           |
 | `enable_symlinks`               | `ENABLE_SYMLINKS`      | `True` / `ON`            |
 | `install_config_dir`            | `INSTALL_CONFIG_DIR`   | `etc/vlink` / `etc/vlink`|
-| `ENABLE_CPM`              | `ENABLE_CPM`     | `False` / `OFF`          |
-| `ENABLE_WHOLE_CPM`        | `ENABLE_WHOLE_CPM` | `False` / `OFF`        |
+| `enable_cpm`                    | `ENABLE_CPM`           | `False` / `OFF`          |
+| `enable_cpm_all`                | `ENABLE_CPM_ALL`       | `False` / `OFF`          |
 | `enable_doc`                    | `ENABLE_DOC`           | `False` / `OFF`          |
 | `enable_examples`               | `ENABLE_EXAMPLES`      | `False` / `OFF`          |
 | `enable_test`                   | `ENABLE_TEST`          | `False` / `OFF`          |
@@ -575,13 +575,13 @@ Conan 选项名使用小写下划线命名，与 CMake 选项一一对应：
 
 `conanfile.py` 中的 `set_options()` 方法实现以下自动推导：
 
-- `ENABLE_WHOLE_CPM=True` 会自动开启 `ENABLE_CPM`
+- `enable_cpm_all=True` 会自动开启 `enable_cpm`
 - 检测到 `QT_DIR` 环境变量则自动开启 `enable_viewer` 和 `enable_viewer_ffmpeg`
 - 检测到 `OSG_DIR` 环境变量则自动开启 `enable_viewer_osg`
 
 ### 1.4.4 Conan 依赖关系
 
-当 `ENABLE_CPM=False` 且 `ENABLE_WHOLE_CPM=False` 时（默认），
+当 `ENABLE_CPM=False` 且 `ENABLE_CPM_ALL=False` 时（默认），
 Conan 会按 `conanfile.py` 的 `requirements()` 自动解析以下依赖：
 
 ```
@@ -598,8 +598,7 @@ flatbuffers/25.9.23    (当 enable_cli_efbs=True 时)
 ffmpeg/8.1.1           (当 enable_viewer=True 且 enable_viewer_ffmpeg=True 时)
 ```
 
-当 `ENABLE_CPM=True` 时，仅通过 Conan 安装核心依赖（sqlite3、openssl、protobuf），
-传输后端依赖由 CPM 在 CMake 阶段自动下载编译。
+当 `ENABLE_CPM=True` 或 `ENABLE_CPM_ALL=True` 时，Conan **不再**提供 sqlite3、openssl、protobuf —— 这些（及传输后端、flatbuffers 等）改由 CPM 在 CMake 阶段自动下载编译。
 
 ### 1.4.5 Conan 构建配置示例
 
@@ -649,7 +648,7 @@ conan build .
 conan install . \
     --build=missing \
     -s build_type=Release \
-    -o "vlink/*:ENABLE_WHOLE_CPM=True"
+    -o "vlink/*:enable_cpm_all=True"
 
 conan build .
 ```
@@ -1786,7 +1785,7 @@ cmake .. -DENABLE_SECURITY=OFF
 **现象**：
 
 ```
-CMake Warning: Can not find protobuf, set ENABLE_CLI_EPROTO/ENABLE_CLI_DUMP/ENABLE_PROXY to OFF
+CMake Warning: Can not find protobuf, set ENABLE_CLI_EPROTO/ENABLE_CLI_DUMP/ENABLE_VIEWER/ENABLE_WEBVIZ to OFF
 ```
 
 **解决方案**：
@@ -1799,7 +1798,7 @@ sudo apt install libprotobuf-dev protobuf-compiler
 cmake .. -DProtobuf_ROOT=/path/to/protobuf
 
 # 或者关闭相关功能
-cmake .. -DENABLE_CLI_EPROTO=OFF -DENABLE_CLI_DUMP=OFF -DENABLE_PROXY=OFF
+cmake .. -DENABLE_CLI_EPROTO=OFF -DENABLE_CLI_DUMP=OFF -DENABLE_VIEWER=OFF -DENABLE_WEBVIZ=OFF
 ```
 
 macOS 上 Homebrew 安装的 Protobuf 路径需显式指定：
@@ -1816,7 +1815,7 @@ cmake -DProtobuf_DIR=$(brew --prefix protobuf)/lib/cmake/protobuf ...
 CMake Warning: Can not find fastdds or cyclonedds, set ENABLE_PROXY to OFF
 ```
 
-**说明**：`ENABLE_PROXY=ON` 需要 Protobuf 且至少安装一种 DDS 后端（Fast-DDS 或 CycloneDDS）。
+**说明**：`ENABLE_PROXY=ON` 需要至少安装一种 DDS 后端（Fast-DDS 或 CycloneDDS）。
 
 **解决方案**：从源码或 Conan 安装一种 DDS 后端；或 `-DENABLE_PROXY=OFF` 关闭代理。
 

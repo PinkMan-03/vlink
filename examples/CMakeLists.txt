@@ -18,7 +18,7 @@ endif()
 
 add_subdirectory(samples)
 
-if(ENABLE_WHOLE_EXAMPLES)
+if(ENABLE_EXAMPLES_ALL)
   add_subdirectory(quickstart)
   add_subdirectory(base)
   add_subdirectory(serialization)
