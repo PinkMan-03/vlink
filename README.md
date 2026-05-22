@@ -229,7 +229,7 @@ vlink/
 ├── tools/              构建/打包/版本管理等辅助脚本
 ├── cmake/              CMake 工具链与 Find 模块
 ├── thirdparty/         第三方依赖与补丁
-├── packup/             发布打包相关
+├── packup/             发布打包
 ├── CMakeLists.txt      顶层 CMake 入口
 ├── conanfile.py        Conan recipe
 └── Android.bp          Android.bp（Soong 构建规则）

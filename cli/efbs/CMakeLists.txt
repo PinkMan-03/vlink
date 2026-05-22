@@ -6,14 +6,7 @@ project(vlink-efbs LANGUAGES CXX)
 
 # requires
 if(NOT TARGET flatbuffers::flatbuffers_shared AND NOT TARGET flatbuffers::flatbuffers)
-  find_package(Flatbuffers CONFIG REQUIRED)
-endif()
-
-if(DEFINED Flatbuffers_VERSION)
-  if(Flatbuffers_VERSION VERSION_LESS "22.0.0")
-    message(WARNING "Flatbuffers version too old, skip build efbs")
-    return()
-  endif()
+  find_package(Flatbuffers 22.0.0 CONFIG REQUIRED)
 endif()
 
 # src
@@ -34,7 +27,13 @@ endif()
 
 # install
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-vlink_install_symlink(efbs SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# symlinks
+if(ENABLE_SYMLINKS)
+  vlink_install_symlink(efbs SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 # completions
-vlink_install_completions(${PROJECT_NAME} ALIASES efbs)
+if(ENABLE_COMPLETIONS)
+  vlink_install_completions(${PROJECT_NAME} ALIAS efbs)
+endif()

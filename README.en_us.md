@@ -229,7 +229,7 @@ vlink/
 ├── tools/              Build, packaging, versioning helpers
 ├── cmake/              CMake toolchains and Find modules
 ├── thirdparty/         Third-party dependencies and patches
-├── packup/             Release packaging assets
+├── packup/             Release packaging
 ├── CMakeLists.txt      Top-level CMake entry
 ├── conanfile.py        Conan recipe
 └── Android.bp          Android.bp (Soong build rules)

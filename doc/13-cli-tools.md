@@ -59,6 +59,7 @@ export PATH=/usr/local/bin:$PATH
 - 所有工具支持 `-h` / `--help` 查看帮助，`-v` / `--version` 查看版本。
 - 多数工具需要组播/广播网络支持才能发现远端节点，工具启动时会打印所需的监听地址。
 - 建议在使用跨机器发现功能之前执行 `vlink-check diag` 完成环境自检。
+- 默认 `ENABLE_SYMLINKS=ON` 时，`<install_prefix>/bin/` 下会额外创建短别名软链：`info`/`bag`/`bag2mcap`/`eproto`/`efbs`/`list`/`monitor`/`dump`/`check`/`bench`/`proxy`/`webviz`/`webviz_foxglove` 等，等价于对应的 `vlink-*`。配置 `-DENABLE_SYMLINKS=OFF` 即可只装 `vlink-*` 全名，避免与发行版包冲突（`packup/build-deb.sh`/`build-rpm.sh`/`build-arch.sh` 默认就是 OFF）。
 
 ---
 

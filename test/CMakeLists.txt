@@ -65,7 +65,7 @@ if(NOT Protobuf_FOUND)
 endif()
 
 if(NOT Flatbuffers_FOUND)
-  find_package(Flatbuffers CONFIG QUIET)
+  find_package(Flatbuffers 22.0.0 CONFIG QUIET)
 endif()
 
 set(ENABLE_FASTDDS_GEN_TEST OFF)

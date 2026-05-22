@@ -26,7 +26,13 @@ target_link_libraries(
 )
 
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-vlink_install_symlink(bag2rrd SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# symlinks
+if(ENABLE_SYMLINKS)
+  vlink_install_symlink(bag2rrd SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 # completions
-vlink_install_completions(${PROJECT_NAME} ALIASES bag2rrd)
+if(ENABLE_COMPLETIONS)
+  vlink_install_completions(${PROJECT_NAME} ALIAS bag2rrd)
+endif()

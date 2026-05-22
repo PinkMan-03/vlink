@@ -2,7 +2,7 @@
 # Copyright (C) 2026 by Thun Lu. All rights reserved.
 #
 
-include(${CMAKE_CURRENT_LIST_DIR}/CPM.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/cpm.cmake)
 if(DEFINED CPM_MODULE_PATH)
   list(APPEND CMAKE_MODULE_PATH ${CPM_MODULE_PATH})
 else()
@@ -11,7 +11,7 @@ endif()
 if(UNIX)
   set(ENV{LD_LIBRARY_PATH} "$ENV{LD_LIBRARY_PATH}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 endif()
-if(ENABLE_CPM_WHOLE_BUILD)
+if(ENABLE_WHOLE_CPM)
   cpmaddpackage(
     NAME
     sqlite3
@@ -20,10 +20,12 @@ if(ENABLE_CPM_WHOLE_BUILD)
     PATCHES
     "${CMAKE_SOURCE_DIR}/tools/patch/sqlite3-cmake.patch"
     OPTIONS
-    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
     "CMAKE_POSITION_INDEPENDENT_CODE ON"
     "BUILD_SHARED_LIBS OFF"
     "sqlite3_BUILD_SHARED_LIBS OFF"
+    EXCLUDE_FROM_ALL
+    ON
   )
   cpmaddpackage(
     NAME
@@ -36,6 +38,8 @@ if(ENABLE_CPM_WHOLE_BUILD)
     "BUILD_SHARED_LIBS ON"
     "protobuf_BUILD_TESTS OFF"
     "protobuf_BUILD_PROTOC_BINARIES ON"
+    EXCLUDE_FROM_ALL
+    OFF
   )
   cpmaddpackage(
     NAME
@@ -49,6 +53,8 @@ if(ENABLE_CPM_WHOLE_BUILD)
     "FLATBUFFERS_BUILD_TESTS OFF"
     "FLATBUFFERS_BUILD_FLATC ON"
     "FLATBUFFERS_STATIC_FLATC ON"
+    EXCLUDE_FROM_ALL
+    OFF
   )
   if(flatbuffers_ADDED
      AND TARGET flatbuffers_shared
@@ -66,10 +72,12 @@ if(ENABLE_CPM_WHOLE_BUILD)
     GIT_TAG
     v3
     OPTIONS
-    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
     "CMAKE_POSITION_INDEPENDENT_CODE ON"
     "BUILD_SHARED_LIBS OFF"
     "OPENSSL_USE_STATIC_LIBS ON"
+    EXCLUDE_FROM_ALL
+    ON
   )
   if(openssl_ADDED)
     if(TARGET crypto AND NOT TARGET OpenSSL::Crypto)
@@ -81,29 +89,31 @@ if(ENABLE_CPM_WHOLE_BUILD)
     find_package(OpenSSL QUIET)
     set(OPENSSL_FOUND TRUE)
   endif()
-endif()
-cpmaddpackage(
-  NAME
-  zstd
-  URL
-  "https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.zip"
-  SOURCE_SUBDIR
-  "build/cmake"
-  OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
-  "CMAKE_POSITION_INDEPENDENT_CODE ON"
-  "BUILD_SHARED_LIBS OFF"
-  "ZSTD_BUILD_PROGRAMS OFF"
-  "ZSTD_BUILD_SHARED OFF"
-  "ZSTD_BUILD_STATIC ON"
-)
-if(zstd_ADDED
-   AND TARGET libzstd_static
-   AND NOT TARGET zstd::libzstd
-   AND NOT TARGET zstd::libzstd_static
-)
-  add_library(zstd::libzstd_static ALIAS libzstd_static)
-  add_library(zstd::libzstd ALIAS libzstd_static)
+  cpmaddpackage(
+    NAME
+    zstd
+    URL
+    "https://github.com/facebook/zstd/archive/refs/tags/v1.5.7.zip"
+    SOURCE_SUBDIR
+    "build/cmake"
+    OPTIONS
+    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
+    "CMAKE_POSITION_INDEPENDENT_CODE ON"
+    "BUILD_SHARED_LIBS OFF"
+    "ZSTD_BUILD_PROGRAMS OFF"
+    "ZSTD_BUILD_SHARED OFF"
+    "ZSTD_BUILD_STATIC ON"
+    EXCLUDE_FROM_ALL
+    ON
+  )
+  if(zstd_ADDED
+     AND TARGET libzstd_static
+     AND NOT TARGET zstd::libzstd
+     AND NOT TARGET zstd::libzstd_static
+  )
+    add_library(zstd::libzstd_static ALIAS libzstd_static)
+    add_library(zstd::libzstd ALIAS libzstd_static)
+  endif()
 endif()
 cpmaddpackage(
   NAME
@@ -111,9 +121,11 @@ cpmaddpackage(
   URL
   "https://github.com/leethomason/tinyxml2/archive/refs/tags/10.1.0.zip"
   OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
   "BUILD_SHARED_LIBS OFF"
+  EXCLUDE_FROM_ALL
+  ON
 )
 if(tinyxml2_ADDED)
   set(TINYXML2_INCLUDE_DIR ${tinyxml2_SOURCE_DIR})
@@ -126,11 +138,13 @@ cpmaddpackage(
   URL
   "https://github.com/skystrife/cpptoml/archive/refs/tags/v0.1.1.zip"
   OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
   "BUILD_SHARED_LIBS OFF"
   "CPPTOML_BUILD_EXAMPLES OFF"
   "CMAKE_POLICY_VERSION_MINIMUM 3.14"
+  EXCLUDE_FROM_ALL
+  ON
 )
 cpmaddpackage(
   NAME
@@ -138,13 +152,15 @@ cpmaddpackage(
   URL
   "https://github.com/foonathan/memory/archive/refs/tags/v0.7-4.zip"
   OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
   "BUILD_SHARED_LIBS OFF"
   "FOONATHAN_MEMORY_BUILD_EXAMPLES OFF"
   "FOONATHAN_MEMORY_BUILD_TESTS OFF"
   "FOONATHAN_MEMORY_BUILD_TOOLS OFF"
   "FOONATHAN_MEMORY_CHECK_ALLOCATION_SIZE OFF"
+  EXCLUDE_FROM_ALL
+  ON
 )
 cpmaddpackage(
   NAME
@@ -152,9 +168,11 @@ cpmaddpackage(
   URL
   "https://github.com/eProsima/Fast-CDR/archive/refs/tags/v1.1.1.zip"
   OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
   "BUILD_SHARED_LIBS OFF"
+  EXCLUDE_FROM_ALL
+  ON
 )
 cpmaddpackage(
   NAME
@@ -164,11 +182,13 @@ cpmaddpackage(
   PATCHES
   "${CMAKE_SOURCE_DIR}/tools/patch/fastdds_2.10.x.patch"
   OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
   "BUILD_SHARED_LIBS OFF"
   "EPROSIMA_BUILD OFF"
   "THIRDPARTY_UPDATE OFF"
+  EXCLUDE_FROM_ALL
+  ON
 )
 cpmaddpackage(
   NAME
@@ -178,7 +198,7 @@ cpmaddpackage(
   PATCHES
   "${CMAKE_SOURCE_DIR}/tools/patch/cyclonedds_0.10.x.patch"
   OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
   "BUILD_SHARED_LIBS OFF"
   "BUILD_IDLC OFF"
@@ -186,6 +206,8 @@ cpmaddpackage(
   "ENABLE_SECURITY OFF"
   "ENABLE_SSL OFF"
   "CYCLONEDDS_DISABLE_SSL ON"
+  EXCLUDE_FROM_ALL
+  ON
 )
 if(cyclonedds_ADDED AND TARGET ddsc)
   set(ddsi_INCLUDE_DIR "${cyclonedds_SOURCE_DIR}/src/core/ddsi/include")
@@ -200,13 +222,15 @@ cpmaddpackage(
   SOURCE_SUBDIR
   "iceoryx_meta"
   OPTIONS
-  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/external.cmake"
+  "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
   "BUILD_SHARED_LIBS OFF"
   "BINDING_C OFF"
   "INTROSPECTION OFF"
   "BUILD_DOC OFF"
   "CCACHE OFF"
+  EXCLUDE_FROM_ALL
+  ON
 )
 if(iceoryx_ADDED
    AND TARGET iceoryx_posh

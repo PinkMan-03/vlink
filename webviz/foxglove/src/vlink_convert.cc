@@ -206,7 +206,7 @@ bool VlinkConvert::build_proto_json_schema(const google::protobuf::Descriptor* d
   return true;
 }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 bool VlinkConvert::is_fbs_integer_type(reflection::BaseType type) {
   switch (type) {
     case reflection::Byte:
@@ -377,7 +377,7 @@ VlinkConvert::VlinkConvert(const Config& config) : config_(config) {
   init_proto_resolver();
   init_convert_plugin();
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   init_fbs_resolver();
 #endif
 
@@ -678,7 +678,7 @@ bool VlinkConvert::resolve_input_schema(CommandMapping& mapping) {
       if VUNLIKELY (!build_proto_json_schema(find_proto_descriptor(mapping.ser), mapping.schema)) {
         return false;
       }
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
     } else if VLIKELY (mapping.payload_encoding == "flatbuffers" && !mapping.ser.empty()) {
       std::string schema_storage;
       const auto* schema = resolve_fbs_schema(mapping.ser, schema_storage);
@@ -1172,7 +1172,7 @@ bool VlinkConvert::decode_backend_message_to_json(const std::string& ser, Schema
 #endif
   }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 
   if VLIKELY (schema_type == SchemaType::kFlatbuffers) {
     std::lock_guard lock(mtx_);
@@ -1293,7 +1293,7 @@ CommandMessage VlinkConvert::encode_json_payload(const CommandRoute& route, cons
 #endif
   }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 
   if VUNLIKELY (route.mapping->payload_encoding == "flatbuffers") {
     std::lock_guard lock(mtx_);
@@ -1328,7 +1328,7 @@ CommandMessage VlinkConvert::encode_json_payload(const CommandRoute& route, cons
   return result;
 }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 bool VlinkConvert::init_fbs_resolver() {
   if VUNLIKELY (config_.fbs_dir.empty()) {
     return false;

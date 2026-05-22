@@ -85,6 +85,8 @@ RUN apt-get install -yq --no-install-recommends \
     libsqlite3-dev \
     libprotobuf-dev \
     protobuf-compiler \
+    flatbuffers-compiler \
+    libflatbuffers-dev \
     libprotoc-dev \
     openjdk-17-jdk \
     libasio-dev \

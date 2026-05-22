@@ -29,7 +29,7 @@ elseif(TARGET protobuf::libprotobuf-lite)
 endif()
 
 if(NOT TARGET flatbuffers::flatbuffers_shared AND NOT TARGET flatbuffers::flatbuffers)
-  find_package(Flatbuffers CONFIG QUIET)
+  find_package(Flatbuffers 22.0.0 CONFIG QUIET)
 endif()
 
 if(TARGET flatbuffers::flatbuffers_shared)
@@ -39,7 +39,7 @@ elseif(TARGET flatbuffers::flatbuffers)
 endif()
 
 if(NOT protobuf_libs OR NOT flatbuffers_libs)
-  message(WARNING "Can not find proto and flatbuffers, skipped.")
+  message(WARNING "Can not find proto or flatbuffers, skipped.")
   return()
 endif()
 
@@ -107,10 +107,16 @@ if(EXISTS ${PROJECT_SOURCE_DIR}/etc)
     REGEX "completions" EXCLUDE
   )
 endif()
-vlink_install_symlink(webviz_foxglove SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# symlinks
+if(ENABLE_SYMLINKS)
+  vlink_install_symlink(webviz_foxglove SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+# completions
+if(ENABLE_COMPLETIONS)
+  vlink_install_completions(${PROJECT_NAME} ALIAS webviz_foxglove)
+endif()
 
 # cli
 add_subdirectory(cli)
-
-# completions
-vlink_install_completions(${PROJECT_NAME} ALIASES webviz_foxglove)

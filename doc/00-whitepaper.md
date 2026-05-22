@@ -1414,7 +1414,7 @@ target_link_libraries(perception_node
 | `ENABLE_VIEWER`      | OFF     | 编译图形化 Viewer（依赖 Qt5/Qt6）                |
 | `ENABLE_WEBVIZ`      | OFF     | 编译 Web 可视化桥接（Foxglove / Rerun）           |
 | `SELECT_LOG_BACKEND` | spdlog  | 日志后端（spdlog / quill / dlt / native）        |
-| `ENABLE_CPM_BUILD`   | OFF     | 使用 CPM.cmake 自动下载依赖                       |
+| `ENABLE_CPM`   | OFF     | 使用 CPM.cmake 自动下载依赖                       |
 
 ---
 

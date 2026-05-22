@@ -115,6 +115,10 @@
 #cmakedefine VLINK_ENABLE_WEBVIZ
 #endif
 
+#ifndef VLINK_ENABLE_SYMLINKS
+#cmakedefine VLINK_ENABLE_SYMLINKS
+#endif
+
 #ifndef VLINK_ENABLE_COMPLETIONS
 #cmakedefine VLINK_ENABLE_COMPLETIONS
 #endif

@@ -5,10 +5,10 @@
 command -v clang-format &> /dev/null || pip install clang-format --user
 command -v cmake-format &> /dev/null || pip install cmake-format --user
 
-SRCS=$(find "$1" -type f -not -path "*/thirdparty/*" -not -path "*/build/*" -not -path "*/builtin/*" -not -path "*/prebuilt/*" -not -path "*/android-bp/*" \
+SRCS=$(find "$1" -type f -not -path "*/thirdparty/*" -not -path "*/build/*" -not -path "*/build-*" -not -path "*/builtin/*" -not -path "*/prebuilt/*" -not -path "*/android-bp/*" \
     \( -name "*.h" -o -name "*.hpp" -o -name "*.cc" -o -name "*.cpp" \))
 
-CONFS=$(find "$1" -type f -not -path "*/thirdparty/*" -not -path "*/build/*" -not -path "*/builtin/*" -not -path "*/prebuilt/*" -not -path "*/android-bp/*" \
+CONFS=$(find "$1" -type f -not -path "*/thirdparty/*" -not -path "*/build/*" -not -path "*/build-*" -not -path "*/builtin/*" -not -path "*/prebuilt/*" -not -path "*/android-bp/*" \
     \( -name "CMakeLists.txt" -o -name "*.cmake" -o -name "*.cmake.in" \))
 
 echo -e "\n=== CLANG-FORMAT ===\n"

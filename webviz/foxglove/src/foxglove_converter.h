@@ -24,11 +24,16 @@
 #pragma once
 
 #if __has_include(<flatbuffers/idl.h>)
+#include <flatbuffers/base.h>
 #include <flatbuffers/flatbuffers.h>
 #include <flatbuffers/idl.h>
 #include <flatbuffers/reflection.h>
 #include <flatbuffers/reflection_generated.h>
-#define VLINK_HAS_FBS_PARSER
+
+#if FLATBUFFERS_VERSION_MAJOR >= 22
+#define VLINK_HAS_FBS_COMPILER
+#endif
+
 #endif
 
 #if __has_include(<google/protobuf/compiler/importer.h>)
@@ -209,7 +214,7 @@ class FoxgloveConverter final {
 
   const FoxgloveMapping* find_mapping(std::string_view url, const std::string& ser, bool* ambiguous = nullptr) const;
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   bool init_fbs_resolver();
 
   bool find_fbs_parser_locked(const std::string& fbs_ser);
@@ -242,7 +247,7 @@ class FoxgloveConverter final {
   std::unordered_map<std::string, const google::protobuf::Descriptor*> imported_proto_descriptors_;
 #endif
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   std::vector<std::unique_ptr<flatbuffers::Parser>> fbs_parser_vec_;
   std::unordered_map<std::string, size_t> fbs_parsers_;
   std::unordered_set<std::string> fbs_not_found_;

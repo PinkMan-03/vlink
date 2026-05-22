@@ -3,7 +3,7 @@
 *:fPIC = True
 
 vlink/*:shared = True
-vlink/*:enable_cpm_build = True
+vlink/*:enable_cpm = True
 vlink/*:enable_viewer = True
 vlink/*:enable_viewer_ffmpeg = True
 vlink/*:enable_viewer_osg = True

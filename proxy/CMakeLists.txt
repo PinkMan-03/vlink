@@ -40,7 +40,18 @@ add_custom_command(
 
 # install
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-vlink_install_symlink(proxy SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# symlinks
+if(ENABLE_SYMLINKS)
+  vlink_install_symlink(proxy SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+# completions
+if(ENABLE_COMPLETIONS)
+  vlink_install_completions(${PROJECT_NAME} ALIAS proxy)
+endif()
+
+# etc
 if(TARGET vlink-shm AND EXISTS ${PROJECT_SOURCE_DIR}/etc)
   install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/etc/
@@ -48,6 +59,3 @@ if(TARGET vlink-shm AND EXISTS ${PROJECT_SOURCE_DIR}/etc)
     REGEX "completions" EXCLUDE
   )
 endif()
-
-# completions
-vlink_install_completions(${PROJECT_NAME} ALIASES proxy)

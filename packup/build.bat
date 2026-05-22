@@ -1,4 +1,32 @@
 @echo off
+::
+:: Build vlink via Conan + CMake on Windows, then assemble a portable archive
+:: and a QtIFW installer.
+::
+:: This is the Windows counterpart of build.sh:
+::   - Pulls all dependencies via Conan (no system libs required)
+::   - Builds with viewer (Qt) + webviz (foxglove) + examples enabled
+::   - Bundles Qt / FFmpeg / OpenSSL / SQLite / Protobuf / FlatBuffers / zstd
+::     DLLs into the output tree
+::   - Produces:
+::       1) portable archive  : build\packup\win32\vlink-<ver>-windows-<arch>.zip
+::       2) QtIFW installer   : build\packup\win32\vlink-<ver>-windows-<arch>.exe
+::
+:: For DEB / RPM / Arch distribution packages on Linux, use
+:: build-deb.sh / build-rpm.sh / build-arch.sh.
+::
+:: Usage:
+::   build.bat {project dir}
+::
+:: Required env:
+::   QT_DIR    path to a Qt 5.x or 6.x install
+::   QTIFW_DIR path to Qt Installer Framework root (optional; auto-detected)
+::
+:: Required system tools:
+::   python + pip on PATH (to bootstrap conan)
+::   cmake >= 3.15 on PATH
+::   Visual Studio 2019+ with C++ workload (cl.exe reachable via vcvars)
+::
 setlocal enabledelayedexpansion
 
 set VSLANG=1033

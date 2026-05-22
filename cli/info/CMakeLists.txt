@@ -17,7 +17,13 @@ endif()
 
 # install
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-vlink_install_symlink(info SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# symlinks
+if(ENABLE_SYMLINKS)
+  vlink_install_symlink(info SYMLINK ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 # completions
-vlink_install_completions(${PROJECT_NAME} ALIASES info)
+if(ENABLE_COMPLETIONS)
+  vlink_install_completions(${PROJECT_NAME} ALIAS info)
+endif()

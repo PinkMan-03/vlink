@@ -63,11 +63,15 @@
 #endif
 
 #if __has_include(<flatbuffers/idl.h>)
+#include <flatbuffers/base.h>
 #include <flatbuffers/flatbuffers.h>
 #include <flatbuffers/idl.h>
 
+#if FLATBUFFERS_VERSION_MAJOR >= 22
 #include "private/flat_gen_text.h"
-#define VLINK_HAS_FBS_PARSER
+#define VLINK_HAS_FBS_COMPILER
+#endif
+
 #endif
 
 #if __has_include(<exprtk/exprtk.hpp>)
@@ -580,7 +584,7 @@ static bool extract_proto_value(const google::protobuf::Message& message, const 
   });
 }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 
 static void import_fbs(std::shared_ptr<flatbuffers::Parser>& parser, const std::string& target_ser,
                        const std::filesystem::path& root_dir, const std::filesystem::path& sub_dir, bool& has_import,
@@ -1801,7 +1805,7 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
     return -1;
   }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   std::shared_ptr<flatbuffers::Parser> fbs_parser;
 #endif
   bool warned_flatbuffers_fields = false;
@@ -1824,13 +1828,13 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
   int64_t dump_seq = 0;
 
   auto reset_cached_decoder = [&root_msg
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
                                ,
                                &fbs_parser
 #endif
   ]() {
     root_msg.reset();
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
     fbs_parser.reset();
 #endif
   };
@@ -1871,7 +1875,7 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
     return root_msg.get();
   };
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   auto ensure_fbs_parser = [&fbs_dir, &fbs_parser, &sync_cached_ser](const std::string& ser) -> flatbuffers::Parser* {
     if (fbs_dir.empty()) {
       return nullptr;
@@ -1904,7 +1908,7 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
   };
 
   dump_callback = [target_url, &dump_seq, &out_file_name, &root_msg, &ensure_proto_message,
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
                    &ensure_fbs_parser,
 #endif
                    &warn_flatbuffers_fields, &dump_type_suffix](int64_t timestamp, const std::string& url,
@@ -1958,7 +1962,7 @@ static int start_dump(const std::string& target_url, const std::string& out_dir,
             print_raw_summary();
           }
         } else if (resolved_schema_type == vlink::SchemaType::kFlatbuffers) {
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
           auto* parser = ensure_fbs_parser(ser);
 
           if (parser != nullptr) {

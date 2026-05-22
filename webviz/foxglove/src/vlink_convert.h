@@ -24,10 +24,14 @@
 #pragma once
 
 #if __has_include(<flatbuffers/idl.h>)
+#include <flatbuffers/base.h>
 #include <flatbuffers/idl.h>
 #include <flatbuffers/reflection.h>
 #include <flatbuffers/reflection_generated.h>
-#define VLINK_HAS_FBS_PARSER
+
+#if FLATBUFFERS_VERSION_MAJOR >= 22
+#define VLINK_HAS_FBS_COMPILER
+#endif
 #endif
 
 #if __has_include(<google/protobuf/compiler/importer.h>)
@@ -173,7 +177,7 @@ class VlinkConvert final {
 
   CommandMessage encode_json_payload(const CommandRoute& route, const Bytes& raw);
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   bool init_fbs_resolver();
 
   bool find_fbs_parser_locked(const std::string& fbs_ser);
@@ -208,7 +212,7 @@ class VlinkConvert final {
   std::unordered_map<std::string, const google::protobuf::Descriptor*> imported_proto_descriptors_;
 #endif
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   std::vector<std::unique_ptr<flatbuffers::Parser>> fbs_parser_vec_;
   std::unordered_map<std::string, size_t> fbs_parsers_;
   std::unordered_map<std::string, std::string> fbs_schema_cache_;

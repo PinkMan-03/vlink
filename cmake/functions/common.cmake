@@ -230,6 +230,12 @@ function(vlink_export project_name)
   if(NOT COMMAND write_basic_package_version_file)
     include(CMakePackageConfigHelpers)
   endif()
+  get_target_property(_vlink_export_type ${target} TYPE)
+  if(_vlink_export_type STREQUAL "SHARED_LIBRARY")
+    set_target_properties(
+      ${target} PROPERTIES VERSION ${version} SOVERSION ${vlink_VERSION_MAJOR}.${vlink_VERSION_MINOR}
+    )
+  endif()
   if(DEFINED VLINK_MODULE_NAME)
     set(in_config_name module.cmake.in)
   else()
@@ -303,23 +309,25 @@ function(vlink_install_symlink name)
     set_property(GLOBAL PROPERTY _VLINK_SYMLINK_MANIFEST_CLEARED TRUE)
   endif()
   install(
-    CODE "execute_process(
-           COMMAND ${CMAKE_COMMAND} -E create_symlink \"${VLINK_SYM_SYMLINK}\" \"${CMAKE_INSTALL_PREFIX}/${VLINK_SYM_DESTINATION}/${name}\")
-           file(APPEND \"${_SYMLINK_MANIFEST}\" \"${CMAKE_INSTALL_PREFIX}/${VLINK_SYM_DESTINATION}/${name}\n\")
-           message(STATUS \"Created symlink: ${CMAKE_INSTALL_PREFIX}/${VLINK_SYM_DESTINATION}/${name} -> ${VLINK_SYM_SYMLINK}\"
-         )
-         "
+    CODE "
+      set(_vlink_link_dst \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${VLINK_SYM_DESTINATION}/${name}\")
+      set(_vlink_link_log \"\${CMAKE_INSTALL_PREFIX}/${VLINK_SYM_DESTINATION}/${name}\")
+      get_filename_component(_vlink_link_dir \"\${_vlink_link_dst}\" DIRECTORY)
+      file(MAKE_DIRECTORY \"\${_vlink_link_dir}\")
+      execute_process(
+        COMMAND \${CMAKE_COMMAND} -E create_symlink \"${VLINK_SYM_SYMLINK}\" \"\${_vlink_link_dst}\"
+      )
+      file(APPEND \"${_SYMLINK_MANIFEST}\" \"\${_vlink_link_log}\\n\")
+      message(STATUS \"Created symlink: \${_vlink_link_log} -> ${VLINK_SYM_SYMLINK}\")
+    "
   )
 endfunction()
 
 function(vlink_install_completions cmdname)
   set(options)
   set(oneValueArgs INSTALL_DIR)
-  set(multiValueArgs ALIASES)
+  set(multiValueArgs ALIAS)
   cmake_parse_arguments(VLINK_COMP "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-  if(NOT ENABLE_COMPLETIONS)
-    return()
-  endif()
   if(WIN32)
     return()
   endif()
@@ -358,7 +366,7 @@ function(vlink_install_completions cmdname)
   set(_stub_dir "${CMAKE_BINARY_DIR}/completions-stubs/${_target}")
   file(MAKE_DIRECTORY "${_stub_dir}")
   set(_compdef_line "#compdef ${_target}")
-  foreach(_alias IN LISTS VLINK_COMP_ALIASES)
+  foreach(_alias IN LISTS VLINK_COMP_ALIAS)
     if(NOT _alias STREQUAL "${_target}")
       string(APPEND _compdef_line " ${_alias}")
     endif()
@@ -382,7 +390,7 @@ function(vlink_install_completions cmdname)
       "fi\n"
     )
     install(FILES "${_bash_stub}" DESTINATION "${CMAKE_INSTALL_DATADIR}/bash-completion/completions")
-    foreach(_alias IN LISTS VLINK_COMP_ALIASES)
+    foreach(_alias IN LISTS VLINK_COMP_ALIAS)
       if(NOT _alias STREQUAL "${_target}")
         install(
           FILES "${_bash_stub}"

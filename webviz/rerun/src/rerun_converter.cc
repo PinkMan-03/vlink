@@ -45,7 +45,7 @@
 namespace vlink {
 namespace webviz {
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 template <typename Resolver>
 bool resolve_thread_local_fbs_schema(const std::string& ser, Resolver&& resolver,
                                      const reflection::Schema*& out_schema) {
@@ -199,7 +199,7 @@ void RerunConverter::log_view_coordinates_value(::rerun::RecordingStream& rec, c
   }
 }
 
-#ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+#ifdef VLINK_HAS_FBS_COMPILER  // NOLINT(readability-redundant-preprocessor)
 
 double RerunConverter::get_fbs_double(const flatbuffers::Table& table, const reflection::Object& obj,
                                       const std::string& field_name, const std::string& default_value,
@@ -260,7 +260,7 @@ RerunConverter::RerunConverter(const Config& config) : config_(config) {
   init_proto_resolver();
   init_convert_plugin();
 
-#ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+#ifdef VLINK_HAS_FBS_COMPILER  // NOLINT(readability-redundant-preprocessor)
   init_fbs_resolver();
 #endif
 
@@ -319,7 +319,7 @@ bool RerunConverter::init_convert_plugin() {
                                      convert_plugin_);
 }
 
-#ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+#ifdef VLINK_HAS_FBS_COMPILER  // NOLINT(readability-redundant-preprocessor)
 bool RerunConverter::init_fbs_resolver() {
   bool has_resolver = schema_interface_ != nullptr;
 
@@ -940,7 +940,7 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
               }
             }
           }
-#ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+#ifdef VLINK_HAS_FBS_COMPILER  // NOLINT(readability-redundant-preprocessor)
           else if (schema_type == SchemaType::kFlatbuffers && mapping->encoding == "flatbuffers") {
             const reflection::Schema* schema = nullptr;
 
@@ -1003,7 +1003,7 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
         break;
       }
 
-#ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+#ifdef VLINK_HAS_FBS_COMPILER  // NOLINT(readability-redundant-preprocessor)
 
       if (schema_type == SchemaType::kFlatbuffers && mapping->encoding == "flatbuffers") {
         const reflection::Schema* schema = nullptr;
@@ -1046,7 +1046,7 @@ void RerunConverter::convert_and_log(::rerun::RecordingStream& rec, const std::s
           continue;
         }
       } else if (schema_type == SchemaType::kFlatbuffers && mapping->encoding == "flatbuffers") {
-#ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+#ifdef VLINK_HAS_FBS_COMPILER  // NOLINT(readability-redundant-preprocessor)
 
         if (log_fbs_with_mapping(rec, log_path, *mapping, ser, raw)) {
           any_logged = true;
@@ -5721,7 +5721,7 @@ bool RerunConverter::log_plugin_json(::rerun::RecordingStream& rec, const std::s
   return false;
 }
 
-#ifdef VLINK_HAS_FBS_PARSER  // NOLINT(readability-redundant-preprocessor)
+#ifdef VLINK_HAS_FBS_COMPILER  // NOLINT(readability-redundant-preprocessor)
 
 // NOLINTNEXTLINE(google-readability-function-size)
 bool RerunConverter::log_fbs_with_mapping(::rerun::RecordingStream& rec, const std::string& entity_path,

@@ -24,10 +24,14 @@
 #pragma once
 
 #if __has_include(<flatbuffers/idl.h>)
+#include <flatbuffers/base.h>
 #include <flatbuffers/idl.h>
 #include <flatbuffers/reflection.h>
 #include <flatbuffers/reflection_generated.h>
-#define VLINK_HAS_FBS_PARSER
+
+#if FLATBUFFERS_VERSION_MAJOR >= 22
+#define VLINK_HAS_FBS_COMPILER
+#endif
 #endif
 
 #if __has_include(<google/protobuf/compiler/importer.h>)
@@ -278,7 +282,7 @@ class RerunConverter final {
   static void log_view_coordinates_value(::rerun::RecordingStream& rec, const std::string& entity_path,
                                          std::string system);
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   bool init_fbs_resolver();
 
   bool resolve_fbs_schema(const std::string& fbs_ser, std::string& schema_data);
@@ -312,7 +316,7 @@ class RerunConverter final {
   std::unordered_map<std::string, const google::protobuf::Descriptor*> imported_proto_descriptors_;
 #endif
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   std::vector<std::unique_ptr<flatbuffers::Parser>> fbs_parser_vec_;
   std::unordered_map<std::string, size_t> fbs_parsers_;
   std::unordered_set<std::string> fbs_not_found_;

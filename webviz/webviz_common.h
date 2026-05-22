@@ -23,7 +23,7 @@
 
 #pragma once
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 #include <flatbuffers/flatbuffers.h>
 #include <flatbuffers/reflection.h>
 #include <flatbuffers/util.h>
@@ -91,7 +91,7 @@ inline std::string format_expression_string(double value) {
   return text;
 }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 inline const reflection::Schema* get_verified_fbs_schema(std::string_view ser, const std::string& schema_data) {
   if VUNLIKELY (schema_data.size() < sizeof(flatbuffers::uoffset_t)) {
     MLOG_W("FlatBuffers schema buffer too small for: {}", ser);
@@ -152,7 +152,7 @@ struct FieldPathToken final {
 
 inline constexpr size_t kFieldPathTokenCacheLimit = 128;
 inline constexpr size_t kProtoFieldLookupCacheLimit = 256;
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 inline constexpr size_t kFbsFieldLookupCacheLimit = 256;
 #endif
 
@@ -203,7 +203,7 @@ struct ProtoIndexedFieldRef final {
   size_t value_idx{0};
 };
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 struct FbsFieldLookupCacheEntry final {
   const reflection::Object* object{nullptr};
   std::string field_name;
@@ -1080,7 +1080,7 @@ struct CachedExpression final {
   std::vector<double> field_values;
   std::vector<ProtoDirectFieldRef> proto_direct_fields;
   std::vector<ProtoIndexedFieldRef> proto_indexed_field_refs;
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   std::vector<FbsDirectFieldRef> fbs_direct_fields;
   std::vector<FbsIndexedFieldRef> fbs_indexed_field_refs;
 #endif
@@ -1097,7 +1097,7 @@ struct CachedExpressionStore final {
   const google::protobuf::Descriptor* last_proto_desc{nullptr};
   CachedExpression* last_proto_cached{nullptr};
   uint64_t last_proto_generation{0};
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   std::unordered_map<std::string, CachedExpression> fbs_cache;
   std::vector<std::string> fbs_insertion_order;
   uint64_t fbs_generation{0};
@@ -1317,7 +1317,7 @@ inline double evaluate_expression_with_msg(const std::string& expression, const 
   return cached.expr.value();
 }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 
 inline void scan_fbs_files(const std::filesystem::path& dir, std::vector<std::filesystem::path>& files, int depth = 0) {
   if VUNLIKELY (depth >= 100) {
@@ -2541,7 +2541,7 @@ inline int64_t extract_proto_timestamp_ns(const google::protobuf::Message& msg, 
   return -1;
 }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 inline int64_t extract_fbs_timestamp_ns(const flatbuffers::Table& table, const reflection::Object& obj,
                                         const reflection::Schema& schema, const std::string& timestamp_field,
                                         std::string_view timestamp_unit) {

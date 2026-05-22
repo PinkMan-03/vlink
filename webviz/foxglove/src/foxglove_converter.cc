@@ -161,7 +161,7 @@ flatbuffers::Offset<flatbuffers::Vector<uint8_t>> FoxgloveConverter::create_prot
 
   return builder.CreateVector(dst, static_cast<size_t>(count));
 }
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 template <typename Resolver>
 bool resolve_thread_local_fbs_schema(const std::string& ser, Resolver&& resolver,
                                      const reflection::Schema*& out_schema) {
@@ -196,7 +196,7 @@ FoxgloveConverter::FoxgloveConverter(const Config& config) : config_(config) {
   init_proto_resolver();
   init_convert_plugin();
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   init_fbs_resolver();
 #endif
 
@@ -325,7 +325,7 @@ std::unique_ptr<google::protobuf::Message> FoxgloveConverter::deserialize_proto_
   return {sec, nsec};
 }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 
 bool FoxgloveConverter::init_fbs_resolver() {
   bool has_resolver = schema_interface_ != nullptr;
@@ -5030,7 +5030,7 @@ FoxgloveMessage FoxgloveConverter::convert(std::string_view url, SchemaType sche
             result.timestamp_ns = extract_proto_timestamp_ns(*msg, mapping->timestamp_field, mapping->timestamp_unit);
           }
         }
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
         else if (schema_type == SchemaType::kFlatbuffers && is_flatbuffers_schema_encoding(mapping->encoding)) {
           const reflection::Schema* schema = nullptr;
 
@@ -5079,7 +5079,7 @@ FoxgloveMessage FoxgloveConverter::convert(std::string_view url, SchemaType sche
               result.timestamp_ns = extract_proto_timestamp_ns(*msg, mapping->timestamp_field, mapping->timestamp_unit);
             }
           }
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
           else if (schema_type == SchemaType::kFlatbuffers && is_flatbuffers_schema_encoding(mapping->encoding)) {
             const reflection::Schema* schema = nullptr;
 
@@ -5123,7 +5123,7 @@ FoxgloveMessage FoxgloveConverter::convert(std::string_view url, SchemaType sche
         return {};
       }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
       auto fbs_result = convert_fbs_mapping(*mapping, ser, raw);
 
       if VLIKELY (fbs_result.success) {
@@ -5192,7 +5192,7 @@ FoxgloveMessage FoxgloveConverter::convert(std::string_view url, SchemaType sche
       return result;
     }
   }
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   else if (schema_type == SchemaType::kFlatbuffers) {
     std::lock_guard lock(mtx_);
 
@@ -5297,7 +5297,7 @@ bool FoxgloveConverter::get_schema_info(std::string_view url, SchemaType schema_
       }
     }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
 
     if (schema_type == SchemaType::kFlatbuffers && is_flatbuffers_schema_encoding(mapping->encoding)) {
       if (resolve_custom_fbs_schema(ser, schema_data)) {
@@ -5363,7 +5363,7 @@ bool FoxgloveConverter::get_schema_info(std::string_view url, SchemaType schema_
       return true;
     }
   }
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
   else if (schema_type == SchemaType::kFlatbuffers) {
     if (resolve_custom_fbs_schema(ser, schema_data)) {
       schema_name = ser;
@@ -5384,7 +5384,7 @@ bool FoxgloveConverter::resolve_schema_by_name(const std::string& schema_name, c
       return true;
     }
 
-#ifdef VLINK_HAS_FBS_PARSER
+#ifdef VLINK_HAS_FBS_COMPILER
     return resolve_custom_fbs_schema(schema_name, schema_data);
 #else
     return false;

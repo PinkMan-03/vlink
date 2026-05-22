@@ -22,7 +22,7 @@ if(NOT TARGET protobuf::libprotobuf)
 endif()
 
 if(NOT TARGET flatbuffers::flatbuffers_shared AND NOT TARGET flatbuffers::flatbuffers)
-  find_package(flatbuffers CONFIG QUIET)
+  find_package(flatbuffers 22.0.0 CONFIG QUIET)
 endif()
 
 # src

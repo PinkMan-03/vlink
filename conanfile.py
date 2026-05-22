@@ -18,8 +18,8 @@ class VLinkConan(ConanFile):
     options = {
         "shared": [True, False],
         "fPIC": [True, False],
-        "enable_cpm_build": [True, False],
-        "enable_cpm_whole_build": [True, False],
+        "enable_cpm": [True, False],
+        "enable_whole_cpm": [True, False],
         "enable_doc": [True, False],
         "enable_cxx_std_20": [True, False],
         "enable_c_api": [True, False],
@@ -35,6 +35,7 @@ class VLinkConan(ConanFile):
         "enable_cli_monitor": [True, False],
         "enable_cli_dump": [True, False],
         "enable_cli_check": [True, False],
+        "enable_cli_bench": [True, False],
         "enable_proxy": [True, False],
         "enable_viewer": [True, False],
         "enable_viewer_ffmpeg": [True, False],
@@ -42,6 +43,7 @@ class VLinkConan(ConanFile):
         "enable_webviz": [True, False],
         "enable_webviz_foxglove": [True, False],
         "enable_webviz_rerun": [True, False],
+        "enable_symlinks": [True, False],
         "enable_completions": [True, False],
         "enable_examples": [True, False],
         "enable_test": [True, False],
@@ -54,8 +56,8 @@ class VLinkConan(ConanFile):
     default_options = {
         "fPIC": True,
         "shared": False,
-        "enable_cpm_build": False,
-        "enable_cpm_whole_build": False,
+        "enable_cpm": False,
+        "enable_whole_cpm": False,
         "enable_doc": False,
         "enable_cxx_std_20": False,
         "enable_c_api": True,
@@ -71,6 +73,7 @@ class VLinkConan(ConanFile):
         "enable_cli_monitor": True,
         "enable_cli_dump": True,
         "enable_cli_check": True,
+        "enable_cli_bench": True,
         "enable_proxy": True,
         "enable_viewer": False,
         "enable_viewer_ffmpeg": False,
@@ -78,6 +81,7 @@ class VLinkConan(ConanFile):
         "enable_webviz": False,
         "enable_webviz_foxglove": False,
         "enable_webviz_rerun": False,
+        "enable_symlinks": True,
         "enable_completions": False,
         "enable_examples": False,
         "enable_test": False,
@@ -89,8 +93,8 @@ class VLinkConan(ConanFile):
     }
 
     def set_options(self):
-        if self.options.enable_cpm_whole_build:
-            self.options.enable_cpm_build = True
+        if self.options.enable_whole_cpm:
+            self.options.ENABLE_CPM = True
         if "QT_DIR" in os.environ:
             self.options.enable_viewer = True
             self.options.enable_viewer_ffmpeg = True
@@ -103,7 +107,7 @@ class VLinkConan(ConanFile):
                 self.version = version_file.read().strip()
 
     def requirements(self):
-        if not self.options.enable_cpm_build and not self.options.enable_cpm_whole_build:
+        if not self.options.enable_cpm and not self.options.enable_whole_cpm:
             self.requires("sqlite3/3.51.3")
             self.requires("openssl/3.0.20")
             self.requires("protobuf/3.21.12")
@@ -111,10 +115,11 @@ class VLinkConan(ConanFile):
             self.requires("fast-dds/2.11.2")
             self.requires("cyclonedds/0.10.5")
             self.requires("iceoryx/2.0.6")
-        elif not self.options.enable_cpm_whole_build:
+        elif not self.options.enable_whole_cpm:
             self.requires("sqlite3/3.51.3")
             self.requires("openssl/3.0.20")
             self.requires("protobuf/3.21.12")
+            self.requires("zstd/1.5.7")
         if self.options.enable_cli_efbs:
             self.requires("flatbuffers/25.9.23")
         if self.options.enable_viewer and self.options.enable_viewer_ffmpeg:
@@ -177,8 +182,8 @@ class VLinkConan(ConanFile):
 
         tc = CMakeToolchain(self)
         tc.variables["ENABLE_CCACHE_BUILD"]    = "OFF"
-        tc.variables["ENABLE_CPM_BUILD"]       = "ON" if self.options.enable_cpm_build else "OFF"
-        tc.variables["ENABLE_CPM_WHOLE_BUILD"] = "ON" if self.options.enable_cpm_whole_build else "OFF"
+        tc.variables["ENABLE_CPM"]             = "ON" if self.options.enable_cpm else "OFF"
+        tc.variables["ENABLE_WHOLE_CPM"]       = "ON" if self.options.enable_whole_cpm else "OFF"
         tc.variables["ENABLE_DOC"]             = "ON" if self.options.enable_doc else "OFF"
         tc.variables["ENABLE_CXX_STD_20"]      = "ON" if self.options.enable_cxx_std_20 else "OFF"
         tc.variables["ENABLE_C_API"]           = "ON" if self.options.enable_c_api else "OFF"
@@ -194,6 +199,7 @@ class VLinkConan(ConanFile):
         tc.variables["ENABLE_CLI_MONITOR"]     = "ON" if self.options.enable_cli_monitor else "OFF"
         tc.variables["ENABLE_CLI_DUMP"]        = "ON" if self.options.enable_cli_dump else "OFF"
         tc.variables["ENABLE_CLI_CHECK"]       = "ON" if self.options.enable_cli_check else "OFF"
+        tc.variables["ENABLE_CLI_BENCH"]       = "ON" if self.options.enable_cli_bench else "OFF"
         tc.variables["ENABLE_PROXY"]           = "ON" if self.options.enable_proxy else "OFF"
         tc.variables["ENABLE_VIEWER"]          = "ON" if self.options.enable_viewer else "OFF"
         tc.variables["ENABLE_VIEWER_FFMPEG"]   = "ON" if self.options.enable_viewer_ffmpeg else "OFF"
@@ -201,6 +207,7 @@ class VLinkConan(ConanFile):
         tc.variables["ENABLE_WEBVIZ"]          = "ON" if self.options.enable_webviz else "OFF"
         tc.variables["ENABLE_WEBVIZ_FOXGLOVE"] = "ON" if self.options.enable_webviz_foxglove else "OFF"
         tc.variables["ENABLE_WEBVIZ_RERUN"]    = "ON" if self.options.enable_webviz_rerun else "OFF"
+        tc.variables["ENABLE_SYMLINKS"]        = "ON" if self.options.enable_symlinks else "OFF"
         tc.variables["ENABLE_COMPLETIONS"]     = "ON" if self.options.enable_completions else "OFF"
         tc.variables["ENABLE_EXAMPLES"]        = "ON" if self.options.enable_examples else "OFF"
         tc.variables["ENABLE_TEST"]            = "ON" if self.options.enable_test else "OFF"

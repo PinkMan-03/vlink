@@ -15,7 +15,6 @@
 .marscode
 CMakeUserPresets.json
 CMakeLists.txt.user*
-build-*
 install_manifest.txt
 __pycache__
 
@@ -23,3 +22,6 @@ __pycache__
 .codex
 .agents
 CLAUDE.md
+
+build-*
+!packup/build-*.sh

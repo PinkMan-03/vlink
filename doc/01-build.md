@@ -14,7 +14,8 @@
 - [1.6 Protobuf / FlatBuffers / IDL 集成](#16-protobuf--flatbuffers--idl-集成)
 - [1.7 交叉编译与跨平台](#17-交叉编译与跨平台)
 - [1.8 安装路径结构](#18-安装路径结构)
-- [1.9 常见问题排查](#19-常见问题排查)
+- [1.9 发行版二进制包打包](#19-发行版二进制包打包)
+- [1.10 常见问题排查](#110-常见问题排查)
 
 ---
 
@@ -185,8 +186,8 @@ cmake -B build -S . -LH
 | `CMAKE_BUILD_TYPE`     | `Release`| STRING | 构建类型：`Release`/`Debug`/`RelWithDebInfo`/`MinSizeRel`      |
 | `ENABLE_CXX_STD_20`    | 自动检测 | BOOL   | 启用 C++20 特性；若编译器支持则自动开启                        |
 | `ENABLE_CCACHE_BUILD`  | `OFF`    | BOOL   | 启用 ccache 编译缓存加速（需要系统安装 ccache）                |
-| `ENABLE_CPM_BUILD`     | `OFF`    | BOOL   | 启用 CPM（CMake Package Manager）自动下载依赖                  |
-| `ENABLE_CPM_WHOLE_BUILD` | `OFF`  | BOOL   | 启用 CPM 全量构建（包含传输模块依赖，覆盖 `ENABLE_CPM_BUILD`） |
+| `ENABLE_CPM`     | `OFF`    | BOOL   | 启用 CPM（CMake Package Manager）自动下载依赖                  |
+| `ENABLE_WHOLE_CPM` | `OFF`  | BOOL   | 启用 CPM 全量构建（包含传输模块依赖，覆盖 `ENABLE_CPM`） |
 | `ENABLE_DOC`           | `OFF`    | BOOL   | 构建 Doxygen 文档                                              |
 | `INSTALL_CONFIG_DIR`   | `${CMAKE_INSTALL_SYSCONFDIR}/${PROJECT_NAME}` | STRING | 配置文件安装目录（相对于安装前缀），默认 `etc/vlink` |
 
@@ -203,6 +204,7 @@ cmake -B build -S . -LH
 | `ENABLE_VIEWER`     | `OFF`  | Qt + `ENABLE_PROXY`        | 编译可视化查看器；需要 Qt 和代理层                          |
 | `ENABLE_WEBVIZ`     | `OFF`  | `ENABLE_PROXY`             | 编译 WebViz 桥接（Foxglove / Rerun）；依赖代理层            |
 | `ENABLE_COMPLETIONS`| `ON`   | 无                         | 安装 bash / zsh 补全脚本                                    |
+| `ENABLE_SYMLINKS`   | `ON`   | 无                         | 安装 CLI 短别名软链（`info` → `vlink-info` 等；打 deb/rpm/pacman 包推荐 ON）|
 
 #### 1.3.5.3 CLI 工具选项
 
@@ -420,29 +422,29 @@ VLink 支持通过 [CPM.cmake](https://github.com/cpm-cmake/CPM.cmake) 自动下
 
 #### 1.3.8.1 CPM 基础构建
 
-启用 `ENABLE_CPM_BUILD=ON` 后，CMake 会通过 CPM 下载并构建基础第三方依赖；OpenSSL、SQLite3、Protobuf、FlatBuffers 等全量依赖位于 `ENABLE_CPM_WHOLE_BUILD=ON` 分支：
+启用 `ENABLE_CPM=ON` 后，CMake 会通过 CPM 下载并构建基础第三方依赖；OpenSSL、SQLite3、Protobuf、FlatBuffers 等全量依赖位于 `ENABLE_WHOLE_CPM=ON` 分支：
 
 ```bash
 cmake -B build-cpm \
     -DCMAKE_BUILD_TYPE=Release \
-    -DENABLE_CPM_BUILD=ON
+    -DENABLE_CPM=ON
 
 cmake --build build-cpm -j$(nproc)
 ```
 
 #### 1.3.8.2 CPM 全量构建
 
-`ENABLE_CPM_WHOLE_BUILD=ON` 会同时下载并构建传输模块依赖（Fast-DDS、CycloneDDS、Iceoryx 等）：
+`ENABLE_WHOLE_CPM=ON` 会同时下载并构建传输模块依赖（Fast-DDS、CycloneDDS、Iceoryx 等）：
 
 ```bash
 cmake -B build-cpm-whole \
     -DCMAKE_BUILD_TYPE=Release \
-    -DENABLE_CPM_WHOLE_BUILD=ON
+    -DENABLE_WHOLE_CPM=ON
 
 cmake --build build-cpm-whole -j$(nproc)
 ```
 
-> 注意：`ENABLE_CPM_WHOLE_BUILD=ON` 会隐含启用 CPM 构建（CMake 中通过 `OR` 逻辑判断，无需同时设置 `ENABLE_CPM_BUILD`）。
+> 注意：`ENABLE_WHOLE_CPM=ON` 会隐含启用 CPM 构建（CMake 中通过 `OR` 逻辑判断，无需同时设置 `ENABLE_CPM`）。
 > 首次编译时会下载大量源码，建议在网络状况良好的环境下使用，或预先配置 CPM 的本地缓存目录：
 >
 > ```bash
@@ -555,11 +557,12 @@ Conan 选项名使用小写下划线命名，与 CMake 选项一一对应：
 | `enable_cli_monitor`            | `ENABLE_CLI_MONITOR`   | `True` / `ON`            |
 | `enable_cli_dump`               | `ENABLE_CLI_DUMP`      | `True` / `ON`            |
 | `enable_cli_check`              | `ENABLE_CLI_CHECK`     | `True` / `ON`            |
-| —（Conan 未暴露）               | `ENABLE_CLI_BENCH`     | — / `ON`                 |
+| `enable_cli_bench`              | `ENABLE_CLI_BENCH`     | `True` / `ON`            |
 | `enable_completions`            | `ENABLE_COMPLETIONS`   | `False` / `ON`           |
+| `enable_symlinks`               | `ENABLE_SYMLINKS`      | `True` / `ON`            |
 | `install_config_dir`            | `INSTALL_CONFIG_DIR`   | `etc/vlink` / `etc/vlink`|
-| `enable_cpm_build`              | `ENABLE_CPM_BUILD`     | `False` / `OFF`          |
-| `enable_cpm_whole_build`        | `ENABLE_CPM_WHOLE_BUILD` | `False` / `OFF`        |
+| `ENABLE_CPM`              | `ENABLE_CPM`     | `False` / `OFF`          |
+| `ENABLE_WHOLE_CPM`        | `ENABLE_WHOLE_CPM` | `False` / `OFF`        |
 | `enable_doc`                    | `ENABLE_DOC`           | `False` / `OFF`          |
 | `enable_examples`               | `ENABLE_EXAMPLES`      | `False` / `OFF`          |
 | `enable_test`                   | `ENABLE_TEST`          | `False` / `OFF`          |
@@ -572,13 +575,13 @@ Conan 选项名使用小写下划线命名，与 CMake 选项一一对应：
 
 `conanfile.py` 中的 `set_options()` 方法实现以下自动推导：
 
-- `enable_cpm_whole_build=True` 会自动开启 `enable_cpm_build`
+- `ENABLE_WHOLE_CPM=True` 会自动开启 `ENABLE_CPM`
 - 检测到 `QT_DIR` 环境变量则自动开启 `enable_viewer` 和 `enable_viewer_ffmpeg`
 - 检测到 `OSG_DIR` 环境变量则自动开启 `enable_viewer_osg`
 
 ### 1.4.4 Conan 依赖关系
 
-当 `enable_cpm_build=False` 且 `enable_cpm_whole_build=False` 时（默认），
+当 `ENABLE_CPM=False` 且 `ENABLE_WHOLE_CPM=False` 时（默认），
 Conan 会按 `conanfile.py` 的 `requirements()` 自动解析以下依赖：
 
 ```
@@ -595,7 +598,7 @@ flatbuffers/25.9.23    (当 enable_cli_efbs=True 时)
 ffmpeg/8.1.1           (当 enable_viewer=True 且 enable_viewer_ffmpeg=True 时)
 ```
 
-当 `enable_cpm_build=True` 时，仅通过 Conan 安装核心依赖（sqlite3、openssl、protobuf），
+当 `ENABLE_CPM=True` 时，仅通过 Conan 安装核心依赖（sqlite3、openssl、protobuf），
 传输后端依赖由 CPM 在 CMake 阶段自动下载编译。
 
 ### 1.4.5 Conan 构建配置示例
@@ -646,7 +649,7 @@ conan build .
 conan install . \
     --build=missing \
     -s build_type=Release \
-    -o "vlink/*:enable_cpm_whole_build=True"
+    -o "vlink/*:ENABLE_WHOLE_CPM=True"
 
 conan build .
 ```
@@ -917,7 +920,7 @@ find_package(vlink REQUIRED COMPONENTS all)
 # 2. （可选）查找序列化库
 # -----------------------------------------------------------------
 find_package(Protobuf CONFIG QUIET)
-find_package(Flatbuffers CONFIG QUIET)
+find_package(Flatbuffers 22.0.0 CONFIG QUIET)
 
 # -----------------------------------------------------------------
 # 3. 代码生成（Protobuf 示例）
@@ -1090,7 +1093,7 @@ root_type PointCloud;
 #### 1.6.2.2 CMakeLists.txt 生成代码
 
 ```cmake
-find_package(Flatbuffers REQUIRED)
+find_package(Flatbuffers 22.0.0 REQUIRED)
 
 vlink_generate_cpp(
   TARGET lidar_fbs_gen
@@ -1641,9 +1644,123 @@ cmake --build build_buildroot -j$(nproc)
 
 ---
 
-## 1.9 常见问题排查
+## 1.9 发行版二进制包打包
 
-### 1.9.1 找不到 OpenSSL，ENABLE_SECURITY 被自动关闭
+VLink 在 `packup/` 目录下提供两套打包脚本：
+
+| 脚本 | 适用场景 | 产物 | 依赖来源 |
+|---|---|---|---|
+| `packup/build-deb.sh`   | Debian / Ubuntu 系统包         | `.deb` | CPM 拉 DDS/iceoryx，系统库提供 ssl/sqlite/zstd/protobuf/flatbuffers |
+| `packup/build-rpm.sh`   | RHEL / Fedora / openEuler / Anolis 系统包 | `.rpm` | 同上 |
+| `packup/build-arch.sh`  | Arch / Manjaro 系统包          | `.pkg.tar.zst` | 同上 |
+| `packup/build.sh`       | **便携 tgz + QtIFW 安装器**（Linux/macOS，含 Viewer/Qt 大件） | `.tgz` + 离线安装器 | Conan 拉全部依赖（不依赖系统库） |
+| `packup/build.bat`      | Windows 平台的 build.sh 等价物 | `.zip` + 离线安装器 | 同上 |
+
+### 1.9.1 用 `build-deb.sh` / `build-rpm.sh` / `build-arch.sh` 打系统包
+
+```bash
+# 在项目根目录下执行
+./packup/build-deb.sh .            # Debian/Ubuntu
+./packup/build-rpm.sh .            # RHEL/Fedora/openEuler/Anolis
+./packup/build-arch.sh .           # Arch/Manjaro
+```
+
+**产物路径**：
+
+```
+{project}/build-deb/packup/linux/vlink-2.0.0-linux-x86_64.deb
+{project}/build-rpm/packup/linux/vlink-2.0.0-linux-x86_64.rpm
+{project}/build-arch/packup/linux/vlink-2.0.0-1-x86_64.pkg.tar.zst
+```
+
+**构建期系统依赖**（CPM 自动拉 DDS/iceoryx/fastcdr/tinyxml2 等，但不拉以下）：
+
+| 发行版 | 包名 |
+|---|---|
+| Debian/Ubuntu | `build-essential cmake git libssl-dev libsqlite3-dev libzstd-dev libprotobuf-dev protobuf-compiler libflatbuffers-dev flatbuffers-compiler` |
+| RHEL/Fedora   | `gcc-c++ cmake git openssl-devel sqlite-devel libzstd-devel protobuf-devel protobuf-compiler flatbuffers-devel flatbuffers-compiler` |
+| Arch/Manjaro  | `base-devel cmake git openssl sqlite zstd protobuf flatbuffers` |
+
+**运行时依赖**（包元数据里声明，由 dpkg/rpm/pacman 安装时自动拉取）：
+
+- DEB：`libssl3 | libssl3t64, libsqlite3-0, libzstd1, libprotobuf23 | libprotobuf32 | libprotobuf32t64, libflatbuffers2 | libflatbuffers23 | libflatbuffers23.5.26`
+- RPM：`openssl-libs, sqlite-libs, libzstd, protobuf, flatbuffers`
+- Arch：`openssl, sqlite, zstd, protobuf, flatbuffers`（写在 `packup/PKGINFO.in` 模板里）
+
+> 包内 `INSTALL_CONFIG_DIR=share/vlink`，最终配置文件落到 `/usr/share/vlink/`，
+> 与发行版 `/usr/share/<pkg>` 只读数据约定一致。
+>
+> 三个打包脚本都显式传 `-DENABLE_SYMLINKS=OFF`，**不把 CLI 短别名软链
+> （`info` → `vlink-info` 等）打进包**。原因：`/usr/bin/info` 已被
+> `texinfo` 等系统包占用，强行写入会触发包冲突。需要短别名时用户可在自
+> 己的 `~/.local/bin` 下手动 `ln -s vlink-info info` 即可；想让包自带，
+> 把脚本里的 `-DENABLE_SYMLINKS=OFF` 改成 `=ON` 就行。
+
+**包安装 / 排查命令**：
+
+```bash
+# DEB
+sudo apt install ./vlink-2.0.0-linux-x86_64.deb
+dpkg-deb -I  vlink-*.deb                 # 控制信息（含 Depends）
+dpkg-deb -c  vlink-*.deb                 # 包内文件列表
+
+# RPM
+sudo dnf install ./vlink-2.0.0-linux-x86_64.rpm
+rpm -qpi  vlink-*.rpm                    # 元信息
+rpm -qpl  vlink-*.rpm                    # 文件列表
+rpm -qpR  vlink-*.rpm                    # Requires
+
+# Arch / Manjaro
+sudo pacman -U vlink-2.0.0-1-x86_64.pkg.tar.zst
+pacman -Qpi  vlink-*.pkg.tar.zst
+bsdtar -tf   vlink-*.pkg.tar.zst
+```
+
+### 1.9.2 用 `build.sh` / `build.bat` 打便携包 + QtIFW 安装器
+
+```bash
+export QT_DIR=/opt/Qt/6.5.3/gcc_64                 # 必填（Linux x86_64 / macOS）
+export OSG_DIR=/opt/osg/3.6.5                      # 可选（启用 3D Viewer）
+export QTIFW_DIR=~/Qt/Tools/QtInstallerFramework/4.x   # 可选（自动探测）
+
+./packup/build.sh .                                # Linux 本机架构
+./packup/build.sh . arm64                          # macOS 交叉到 arm64
+```
+
+**产物路径**：
+
+```
+build/packup/linux/vlink-2.0.0-linux-x86_64.tgz   # 便携压缩包
+build/packup/linux/vlink-2.0.0-linux-x86_64       # QtIFW 离线安装器
+build/packup/darwin/VLink Player.app              # macOS bundle
+```
+
+Windows 用 `build.bat`，产物在 `build\packup\win32\` 下。
+
+### 1.9.3 跨发行版兼容策略
+
+- DEB/RPM 的 `Depends/Requires` 用 `|` 备选列出多发行版的实际包名，覆盖
+  Ubuntu 22.04 / 24.04 / Debian 12 / RHEL 9 / Fedora / openEuler / Anolis。
+- `dpkg-shlibdeps` (DEB) 与 `rpm-build` 的 AUTOREQ (RPM) 自动追加基于实际
+  SONAME 的 `libc6 (>= 2.X) / libstdc++6 (>= Y)` 版本约束，构建机的
+  glibc/libstdc++ 版本即包的最低运行版本。
+- 想支持更老系统，请在更老的发行版上重新构建（例如要支持 Ubuntu 20.04，
+  请在 Ubuntu 20.04 容器/机器上跑脚本）。
+
+### 1.9.4 CPack 配置位置
+
+CPack 相关设置集中在 `cmake/package.cmake`，在 `CMakeLists.txt` 末尾通过
+`include(cmake/package.cmake)` 引入。要修改包名/维护者/license/默认依赖/
+压缩方式等，编辑该文件即可，无需改 `CMakeLists.txt`。
+
+`packup/PKGINFO.in` 是 Arch 包的 `.PKGINFO` 模板（`@VAR@` 占位符由
+`build-arch.sh` 用 `sed` 替换）。
+
+---
+
+## 1.10 常见问题排查
+
+### 1.10.1 找不到 OpenSSL，ENABLE_SECURITY 被自动关闭
 
 **现象**：
 
@@ -1664,7 +1781,7 @@ sudo yum install openssl-devel
 cmake .. -DENABLE_SECURITY=OFF
 ```
 
-### 1.9.2 找不到 Protobuf，CLI 工具被自动关闭
+### 1.10.2 找不到 Protobuf，CLI 工具被自动关闭
 
 **现象**：
 
@@ -1691,7 +1808,7 @@ macOS 上 Homebrew 安装的 Protobuf 路径需显式指定：
 cmake -DProtobuf_DIR=$(brew --prefix protobuf)/lib/cmake/protobuf ...
 ```
 
-### 1.9.3 找不到 Fast-DDS 或 CycloneDDS，ENABLE_PROXY 被关闭
+### 1.10.3 找不到 Fast-DDS 或 CycloneDDS，ENABLE_PROXY 被关闭
 
 **现象**：
 
@@ -1703,7 +1820,7 @@ CMake Warning: Can not find fastdds or cyclonedds, set ENABLE_PROXY to OFF
 
 **解决方案**：从源码或 Conan 安装一种 DDS 后端；或 `-DENABLE_PROXY=OFF` 关闭代理。
 
-### 1.9.4 GCC 8 及更早版本缺少 std::filesystem
+### 1.10.4 GCC 8 及更早版本缺少 std::filesystem
 
 **现象**：链接错误，找不到 `std::filesystem` 相关符号。
 
@@ -1715,7 +1832,7 @@ sudo apt install g++-9
 cmake .. -DCMAKE_CXX_COMPILER=g++-9
 ```
 
-### 1.9.5 VLINK_LIBRARIES 为空的警告
+### 1.10.5 VLINK_LIBRARIES 为空的警告
 
 **现象**：
 
@@ -1728,9 +1845,9 @@ CMake Warning: VLINK_LIBRARIES is empty
 **解决方案**：
 1. 检查 Fast-DDS、CycloneDDS、Iceoryx 是否正确安装
 2. 查看 `<build>/output/etc/vlink/vlink-options.txt` 中的 `Modules` 字段确认哪些模块被构建
-3. 至少需要安装一个传输后端，或使用 `ENABLE_CPM_BUILD=ON` 自动下载
+3. 至少需要安装一个传输后端，或使用 `ENABLE_CPM=ON` 自动下载
 
-### 1.9.6 动态库运行时找不到
+### 1.10.6 动态库运行时找不到
 
 **现象**：运行时报错 `error while loading shared libraries: libvlink.so.2.0`
 
@@ -1747,19 +1864,19 @@ export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 source <build_dir>/output/vlink-setup.sh
 ```
 
-### 1.9.7 Windows 下 MSVC 编译失败
+### 1.10.7 Windows 下 MSVC 编译失败
 
 **常见原因**：MSVC 编码问题（非 UTF-8 源文件）
 
 **解决方案**：VLink CMakeLists.txt 已自动添加 `/utf-8` 编译选项（MSVC）。若仍有问题，确认使用 MSVC 2019 或更新版本，且已安装 Windows SDK 10。
 
-### 1.9.8 Conan 相关
+### 1.10.8 Conan 相关
 
 - `ConanException: Package '...' not found in remotes`：`conan remote list` 确认远程仓库，必要时 `conan install . --build=missing` 本地编译。
 - `ERROR: Conflict in protobuf version: ...`：`conan graph info . --build=missing` 查看冲突，或 `--requires "protobuf/3.21.12"` 强制版本。
 - `conan cache clean`（慎用）或 `conan remove "vlink/*" --confirm` 可清除缓存。
 
-### 1.9.9 Conan cmake --preset 找不到 Preset
+### 1.10.9 Conan cmake --preset 找不到 Preset
 
 **现象**：
 
@@ -1783,13 +1900,13 @@ cmake -B conan \
 cmake --build conan
 ```
 
-### 1.9.10 交叉编译：找不到目标平台的库
+### 1.10.10 交叉编译：找不到目标平台的库
 
 **症状**：`Could not find package XXX` 或链接到了宿主机的 x86 库。
 
 **解决**：确认 `LINUX_INSTALL_PREFIX` 或 `CMAKE_FIND_ROOT_PATH` 指向目标平台的 sysroot，并检查工具链文件中 `CMAKE_FIND_ROOT_PATH_MODE_*` 是否设置为 `ONLY`。
 
-### 1.9.11 QNX 编译报错 `QNX_HOST not set`
+### 1.10.11 QNX 编译报错 `QNX_HOST not set`
 
 `qnx.toolchain.common.cmake` 强制检查 `$QNX_HOST` 和 `$QNX_TARGET`，需先 source SDP 环境脚本：
 
@@ -1797,11 +1914,11 @@ cmake --build conan
 source /opt/qnx800/qnxsdp-env.sh
 ```
 
-### 1.9.12 Android STL 链接错误
+### 1.10.12 Android STL 链接错误
 
 确认所有共享库（包括 vlink 和第三方库）都使用相同的 STL 类型（`c++_shared`）。混用 `c++_static` 会导致符号重复定义或运行时崩溃。
 
-### 1.9.13 Yocto 交叉编译时 CMake 找到了宿主工具
+### 1.10.13 Yocto 交叉编译时 CMake 找到了宿主工具
 
 Source 了 Yocto SDK 环境后，`CC`/`CXX` 已设为交叉编译器。若 CMake 仍选择宿主机编译器，检查是否有缓存覆盖了设置：
 
@@ -1810,7 +1927,7 @@ rm -rf build_yocto/CMakeCache.txt
 cmake ...  # 重新配置
 ```
 
-### 1.9.14 查看完整编译配置
+### 1.10.14 查看完整编译配置
 
 编译完成后，可在 `<build>/output/etc/vlink/vlink-options.txt` 中查看完整的编译选项摘要（路径由 `INSTALL_CONFIG_DIR` CMake 缓存变量决定，默认相对前缀为 `etc/vlink`）：
 

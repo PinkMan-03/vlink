@@ -183,6 +183,10 @@
 // #define VLINK_ENABLE_WEBVIZ
 #endif
 
+#ifndef VLINK_ENABLE_SYMLINKS
+// #define VLINK_ENABLE_SYMLINKS
+#endif
+
 #ifndef VLINK_ENABLE_COMPLETIONS
 // #define VLINK_ENABLE_COMPLETIONS
 #endif
