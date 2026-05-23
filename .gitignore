@@ -25,3 +25,4 @@ CLAUDE.md
 
 build-*
 !packup/build-*.sh
+!packup/build-*.bat
