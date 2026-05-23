@@ -11,5 +11,3 @@ license = Apache
 depend = openssl
 depend = sqlite
 depend = zstd
-depend = protobuf
-depend = flatbuffers

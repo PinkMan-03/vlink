@@ -20,7 +20,6 @@
 # Required system build deps (CPM fetches DDS/iceoryx/etc itself):
 #   base-devel cmake git
 #   openssl sqlite zstd
-#   protobuf flatbuffers
 #
 # Host support:
 #   - Manjaro / Arch: native; bsdtar is part of base (libarchive).

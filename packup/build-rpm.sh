@@ -16,8 +16,6 @@
 # Required system build deps (CPM fetches DDS/iceoryx/etc itself):
 #   gcc-c++ cmake git
 #   openssl-devel sqlite-devel libzstd-devel
-#   protobuf-devel protobuf-compiler
-#   flatbuffers-devel flatbuffers-compiler
 #
 # Host support:
 #   - Fedora / RHEL / openEuler / Anolis: native; rpmbuild from rpm-build
@@ -55,7 +53,7 @@ case "$PLATFORM_ARCH" in
     *) LIBDIR=lib ;;
 esac
 
-RPM_REQUIRES="openssl-libs, sqlite-libs, libzstd, protobuf, flatbuffers"
+RPM_REQUIRES="openssl-libs, sqlite-libs, libzstd"
 
 [ -d "$BUILD_DIR" ] && rm -rf "$BUILD_DIR"
 

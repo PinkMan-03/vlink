@@ -1676,15 +1676,15 @@ VLink 在 `packup/` 目录下提供两套打包脚本：
 
 | 发行版 | 包名 |
 |---|---|
-| Debian/Ubuntu | `build-essential cmake git libssl-dev libsqlite3-dev libzstd-dev libprotobuf-dev protobuf-compiler libflatbuffers-dev flatbuffers-compiler` |
-| RHEL/Fedora   | `gcc-c++ cmake git openssl-devel sqlite-devel libzstd-devel protobuf-devel protobuf-compiler flatbuffers-devel flatbuffers-compiler` |
-| Arch/Manjaro  | `base-devel cmake git openssl sqlite zstd protobuf flatbuffers` |
+| Debian/Ubuntu | `build-essential cmake git libssl-dev libsqlite3-dev libzstd-dev` |
+| RHEL/Fedora   | `gcc-c++ cmake git openssl-devel sqlite-devel libzstd-devel` |
+| Arch/Manjaro  | `base-devel cmake git openssl sqlite zstd` |
 
 **运行时依赖**（包元数据里声明，由 dpkg/rpm/pacman 安装时自动拉取）：
 
-- DEB：`libssl3 | libssl3t64, libsqlite3-0, libzstd1, libprotobuf23 | libprotobuf32 | libprotobuf32t64, libflatbuffers2 | libflatbuffers23 | libflatbuffers23.5.26`
-- RPM：`openssl-libs, sqlite-libs, libzstd, protobuf, flatbuffers`
-- Arch：`openssl, sqlite, zstd, protobuf, flatbuffers`（写在 `packup/PKGINFO.in` 模板里）
+- DEB：`libssl3 | libssl3t64, libsqlite3-0, libzstd1`
+- RPM：`openssl-libs, sqlite-libs, libzstd`
+- Arch：`openssl, sqlite, zstd`（写在 `packup/PKGINFO.in` 模板里）
 
 > 包内 `INSTALL_CONFIG_DIR=share/vlink`，最终配置文件落到 `/usr/share/vlink/`，
 > 与发行版 `/usr/share/<pkg>` 只读数据约定一致。

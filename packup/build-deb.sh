@@ -16,8 +16,6 @@
 # Required system build deps (CPM fetches DDS/iceoryx/etc itself):
 #   build-essential cmake git
 #   libssl-dev libsqlite3-dev libzstd-dev
-#   libprotobuf-dev protobuf-compiler
-#   libflatbuffers-dev flatbuffers-compiler
 #
 # Host support:
 #   - Debian / Ubuntu : native; dpkg-deb pre-installed
@@ -49,7 +47,7 @@ BUILD_DIR=$SRC_DIR/build-deb
 OUTPUT_DIR=$BUILD_DIR/packup/linux
 VERSION=$(tr -d '[:space:]' < "$SRC_DIR/version.txt")
 
-DEB_DEPENDS="libssl3 | libssl3t64, libsqlite3-0, libzstd1, libprotobuf23 | libprotobuf32 | libprotobuf32t64, libflatbuffers2 | libflatbuffers23 | libflatbuffers23.5.26"
+DEB_DEPENDS="libssl3 | libssl3t64, libsqlite3-0, libzstd1"
 
 [ -d "$BUILD_DIR" ] && rm -rf "$BUILD_DIR"
 
