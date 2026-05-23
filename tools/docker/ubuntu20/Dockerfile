@@ -246,14 +246,14 @@ RUN python3 -m pip install --no-cache-dir \
     conan \
     jinja2
 RUN python3 -m pip install --no-cache-dir \
-    cppcheck \
-    gcovr \
-    coverage \
-    cpplint \
-    cmake \
-    cmake-format \
-    clang-format \
-    clang-tidy
+    "cmake==3.30.9" \
+    "cmake-format==0.6.13" \
+    "clang-format==21.1.8" \
+    "clang-tidy==21.1.6" \
+    "cpplint==2.0.1" \
+    "cppcheck==1.5.1" \
+    "gcovr==8.2" \
+    "coverage==7.6.1"
 
 #=== fixuid
 COPY fixuid /usr/local/bin/fixuid
