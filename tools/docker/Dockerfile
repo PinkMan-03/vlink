@@ -44,6 +44,7 @@ RUN apt-get install -yq --no-install-recommends \
     wget \
     git \
     git-lfs \
+    rpm \
     zsh \
     zsh-syntax-highlighting \
     zsh-autosuggestions \
