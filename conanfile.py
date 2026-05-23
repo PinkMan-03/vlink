@@ -82,7 +82,7 @@ class VLinkConan(ConanFile):
         "enable_webviz_foxglove": False,
         "enable_webviz_rerun": False,
         "enable_symlinks": True,
-        "enable_completions": False,
+        "enable_completions": True,
         "enable_examples": False,
         "enable_test": False,
         "enable_test_warn": False,
