@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-VLINK_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
-export VLINK_ROOT_DIR="$(cd "$VLINK_BIN_DIR/.." && pwd)"
+export VLINK_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 export VLINK_ETC_DIR="$VLINK_ROOT_DIR/etc"
 export VLINK_COMPLETIONS="$VLINK_ETC_DIR/vlink/vlink-completions.sh"
 
@@ -35,7 +34,7 @@ fi
 echo -e "Support commands: [proxy] [info] [monitor] [bag] [list] [eproto] [efbs] [dump] [check] [bench] [viewer] [player] [analyzer] [webviz]"
 echo -e ""
 
-[[ "$PATH" != *"$VLINK_BIN_DIR"* ]] && export PATH="$VLINK_BIN_DIR:$PATH"
+[[ "$PATH" != *"$VLINK_ROOT_DIR/bin"* ]] && export PATH="$VLINK_ROOT_DIR/bin:$PATH"
 [[ "$LD_LIBRARY_PATH" != *"$VLINK_ROOT_DIR/lib"* ]] && export LD_LIBRARY_PATH="$VLINK_ROOT_DIR/lib:$LD_LIBRARY_PATH"
 [[ "$DYLD_LIBRARY_PATH" != *"$VLINK_ROOT_DIR/lib"* ]] && export DYLD_LIBRARY_PATH="$VLINK_ROOT_DIR/lib:$DYLD_LIBRARY_PATH"
 [[ "$LC_RPATH" != *"$VLINK_ROOT_DIR/lib"* ]] && export LC_RPATH="$VLINK_ROOT_DIR/lib:$LC_RPATH"
@@ -43,8 +42,8 @@ echo -e ""
 export VLINK_DIR="$VLINK_ROOT_DIR"
 export vlink_DIR="$VLINK_ROOT_DIR/lib/cmake/vlink"
 [[ ";$CMAKE_PREFIX_PATH;" != *";$VLINK_ROOT_DIR;"* ]] && export CMAKE_PREFIX_PATH="$VLINK_ROOT_DIR${CMAKE_PREFIX_PATH:+;$CMAKE_PREFIX_PATH}"
-# export VLINK_PROTOC_PROGRAM="$VLINK_BIN_DIR/protoc"
-# export VLINK_FLATC_PROGRAM="$VLINK_BIN_DIR/flatc"
+# export VLINK_PROTOC_PROGRAM="$VLINK_ROOT_DIR/bin/protoc"
+# export VLINK_FLATC_PROGRAM="$VLINK_ROOT_DIR/bin/flatc"
 [ -f "$VLINK_COMPLETIONS" ] && source "$VLINK_COMPLETIONS"
 
 function kill_proxy() {

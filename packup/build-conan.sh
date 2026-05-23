@@ -297,11 +297,12 @@ if [ "$PLATFORM_OS" = "Darwin" ];then
         done
     fi
 
-    for f in run_viewer.sh run_player.sh run_analyzer.sh setup_runtime.sh vlink-cmd.sh;do
+    for f in run_viewer.sh run_player.sh run_analyzer.sh run_cmd.sh;do
         [ -f $WORK_DIR/darwin/$f ] && cmake -E copy $WORK_DIR/darwin/$f $PACKUP_DIR/bin/
     done
     [ -f $WORK_DIR/darwin/install.sh ] && cmake -E copy $WORK_DIR/darwin/install.sh $PACKUP_DIR/
     [ -f $WORK_DIR/darwin/uninstall.sh ] && cmake -E copy $WORK_DIR/darwin/uninstall.sh $PACKUP_DIR/
+    [ -f $WORK_DIR/darwin/setup_runtime.sh ] && cmake -E copy $WORK_DIR/darwin/setup_runtime.sh $PACKUP_DIR/
     cmake -E copy $WORK_DIR/darwin/qt.conf $PACKUP_DIR/bin/
     for f in $(find $WORK_DIR/darwin -maxdepth 1 \( -name '*.png' -o -name '*.svg' \));do
         cmake -E copy $f $PACKUP_DIR/desktop/
@@ -483,11 +484,12 @@ else
         done
     fi
 
-    for f in run_viewer.sh run_player.sh run_analyzer.sh setup_runtime.sh vlink-cmd.sh;do
+    for f in run_viewer.sh run_player.sh run_analyzer.sh run_cmd.sh;do
         [ -f $WORK_DIR/linux/common/$f ] && cmake -E copy $WORK_DIR/linux/common/$f $PACKUP_DIR/bin/
     done
     [ -f $WORK_DIR/linux/common/install.sh ] && cmake -E copy $WORK_DIR/linux/common/install.sh $PACKUP_DIR/
     [ -f $WORK_DIR/linux/common/uninstall.sh ] && cmake -E copy $WORK_DIR/linux/common/uninstall.sh $PACKUP_DIR/
+    [ -f $WORK_DIR/linux/common/setup_runtime.sh ] && cmake -E copy $WORK_DIR/linux/common/setup_runtime.sh $PACKUP_DIR/
     cmake -E copy $WORK_DIR/linux/common/qt.conf $PACKUP_DIR/bin/
     chmod +x $PACKUP_DIR/bin/*.sh $PACKUP_DIR/*.sh 2>/dev/null
     for f in $(find $WORK_DIR/linux/common -maxdepth 1 \( -name '*.desktop' -o -name '*.png' -o -name '*.svg' -o -name '*.xml' \));do

@@ -25,7 +25,7 @@ sed -i "s#Exec=run_player.sh#Exec=${VLINK_BIN_DIR}/run_player.sh#g" ~/.local/sha
 sed -i "s#Icon=vlink-analyzer.png#Icon=${DESKTOP_DIR}/vlink-analyzer.png#g" ~/.local/share/applications/vlink-analyzer.desktop
 sed -i "s#Exec=run_analyzer.sh#Exec=${VLINK_BIN_DIR}/run_analyzer.sh#g" ~/.local/share/applications/vlink-analyzer.desktop
 sed -i "s#Icon=vlink-cmd.png#Icon=${DESKTOP_DIR}/vlink-cmd.png#g" ~/.local/share/applications/vlink-cmd.desktop
-sed -i "s#Exec=vlink-cmd.sh#Exec=${VLINK_BIN_DIR}/vlink-cmd.sh#g" ~/.local/share/applications/vlink-cmd.desktop
+sed -i "s#Exec=run_cmd.sh#Exec=${VLINK_BIN_DIR}/run_cmd.sh#g" ~/.local/share/applications/vlink-cmd.desktop
 
 chmod a+x ~/.local/share/applications/vlink-viewer.desktop
 chmod a+x ~/.local/share/applications/vlink-player.desktop

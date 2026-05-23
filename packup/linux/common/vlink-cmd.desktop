@@ -2,6 +2,6 @@
 Type=Application
 Name=VLink CMD
 Terminal=true
-Exec=vlink-cmd.sh
+Exec=run_cmd.sh
 Icon=vlink-cmd.png
 Categories=Development

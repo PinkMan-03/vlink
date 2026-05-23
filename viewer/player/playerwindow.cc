@@ -827,7 +827,7 @@ void PlayerWindow::on_toolButton_viewer_clicked() {
 
 void PlayerWindow::on_toolButton_cmd_clicked() {
 #ifdef _WIN32
-  QString script_path = qApp->applicationDirPath() + "/vlink-cmd.bat";
+  QString script_path = qApp->applicationDirPath() + "/run_cmd.bat";
 
   if (!QFile::exists(script_path)) {
     return;
@@ -835,7 +835,7 @@ void PlayerWindow::on_toolButton_cmd_clicked() {
 
   QProcess::startDetached(script_path);
 #else
-  QString script_path = qApp->applicationDirPath() + "/vlink-cmd.sh";
+  QString script_path = qApp->applicationDirPath() + "/run_cmd.sh";
 
   if (!QFile::exists(script_path)) {
     return;
