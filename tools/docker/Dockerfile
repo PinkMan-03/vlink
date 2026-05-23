@@ -29,8 +29,8 @@ RUN groupadd --gid $USER_GID $USERNAME && useradd --uid $USER_UID --gid $USER_GI
     echo "root:$ROOT_PASSWORD" | chpasswd && echo "$USERNAME:$USER_PASSWORD" | chpasswd
 
 #=== change apt source to USTC
-RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list && \
-    sed -i 's@http://security.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list
+RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@http://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list && \
+    sed -i 's@http://security.ubuntu.com/ubuntu/@http://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list
 
 #=== apt-get
 RUN apt-get update
@@ -240,23 +240,16 @@ RUN pip config --no-cache-dir --global set global.index-url https://pypi.mirrors
     pip config --no-cache-dir --global set global.trusted-host pypi.mirrors.ustc.edu.cn
 
 RUN pip install --no-cache-dir \
-    vcstool \
+    vcs2l \
     conan \
     jinja2 \
     cppcheck \
-    "gcovr==8.4" \
-    "cpplint==2.0.2" \
-    "cmake-format==0.6.13" \
-    "clang-format==21.1.8" \
-    "clang-tidy==21.1.6"
-
-#=== cmake
-# RUN wget -q https://cmake.org/files/v3.31/cmake-3.31.10-linux-x86_64.sh -O /tmp/cmake-linux.sh && \
-#     chmod +x /tmp/cmake-linux.sh && /tmp/cmake-linux.sh --skip-license --prefix=/usr/local
-
-#=== lcov
-RUN wget -q https://archive.ubuntu.com/ubuntu/pool/universe/l/lcov/lcov_2.3.2-1_all.deb -O /tmp/lcov.deb && \
-    dpkg -i /tmp/lcov.deb
+    coverage \
+    gcovr \
+    cpplint \
+    cmake-format \
+    clang-format \
+    clang-tidy
 
 #=== fixuid
 COPY fixuid /usr/local/bin/fixuid

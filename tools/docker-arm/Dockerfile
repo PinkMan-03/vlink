@@ -29,8 +29,8 @@ RUN groupadd --gid $USER_GID $USERNAME && useradd --uid $USER_UID --gid $USER_GI
     echo "root:$ROOT_PASSWORD" | chpasswd && echo "$USERNAME:$USER_PASSWORD" | chpasswd
 
 #=== change apt source to USTC
-RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list && \
-    sed -i 's@http://security.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list
+RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@http://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list && \
+    sed -i 's@http://security.ubuntu.com/ubuntu/@http://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list
 
 #=== apt-get
 RUN apt-get update
@@ -240,14 +240,9 @@ RUN pip config --no-cache-dir --global set global.index-url https://pypi.mirrors
     pip config --no-cache-dir --global set global.trusted-host pypi.mirrors.ustc.edu.cn
 
 RUN pip install --no-cache-dir \
-    vcstool \
+    vcs2l \
     conan \
-    jinja2 \
-    cppcheck
-
-#=== cmake
-# RUN wget -q https://cmake.org/files/v3.31/cmake-3.31.10-linux-aarch64.sh -O /tmp/cmake-linux.sh && \
-#     chmod +x /tmp/cmake-linux.sh && /tmp/cmake-linux.sh --skip-license --prefix=/usr/local
+    jinja2
 
 #=== bash
 ARG DOCKER_VERSION=${DOCKER_VERSION:-1.0.0}
