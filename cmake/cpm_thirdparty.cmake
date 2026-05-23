@@ -117,11 +117,12 @@ if(ENABLE_CPM_ALL OR ENABLE_CPM_PROTOBUF)
   endif()
 endif()
 if(ENABLE_CPM_ALL OR ENABLE_CPM_FLATBUFFERS)
+  set(flatbuffers_VERSION_STRING "25.9.23")
   cpmaddpackage(
     NAME
     flatbuffers
     URL
-    "https://github.com/google/flatbuffers/archive/refs/tags/v25.9.23.zip"
+    "https://github.com/google/flatbuffers/archive/refs/tags/v${flatbuffers_VERSION_STRING}.zip"
     OPTIONS
     "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
     "CMAKE_POSITION_INDEPENDENT_CODE ON"

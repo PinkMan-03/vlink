@@ -238,7 +238,7 @@ if(ENABLE_CLI_EFBS
    OR ENABLE_WEBVIZ
 )
   find_package(flatbuffers CONFIG QUIET)
-  if(flatbuffers_FOUND AND NOT DEFINED flatbuffers_VERSION)
+  if((NOT DEFINED flatbuffers_VERSION OR flatbuffers_VERSION STREQUAL "") AND DEFINED flatbuffers_VERSION_STRING)
     set(flatbuffers_VERSION ${flatbuffers_VERSION_STRING})
   endif()
   if((NOT TARGET flatbuffers::flatbuffers_shared AND NOT TARGET flatbuffers::flatbuffers)
