@@ -42,8 +42,6 @@ if(UNIX
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
   set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON)
   set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
-  # libc6 / libstdc++6 versions are auto-resolved by dpkg-shlibdeps based on the actual symbols referenced by the built
-  # binaries on the build host, so we don't pin a Pre-Depends version here. rpm
   set(CPACK_RPM_PACKAGE_LICENSE "Apache-2.0")
   set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
   set(CPACK_RPM_PACKAGE_URL "${CPACK_PACKAGE_HOMEPAGE_URL}")

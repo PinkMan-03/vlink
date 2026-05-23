@@ -15,8 +15,8 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE "DOCTEST_CONFIG_USE_STD_HEADE
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_CLANG_TIDY "")
 
 if(WIN32)
-  if(EXISTS ${CMAKE_SOURCE_DIR}/tools/ico/vlink-cmd.rc)
-    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/tools/ico/vlink-cmd.rc)
+  if(EXISTS ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
+    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
   endif()
 endif()
 

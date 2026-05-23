@@ -100,7 +100,7 @@ if [ ! -z $OSG_DIR ];then
             -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_PREFIX_PATH=$QT_DIR \
-            -DENABLE_EXAMPLES=ON \
+            -DENABLE_IOX_ROUDI=ON \
             -DENABLE_VIEWER=ON \
             -DENABLE_VIEWER_FFMPEG=ON \
             -DENABLE_VIEWER_OSG=ON \
@@ -112,7 +112,7 @@ if [ ! -z $OSG_DIR ];then
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_EXAMPLES=ON \
+            -DENABLE_IOX_ROUDI=ON \
             -DENABLE_VIEWER=ON \
             -DENABLE_VIEWER_FFMPEG=ON \
             -DENABLE_VIEWER_OSG=ON \
@@ -127,7 +127,7 @@ else
             -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
             -DCMAKE_PREFIX_PATH=$QT_DIR \
-            -DENABLE_EXAMPLES=ON \
+            -DENABLE_IOX_ROUDI=ON \
             -DENABLE_VIEWER=ON \
             -DENABLE_VIEWER_FFMPEG=ON \
             -DENABLE_VIEWER_OSG=OFF \
@@ -139,7 +139,7 @@ else
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_EXAMPLES=ON \
+            -DENABLE_IOX_ROUDI=ON \
             -DENABLE_VIEWER=ON \
             -DENABLE_VIEWER_FFMPEG=ON \
             -DENABLE_VIEWER_OSG=OFF \
@@ -151,7 +151,7 @@ else
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
             -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_EXAMPLES=ON \
+            -DENABLE_IOX_ROUDI=ON \
             -DENABLE_VIEWER=ON \
             -DENABLE_VIEWER_FFMPEG=ON \
             -DENABLE_VIEWER_OSG=ON \

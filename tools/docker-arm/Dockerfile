@@ -28,6 +28,10 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 RUN groupadd --gid $USER_GID $USERNAME && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME && \
     echo "root:$ROOT_PASSWORD" | chpasswd && echo "$USERNAME:$USER_PASSWORD" | chpasswd
 
+#=== change apt source to USTC
+RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list && \
+    sed -i 's@http://security.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list
+
 #=== apt-get
 RUN apt-get update
 RUN apt-get install -yq --no-install-recommends \
@@ -85,6 +89,8 @@ RUN apt-get install -yq --no-install-recommends \
     libsqlite3-dev \
     libprotobuf-dev \
     protobuf-compiler \
+    flatbuffers-compiler \
+    libflatbuffers-dev \
     libprotoc-dev \
     openjdk-17-jdk \
     libasio-dev \

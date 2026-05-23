@@ -66,6 +66,9 @@ include(CheckCXXCompilerFlag)
 check_cxx_compiler_flag("-std=c++20" COMPILER_SUPPORTS_CXX20)
 
 # ipo
+if(POLICY CMP0069)
+  cmake_policy(SET CMP0069 NEW)
+endif()
 if(NOT MSVC AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   include(CheckIPOSupported)
   check_ipo_supported(RESULT ipo_supported)
@@ -75,9 +78,6 @@ if(NOT MSVC AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   else()
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
   endif()
-endif()
-if(POLICY CMP0069)
-  cmake_policy(SET CMP0069 NEW)
 endif()
 
 # options

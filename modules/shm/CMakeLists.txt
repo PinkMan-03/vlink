@@ -9,6 +9,7 @@ project(vlink-${VLINK_MODULE_NAME} LANGUAGES CXX)
 
 # options
 option(SKIP_SHM "Skip shm module" OFF)
+option(ENABLE_IOX_ROUDI "Install iox-roudi" OFF)
 
 if(SKIP_SHM)
   message(STATUS "Skip shm module")
@@ -72,46 +73,44 @@ install(
 vlink_export(${PROJECT_NAME} ${PROJECT_NAME} ${PROJECT_NAMESPACE} ${CMAKE_PROJECT_VERSION})
 
 # iox-roudi
-if(TARGET iceoryx_posh::iox-roudi)
-  get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_RELEASE)
-
-  if(NOT EXISTS "${ROUDI_EXECUTABLE}")
-    get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_RELWITHDEBINFO)
-  endif()
-
-  if(NOT EXISTS "${ROUDI_EXECUTABLE}")
-    get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_MINSIZEREL)
-  endif()
-
-  if(NOT EXISTS "${ROUDI_EXECUTABLE}")
-    get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_DEBUG)
-  endif()
-
-  if(NOT EXISTS "${ROUDI_EXECUTABLE}")
-    get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_NOCONFIG)
-  endif()
-
-  if(EXISTS "${ROUDI_EXECUTABLE}")
-    add_custom_command(
-      TARGET ${PROJECT_NAME}
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy "${ROUDI_EXECUTABLE}" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-    )
-  endif()
-elseif(iceoryx_PACKAGE_FOLDER_RELEASE)
-  if(WIN32)
-    add_custom_command(
-      TARGET ${PROJECT_NAME}
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy "${iceoryx_PACKAGE_FOLDER_RELEASE}/bin/iox-roudi.exe"
-              "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-    )
-  else()
-    add_custom_command(
-      TARGET ${PROJECT_NAME}
-      POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy "${iceoryx_PACKAGE_FOLDER_RELEASE}/bin/iox-roudi"
-              "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-    )
+if(ENABLE_IOX_ROUDI)
+  if(TARGET iceoryx_posh::iox-roudi)
+    get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_RELEASE)
+    if(NOT EXISTS "${ROUDI_EXECUTABLE}")
+      get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_RELWITHDEBINFO)
+    endif()
+    if(NOT EXISTS "${ROUDI_EXECUTABLE}")
+      get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_MINSIZEREL)
+    endif()
+    if(NOT EXISTS "${ROUDI_EXECUTABLE}")
+      get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_DEBUG)
+    endif()
+    if(NOT EXISTS "${ROUDI_EXECUTABLE}")
+      get_target_property(ROUDI_EXECUTABLE iceoryx_posh::iox-roudi IMPORTED_LOCATION_NOCONFIG)
+    endif()
+    if(EXISTS "${ROUDI_EXECUTABLE}")
+      add_dependencies(${PROJECT_NAME} iceoryx_posh::iox-roudi)
+      add_custom_command(
+        TARGET ${PROJECT_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy "${ROUDI_EXECUTABLE}" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      )
+    endif()
+  elseif(iceoryx_PACKAGE_FOLDER_RELEASE)
+    if(WIN32)
+      add_custom_command(
+        TARGET ${PROJECT_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy "${iceoryx_PACKAGE_FOLDER_RELEASE}/bin/iox-roudi.exe"
+                "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      )
+    else()
+      add_custom_command(
+        TARGET ${PROJECT_NAME}
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy "${iceoryx_PACKAGE_FOLDER_RELEASE}/bin/iox-roudi"
+                "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      )
+    endif()
   endif()
 endif()

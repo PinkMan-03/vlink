@@ -90,7 +90,7 @@ if not "%OSG_DIR%"=="" (
         -DCMAKE_BUILD_TYPE=Release ^
         -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
         -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
-        -DENABLE_EXAMPLES=ON ^
+        -DENABLE_IOX_ROUDI=ON ^
         -DENABLE_VIEWER=ON ^
         -DENABLE_VIEWER_FFMPEG=ON ^
         -DENABLE_VIEWER_OSG=ON ^
@@ -103,7 +103,7 @@ if not "%OSG_DIR%"=="" (
         -DCMAKE_BUILD_TYPE=Release ^
         -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
         -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
-        -DENABLE_EXAMPLES=ON ^
+        -DENABLE_IOX_ROUDI=ON ^
         -DENABLE_VIEWER=ON ^
         -DENABLE_VIEWER_FFMPEG=ON ^
         -DENABLE_VIEWER_OSG=OFF ^

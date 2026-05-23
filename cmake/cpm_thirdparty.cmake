@@ -30,7 +30,7 @@ if(ENABLE_CPM_ALL OR ENABLE_CPM_SQLITE3)
     URL
     "https://github.com/sjinks/sqlite3-cmake/archive/refs/tags/v3.45.3.zip"
     PATCHES
-    "${CMAKE_SOURCE_DIR}/tools/patch/sqlite3-cmake.patch"
+    "${CMAKE_SOURCE_DIR}/packup/patch/sqlite3-cmake.patch"
     OPTIONS
     "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
     "CMAKE_POSITION_INDEPENDENT_CODE ON"
@@ -212,7 +212,7 @@ cpmaddpackage(
   URL
   "https://github.com/eProsima/Fast-DDS/archive/refs/tags/v2.10.7.zip"
   PATCHES
-  "${CMAKE_SOURCE_DIR}/tools/patch/fastdds_2.10.x.patch"
+  "${CMAKE_SOURCE_DIR}/packup/patch/fastdds_2.10.x.patch"
   OPTIONS
   "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
@@ -228,7 +228,7 @@ cpmaddpackage(
   URL
   "https://github.com/eclipse-cyclonedds/cyclonedds/archive/refs/tags/0.10.5.zip"
   PATCHES
-  "${CMAKE_SOURCE_DIR}/tools/patch/cyclonedds_0.10.x.patch"
+  "${CMAKE_SOURCE_DIR}/packup/patch/cyclonedds_0.10.x.patch"
   OPTIONS
   "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"
@@ -250,7 +250,7 @@ cpmaddpackage(
   URL
   "https://github.com/eclipse-iceoryx/iceoryx/archive/refs/tags/v2.0.8.zip"
   PATCHES
-  "${CMAKE_SOURCE_DIR}/tools/patch/iceoryx_2.0.x.patch"
+  "${CMAKE_SOURCE_DIR}/packup/patch/iceoryx_2.0.x.patch"
   SOURCE_SUBDIR
   "iceoryx_meta"
   OPTIONS
@@ -281,5 +281,11 @@ if(iceoryx_ADDED
    AND NOT TARGET iceoryx_posh::iceoryx_posh_roudi
 )
   add_library(iceoryx_posh::iceoryx_posh_roudi ALIAS iceoryx_posh_roudi)
+endif()
+if(iceoryx_ADDED
+   AND TARGET iox-roudi
+   AND NOT TARGET iceoryx_posh::iox-roudi
+)
+  add_executable(iceoryx_posh::iox-roudi ALIAS iox-roudi)
 endif()
 unset(CMAKE_PROJECT_INCLUDE_BEFORE)

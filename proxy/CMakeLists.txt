@@ -16,8 +16,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE vlink::vlink vlink::all)
 target_link_libraries(${PROJECT_NAME} PRIVATE thirdparty::bitsery thirdparty::argparse vlink::proxy_server)
 
 if(WIN32)
-  if(EXISTS ${CMAKE_SOURCE_DIR}/tools/ico/vlink-cmd.rc)
-    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/tools/ico/vlink-cmd.rc)
+  if(EXISTS ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
+    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
   endif()
 endif()
 

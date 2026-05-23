@@ -28,6 +28,10 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 RUN groupadd --gid $USER_GID $USERNAME && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME && \
     echo "root:$ROOT_PASSWORD" | chpasswd && echo "$USERNAME:$USER_PASSWORD" | chpasswd
 
+#=== change apt source to USTC
+RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list && \
+    sed -i 's@http://security.ubuntu.com/ubuntu/@https://mirrors.ustc.edu.cn/ubuntu/@g' /etc/apt/sources.list
+
 #=== apt-get
 RUN apt-get update
 RUN apt-get install -yq --no-install-recommends \
@@ -254,10 +258,6 @@ RUN pip install --no-cache-dir \
 RUN wget -q https://archive.ubuntu.com/ubuntu/pool/universe/l/lcov/lcov_2.3.2-1_all.deb -O /tmp/lcov.deb && \
     dpkg -i /tmp/lcov.deb
 
-#=== repo
-COPY repo /usr/local/bin/repo
-RUN chmod +x /usr/local/bin/repo
-
 #=== fixuid
 COPY fixuid /usr/local/bin/fixuid
 RUN chown root:root /usr/local/bin/fixuid && chmod 4755 /usr/local/bin/fixuid && \
@@ -273,10 +273,6 @@ RUN chown root:root /usr/local/bin/fixuid && chmod 4755 /usr/local/bin/fixuid &&
 # RUN wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
 #     chmod +x /tmp/dotnet-install.sh && /tmp/dotnet-install.sh --runtime dotnet -c 7.0 -i /opt/dotnet && \
 #     ln -sf /opt/dotnet/dotnet /usr/local/bin/dotnet
-
-#=== thirdparty
-COPY install-thirdparty.sh /opt/install-thirdparty.sh
-# RUN chmod +x /opt/install-thirdparty.sh && /opt/install-thirdparty.sh
 
 #=== bash
 ARG DOCKER_VERSION=${DOCKER_VERSION:-1.0.0}

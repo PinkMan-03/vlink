@@ -28,8 +28,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE thirdparty::argparse thirdparty::j
 
 if(WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE Psapi)
-  if(EXISTS ${CMAKE_SOURCE_DIR}/tools/ico/vlink-cmd.rc)
-    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/tools/ico/vlink-cmd.rc)
+  if(EXISTS ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
+    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
   endif()
 endif()
 
