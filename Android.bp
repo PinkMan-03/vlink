@@ -166,7 +166,6 @@ cc_library_shared {
     defaults: [
         "libvlink-defaults",
     ],
-    rtti: true,
     // vendor_available: true,
     srcs: [
         "proxy/proxy_api/*.cc",
@@ -197,7 +196,6 @@ cc_library_shared {
     defaults: [
         "libvlink-defaults",
     ],
-    rtti: true,
     // vendor_available: true,
     srcs: [
         "proxy/proxy_server/*.cc",
@@ -228,7 +226,6 @@ cc_binary {
     defaults: [
         "libvlink-defaults",
     ],
-    rtti: true,
     srcs: [
         "proxy/*.cc",
     ],
