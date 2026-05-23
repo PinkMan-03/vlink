@@ -384,7 +384,7 @@ vlink-proxy --runnable my_plugin_a my_plugin_b
 
 #### 16.8.6.2 数据结构
 
-握手与时钟/控制面消息均为内部 wire 类型,定义在 `proxy/proxy_common.h` 中,使用 cereal `PortableBinaryArchive` 序列化:
+握手与时钟/控制面消息均为内部 wire 类型,定义在 `proxy/proxy_common.h` 中,使用 bitsery `OutputBufferAdapter`/`InputBufferAdapter` 二进制序列化:
 
 ```cpp
 // proxy/proxy_common.h
@@ -689,7 +689,7 @@ api.send_data(data);  // send_data() 同样要求显式传入 ser + schema
 
 ## 16.13 ProxyData 零拷贝传输
 
-数据通道统一使用 `zerocopy::ProxyData` 结构体在 proxy_server ↔ proxy_api 之间传输,绕开了控制面采用的 cereal 序列化路径。
+数据通道统一使用 `zerocopy::ProxyData` 结构体在 proxy_server ↔ proxy_api 之间传输,绕开了控制面采用的 bitsery 序列化路径。
 
 `ProxyData` 是一个 **80 字节固定头部 + 变长尾部** 的平坦内存结构：
 

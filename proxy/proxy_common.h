@@ -27,19 +27,80 @@
 #include <vlink/base/logger.h>
 #include <vlink/external/proxy_api.h>
 //
-#include <cereal/archives/portable_binary.hpp>
-#include <cereal/types/string.hpp>
-#include <cereal/types/vector.hpp>
+#include <bitsery/adapter/buffer.h>
+#include <bitsery/bitsery.h>
+#include <bitsery/brief_syntax.h>
+#include <bitsery/brief_syntax/string.h>
+#include <bitsery/brief_syntax/vector.h>
+#include <bitsery/ext/growable.h>
+#include <bitsery/traits/vector.h>
 //
+#include <algorithm>
 #include <cstdint>
-#include <sstream>
+#include <cstring>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #define VLINK_PROXY_ENABLE_FILTER 1
-
 #define VLINK_PROXY_ENABLE_HANDSHAKE 1
+
+namespace bitsery {
+
+namespace traits {
+
+template <>
+struct ContainerTraits<vlink::Bytes> {
+  using TValue = uint8_t;
+  static constexpr bool isResizable = true;
+  static constexpr bool isContiguous = true;
+
+  static size_t size(const vlink::Bytes& c) noexcept { return c.size(); }
+};
+
+template <>
+struct BufferAdapterTraits<vlink::Bytes> {
+  using TIterator = uint8_t*;
+  using TConstIterator = const uint8_t*;
+  using TValue = uint8_t;
+
+  static void increaseBufferSize(vlink::Bytes& c, size_t currSize, size_t minSize) {
+    const size_t cap = c.capacity();
+    size_t target;
+
+    if (cap == 0) {
+      target = std::max<size_t>(minSize, vlink::Bytes::stack_size());
+    } else {
+      target = cap + (cap >> 1) + 64;
+      target -= target % 64;
+
+      if (target < minSize) {
+        target = (minSize + 63) & ~size_t{63};
+      }
+    }
+
+    if VUNLIKELY (!c.is_owner()) {
+      auto new_buf = vlink::Bytes::create(target);
+
+      if VUNLIKELY (!new_buf.is_owner()) {
+        throw std::bad_alloc{};
+      }
+
+      if (currSize > 0 && c.data() != nullptr) {
+        std::memcpy(new_buf.data(), c.data(), currSize);
+      }
+
+      c = std::move(new_buf);
+    } else if VUNLIKELY (!c.resize(target)) {
+      throw std::bad_alloc{};
+    }
+  }
+};
+
+}  // namespace traits
+
+}  // namespace bitsery
 
 namespace vlink {
 
@@ -67,6 +128,13 @@ namespace proxy {
 [[maybe_unused]] static constexpr uint32_t kHandshakeWaitMs = 800;
 [[maybe_unused]] static constexpr uint32_t kHandshakeInvokeMs = 800;
 
+[[maybe_unused]] static constexpr size_t kMaxStringSize = 256;
+[[maybe_unused]] static constexpr size_t kMaxTokenSize = 1024;
+[[maybe_unused]] static constexpr size_t kMaxUrlSize = 1024;
+[[maybe_unused]] static constexpr size_t kMaxFilterSize = 4096;
+[[maybe_unused]] static constexpr size_t kMaxTopicListSize = 4096;
+[[maybe_unused]] static constexpr size_t kMaxProcessListSize = 256;
+
 enum HandshakeResult : uint8_t {
   kHandshakeOk = 0,
   kHandshakeVersionMismatch = 1,
@@ -83,25 +151,22 @@ enum HandshakeResult : uint8_t {
   return out;
 }
 
+using OutputAdapter = bitsery::OutputBufferAdapter<Bytes>;
+using InputAdapter = bitsery::InputBufferAdapter<const uint8_t*>;
+
 template <typename T>
 inline bool encode_to_bytes(const T& src, Bytes& des) noexcept {
-  thread_local std::ostringstream oss;
-
-  oss.str(std::string());
-  oss.clear();
+  des.clear();
 
   try {
-    {
-      cereal::PortableBinaryOutputArchive archive(oss);
-      archive(src);
-    }
+    const size_t written = bitsery::quickSerialization<OutputAdapter>(des, src);
 
-    const std::string& str = oss.str();
-    des = Bytes::deep_copy(reinterpret_cast<const uint8_t*>(str.data()), str.size());
+    (void)des.shrink_to(written);
 
     return true;
   } catch (const std::exception& e) {
-    VLOG_T("ProxyCommon: Cereal serialize failed: ", e.what(), ".");
+    des.clear();
+    VLOG_T("ProxyCommon: Bitsery serialize failed: ", e.what(), ".");
     return false;
   }
 }
@@ -110,78 +175,58 @@ template <typename T>
 inline bool decode_from_bytes(const Bytes& src, T& des) noexcept {
   if VUNLIKELY (src.empty()) {
     des = T{};
+    VLOG_T("ProxyCommon: Empty payload, returning default-constructed value.");
     return true;
   }
 
-  thread_local std::istringstream iss;
-
-  iss.str(std::string(reinterpret_cast<const char*>(src.data()), src.size()));
-  iss.clear();
-
   try {
-    cereal::PortableBinaryInputArchive archive(iss);
-    archive(des);
+    const auto state = bitsery::quickDeserialization<InputAdapter>(InputAdapter{src.data(), src.size()}, des);
+
+    if VUNLIKELY (state.first != bitsery::ReaderError::NoError || !state.second) {
+      des = T{};
+      VLOG_T("ProxyCommon: Bitsery deserialize failed: error=", static_cast<int>(state.first),
+             ", completed=", state.second, ".");
+      return false;
+    }
 
     return true;
   } catch (const std::exception& e) {
-    VLOG_T("ProxyCommon: Cereal deserialize failed: ", e.what(), ".");
+    des = T{};
+    VLOG_T("ProxyCommon: Bitsery deserialize failed: ", e.what(), ".");
     return false;
   }
 }
 
 }  // namespace proxy
 
-template <class Archive>
-inline void serialize(Archive& ar, ProxyAPI::Process& msg) {
-  ar(msg.type, msg.host, msg.pid, msg.name, msg.ip);
+static_assert(sizeof(ProxyAPI::Mode) == 1, "wire format: ProxyAPI::Mode must remain 1 byte");
+static_assert(sizeof(ProxyAPI::Status) == 1, "wire format: ProxyAPI::Status must remain 1 byte");
+static_assert(sizeof(SchemaType) == 1, "wire format: SchemaType must remain 1 byte");
+static_assert(sizeof(ImplType) == 1, "wire format: ImplType must remain 1 byte");
+static_assert(sizeof(proxy::HandshakeResult) == 1, "wire format: HandshakeResult must remain 1 byte");
+
+template <typename S>
+inline void serialize(S& s, ProxyAPI::Process& msg) {
+  s(msg.type, bitsery::maxSize(msg.host, proxy::kMaxStringSize), msg.pid,
+    bitsery::maxSize(msg.name, proxy::kMaxStringSize), bitsery::maxSize(msg.ip, proxy::kMaxStringSize));
 }
 
-template <class Archive>
-inline void save(Archive& ar, const ProxyAPI::UrlMeta& msg) {
-  ar(msg.url, msg.ser, static_cast<uint8_t>(msg.schema), static_cast<uint8_t>(msg.type));
+template <typename S>
+inline void serialize(S& s, ProxyAPI::UrlMeta& msg) {
+  s(bitsery::maxSize(msg.url, proxy::kMaxUrlSize), bitsery::maxSize(msg.ser, proxy::kMaxUrlSize), msg.schema, msg.type);
 }
 
-template <class Archive>
-inline void load(Archive& ar, ProxyAPI::UrlMeta& msg) {
-  uint8_t schema_value{0};
-  uint8_t type_value{0};
-
-  ar(msg.url, msg.ser, schema_value, type_value);
-
-  msg.schema = static_cast<SchemaType>(schema_value);
-  msg.type = static_cast<ImplType>(type_value);
+template <typename S>
+inline void serialize(S& s, ProxyAPI::Info& msg) {
+  s(msg.type, bitsery::maxSize(msg.url, proxy::kMaxUrlSize), bitsery::maxSize(msg.ser, proxy::kMaxUrlSize), msg.schema,
+    msg.status, msg.freq, msg.rate, msg.loss, msg.latency,
+    bitsery::maxSize(msg.process_list, proxy::kMaxProcessListSize));
 }
 
-template <class Archive>
-inline void save(Archive& ar, const ProxyAPI::Info& msg) {
-  ar(msg.type, msg.url, msg.ser, static_cast<uint8_t>(msg.schema), static_cast<uint8_t>(msg.status), msg.freq, msg.rate,
-     msg.loss, msg.latency, msg.process_list);
-}
-
-template <class Archive>
-inline void load(Archive& ar, ProxyAPI::Info& msg) {
-  uint8_t schema_value{0};
-  uint8_t status_value{0};
-
-  ar(msg.type, msg.url, msg.ser, schema_value, status_value, msg.freq, msg.rate, msg.loss, msg.latency,
-     msg.process_list);
-
-  msg.schema = static_cast<SchemaType>(schema_value);
-  msg.status = static_cast<ProxyAPI::Status>(status_value);
-}
-
-template <class Archive>
-inline void save(Archive& ar, const ProxyAPI::Control& msg) {
-  ar(static_cast<uint8_t>(msg.mode), msg.url_meta_list, msg.filter_by_process, msg.filter_str, msg.filter_type);
-}
-
-template <class Archive>
-inline void load(Archive& ar, ProxyAPI::Control& msg) {
-  uint8_t mode_value{0};
-
-  ar(mode_value, msg.url_meta_list, msg.filter_by_process, msg.filter_str, msg.filter_type);
-
-  msg.mode = static_cast<ProxyAPI::Mode>(mode_value);
+template <typename S>
+inline void serialize(S& s, ProxyAPI::Control& msg) {
+  s(msg.mode, bitsery::maxSize(msg.url_meta_list, proxy::kMaxTopicListSize), msg.filter_by_process,
+    bitsery::maxSize(msg.filter_str, proxy::kMaxFilterSize), msg.filter_type);
 }
 
 namespace proxy {
@@ -191,9 +236,11 @@ struct ControlPacket final {
   std::string token;
   ProxyAPI::Control body;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-    ar(control_id, token, body);
+  template <typename S>
+  void serialize(S& s) {
+    s.ext(*this, bitsery::ext::Growable{}, [](S& sub, ControlPacket& obj) {
+      sub(obj.control_id, bitsery::maxSize(obj.token, kMaxTokenSize), obj.body);
+    });
   }
 
   bool operator>>(Bytes& des) const noexcept { return encode_to_bytes(*this, des); }
@@ -205,9 +252,12 @@ struct InfoListPacket final {
   std::string hostname;
   std::vector<ProxyAPI::Info> info_list;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-    ar(control_id, hostname, info_list);
+  template <typename S>
+  void serialize(S& s) {
+    s.ext(*this, bitsery::ext::Growable{}, [](S& sub, InfoListPacket& obj) {
+      sub(obj.control_id, bitsery::maxSize(obj.hostname, kMaxStringSize),
+          bitsery::maxSize(obj.info_list, kMaxTopicListSize));
+    });
   }
 
   bool operator>>(Bytes& des) const noexcept { return encode_to_bytes(*this, des); }
@@ -229,20 +279,14 @@ struct TimePacket final {
   double memory_usage{0.0};
   std::string token;
 
-  template <class Archive>
-  void save(Archive& ar) const {
-    ar(control_id, static_cast<uint8_t>(mode), sys_time, boot_time, reliable_mode, tcp_mode, direct_mode, version,
-       hostname, machine_id, cpu_usage, memory_usage, token);
-  }
-
-  template <class Archive>
-  void load(Archive& ar) {
-    uint8_t mode_value{0};
-
-    ar(control_id, mode_value, sys_time, boot_time, reliable_mode, tcp_mode, direct_mode, version, hostname, machine_id,
-       cpu_usage, memory_usage, token);
-
-    mode = static_cast<ProxyAPI::Mode>(mode_value);
+  template <typename S>
+  void serialize(S& s) {
+    s.ext(*this, bitsery::ext::Growable{}, [](S& sub, TimePacket& obj) {
+      sub(obj.control_id, obj.mode, obj.sys_time, obj.boot_time, obj.reliable_mode, obj.tcp_mode, obj.direct_mode,
+          bitsery::maxSize(obj.version, kMaxStringSize), bitsery::maxSize(obj.hostname, kMaxStringSize),
+          bitsery::maxSize(obj.machine_id, kMaxStringSize), obj.cpu_usage, obj.memory_usage,
+          bitsery::maxSize(obj.token, kMaxTokenSize));
+    });
   }
 
   bool operator>>(Bytes& des) const noexcept { return encode_to_bytes(*this, des); }
@@ -255,9 +299,12 @@ struct HandshakeReqPacket final {
   std::string hostname;
   std::string role;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-    ar(control_id, version, hostname, role);
+  template <typename S>
+  void serialize(S& s) {
+    s.ext(*this, bitsery::ext::Growable{}, [](S& sub, HandshakeReqPacket& obj) {
+      sub(obj.control_id, bitsery::maxSize(obj.version, kMaxStringSize), bitsery::maxSize(obj.hostname, kMaxStringSize),
+          bitsery::maxSize(obj.role, kMaxStringSize));
+    });
   }
 
   bool operator>>(Bytes& des) const noexcept { return encode_to_bytes(*this, des); }
@@ -271,18 +318,12 @@ struct HandshakeRespPacket final {
   std::string hostname;
   std::string machine_id;
 
-  template <class Archive>
-  void save(Archive& ar) const {
-    ar(static_cast<uint8_t>(result), token, version, hostname, machine_id);
-  }
-
-  template <class Archive>
-  void load(Archive& ar) {
-    uint8_t result_value{0};
-
-    ar(result_value, token, version, hostname, machine_id);
-
-    result = static_cast<HandshakeResult>(result_value);
+  template <typename S>
+  void serialize(S& s) {
+    s.ext(*this, bitsery::ext::Growable{}, [](S& sub, HandshakeRespPacket& obj) {
+      sub(obj.result, bitsery::maxSize(obj.token, kMaxTokenSize), bitsery::maxSize(obj.version, kMaxStringSize),
+          bitsery::maxSize(obj.hostname, kMaxStringSize), bitsery::maxSize(obj.machine_id, kMaxStringSize));
+    });
   }
 
   bool operator>>(Bytes& des) const noexcept { return encode_to_bytes(*this, des); }
