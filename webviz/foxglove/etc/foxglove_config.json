@@ -16,7 +16,6 @@
   },
   "parameters": {
     "url": "dds://foxglove/parameters",
-    "encoding": "json",
     "values": [
       { "name": "vehicle.mode", "value": "AUTO" },
       { "name": "control.max_speed", "value": 12.5, "type": "float64" },

@@ -170,6 +170,8 @@ cpmaddpackage(
   cpptoml
   URL
   "https://github.com/skystrife/cpptoml/archive/refs/tags/v0.1.1.zip"
+  PATCHES
+  "${CMAKE_SOURCE_DIR}/packup/patch/cpptoml_0.1.x.patch"
   OPTIONS
   "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
   "CMAKE_POSITION_INDEPENDENT_CODE ON"

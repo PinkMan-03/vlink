@@ -39,7 +39,6 @@ _vlink-foxglove() {
         '*--rpc_msgs=[Path(s) to Foxglove rpc service config files]:file:_files -g "*.json"' \
         '--send_time[Send time updates to frontend clients]' \
         '--parameters_url=[Parameters URL]:url:_vlink_zsh_complete_url' \
-        '--parameters_encoding=[Parameters encoding]:enc:(json protobuf flatbuffer flatbuffers)' \
         '(-i --filter)'{-i,--filter}'=[Filter]:filter:' \
         '(-k --black)'{-k,--black}'[Blacklist mode]' \
         '--allow_multiple[Allow multiple instances]' \

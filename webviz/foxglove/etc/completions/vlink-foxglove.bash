@@ -30,10 +30,6 @@ _vlink_foxglove() {
             _vlink_bash_complete_url "$cur"
             return
             ;;
-        --parameters_encoding)
-            _vlink_bash_complete_words "json protobuf flatbuffer flatbuffers" "$cur"
-            return
-            ;;
         -p|--port|-a|--address|--name|--convert_plugin_config|-i|--filter)
             return
             ;;
@@ -51,7 +47,7 @@ _vlink_foxglove() {
 
     _vlink_bash_complete_words "-p --port -a --address -c --config --name --proto_dir --fbs_dir \
 --schema_plugin --convert_plugin --convert_plugin_config --vlink_msgs --foxglove_msgs --rpc_msgs \
---send_time --parameters_url --parameters_encoding -i --filter -k --black --allow_multiple \
+--send_time --parameters_url -i --filter -k --black --allow_multiple \
 $_vlink_bash_webviz_proxy_opts -h --help -v --version" "$cur"
 }
 

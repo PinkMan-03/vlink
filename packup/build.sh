@@ -432,7 +432,15 @@ else
         for _dir in platforms platformthemes platforminputcontexts imageformats sqldrivers \
                      xcbglintegrations wayland-decoration-client wayland-graphics-integration-client \
                      wayland-shell-integration;do
-            [ -d "$QT_DIR/plugins/$_dir" ] && cmake -E copy $QT_DIR/plugins/$_dir/* $PACKUP_DIR/lib/$_dir/ 2>/dev/null || true
+            src="$QT_DIR/plugins/$_dir"
+            dst="$PACKUP_DIR/lib/$_dir"
+            [ -d "$src" ] || continue
+            mkdir -p "$dst"
+            find "$src" \
+                -maxdepth 1 \
+                -type f \
+                ! -name "*.debug" \
+                -exec cp -f {} "$dst/" \;
         done
     fi
 

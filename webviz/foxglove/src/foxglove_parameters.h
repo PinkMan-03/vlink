@@ -24,13 +24,11 @@
 #pragma once
 
 #include <vlink/base/bytes.h>
-#include <vlink/base/logger.h>
 #include <vlink/base/macros.h>
 #include <vlink/setter.h>
 
 #include <atomic>
 #include <map>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <shared_mutex>
 #include <string>
@@ -53,7 +51,6 @@ class FoxgloveParameters final {
 
   struct Config final {
     std::string url;
-    std::string encoding{"json"};
     std::vector<ParameterEntry> values;
     ProxyBridge::TransportConfig transport;
   };
@@ -70,11 +67,7 @@ class FoxgloveParameters final {
 
   [[nodiscard]] bool active() const { return started_.load(); }
 
-  [[nodiscard]] const std::string& url() const { return config_.url; }
-
   [[nodiscard]] std::vector<std::string> get_names() const;
-
-  [[nodiscard]] bool can_forward() const { return static_cast<bool>(setter_); }
 
   static bool parse_config_values(const nlohmann::json& parameters_root, std::vector<ParameterEntry>& out,
                                   std::string& error);
@@ -85,19 +78,7 @@ class FoxgloveParameters final {
                             std::string& error);
 
  private:
-  enum BackendEncoding : uint8_t {
-    kJson = 0,
-    kProtobuf = 1,
-    kFlatbuffers = 2,
-  };
-
   using ParameterMap = std::map<std::string, ParameterEntry>;
-
-  static bool parse_backend_encoding(std::string_view encoding, BackendEncoding& out);
-
-  static const char* to_string(BackendEncoding encoding);
-
-  static std::string backend_ser(BackendEncoding encoding);
 
   static bool is_supported_parameter_type(std::string_view type);
 
@@ -111,16 +92,11 @@ class FoxgloveParameters final {
 
   static nlohmann::json make_parameter_json(const ParameterEntry& entry);
 
-  static std::string encode_json_fragment(const nlohmann::json& value);
-
   static bool encode_json_payload(const ParameterMap& state, Bytes& payload);
 
   static std::vector<ParameterEntry> diff_states(const ParameterMap& old_state, const ParameterMap& new_state);
 
-  bool encode_snapshot(const ParameterMap& state, Bytes& payload) const;
-
   Config config_;
-  BackendEncoding backend_encoding_{kJson};
   Setter<Bytes>::SharedPtr setter_;
   mutable std::shared_mutex state_mtx_;
   ParameterMap state_;

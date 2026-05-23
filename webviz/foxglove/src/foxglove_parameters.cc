@@ -24,32 +24,19 @@
 #include "foxglove_parameters.h"
 
 //
-#include <flatbuffers/flatbuffers.h>
+#include <vlink/base/logger.h>
 
 //
-#include <algorithm>
-#include <limits>
-#include <string>
+#include <mutex>
 #include <unordered_set>
 #include <utility>
-
-//
-#include "WebvizParameterSnapshot.fbs.hpp"
-#include "webviz_parameter_snapshot.pb.h"
 
 namespace vlink {
 namespace webviz {
 
 using Json = nlohmann::json;
 
-using ProtoSnapshot = ::vlink::webviz::foxglove::pb::ParameterSnapshot;
-using FbsEntry = ::vlink::webviz::foxglove::fbs::ParameterEntry;
-
 FoxgloveParameters::FoxgloveParameters(const Config& config) : config_(config) {
-  if VLIKELY (parse_backend_encoding(config_.encoding, backend_encoding_)) {
-    config_.encoding = to_string(backend_encoding_);
-  }
-
   std::unique_lock lock(state_mtx_);
 
   for (const auto& entry : config_.values) {
@@ -70,12 +57,6 @@ bool FoxgloveParameters::start() {
     return true;
   }
 
-  if VUNLIKELY (!parse_backend_encoding(config_.encoding, backend_encoding_)) {
-    started_.store(false);
-    MLOG_E("Invalid Foxglove parameters encoding: {}", config_.encoding);
-    return false;
-  }
-
   if VLIKELY (!config_.url.empty()) {
     setter_ = Setter<Bytes>::create_shared(config_.url, InitType::kWithoutInit);
 
@@ -85,28 +66,15 @@ bool FoxgloveParameters::start() {
       return false;
     }
 
-    const auto ser = backend_ser(backend_encoding_);
-    auto schema_type = SchemaType::kRaw;
-
-    if VLIKELY (backend_encoding_ == FoxgloveParameters::kProtobuf) {
-      schema_type = SchemaType::kProtobuf;
-    } else if VLIKELY (backend_encoding_ == FoxgloveParameters::kFlatbuffers) {
-      schema_type = SchemaType::kFlatbuffers;
-    }
-
-    setter_->set_ser_type(ser, schema_type);
+    setter_->set_ser_type("json", SchemaType::kRaw);
     ProxyBridge::apply_transport(*setter_, config_.transport, false);
 
     if VUNLIKELY (!setter_->init()) {
       started_.store(false);
-      MLOG_E("Failed to initialize Foxglove parameter setter on {} with {}", config_.url, config_.encoding);
+      MLOG_E("Failed to initialize Foxglove parameter setter on {}", config_.url);
       setter_.reset();
       return false;
     }
-  } else if VUNLIKELY (backend_encoding_ != FoxgloveParameters::kJson) {
-    MLOG_W("Foxglove parameters encoding {} is ignored without parameters.url; forcing json", config_.encoding);
-    backend_encoding_ = FoxgloveParameters::kJson;
-    config_.encoding = to_string(backend_encoding_);
   }
 
   size_t value_count = 0;
@@ -248,8 +216,8 @@ bool FoxgloveParameters::apply_set_parameters(const Json& request, Json& respons
   if VLIKELY (setter_) {
     Bytes payload;
 
-    if VUNLIKELY (!encode_snapshot(new_state, payload)) {
-      error = "failed to encode parameter snapshot";
+    if VUNLIKELY (!encode_json_payload(new_state, payload)) {
+      error = "failed to encode parameter JSON payload";
       std::unique_lock lock(state_mtx_);
       state_ = std::move(old_state);
       return false;
@@ -273,51 +241,6 @@ bool FoxgloveParameters::apply_set_parameters(const Json& request, Json& respons
 
   response = build_parameter_values(requested_names, response_id);
   return true;
-}
-
-bool FoxgloveParameters::parse_backend_encoding(std::string_view encoding, BackendEncoding& out) {
-  if VLIKELY (encoding == "json") {
-    out = FoxgloveParameters::kJson;
-    return true;
-  }
-
-  if VLIKELY (encoding == "protobuf") {
-    out = FoxgloveParameters::kProtobuf;
-    return true;
-  }
-
-  if VLIKELY (encoding == "flatbuffer" || encoding == "flatbuffers") {
-    out = FoxgloveParameters::kFlatbuffers;
-    return true;
-  }
-
-  return false;
-}
-
-const char* FoxgloveParameters::to_string(BackendEncoding encoding) {
-  switch (encoding) {
-    case FoxgloveParameters::kJson:
-      return "json";
-    case FoxgloveParameters::kProtobuf:
-      return "protobuf";
-    case FoxgloveParameters::kFlatbuffers:
-      return "flatbuffer";
-    default:
-      return "unknown";
-  }
-}
-
-std::string FoxgloveParameters::backend_ser(BackendEncoding encoding) {
-  switch (encoding) {
-    case FoxgloveParameters::kJson:
-      return "json";
-    case FoxgloveParameters::kProtobuf:
-      return "vlink.webviz.foxglove.pb.ParameterSnapshot";
-    case FoxgloveParameters::kFlatbuffers:
-      return "vlink.webviz.foxglove.fbs.ParameterSnapshot";
-    default:
-      return {};
-  }
 }
 
 bool FoxgloveParameters::is_supported_parameter_type(std::string_view type) {
@@ -501,8 +424,6 @@ Json FoxgloveParameters::make_parameter_json(const ParameterEntry& entry) {
   return item;
 }
 
-std::string FoxgloveParameters::encode_json_fragment(const Json& value) { return value.dump(); }
-
 bool FoxgloveParameters::encode_json_payload(const ParameterMap& state, Bytes& payload) {
   Json root;
   root["parameters"] = Json::array();
@@ -545,73 +466,6 @@ std::vector<FoxgloveParameters::ParameterEntry> FoxgloveParameters::diff_states(
   }
 
   return delta;
-}
-
-bool FoxgloveParameters::encode_snapshot(const ParameterMap& state, Bytes& payload) const {
-  if VLIKELY (backend_encoding_ == FoxgloveParameters::kJson) {
-    return encode_json_payload(state, payload);
-  }
-
-  if VUNLIKELY (backend_encoding_ == FoxgloveParameters::kProtobuf) {
-    ProtoSnapshot snapshot;
-
-    for (const auto& state_entry : state) {
-      const auto& entry = state_entry.second;
-      auto* parameter = snapshot.add_parameters();
-      parameter->set_name(entry.name);
-      parameter->set_has_value(entry.has_value);
-
-      if VLIKELY (entry.type == "byte_array") {
-        parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_BYTE_ARRAY);
-      } else if VLIKELY (entry.type == "float64") {
-        parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_FLOAT64);
-      } else if VLIKELY (entry.type == "float64_array") {
-        parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_FLOAT64_ARRAY);
-      } else {
-        parameter->set_type(::vlink::webviz::foxglove::pb::ParameterType::PARAMETER_TYPE_UNSPECIFIED);
-      }
-
-      parameter->set_json_value(encode_json_fragment(entry.value));
-    }
-
-    auto byte_size = snapshot.ByteSizeLong();
-
-    if VUNLIKELY (byte_size > std::numeric_limits<int>::max()) {
-      return false;
-    }
-
-    // NOLINTNEXTLINE(readability-redundant-casting)
-    payload = Bytes::create(static_cast<size_t>(byte_size));
-    return snapshot.SerializeToArray(payload.data(), static_cast<int>(byte_size));
-  }
-
-  flatbuffers::FlatBufferBuilder builder(1024);
-  std::vector<flatbuffers::Offset<FbsEntry>> entries;
-  entries.reserve(state.size());
-
-  for (const auto& state_entry : state) {
-    const auto& entry = state_entry.second;
-    auto name_offset = builder.CreateString(entry.name);
-    auto json_offset = builder.CreateString(encode_json_fragment(entry.value));
-    ::vlink::webviz::foxglove::fbs::ParameterType fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::Unspecified;
-
-    if VLIKELY (entry.type == "byte_array") {
-      fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::ByteArray;
-    } else if VLIKELY (entry.type == "float64") {
-      fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::Float64;
-    } else if VLIKELY (entry.type == "float64_array") {
-      fbs_type = ::vlink::webviz::foxglove::fbs::ParameterType::Float64Array;
-    }
-
-    entries.emplace_back(vlink::webviz::foxglove::fbs::CreateParameterEntry(builder, name_offset, entry.has_value,
-                                                                            fbs_type, json_offset));
-  }
-
-  auto parameters_offset = builder.CreateVector(entries);
-  auto snapshot_offset = vlink::webviz::foxglove::fbs::CreateParameterSnapshot(builder, parameters_offset);
-  builder.Finish(snapshot_offset);
-  payload = Bytes::deep_copy(builder.GetBufferPointer(), builder.GetSize());
-  return !payload.empty();
 }
 
 }  // namespace webviz

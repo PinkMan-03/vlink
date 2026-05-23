@@ -102,10 +102,6 @@ int main(int argc, char* argv[]) {
       .help("VLink url used for Foxglove parameters capability")
       .default_value(std::string(""));
 
-  program.add_argument("--parameters_encoding")
-      .help("Backend parameter payload encoding: json/protobuf/flatbuffer")
-      .default_value(std::string("json"));
-
   program.add_argument("-i", "--filter")
       .help("Case-insensitive substring filter for url, separated by spaces")
       .default_value(std::string(""));
@@ -182,10 +178,6 @@ int main(int argc, char* argv[]) {
   config.foxglove_msgs = std::move(foxglove_msgs);
   config.rpc_msgs = std::move(rpc_msgs);
   config.parameters.url = program.get<std::string>("--parameters_url");
-
-  if VUNLIKELY (program.is_used("--parameters_encoding")) {
-    config.parameters.encoding = program.get<std::string>("--parameters_encoding");
-  }
 
   bool publish_configured = false;
   bool rpcs_configured = false;
@@ -285,15 +277,6 @@ int main(int argc, char* argv[]) {
           }
 
           config.parameters.url = parameters["url"].get<std::string>();
-        }
-
-        if VLIKELY (!program.is_used("--parameters_encoding") && parameters.contains("encoding")) {
-          if VUNLIKELY (!parameters["encoding"].is_string()) {
-            std::cerr << "Invalid config file " << config_file << ": parameters.encoding must be a string" << std::endl;
-            return 1;
-          }
-
-          config.parameters.encoding = parameters["encoding"].get<std::string>();
         }
 
         std::string parameters_error;
@@ -447,13 +430,6 @@ int main(int argc, char* argv[]) {
 
   if VUNLIKELY (config.address.empty()) {
     std::cerr << "--address must not be empty" << std::endl;
-    return 1;
-  }
-
-  if VUNLIKELY (!config.parameters.url.empty() && config.parameters.encoding != "json" &&
-                config.parameters.encoding != "protobuf" && config.parameters.encoding != "flatbuffers" &&
-                config.parameters.encoding != "flatbuffer") {
-    std::cerr << "parameters.encoding must be one of json/protobuf/flatbuffer" << std::endl;
     return 1;
   }
 

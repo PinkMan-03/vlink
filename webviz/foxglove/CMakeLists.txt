@@ -55,9 +55,6 @@ vlink_generate_cpp(
   "--bfbs-gen-embed"
 )
 
-file(GLOB FOXGLOVE_PROTO_FILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/proto/*.proto)
-vlink_generate_cpp(TARGET foxglove_proto_gen PROTO ${FOXGLOVE_PROTO_FILES})
-
 # src
 file(GLOB PROJECT_HDRS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.h)
 file(GLOB PROJECT_SRCS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/src/*.cc)
@@ -76,7 +73,6 @@ target_link_libraries(
           thirdparty::asio
           thirdparty::argparse
           thirdparty::exprtk
-          $<BUILD_INTERFACE:foxglove_proto_gen>
           $<BUILD_INTERFACE:foxglove_fbs_gen>
 )
 
