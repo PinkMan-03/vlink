@@ -3,7 +3,7 @@
 _vlink_eproto() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     local prev="${COMP_WORDS[COMP_CWORD-1]}"
-    local subcommands="pub sub"
+    local subcommands="pub sub import"
     local subcommand
 
     COMPREPLY=()
@@ -11,6 +11,15 @@ _vlink_eproto() {
 
     if [[ -z "$subcommand" ]]; then
         _vlink_bash_complete_words "$subcommands -h --help -v --version" "$cur"
+        return
+    fi
+
+    if [[ "$subcommand" == "import" ]]; then
+        if [[ "$cur" == -* ]]; then
+            _vlink_bash_complete_words "-h --help" "$cur"
+        else
+            _vlink_bash_complete_dirs "$cur"
+        fi
         return
     fi
 

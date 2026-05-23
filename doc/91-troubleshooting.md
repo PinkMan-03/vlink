@@ -555,6 +555,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 
 - `-d /path/to/protos` 指定 proto 目录
 - 或 `export VLINK_PROTO_DIR=/path/to/protos`
+- 或运行 `vlink-eproto import /path/to/protos`（一次性写入 `$HOME/.vlink_proto_dir`，后续所有 shell 自动生效；`vlink-efbs` 同理用 `vlink-efbs import`）
 - 或注册 `VLINK_SCHEMA_PLUGIN`（schema 插件 — 见 [19-extensions.md](19-extensions.md)）
 
 ### 91.10.3 `vlink-monitor` TUI 花屏
@@ -637,7 +638,7 @@ sudo ip route add 239.255.0.100/32 dev eth0
 共享的错误：
 - `Cannot pub intra url.` → intra:// 不能跨进程 pub
 - `Url is empty.` / `ser_type and encoding do not match.`
-- `Must set proto dir [-d], set env 'VLINK_PROTO_DIR', or load VLINK_SCHEMA_PLUGIN.`
+- `Must set proto dir [-d], set env 'VLINK_PROTO_DIR', run 'vlink-eproto import <dir>', or load VLINK_SCHEMA_PLUGIN.`（`vlink-efbs` 对应 `'VLINK_FBS_DIR'` 与 `'vlink-efbs import <dir>'`）
 - `Proto txt file does not exist.` / `load_text_for_file failed.`
 - `Blob content must be hex bytes.`
 - `Cannot find proto.` / `Cannot find ser.`

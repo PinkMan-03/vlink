@@ -30,8 +30,8 @@
 | `VLINK_URL_PLUGINS`     | 插件名列表 | 传输后端插件基础名（不含路径、`lib` 前缀和 `.so` 后缀），**分号分隔**。`vlink-` 前缀可省略。 |
 | `VLINK_SCHEMA_PLUGIN`   | 路径/插件名 | SchemaPluginInterface 插件共享库路径或插件基础名                |
 | `VLINK_CONVERT_PLUGIN`  | 路径/插件名 | MessageConvertPlugin 插件共享库路径或插件基础名；WebViz 实时桥接和 `vlink-bag2mcap` / `vlink-bag2rrd` 离线转换工具在未显式传 `--convert_plugin` 时读取 |
-| `VLINK_PROTO_DIR`       | 目录路径 | `.proto` 搜索目录（由 SchemaPluginBase 实现主动读取时生效）       |
-| `VLINK_FBS_DIR`         | 目录路径 | `.fbs` 搜索目录（同上）                                           |
+| `VLINK_PROTO_DIR`       | 目录路径 | `.proto` 搜索目录（由 SchemaPluginBase 实现主动读取时生效）；未设置时 `vlink-eproto` 还会回退到 `$HOME/.vlink_proto_dir` 文件内容（由 `vlink-eproto import <dir>` 写入） |
+| `VLINK_FBS_DIR`         | 目录路径 | `.fbs` 搜索目录（同上）；未设置时 `vlink-efbs` 回退到 `$HOME/.vlink_fbs_dir`（由 `vlink-efbs import <dir>` 写入） |
 | `VLINK_PLUGIN_DIR`      | 目录路径 | 插件共享库搜索目录                                                |
 | `VLINK_TMP_DIR`         | 目录路径 | 临时文件目录                                                      |
 | `VLINK_LOCK_DIR`        | 目录路径 | 锁文件目录                                                        |
@@ -51,6 +51,10 @@ export VLINK_PROTO_DIR=/opt/vlink/proto
 
 # 指定 fbs 文件目录
 export VLINK_FBS_DIR=/opt/vlink/fbs
+
+# 或者一次性写入 $HOME/.vlink_proto_dir / $HOME/.vlink_fbs_dir（之后所有 shell 自动生效）
+vlink-eproto import /opt/vlink/proto
+vlink-efbs   import /opt/vlink/fbs
 
 # 指定 schema 插件（可写基础名或共享库路径）
 export VLINK_SCHEMA_PLUGIN=my_schema_plugin

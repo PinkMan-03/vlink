@@ -1781,7 +1781,7 @@ vlink-dump shm://sensor/camera -t h264                 # 从实时流导出 H264
 
 **功能定位：** Protobuf 序列化数据的动态发布与订阅调试工具。
 
-**vlink-eproto** 支持 Protobuf（.proto 文件）的动态加载与解析，无需预先编译消息类型即可进行发布与订阅，提供 `pub`/`sub` 两个子命令：
+**vlink-eproto** 支持 Protobuf（.proto 文件）的动态加载与解析，无需预先编译消息类型即可进行发布与订阅，提供 `pub`/`sub`/`import` 三个子命令：
 
 ```bash
 # 订阅 Protobuf 话题并实时打印解码内容（url 是位置参数）
@@ -1792,6 +1792,9 @@ vlink-eproto sub shm://sensor/imu -d /path/to/protos -s sensor_msgs.Imu
 # 字段必须是 -s 指定 message 上真实存在的字段
 vlink-eproto pub shm://sensor/imu -d /path/to/protos \
     -s sensor_msgs.Imu -c 'orientation_covariance: 0.0'
+
+# 把 proto 目录持久化到 $HOME/.vlink_proto_dir，后续 pub/sub 在未指定 -d / VLINK_PROTO_DIR 时自动读取
+vlink-eproto import /path/to/protos
 ```
 
 `sub` 主要参数：
@@ -1814,7 +1817,7 @@ vlink-eproto pub shm://sensor/imu -d /path/to/protos \
 
 **功能定位：** FlatBuffers 序列化数据的动态发布与订阅调试工具。
 
-`vlink-efbs` 结构与 `vlink-eproto` 完全一致，区别仅在于使用 `--fbs_dir` 替代 `--proto_dir` 指定 FlatBuffers schema 目录，使用 `flatc` 动态解析 `.fbs` 文件。
+`vlink-efbs` 结构与 `vlink-eproto` 完全一致，区别仅在于使用 `--fbs_dir` 替代 `--proto_dir` 指定 FlatBuffers schema 目录，使用 `flatc` 动态解析 `.fbs` 文件。同样提供 `import` 子命令（`vlink-efbs import <dir>`），把目录持久化到 `$HOME/.vlink_fbs_dir`。
 
 ---
 

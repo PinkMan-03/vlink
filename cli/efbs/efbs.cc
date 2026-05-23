@@ -157,6 +157,124 @@ using RawGetter = vlink::Getter<vlink::Bytes>;
   return !input.bad();
 }
 
+[[maybe_unused]] static std::filesystem::path utf8_to_path(const std::string& utf8) noexcept {
+  try {
+#ifdef _WIN32
+    return std::filesystem::path(vlink::Helpers::string_to_wstring(utf8));
+#else
+    return std::filesystem::path(utf8);
+#endif
+  } catch (const std::filesystem::filesystem_error&) {
+    return {};
+  } catch (const std::exception&) {
+    return {};
+  }
+}
+
+[[maybe_unused]] static std::string get_home_config_path(const std::string& filename) {
+  std::string home = vlink::Utils::get_env("HOME");
+
+  if (home.empty()) {
+    home = vlink::Utils::get_env("USERPROFILE");
+  }
+
+  if VUNLIKELY (home.empty()) {
+    return {};
+  }
+
+  auto home_path = utf8_to_path(home);
+
+  if VUNLIKELY (home_path.empty()) {
+    return {};
+  }
+
+  std::string result;
+
+  try {
+    auto joined = home_path / filename;
+    result = vlink::Helpers::path_to_string(joined);
+  } catch (const std::filesystem::filesystem_error&) {
+    return {};
+  } catch (const std::exception&) {
+    return {};
+  }
+
+#ifdef _WIN32
+  std::replace(result.begin(), result.end(), '\\', '/');
+#endif
+  return result;
+}
+
+[[maybe_unused]] static std::string read_home_config(const std::string& filename) {
+  auto config_path_utf8 = get_home_config_path(filename);
+
+  if VUNLIKELY (config_path_utf8.empty()) {
+    return {};
+  }
+
+  auto fs_path = utf8_to_path(config_path_utf8);
+
+  if VUNLIKELY (fs_path.empty()) {
+    return {};
+  }
+
+  std::error_code ec;
+
+  if (!std::filesystem::is_regular_file(fs_path, ec) || ec) {
+    return {};
+  }
+
+  std::ifstream input(fs_path, std::ios::binary);
+
+  if VUNLIKELY (!input.is_open()) {
+    return {};
+  }
+
+  std::string content;
+  content.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+
+  auto back_pos = content.find_last_not_of(" \t\r\n");
+
+  if (back_pos != std::string::npos) {
+    content.erase(back_pos + 1);
+  } else {
+    content.clear();
+  }
+
+  auto front_pos = content.find_first_not_of(" \t\r\n");
+
+  if (front_pos != std::string::npos) {
+    content.erase(0, front_pos);
+  }
+
+  return content;
+}
+
+[[maybe_unused]] static bool write_home_config(const std::string& filename, const std::string& value) {
+  auto config_path_utf8 = get_home_config_path(filename);
+
+  if VUNLIKELY (config_path_utf8.empty()) {
+    return false;
+  }
+
+  auto fs_path = utf8_to_path(config_path_utf8);
+
+  if VUNLIKELY (fs_path.empty()) {
+    return false;
+  }
+
+  std::ofstream output(fs_path, std::ios::binary | std::ios::trunc);
+
+  if VUNLIKELY (!output.is_open()) {
+    return false;
+  }
+
+  output << value;
+  output.flush();
+
+  return output.good();
+}
+
 [[maybe_unused]] static bool format_json_text(const std::string& content, std::string& out) {
   auto json = nlohmann::ordered_json::parse(content, nullptr, false);
 
@@ -165,6 +283,7 @@ using RawGetter = vlink::Getter<vlink::Bytes>;
   }
 
   out = json.dump(2);
+
   return true;
 }
 
@@ -478,7 +597,9 @@ int start_efbs_pub(const std::string& url, const std::string& fbs_dir, const std
 
     if (!has_import) {
       if VUNLIKELY (fbs_dir.empty()) {
-        std::cerr << "Must set fbs dir [-d], set env 'VLINK_FBS_DIR', or load VLINK_SCHEMA_PLUGIN." << std::endl;
+        std::cerr << "Must set fbs dir [-d], set env 'VLINK_FBS_DIR', run 'vlink-efbs import <dir>', or load "
+                     "VLINK_SCHEMA_PLUGIN."
+                  << std::endl;
         has_quit = true;
         return -1;
       }
@@ -750,7 +871,9 @@ int start_efbs_sub(const std::string& url, const std::string& fbs_dir, const std
 
     if (!has_import) {
       if VUNLIKELY (fbs_dir.empty()) {
-        std::cerr << "Must set fbs dir [-d], set env 'VLINK_FBS_DIR', or load VLINK_SCHEMA_PLUGIN." << std::endl;
+        std::cerr << "Must set fbs dir [-d], set env 'VLINK_FBS_DIR', run 'vlink-efbs import <dir>', or load "
+                     "VLINK_SCHEMA_PLUGIN."
+                  << std::endl;
         has_quit = true;
         return -1;
       }
@@ -2422,8 +2545,14 @@ int main(int argc, char* argv[]) {
 
   sub_command.add_epilog("Example:\n  vlink-efbs sub shm://test -d /home/fbs_dir -s pb.Test");
 
+  argparse::ArgumentParser import_command("import", VLINK_VERSION, argparse::default_arguments::help);
+  import_command.add_argument("dir").help("Fbs dir path to persist").required();
+  import_command.add_description("Save fbs dir to $HOME/.vlink_fbs_dir");
+  import_command.add_epilog("Example:\n  vlink-efbs import /home/fbs_dir");
+
   program.add_subparser(pub_command);
   program.add_subparser(sub_command);
+  program.add_subparser(import_command);
 
   try {
     program.parse_args(argc, argv);
@@ -2434,6 +2563,8 @@ int main(int argc, char* argv[]) {
       std::cerr << pub_command << std::endl;
     } else if (program.is_subcommand_used("sub")) {
       std::cerr << sub_command << std::endl;
+    } else if (program.is_subcommand_used("import")) {
+      std::cerr << import_command << std::endl;
     }
 
     return 1;
@@ -2449,6 +2580,10 @@ int main(int argc, char* argv[]) {
 
     if (fbs_dir.empty()) {
       fbs_dir = vlink::Utils::get_env("VLINK_FBS_DIR");
+    }
+
+    if (fbs_dir.empty()) {
+      fbs_dir = read_home_config(".vlink_fbs_dir");
     }
 
     if (schema_plugin_path.empty()) {
@@ -2541,6 +2676,10 @@ int main(int argc, char* argv[]) {
       fbs_dir = vlink::Utils::get_env("VLINK_FBS_DIR");
     }
 
+    if (fbs_dir.empty()) {
+      fbs_dir = read_home_config(".vlink_fbs_dir");
+    }
+
     if (schema_plugin_path.empty()) {
       schema_plugin_path = vlink::Utils::get_env("VLINK_SCHEMA_PLUGIN");
     }
@@ -2611,6 +2750,83 @@ int main(int argc, char* argv[]) {
     VLINK_TERM_OUT.flush();
 
     return ret;
+  } else if (program.is_subcommand_used("import")) {
+    auto dir = import_command.get<std::string>("dir");
+
+#ifdef _WIN32
+    try {
+      dir = vlink::Helpers::path_to_string(std::filesystem::path(dir));
+    } catch (const std::filesystem::filesystem_error&) {
+    } catch (const std::exception&) {
+    }
+
+    std::replace(dir.begin(), dir.end(), '\\', '/');
+#endif
+
+    while (!dir.empty() && dir.back() == '/') {
+      dir.pop_back();
+    }
+
+    if VUNLIKELY (dir.empty()) {
+      std::cerr << "Fbs dir cannot be empty." << std::endl;
+      return -1;
+    }
+
+    auto input_path = utf8_to_path(dir);
+
+    if VUNLIKELY (input_path.empty()) {
+      std::cerr << "Invalid fbs dir path: " << dir << "." << std::endl;
+      return -1;
+    }
+
+    std::error_code ec;
+    auto absolute_path = std::filesystem::absolute(input_path, ec);
+
+    if VUNLIKELY (ec) {
+      std::cerr << "Invalid fbs dir path: " << dir << " (" << ec.message() << ")." << std::endl;
+      return -1;
+    }
+
+    if VUNLIKELY (!std::filesystem::exists(absolute_path, ec) || ec) {
+      std::cerr << "Fbs dir does not exist: " << vlink::Helpers::path_to_string(absolute_path) << "." << std::endl;
+      return -1;
+    }
+
+    if VUNLIKELY (!std::filesystem::is_directory(absolute_path, ec) || ec) {
+      std::cerr << "Fbs dir is not a directory: " << vlink::Helpers::path_to_string(absolute_path) << "." << std::endl;
+      return -1;
+    }
+
+    auto saved = vlink::Helpers::path_to_string(absolute_path);
+
+#ifdef _WIN32
+    std::replace(saved.begin(), saved.end(), '\\', '/');
+#endif
+
+    while (saved.size() > 1 && saved.back() == '/') {
+      saved.pop_back();
+    }
+
+    if VUNLIKELY (saved.empty()) {
+      std::cerr << "Failed to resolve absolute path for: " << dir << "." << std::endl;
+      return -1;
+    }
+
+    auto config_path = get_home_config_path(".vlink_fbs_dir");
+
+    if VUNLIKELY (config_path.empty()) {
+      std::cerr << "Cannot resolve HOME directory." << std::endl;
+      return -1;
+    }
+
+    if VUNLIKELY (!write_home_config(".vlink_fbs_dir", saved)) {
+      std::cerr << "Failed to write " << config_path << "." << std::endl;
+      return -1;
+    }
+
+    std::cout << "Saved VLINK_FBS_DIR to " << config_path << ": " << saved << std::endl;
+
+    return 0;
   }
 
   std::cerr << program << std::endl;

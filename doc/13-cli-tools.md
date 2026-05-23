@@ -818,7 +818,7 @@ vlink-dump dds://test -c "pose.x,pose.y" \
 
 `vlink-eproto` 用于在终端中实时订阅并以 Protobuf TextFormat 或 JSON（`-j`）格式显示消息内容，或向指定 URL 发布 Protobuf 消息。支持交互式热键控制显示选项，支持内容分页翻阅。
 
-**前提条件：** 需要 Protobuf compiler 支持，须通过 `-d` 参数或 `VLINK_PROTO_DIR` 指定 `.proto` 文件目录。
+**前提条件：** 需要 Protobuf compiler 支持。`.proto` 文件目录可通过以下三种方式之一指定（按优先级从高到低）：`-d` / `--proto_dir` 参数 → `VLINK_PROTO_DIR` 环境变量 → `$HOME/.vlink_proto_dir` 配置文件（由 `vlink-eproto import <dir>` 写入）。
 
 ### 13.9.2 子命令
 
@@ -915,6 +915,24 @@ vlink-eproto pub <url> [options]
 > 指定 `-x raw` 时，`-f/--prototxt_file` 和 `-c/--prototxt_content` 的内容会直接按原始文本发送；如果内容本身是 JSON 字符串，订阅显示时会优先按 JSON 美化。
 > 指定 `-x blob` 时，`-c/--prototxt_content` 按十六进制字节串解析，`-f/--prototxt_file` 则直接读取原始二进制文件内容发送。
 
+#### 13.9.2.3 import — 持久化 proto 目录
+
+```
+vlink-eproto import <dir>
+```
+
+| 参数  | 说明                       | 默认值 |
+| ----- | -------------------------- | ------ |
+| `dir` | 要持久化的 proto 目录（必填）| -      |
+
+把 `<dir>` 解析为绝对路径并写入 `$HOME/.vlink_proto_dir`。之后任意 shell 中调用 `vlink-eproto pub/sub` 时，若未通过 `-d/--proto_dir` 或 `VLINK_PROTO_DIR` 指定目录，将自动从该文件读取。注意：目录必须存在且为有效目录，否则会拒绝写入。
+
+```bash
+# 一次配置，后续不再重复传 -d / 设置环境变量
+vlink-eproto import /home/protos
+vlink-eproto sub dds://sensor/imu -s pb.ImuData
+```
+
 ### 13.9.3 使用示例
 
 ```bash
@@ -952,7 +970,7 @@ vlink-eproto pub dds://test/msg -d /home/protos/ -s pb.TestMsg \
 
 ### 13.10.1 功能说明
 
-`vlink-efbs` 功能与 `vlink-eproto` 相同，但针对 FlatBuffers 序列化格式。同样支持 `sub`（订阅显示）和 `pub`（发布消息）两个子命令。FlatBuffers 的 schema 文件（.fbs）目录通过 `-d/--fbs_dir` 参数或 `VLINK_FBS_DIR` 环境变量指定。普通 FlatBuffers 消息的输入本身按 JSON 语法解析，显示时也默认输出 JSON 风格文本，因此不再单独提供 `--json` 开关。
+`vlink-efbs` 功能与 `vlink-eproto` 相同，但针对 FlatBuffers 序列化格式。同样支持 `sub`（订阅显示）、`pub`（发布消息）和 `import`（持久化 fbs 目录）三个子命令。FlatBuffers 的 schema 文件（.fbs）目录按优先级从高到低依次为：`-d/--fbs_dir` 参数 → `VLINK_FBS_DIR` 环境变量 → `$HOME/.vlink_fbs_dir` 配置文件（由 `vlink-efbs import <dir>` 写入）。普通 FlatBuffers 消息的输入本身按 JSON 语法解析，显示时也默认输出 JSON 风格文本，因此不再单独提供 `--json` 开关。
 
 ### 13.10.2 子命令：sub — 订阅并显示消息
 
@@ -1019,7 +1037,24 @@ vlink-efbs pub <url> [options]
 > 指定 `-x raw` 时，`-f/--fbstxt_file` 和 `-c/--fbstxt_content` 的内容会直接按原始文本发送；如果内容本身是 JSON 字符串，订阅显示时会优先按 JSON 美化。
 > 指定 `-x blob` 时，`-c/--fbstxt_content` 按十六进制字节串解析，`-f/--fbstxt_file` 则直接读取原始二进制文件内容发送。
 
-### 13.10.4 使用示例
+### 13.10.4 子命令：import — 持久化 fbs 目录
+
+```
+vlink-efbs import <dir>
+```
+
+| 参数  | 说明                             | 默认值 |
+| ----- | -------------------------------- | ------ |
+| `dir` | 要持久化的 FlatBuffers 目录（必填）| -      |
+
+把 `<dir>` 解析为绝对路径并写入 `$HOME/.vlink_fbs_dir`。之后任意 shell 中调用 `vlink-efbs pub/sub` 时，若未通过 `-d/--fbs_dir` 或 `VLINK_FBS_DIR` 指定目录，将自动从该文件读取。目录必须存在且为有效目录，否则拒绝写入。
+
+```bash
+vlink-efbs import /home/fbs_schemas
+vlink-efbs sub dds://sensor/scan -s MyScan
+```
+
+### 13.10.5 使用示例
 
 ```bash
 # 订阅 FlatBuffers 话题

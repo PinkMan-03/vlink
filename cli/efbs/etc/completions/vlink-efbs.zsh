@@ -41,9 +41,19 @@ _vlink-efbs_sub() {
         ':url:_vlink_zsh_complete_url'
 }
 
+_vlink-efbs_import() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show help]' \
+        ':dir:_files -/'
+}
+
 _vlink-efbs() {
     local curcontext="$curcontext" state line
-    local -a subcommands=('pub:Publish data' 'sub:Subscribe data')
+    local -a subcommands=(
+        'pub:Publish data'
+        'sub:Subscribe data'
+        'import:Save fbs dir to $HOME/.vlink_fbs_dir'
+    )
 
     _arguments -C \
         '(-h --help)'{-h,--help}'[Show help]' \
@@ -59,6 +69,7 @@ _vlink-efbs() {
             case "$line[1]" in
                 pub) _vlink-efbs_pub ;;
                 sub) _vlink-efbs_sub ;;
+                import) _vlink-efbs_import ;;
             esac
             ;;
     esac

@@ -43,9 +43,19 @@ _vlink-eproto_sub() {
         ':url:_vlink_zsh_complete_url'
 }
 
+_vlink-eproto_import() {
+    _arguments -s \
+        '(-h --help)'{-h,--help}'[Show help]' \
+        ':dir:_files -/'
+}
+
 _vlink-eproto() {
     local curcontext="$curcontext" state line
-    local -a subcommands=('pub:Publish data' 'sub:Subscribe data')
+    local -a subcommands=(
+        'pub:Publish data'
+        'sub:Subscribe data'
+        'import:Save proto dir to $HOME/.vlink_proto_dir'
+    )
 
     _arguments -C \
         '(-h --help)'{-h,--help}'[Show help]' \
@@ -61,6 +71,7 @@ _vlink-eproto() {
             case "$line[1]" in
                 pub) _vlink-eproto_pub ;;
                 sub) _vlink-eproto_sub ;;
+                import) _vlink-eproto_import ;;
             esac
             ;;
     esac
