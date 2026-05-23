@@ -25,5 +25,9 @@ endif()
 
 # completions
 if(ENABLE_COMPLETIONS)
-  vlink_install_completions(${PROJECT_NAME} ALIAS list)
+  if(ENABLE_SYMLINKS)
+    vlink_install_completions(${PROJECT_NAME} ALIAS list)
+  else()
+    vlink_install_completions(${PROJECT_NAME})
+  endif()
 endif()

@@ -43,5 +43,9 @@ endif()
 
 # completions
 if(ENABLE_COMPLETIONS)
-  vlink_install_completions(${PROJECT_NAME} ALIAS dump)
+  if(ENABLE_SYMLINKS)
+    vlink_install_completions(${PROJECT_NAME} ALIAS dump)
+  else()
+    vlink_install_completions(${PROJECT_NAME})
+  endif()
 endif()

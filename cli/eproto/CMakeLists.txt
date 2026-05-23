@@ -33,5 +33,9 @@ endif()
 
 # completions
 if(ENABLE_COMPLETIONS)
-  vlink_install_completions(${PROJECT_NAME} ALIAS eproto)
+  if(ENABLE_SYMLINKS)
+    vlink_install_completions(${PROJECT_NAME} ALIAS eproto)
+  else()
+    vlink_install_completions(${PROJECT_NAME})
+  endif()
 endif()

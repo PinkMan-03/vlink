@@ -245,6 +245,8 @@ RUN python3 -m pip install --no-cache-dir \
     vcs2l \
     conan \
     jinja2
+RUN python3 -m pip install --no-cache-dir \
+    cmake
 
 #=== bash
 ARG DOCKER_VERSION=${DOCKER_VERSION:-1.0.0}

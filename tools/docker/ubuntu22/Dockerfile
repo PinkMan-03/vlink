@@ -250,6 +250,7 @@ RUN python3 -m pip install --no-cache-dir \
     gcovr \
     coverage \
     cpplint \
+    cmake \
     cmake-format \
     clang-format \
     clang-tidy
