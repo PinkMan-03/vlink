@@ -18,7 +18,7 @@ echo -e "║                                     ║"
 echo -e "╚═════════════════════════════════════╝"
 echo -e -n "\033[0m"
 
-[ -f "$VLINK_ROOT_DIR/version.txt" ] && echo -e "  Version: $(cat "$VLINK_ROOT_DIR/version.txt")"
+[ -f "$VLINK_ROOT_DIR/version.txt" ] && echo -e "Version: $(cat "$VLINK_ROOT_DIR/version.txt")"
 VLINK_PROTO_DIR_CONFIG="$HOME/.vlink_proto_dir"
 VLINK_FBS_DIR_CONFIG="$HOME/.vlink_fbs_dir"
 
