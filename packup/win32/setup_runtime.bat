@@ -11,13 +11,14 @@ set "VLINK_FBS_DIR_CONFIG=%USERPROFILE%\.vlink_fbs_dir"
 
 cls
 echo Setup vlink runtime...
-echo.
-echo  _    __   __      _           __
-echo ^| ^|  / /  / /     ^(_^) ____    / /__
-echo ^| ^| / /  / /     / / / __ \  / //_/
-echo ^| ^|/ /  / /___  / / / / / / / ,^<
-echo ^|___/  /_____/ /_/ /_/ /_/ /_/^|_^|
-echo.
+echo +--------------------------------------+
+echo ^|  _    __   __      _           __    ^|
+echo ^| ^| ^|  / /  / /     ^(_^) ____    / /__  ^|
+echo ^| ^| ^| / /  / /     / / / __ \  / //_ / ^|
+echo ^| ^| ^|/ /  / /___  / / / / / / / ,^<     ^|
+echo ^| ^|___/  /_____/ /_/ /_/ /_/ /_/^|_^|    ^|
+echo ^|                                      ^|
+echo +--------------------------------------+
 
 setlocal enabledelayedexpansion
 if exist "%VLINK_ROOT_DIR%\version.txt" (
