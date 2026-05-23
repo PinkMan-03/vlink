@@ -576,19 +576,19 @@ else()
 endif()
 if(WIN32)
   configure_file(
-    "${CMAKE_SOURCE_DIR}/tools/scripts/vlink-setup.bat.in" "${CMAKE_BINARY_DIR}/output/bin/vlink-setup.bat" @ONLY
+    "${CMAKE_SOURCE_DIR}/packup/scripts/vlink-setup.bat.in" "${CMAKE_BINARY_DIR}/output/bin/vlink-setup.bat" @ONLY
   )
   install(FILES ${CMAKE_BINARY_DIR}/output/bin/vlink-setup.bat DESTINATION ${CMAKE_INSTALL_BINDIR})
 else()
   if(ENABLE_COMPLETIONS)
     configure_file(
-      "${CMAKE_SOURCE_DIR}/tools/scripts/vlink-completions.sh.in"
+      "${CMAKE_SOURCE_DIR}/packup/scripts/vlink-completions.sh.in"
       "${CMAKE_BINARY_DIR}/output/${BUILD_CONFIG_DIR}/vlink-completions.sh" @ONLY
     )
     install(FILES ${CMAKE_BINARY_DIR}/output/${BUILD_CONFIG_DIR}/vlink-completions.sh DESTINATION ${INSTALL_CONFIG_DIR})
   endif()
   configure_file(
-    "${CMAKE_SOURCE_DIR}/tools/scripts/vlink-setup.sh.in" "${CMAKE_BINARY_DIR}/output/vlink-setup.sh" @ONLY
+    "${CMAKE_SOURCE_DIR}/packup/scripts/vlink-setup.sh.in" "${CMAKE_BINARY_DIR}/output/vlink-setup.sh" @ONLY
   )
   install(FILES ${CMAKE_BINARY_DIR}/output/vlink-setup.sh DESTINATION ${INSTALL_CONFIG_DIR})
 endif()

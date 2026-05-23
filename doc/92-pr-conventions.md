@@ -102,7 +102,7 @@ which clang-format clang-tidy
 clang-format --version  # 必须 >= 14
 
 # 一次性安装 git hooks（可选；仅在仓库提供 hook 模板时执行）
-test -f tools/scripts/pre-commit && cp tools/scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+test -f packup/scripts/pre-commit && cp packup/scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 
 # 跑一轮完整构建 + 测试，确认本地环境 OK
 cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_TEST=ON
