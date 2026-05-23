@@ -265,7 +265,7 @@ if not "%OSG_DIR%"=="" (
 for /f "delims=" %%f in ('dir /b "%QT_DIR%\bin\libcrypto*.dll" 2^>nul') do cmake -E copy "%QT_DIR%/bin/%%f" "%PACKUP_DIR%/bin/"
 for /f "delims=" %%f in ('dir /b "%QT_DIR%\bin\libssl*.dll" 2^>nul') do cmake -E copy "%QT_DIR%/bin/%%f" "%PACKUP_DIR%/bin/"
 
-for %%f in (vlink-cmd.bat qt.conf) do (
+for %%f in (run_cmd.bat qt.conf) do (
     if exist "%WORK_DIR%\win32\%%f" cmake -E copy "%WORK_DIR%/win32/%%f" "%PACKUP_DIR%/bin/"
 )
 if exist "%WORK_DIR%\win32\install.bat" cmake -E copy "%WORK_DIR%/win32/install.bat" "%PACKUP_DIR%/"

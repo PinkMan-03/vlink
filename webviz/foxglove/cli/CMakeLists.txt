@@ -4,15 +4,13 @@
 
 project(vlink-bag2mcap LANGUAGES CXX)
 
+# src
 add_executable(${PROJECT_NAME} bag2mcap.cc)
-
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/../src ${PROJECT_SOURCE_DIR}/../..)
-
 target_sources(
   ${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/../src/foxglove_converter.cc
                           ${PROJECT_SOURCE_DIR}/../src/foxglove_converter.h
 )
-
 target_link_libraries(
   ${PROJECT_NAME}
   PRIVATE vlink::vlink
@@ -25,7 +23,13 @@ target_link_libraries(
           thirdparty::exprtk
           $<BUILD_INTERFACE:foxglove_fbs_gen>
 )
+if(WIN32)
+  if(EXISTS ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
+    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/packup/ico/vlink-cmd.rc)
+  endif()
+endif()
 
+# install
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # symlinks
