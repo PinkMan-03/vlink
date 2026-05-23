@@ -8,15 +8,15 @@
 #   - Bundles Qt / OSG / FFmpeg / OpenSSL / SQLite / Protobuf / FlatBuffers /
 #     zstd shared libraries into the output tree
 #   - Produces:
-#       1) portable archive  : build/packup/<linux|darwin>/vlink-<ver>-<os>-<arch>.tgz
-#       2) QtIFW installer   : build/packup/<linux|darwin>/vlink-<ver>-<os>-<arch>(.app)
-#       3) (macOS) bundle    : build/packup/darwin/VLink Player.app
+#       1) portable archive  : build-conan/packup/<linux|darwin>/vlink-<ver>-<os>-<arch>.tgz
+#       2) QtIFW installer   : build-conan/packup/<linux|darwin>/vlink-<ver>-<os>-<arch>(.app)
+#       3) (macOS) bundle    : build-conan/packup/darwin/VLink Player.app
 #
 # For DEB / RPM / Arch (.pkg.tar.zst) distribution packages, use
 # build-deb.sh / build-rpm.sh / build-arch.sh instead.
 #
 # Usage:
-#   ./packup/build.sh {project dir} [arch]
+#   ./packup/build-conan.sh {project dir} [arch]
 #
 #   {project dir}   absolute or relative path to the vlink source tree
 #   [arch]          (macOS only) x86_64 | arm64   selects Conan profile arch
@@ -37,7 +37,7 @@ WORK_DIR=$(cd $(dirname ${BASH_SOURCE:-$0}) && pwd)
 PLATFORM_OS=$(uname -o)
 PLATFORM_ARCH=$(uname -m)
 
-([ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]) && echo -e "Usage: \n  build.sh {project dir} [arch]" && exit 0
+([ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]) && echo -e "Usage: \n  build-conan.sh {project dir} [arch]" && exit 0
 
 if [ "$PLATFORM_OS" = "Darwin" ] || [ "$PLATFORM_ARCH" = "x86_64" ];then
     [ -z $QT_DIR ] && echo -e "QT_DIR env is empty!" && exit 1
@@ -68,7 +68,7 @@ echo "********************************************"
 echo ""
 
 SRC_DIR=$1
-BUILD_DIR=$1/build
+BUILD_DIR=$1/build-conan
 
 INSTALL_DIR=$BUILD_DIR/install
 

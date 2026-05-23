@@ -621,6 +621,7 @@ conan install . \
     -o "vlink/*:enable_cli_monitor=False" \
     -o "vlink/*:enable_cli_dump=False" \
     -o "vlink/*:enable_cli_check=False" \
+    -o "vlink/*:enable_cli_bench=False" \
     -o "vlink/*:enable_proxy=False" \
     -o "vlink/*:enable_test=False"
 
@@ -1649,11 +1650,11 @@ VLink 在 `packup/` 目录下提供两套打包脚本：
 
 | 脚本 | 适用场景 | 产物 | 依赖来源 |
 |---|---|---|---|
-| `packup/build-deb.sh`   | Debian / Ubuntu 系统包         | `.deb` | CPM 拉 DDS/iceoryx，系统库提供 ssl/sqlite/zstd/protobuf/flatbuffers |
-| `packup/build-rpm.sh`   | RHEL / Fedora / openEuler / Anolis 系统包 | `.rpm` | 同上 |
-| `packup/build-arch.sh`  | Arch / Manjaro 系统包          | `.pkg.tar.zst` | 同上 |
-| `packup/build.sh`       | **便携 tgz + QtIFW 安装器**（Linux/macOS，含 Viewer/Qt 大件） | `.tgz` + 离线安装器 | Conan 拉全部依赖（不依赖系统库） |
-| `packup/build.bat`      | Windows 平台的 build.sh 等价物 | `.zip` + 离线安装器 | 同上 |
+| `packup/build-deb.sh`    | Debian / Ubuntu 系统包         | `.deb` | CPM 拉 DDS/iceoryx，系统库提供 ssl/sqlite/zstd/protobuf/flatbuffers |
+| `packup/build-rpm.sh`    | RHEL / Fedora / openEuler / Anolis 系统包 | `.rpm` | 同上 |
+| `packup/build-arch.sh`   | Arch / Manjaro 系统包          | `.pkg.tar.zst` | 同上 |
+| `packup/build-conan.sh`  | **便携 tgz + QtIFW 安装器**（Linux/macOS，含 Viewer/Qt 大件） | `.tgz` + 离线安装器 | Conan 拉全部依赖（不依赖系统库） |
+| `packup/build-conan.bat` | Windows 平台的 build-conan.sh 等价物 | `.zip` + 离线安装器 | 同上 |
 
 ### 1.9.1 用 `build-deb.sh` / `build-rpm.sh` / `build-arch.sh` 打系统包
 
@@ -1715,26 +1716,26 @@ pacman -Qpi  vlink-*.pkg.tar.zst
 bsdtar -tf   vlink-*.pkg.tar.zst
 ```
 
-### 1.9.2 用 `build.sh` / `build.bat` 打便携包 + QtIFW 安装器
+### 1.9.2 用 `build-conan.sh` / `build-conan.bat` 打便携包 + QtIFW 安装器
 
 ```bash
 export QT_DIR=/opt/Qt/6.5.3/gcc_64                 # 必填（Linux x86_64 / macOS）
 export OSG_DIR=/opt/osg/3.6.5                      # 可选（启用 3D Viewer）
 export QTIFW_DIR=~/Qt/Tools/QtInstallerFramework/4.x   # 可选（自动探测）
 
-./packup/build.sh .                                # Linux 本机架构
-./packup/build.sh . arm64                          # macOS 交叉到 arm64
+./packup/build-conan.sh .                                # Linux 本机架构
+./packup/build-conan.sh . arm64                          # macOS 交叉到 arm64
 ```
 
 **产物路径**：
 
 ```
-build/packup/linux/vlink-2.0.0-linux-x86_64.tgz   # 便携压缩包
-build/packup/linux/vlink-2.0.0-linux-x86_64       # QtIFW 离线安装器
-build/packup/darwin/VLink Player.app              # macOS bundle
+build-conan/packup/linux/vlink-2.0.0-linux-x86_64.tgz   # 便携压缩包
+build-conan/packup/linux/vlink-2.0.0-linux-x86_64       # QtIFW 离线安装器
+build-conan/packup/darwin/VLink Player.app              # macOS bundle
 ```
 
-Windows 用 `build.bat`，产物在 `build\packup\win32\` 下。
+Windows 用 `build-conan.bat`，产物在 `build-conan\packup\win32\` 下。
 
 ### 1.9.3 跨发行版兼容策略
 
