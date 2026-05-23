@@ -6,7 +6,7 @@ project(vlink-efbs LANGUAGES CXX)
 
 # requires
 if(NOT TARGET flatbuffers::flatbuffers_shared AND NOT TARGET flatbuffers::flatbuffers)
-  find_package(Flatbuffers 22.0.0 CONFIG REQUIRED)
+  find_package(flatbuffers CONFIG REQUIRED)
 endif()
 
 # src

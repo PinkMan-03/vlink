@@ -18,7 +18,7 @@ if(NOT TARGET vlink::vlink)
 endif()
 
 if(NOT TARGET OpenSSL::Crypto)
-  find_package(OpenSSL 1.1.0 QUIET)
+  find_package(OpenSSL QUIET)
 endif()
 if(NOT TARGET OpenSSL::Crypto)
   message(WARNING "OpenSSL::Crypto >= 1.1.0 not found -- skipping example_security_rsa.")

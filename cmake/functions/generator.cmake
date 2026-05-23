@@ -359,7 +359,7 @@ function(vlink_generate_cpp)
   elseif(VLINK_GEN_FLAT OR VLINK_GEN_FBS)
     set(VLINK_GEN_HEADER_ONLY TRUE)
     if(NOT TARGET flatbuffers::flatbuffers OR NOT TARGET flatbuffers::flatbuffers_shared)
-      find_package(Flatbuffers 22.0.0 CONFIG QUIET)
+      find_package(flatbuffers CONFIG QUIET)
     endif()
     _vlink_generate_flatbuffers_cpp(
       "${ABS_INPUTS}" "${VLINK_GEN_IN_DIR}" "${VLINK_GEN_OUT_DIR}" "${VLINK_GEN_FLAGS}" out_hdrs out_srcs
@@ -504,7 +504,7 @@ function(vlink_generate_flatbuffers_registry_cpp)
       PARENT_SCOPE
   )
   if(NOT TARGET flatbuffers::flatbuffers OR NOT TARGET flatbuffers::flatbuffers_shared)
-    find_package(Flatbuffers 22.0.0 CONFIG QUIET)
+    find_package(flatbuffers CONFIG QUIET)
   endif()
   if(TARGET flatbuffers::flatbuffers_shared)
     set(depend_libs flatbuffers::flatbuffers_shared)

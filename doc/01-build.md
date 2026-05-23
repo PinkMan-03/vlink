@@ -919,7 +919,7 @@ find_package(vlink REQUIRED COMPONENTS all)
 # 2. （可选）查找序列化库
 # -----------------------------------------------------------------
 find_package(Protobuf CONFIG QUIET)
-find_package(Flatbuffers 22.0.0 CONFIG QUIET)
+find_package(flatbuffers CONFIG QUIET)
 
 # -----------------------------------------------------------------
 # 3. 代码生成（Protobuf 示例）
@@ -1092,7 +1092,7 @@ root_type PointCloud;
 #### 1.6.2.2 CMakeLists.txt 生成代码
 
 ```cmake
-find_package(Flatbuffers 22.0.0 REQUIRED)
+find_package(flatbuffers REQUIRED)
 
 vlink_generate_cpp(
   TARGET lidar_fbs_gen

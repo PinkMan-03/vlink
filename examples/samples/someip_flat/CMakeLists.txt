@@ -11,7 +11,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/example_standalone.cmake")
 include(GNUInstallDirs)
 
 if(NOT Flatbuffers_FOUND)
-  find_package(Flatbuffers 22.0.0 CONFIG QUIET)
+  find_package(flatbuffers CONFIG QUIET)
 endif()
 if(NOT TARGET vlink::vlink)
   find_package(vlink QUIET COMPONENTS someip)

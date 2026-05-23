@@ -33,7 +33,7 @@ if(NOT TARGET protobuf::libprotobuf)
 endif()
 
 if(NOT TARGET flatbuffers::flatbuffers_shared AND NOT TARGET flatbuffers::flatbuffers)
-  find_package(flatbuffers 22.0.0 CONFIG REQUIRED)
+  find_package(flatbuffers CONFIG REQUIRED)
 endif()
 
 if(QT_VERSION_MAJOR EQUAL 6)
