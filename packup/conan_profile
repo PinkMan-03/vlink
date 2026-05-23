@@ -8,8 +8,6 @@ vlink/*:enable_viewer = True
 vlink/*:enable_viewer_ffmpeg = True
 vlink/*:enable_viewer_osg = True
 
-protobuf/*:shared = True
-
 ffmpeg/*:shared = True
 ffmpeg/*:avcodec = True
 ffmpeg/*:avformat = True

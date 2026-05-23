@@ -108,17 +108,22 @@ class VLinkConan(ConanFile):
 
     def requirements(self):
         if not self.options.enable_cpm and not self.options.enable_cpm_all:
+            self.requires("zlib/1.3.2")
+            self.requires("zstd/1.5.7")
             self.requires("sqlite3/3.51.3")
             self.requires("openssl/3.0.20")
             self.requires("protobuf/3.21.12")
-            self.requires("zstd/1.5.7")
+            self.requires("flatbuffers/25.9.23")
             self.requires("fast-dds/2.11.2")
             self.requires("cyclonedds/0.10.5")
             self.requires("iceoryx/2.0.6")
         elif not self.options.enable_cpm_all:
+            self.requires("zlib/1.3.2")
+            self.requires("zstd/1.5.7")
             self.requires("sqlite3/3.51.3")
             self.requires("openssl/3.0.20")
-            self.requires("zstd/1.5.7")
+            self.requires("protobuf/3.21.12")
+            self.requires("flatbuffers/25.9.23")
         if self.options.enable_viewer and self.options.enable_viewer_ffmpeg:
             self.requires("ffmpeg/8.1.1")
 

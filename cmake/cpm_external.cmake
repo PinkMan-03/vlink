@@ -5,8 +5,21 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output/external/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output/external/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/output/external/lib)
-set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 # set(CMAKE_SKIP_INSTALL_RULES ON)
+
+if(NOT MSVC AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT ipo_supported)
+  if(ipo_supported)
+    message(STATUS "Enable Interprocedural Optimization")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+  else()
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+  endif()
+endif()
+if(POLICY CMP0069)
+  cmake_policy(SET CMP0069 NEW)
+endif()
 
 function(export)
 

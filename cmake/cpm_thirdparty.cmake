@@ -7,8 +7,8 @@ if(ENABLE_CPM)
   option(ENABLE_CPM_SQLITE3 "Enable cpm build for sqlite3" OFF)
   option(ENABLE_CPM_OPENSSL "Enable cpm build for openssl" OFF)
   option(ENABLE_CPM_ZSTD "Enable cpm build for zstd" OFF)
-  option(ENABLE_CPM_PROTOBUF "Enable cpm build for protobuf" ON)
-  option(ENABLE_CPM_FLATBUFFERS "Enable cpm build for flatbuffers" ON)
+  option(ENABLE_CPM_PROTOBUF "Enable cpm build for protobuf" OFF)
+  option(ENABLE_CPM_FLATBUFFERS "Enable cpm build for flatbuffers" OFF)
 endif()
 
 # import cpm
@@ -101,10 +101,12 @@ if(ENABLE_CPM_ALL OR ENABLE_CPM_PROTOBUF)
     URL
     "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip"
     OPTIONS
+    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
     "CMAKE_POSITION_INDEPENDENT_CODE ON"
     "BUILD_SHARED_LIBS OFF"
     "protobuf_BUILD_TESTS OFF"
     "protobuf_BUILD_PROTOC_BINARIES ON"
+    "protobuf_MSVC_STATIC_RUNTIME OFF"
     EXCLUDE_FROM_ALL
     ON
   )
@@ -121,6 +123,7 @@ if(ENABLE_CPM_ALL OR ENABLE_CPM_FLATBUFFERS)
     URL
     "https://github.com/google/flatbuffers/archive/refs/tags/v25.9.23.zip"
     OPTIONS
+    "CMAKE_PROJECT_INCLUDE_BEFORE ${CMAKE_SOURCE_DIR}/cmake/cpm_external.cmake"
     "CMAKE_POSITION_INDEPENDENT_CODE ON"
     "BUILD_SHARED_LIBS OFF"
     "FLATBUFFERS_BUILD_SHAREDLIB OFF"
