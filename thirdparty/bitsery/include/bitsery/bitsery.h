@@ -65,13 +65,13 @@
 #define BITSERY_ATTRIBUTE(...) [[__VA_ARGS__]]
 #endif
 
-#if __has_cpp_attribute(likely)
+#if __cplusplus >= 202002L && __has_cpp_attribute(likely)
 #define BITSERY_LIKELY BITSERY_ATTRIBUTE(likely)
 #else
 #define BITSERY_LIKELY
 #endif
 
-#if __has_cpp_attribute(unlikely)
+#if __cplusplus >= 202002L && __has_cpp_attribute(unlikely)
 #define BITSERY_UNLIKELY BITSERY_ATTRIBUTE(unlikely)
 #else
 #define BITSERY_UNLIKELY
