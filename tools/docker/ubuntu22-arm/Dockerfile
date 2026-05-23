@@ -118,8 +118,6 @@ RUN apt-get install -yq --no-install-recommends \
     less \
     sqlite3 \
     postgresql \
-    clang-tidy \
-    clang-format \
     curl \
     automake \
     pkgconf \
@@ -237,10 +235,13 @@ RUN echo "\n$USERNAME ALL=(ALL) ALL\n" >> /etc/sudoers && \
     locale-gen en_US en_US.UTF-8 && update-locale
 
 #=== python
-RUN pip config --no-cache-dir --global set global.index-url https://pypi.mirrors.ustc.edu.cn/simple/ && \
-    pip config --no-cache-dir --global set global.trusted-host pypi.mirrors.ustc.edu.cn
-
-RUN pip install --no-cache-dir \
+RUN python3 -m pip config --no-cache-dir --global set global.index-url https://pypi.mirrors.ustc.edu.cn/simple/ && \
+    python3 -m pip config --no-cache-dir --global set global.trusted-host pypi.mirrors.ustc.edu.cn
+RUN python3 -m pip install --no-cache-dir -U \
+    pip \
+    setuptools \
+    wheel
+RUN python3 -m pip install --no-cache-dir \
     vcs2l \
     conan \
     jinja2
