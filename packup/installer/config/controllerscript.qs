@@ -5,10 +5,17 @@ function Controller()
         installer.setMessageBoxAutomaticAnswer("TargetDirectoryInUse",     QMessageBox.Yes);
         installer.setMessageBoxAutomaticAnswer("MaintenanceToolFound",     QMessageBox.Ok);
         installer.setMessageBoxAutomaticAnswer("stopProcessesForUpdates",  QMessageBox.Ignore);
+        installer.valueChanged.connect(this.onValueChanged.bind(this));
+        try { this.removeMaintenance(installer.value("TargetDir")); } catch (e) {}
     }
 
     if (installer.isUninstaller()) {
-        installer.setDefaultPageVisible(QInstaller.Introduction, true);
+        installer.setDefaultPageVisible(QInstaller.Introduction,  true);
+        installer.setDefaultPageVisible(QInstaller.TargetDirectory,  false);
+        installer.setDefaultPageVisible(QInstaller.ComponentSelection, false);
+        installer.setDefaultPageVisible(QInstaller.LicenseCheck,   false);
+        installer.setDefaultPageVisible(QInstaller.StartMenuSelection, false);
+        installer.setDefaultPageVisible(QInstaller.ReadyForInstallation, true);
         try { gui.setSettingsButtonEnabled(false); } catch (e) {}
     }
 }
@@ -74,11 +81,32 @@ Controller.prototype.TargetDirectoryPageCallback = function()
         } catch (e) {}
         var suggest = ("" + dir).replace(/[\/\\]+$/, "") +
                       (systemInfo.kernelType === "winnt" ? "\\vlink" : "/vlink");
-        installer.setValue("TargetDir", suggest);
+        this._setTargetDirForced(suggest);
         return;
     }
 
     this.removeMaintenance(dir);
+    this._setTargetDirForced(dir);
+}
+
+Controller.prototype.onValueChanged = function(key, value)
+{
+    if (key !== "TargetDir") return;
+    if (this._inRevalidate) return;
+    this.removeMaintenance(value);
+    this._setTargetDirForced(value);
+}
+
+Controller.prototype._setTargetDirForced = function(dir)
+{
+    if (!dir || dir === "") return;
+    if (this._inRevalidate) return;
+    this._inRevalidate = true;
+    try {
+        installer.setValue("TargetDir", dir + ".vlinktmp");
+        installer.setValue("TargetDir", dir);
+    } catch (e) {}
+    this._inRevalidate = false;
 }
 
 Controller.prototype.removeMaintenance = function(dir)
