@@ -64,7 +64,7 @@ if(NOT Protobuf_FOUND)
   find_package(Protobuf CONFIG QUIET)
 endif()
 
-if(NOT Flatbuffers_FOUND)
+if(NOT flatbuffers_FOUND)
   find_package(flatbuffers CONFIG QUIET)
 endif()
 
@@ -88,7 +88,7 @@ if(Protobuf_FOUND)
   target_compile_definitions(${PROJECT_NAME} PRIVATE "VLINK_TEST_SUPPORT_PROTOBUF")
 endif()
 
-if(Flatbuffers_FOUND)
+if(flatbuffers_FOUND)
   file(GLOB IDL_SRCS CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/idl/*.fbs)
   vlink_generate_cpp(TARGET sample_gen_flatbuffers FBS ${IDL_SRCS})
   target_link_libraries(${PROJECT_NAME} PRIVATE sample_gen_flatbuffers)
