@@ -6,66 +6,77 @@ DESKTOP_DIR="$VLINK_ROOT_DIR/desktop"
 
 echo "Uninstall..."
 
-mkdir -p ~/.local/share/applications/
-mkdir -p ~/.local/share/icons/
+rm -f "$HOME/.local/share/icons/vlink-viewer.png"              2>/dev/null
+rm -f "$HOME/.local/share/icons/vlink-player.png"              2>/dev/null
+rm -f "$HOME/.local/share/icons/vlink-analyzer.png"            2>/dev/null
+rm -f "$HOME/.local/share/icons/vlink-cmd.png"                 2>/dev/null
+rm -f "$HOME/.local/share/applications/vlink-viewer.desktop"   2>/dev/null
+rm -f "$HOME/.local/share/applications/vlink-player.desktop"   2>/dev/null
+rm -f "$HOME/.local/share/applications/vlink-analyzer.desktop" 2>/dev/null
+rm -f "$HOME/.local/share/applications/vlink-cmd.desktop"      2>/dev/null
 
-[ -f ~/.local/share/icons/vlink-viewer.png ] && rm -f ~/.local/share/icons/vlink-viewer.png
-[ -f ~/.local/share/applications/vlink-viewer.desktop ] && rm -f ~/.local/share/applications/vlink-viewer.desktop
-[ -f ~/.local/share/icons/vlink-player.png ] && rm -f ~/.local/share/icons/vlink-player.png
-[ -f ~/.local/share/applications/vlink-player.desktop ] && rm -f ~/.local/share/applications/vlink-player.desktop
-[ -f ~/.local/share/icons/vlink-analyzer.png ] && rm -f ~/.local/share/icons/vlink-analyzer.png
-[ -f ~/.local/share/applications/vlink-analyzer.desktop ] && rm -f ~/.local/share/applications/vlink-analyzer.desktop
-[ -f ~/.local/share/icons/vlink-cmd.png ] && rm -f ~/.local/share/icons/vlink-cmd.png
-[ -f ~/.local/share/applications/vlink-cmd.desktop ] && rm -f ~/.local/share/applications/vlink-cmd.desktop
-
-if command -v xdg-user-dir &> /dev/null; then
-    DESKTOP="$(xdg-user-dir DESKTOP)"
-    if [ -f "$DESKTOP/vlink-viewer.desktop" ]; then
-        gio remove "$DESKTOP/vlink-viewer.desktop" &> /dev/null
-        [ -f "$DESKTOP/vlink-viewer.desktop" ] && rm -f "$DESKTOP/vlink-viewer.desktop"
-    fi
-    if [ -f "$DESKTOP/vlink-player.desktop" ]; then
-        gio remove "$DESKTOP/vlink-player.desktop" &> /dev/null
-        [ -f "$DESKTOP/vlink-player.desktop" ] && rm -f "$DESKTOP/vlink-player.desktop"
-    fi
-    if [ -f "$DESKTOP/vlink-analyzer.desktop" ]; then
-        gio remove "$DESKTOP/vlink-analyzer.desktop" &> /dev/null
-        [ -f "$DESKTOP/vlink-analyzer.desktop" ] && rm -f "$DESKTOP/vlink-analyzer.desktop"
-    fi
-    if [ -f "$DESKTOP/vlink-cmd.desktop" ]; then
-        gio remove "$DESKTOP/vlink-cmd.desktop" &> /dev/null
-        [ -f "$DESKTOP/vlink-cmd.desktop" ] && rm -f "$DESKTOP/vlink-cmd.desktop"
+if command -v xdg-user-dir &>/dev/null; then
+    DESKTOP="$(xdg-user-dir DESKTOP 2>/dev/null)"
+    if [ -n "$DESKTOP" ] && [ -d "$DESKTOP" ] && [ "$DESKTOP" != "$HOME" ]; then
+        for _f in vlink-viewer vlink-player vlink-analyzer vlink-cmd; do
+            if [ -f "$DESKTOP/${_f}.desktop" ] || [ -L "$DESKTOP/${_f}.desktop" ]; then
+                gio remove "$DESKTOP/${_f}.desktop" &>/dev/null
+                rm -f "$DESKTOP/${_f}.desktop" 2>/dev/null
+            fi
+        done
     fi
 fi
 
-# mime
-xdg-mime uninstall --mode user "$DESKTOP_DIR/x-vlink-bag.xml" &> /dev/null
-update-desktop-database ~/.local/share/applications/ &> /dev/null
-update-mime-database ~/.local/share/mime/ &> /dev/null
+if [ -f "$DESKTOP_DIR/x-vlink-bag.xml" ]; then
+    xdg-mime uninstall --mode user "$DESKTOP_DIR/x-vlink-bag.xml" &>/dev/null
+fi
+rm -f "$HOME/.local/share/mime/packages/x-vlink-bag.xml" 2>/dev/null
 
-# icon
-function uninstall_theme_icon () {
-    local _theme_name="$1"
-    [ -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vdb.png ] && rm -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vdb.png
-    [ -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vdbx.png ] && rm -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vdbx.png
-    [ -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vcap.png ] && rm -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vcap.png
-    [ -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vcapx.png ] && rm -f ~/.local/share/icons/"$_theme_name"/256x256/mimetypes/vlink-vcapx.png
-    [ -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vdb.svg ] && rm -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vdb.svg
-    [ -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vdbx.svg ] && rm -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vdbx.svg
-    [ -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vcap.svg ] && rm -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vcap.svg
-    [ -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vcapx.svg ] && rm -f ~/.local/share/icons/"$_theme_name"/scalable/mimetypes/vlink-vcapx.svg
-    gtk-update-icon-cache ~/.local/share/icons/"$_theme_name"/ &> /dev/null
-    gtk-update-icon-cache /usr/share/icons/"$_theme_name"/ &> /dev/null
+for _f in "$HOME/.config/mimeapps.list" "$HOME/.local/share/applications/mimeapps.list"; do
+    if [ -f "$_f" ]; then
+        sed -i.vlink_bak -E \
+            -e '/^application\/(x-)?vlink-(vdb|vdbx|vcap|vcapx)[[:space:]]*=/d' \
+            "$_f" 2>/dev/null
+        rm -f "${_f}.vlink_bak" 2>/dev/null
+    fi
+done
+
+update-desktop-database "$HOME/.local/share/applications/" &>/dev/null
+update-mime-database    "$HOME/.local/share/mime/"         &>/dev/null
+
+uninstall_theme_icon() {
+    local _theme_dir="$1"
+    [ -d "$_theme_dir" ] || return 0
+    local _touched=0
+    for _path in \
+        "$_theme_dir/256x256/mimetypes/vlink-vdb.png" \
+        "$_theme_dir/256x256/mimetypes/vlink-vdbx.png" \
+        "$_theme_dir/256x256/mimetypes/vlink-vcap.png" \
+        "$_theme_dir/256x256/mimetypes/vlink-vcapx.png" \
+        "$_theme_dir/scalable/mimetypes/vlink-vdb.svg" \
+        "$_theme_dir/scalable/mimetypes/vlink-vdbx.svg" \
+        "$_theme_dir/scalable/mimetypes/vlink-vcap.svg" \
+        "$_theme_dir/scalable/mimetypes/vlink-vcapx.svg"; do
+        if [ -e "$_path" ]; then
+            rm -f "$_path" 2>/dev/null
+            _touched=1
+        fi
+    done
+    if [ "$_touched" = "1" ] && command -v gtk-update-icon-cache &>/dev/null; then
+        gtk-update-icon-cache "$_theme_dir/" &>/dev/null
+    fi
 }
 
-THEME_NAME="$(gsettings get org.gnome.desktop.interface icon-theme | sed "s/'//g")"
-uninstall_theme_icon hicolor
-if [ -n "$THEME_NAME" ]; then
-    uninstall_theme_icon "$THEME_NAME"
+if [ -d "$HOME/.local/share/icons" ]; then
+    shopt -s nullglob
+    for _theme_dir in "$HOME/.local/share/icons"/*/; do
+        uninstall_theme_icon "${_theme_dir%/}"
+    done
+    shopt -u nullglob
 fi
 
-
-# [ -f ~/.vlink_proto_dir ] && rm -f ~/.vlink_proto_dir
-# [ -f ~/.vlink_fbs_dir ] && rm -f ~/.vlink_fbs_dir
+rm -f "$HOME/.config/vlink/install_path" 2>/dev/null
+rmdir "$HOME/.config/vlink" 2>/dev/null
 
 echo "Done."
+exit 0

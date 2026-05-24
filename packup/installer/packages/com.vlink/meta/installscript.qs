@@ -1,63 +1,132 @@
-function Component()
-{
-    if (installer.isInstaller()) {
-        var oldPath = this.readOldInstallPath();
-        if (oldPath !== "") {
-            if (systemInfo.kernelType === "winnt") {
-                installer.execute("powershell.exe", ["-NoProfile", "-Command",
-                    "Remove-Item -Force -ErrorAction SilentlyContinue '" + oldPath + "/vlink-maintenance.exe'"]);
-            } else {
-                installer.execute("rm", ["-f", oldPath + "/vlink-maintenance"]);
-            }
-        }
-        installer.installationStarted.connect(this,
-            Component.prototype.onInstallationStarted);
+function bashEscape(s) {
+    if (s === undefined || s === null) return "''";
+    return "'" + ("" + s).replace(/'/g, "'\\''") + "'";
+}
+
+function normPath(p) {
+    if (!p) return "";
+    var s = ("" + p).replace(/[\r\n]+/g, "").replace(/\\/g, "/").trim();
+    if (s.length > 1) s = s.replace(/\/+$/, "");
+    return s;
+}
+
+function toWinPath(p) {
+    return ("" + p).replace(/\//g, "\\");
+}
+
+var DANGEROUS_TARGETS = {
+    winnt: [
+        "c:", "c:/windows", "c:/windows/system32",
+        "c:/program files", "c:/program files (x86)",
+        "c:/users", "c:/users/public", "c:/programdata"
+    ],
+    darwin: [
+        "/", "/applications", "/system", "/library",
+        "/usr", "/usr/local", "/bin", "/sbin", "/etc", "/var",
+        "/users", "/users/shared",
+        "/opt", "/private", "/volumes"
+    ],
+    linux: [
+        "/", "/home", "/root", "/boot", "/dev",
+        "/etc", "/lib", "/lib64", "/proc", "/sys",
+        "/opt", "/usr", "/usr/local", "/usr/bin", "/usr/lib", "/usr/share",
+        "/var", "/srv", "/run", "/tmp", "/mnt", "/media", "/snap"
+    ]
+};
+
+function isObviouslyDangerousTarget(targetDir) {
+    if (!targetDir) return true;
+    var n = normPath(targetDir);
+    if (n === "") return true;
+    var caseFold = (systemInfo.kernelType === "winnt" ||
+                    systemInfo.kernelType === "darwin");
+    var nKey = caseFold ? n.toLowerCase() : n;
+
+    var list = DANGEROUS_TARGETS[systemInfo.kernelType] || DANGEROUS_TARGETS.linux;
+    for (var i = 0; i < list.length; ++i) {
+        if (nKey === list[i]) return true;
+    }
+    if (/^[a-z]:$/i.test(n)) return true;
+
+    var homeVar = systemInfo.kernelType === "winnt" ? "USERPROFILE" : "HOME";
+    var home = installer.environmentVariable(homeVar);
+    if (home && home !== "") {
+        var hn = normPath(home);
+        var hnKey = caseFold ? hn.toLowerCase() : hn;
+        if (hnKey === nKey) return true;
+    }
+    return false;
+}
+
+function hasPolkit() {
+    try {
+        var r = installer.execute("/bin/bash", ["-c",
+            "command -v pkexec >/dev/null 2>&1 && echo yes || echo no"]);
+        return r && r.length > 0 && (("" + r[0]).indexOf("yes") !== -1);
+    } catch (e) {
+        return false;
     }
 }
 
-Component.prototype.readOldInstallPath = function()
+function readOldInstallPath()
 {
     try {
         if (systemInfo.kernelType === "winnt") {
-            var result = installer.execute("reg",
+            var r = installer.execute("reg",
                 ["query", "HKCU\\Software\\VLink", "/v", "InstallPath"]);
-            if (result.length > 1 && result[1] == 0) {
-                var match = result[0].match(/InstallPath\s+REG_SZ\s+(.+)/);
-                if (match) return match[1].trim();
+            if (r && r.length > 1 && r[1] == 0) {
+                var m = r[0].match(/InstallPath\s+REG_SZ\s+([^\r\n]+)/);
+                if (m) return normPath(m[1]);
             }
         } else {
             var home = installer.environmentVariable("HOME");
-            var result = installer.execute("cat",
+            if (!home || home === "") return "";
+            var r = installer.execute("/bin/cat",
                 [home + "/.config/vlink/install_path"]);
-            if (result.length > 1 && result[1] == 0) {
-                return result[0].trim();
+            if (r && r.length > 1 && r[1] == 0) {
+                return normPath(r[0]);
             }
         }
     } catch (e) {}
     return "";
 }
 
+function Component()
+{
+    if (installer.isInstaller()) {
+        installer.installationStarted.connect(
+            Component.prototype.onInstallationStarted.bind(this));
+    }
+}
+
 Component.prototype.onInstallationStarted = function()
 {
-    var oldPath = this.readOldInstallPath();
+    var oldPath = readOldInstallPath();
     if (oldPath === "") return;
 
     if (systemInfo.kernelType === "winnt") {
-        installer.execute("cmd.exe",
-            ["/c", oldPath + "/uninstall.bat"]);
+        var oldWin = toWinPath(oldPath);
+        installer.execute("cmd.exe", ["/c",
+            "if exist \"" + oldWin + "\\uninstall.bat\" " +
+            "call \"" + oldWin + "\\uninstall.bat\""]);
         installer.execute("reg",
             ["delete", "HKCU\\Software\\VLink", "/f"]);
         installer.execute("reg", ["delete",
-            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VLink", "/f"]);
-        installer.execute("powershell.exe", ["-NoProfile", "-Command",
-            "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue '" + oldPath + "'"]);
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VLink",
+            "/f"]);
     } else {
-        installer.execute("bash",
-            ["-c", "cd '" + oldPath + "' && ./uninstall.sh 2>/dev/null"]);
+        var oldQ = bashEscape(oldPath);
+        installer.execute("/bin/bash", ["-c",
+            "if [ -x " + oldQ + "/uninstall.sh ]; then " +
+            "  cd " + oldQ + " && ./uninstall.sh >/dev/null 2>&1 || true; " +
+            "fi; exit 0"]);
         var home = installer.environmentVariable("HOME");
-        installer.execute("rm",
-            ["-f", home + "/.config/vlink/install_path"]);
-        installer.execute("rm", ["-rf", oldPath]);
+        if (home && home !== "") {
+            var homeQ = bashEscape(home);
+            installer.execute("/bin/bash", ["-c",
+                "rm -f " + homeQ + "/.config/vlink/install_path 2>/dev/null; " +
+                "rmdir " + homeQ + "/.config/vlink 2>/dev/null; exit 0"]);
+        }
     }
 }
 
@@ -67,28 +136,39 @@ Component.prototype.createOperations = function()
 
     var targetDir = installer.value("TargetDir");
 
+    if (isObviouslyDangerousTarget(targetDir)) {
+        throw new Error("Refusing to install to TargetDir '" + targetDir +
+                        "' (empty, filesystem root, drive root, or user home).");
+    }
+
     if (systemInfo.kernelType === "winnt") {
+        var targetWin = toWinPath(targetDir);
+
         component.addOperation("Execute",
             "reg", "add", "HKCU\\Software\\VLink",
             "/v", "InstallPath", "/t", "REG_SZ",
-            "/d", targetDir, "/f",
+            "/d", targetWin, "/f",
             "UNDOEXECUTE",
-            "reg", "delete", "HKCU\\Software\\VLink", "/f");
+            "cmd.exe", "/c",
+            "reg delete \"HKCU\\Software\\VLink\" /f >nul 2>&1 & exit /b 0");
 
         component.addElevatedOperation("Execute",
-            "cmd.exe", "/c", targetDir + "/install.bat",
+            "cmd.exe", "/c", targetWin + "\\install.bat",
             "UNDOEXECUTE",
-            "cmd.exe", "/c", targetDir + "/uninstall.bat");
+            "cmd.exe", "/c",
+            "call \"" + targetWin + "\\uninstall.bat\" >nul 2>&1 & exit /b 0");
 
-        var uk = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VLink";
+        var uk  = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VLink";
         var ver = installer.value("ProductVersion");
-        var mt = targetDir + "/vlink-maintenance.exe";
+        var mt  = targetWin + "\\vlink-maintenance.exe";
+        var iconPath = targetWin + "\\bin\\vlink-viewer.exe,0";
 
         component.addOperation("Execute",
             "reg", "add", uk, "/v", "DisplayName",
             "/t", "REG_SZ", "/d", "VLink " + ver, "/f",
             "UNDOEXECUTE",
-            "reg", "delete", uk, "/f");
+            "cmd.exe", "/c",
+            "reg delete \"" + uk + "\" /f >nul 2>&1 & exit /b 0");
         component.addOperation("Execute",
             "reg", "add", uk, "/v", "DisplayVersion",
             "/t", "REG_SZ", "/d", ver, "/f");
@@ -97,13 +177,13 @@ Component.prototype.createOperations = function()
             "/t", "REG_SZ", "/d", "VLink", "/f");
         component.addOperation("Execute",
             "reg", "add", uk, "/v", "InstallLocation",
-            "/t", "REG_SZ", "/d", targetDir, "/f");
+            "/t", "REG_SZ", "/d", targetWin, "/f");
         component.addOperation("Execute",
             "reg", "add", uk, "/v", "UninstallString",
             "/t", "REG_SZ", "/d", mt, "/f");
         component.addOperation("Execute",
             "reg", "add", uk, "/v", "DisplayIcon",
-            "/t", "REG_SZ", "/d", targetDir + "/bin/vlink-viewer.exe,0", "/f");
+            "/t", "REG_SZ", "/d", iconPath, "/f");
         component.addOperation("Execute",
             "reg", "add", uk, "/v", "NoModify",
             "/t", "REG_DWORD", "/d", "1", "/f");
@@ -112,43 +192,64 @@ Component.prototype.createOperations = function()
             "/t", "REG_DWORD", "/d", "1", "/f");
 
     } else {
-        var home = installer.environmentVariable("HOME");
+        var home    = installer.environmentVariable("HOME");
+        var targetQ = bashEscape(targetDir);
+        var isMac   = (systemInfo.kernelType === "darwin");
 
         component.addOperation("Execute",
-            "bash", "-c",
-            "cd '" + targetDir + "' && chmod +x bin/vlink-* bin/*.sh install.sh uninstall.sh 2>/dev/null && ./install.sh",
+            "/bin/bash", "-c",
+            "cd " + targetQ + " && " +
+            "chmod +x install.sh uninstall.sh 2>/dev/null; " +
+            "chmod +x bin/vlink-* bin/*.sh 2>/dev/null; " +
+            "./install.sh",
             "UNDOEXECUTE",
-            "bash", "-c",
-            "cd '" + targetDir + "' && ./uninstall.sh");
+            "/bin/bash", "-c",
+            "if [ -x " + targetQ + "/uninstall.sh ]; then " +
+            "  cd " + targetQ + " && ./uninstall.sh; " +
+            "fi; exit 0");
 
-        if (systemInfo.productType !== "osx") {
+        if (!isMac && hasPolkit()) {
             try {
-                var check = installer.execute("bash", ["-c",
+                var check = installer.execute("/bin/bash", ["-c",
                     "grep -q Ubuntu /etc/os-release 2>/dev/null || exit 1; " +
                     "missing=''; for p in libvdpau-dev libva-drm2 libva-x11-2; do " +
                     "dpkg-query -W -f='${Status}' \"$p\" 2>/dev/null | grep -q 'install ok installed' || missing=\"$missing $p\"; done; " +
                     "[ -n \"$missing\" ] && echo $missing || exit 1"]);
-                if (check.length > 1 && check[1] == 0 && check[0].trim() !== "") {
+                if (check && check.length > 1 && check[1] == 0 && check[0].trim() !== "") {
                     component.addElevatedOperation("Execute",
-                        "bash", "-c", "apt-get install -y " + check[0].trim());
+                        "/bin/bash", "-c",
+                        "apt-get install -y " + check[0].trim() + " || true");
                 }
             } catch (e) {
-                // Skip silently
             }
         }
 
-        component.addOperation("Execute",
-            "bash", "-c",
-            "mkdir -p '" + home + "/.config/vlink' && echo '" + targetDir + "' > '" + home + "/.config/vlink/install_path'",
-            "UNDOEXECUTE",
-            "bash", "-c",
-            "rm -f '" + home + "/.config/vlink/install_path'");
+        if (home && home !== "") {
+            var homeQ = bashEscape(home);
+            component.addOperation("Execute",
+                "/bin/bash", "-c",
+                "mkdir -p " + homeQ + "/.config/vlink && " +
+                "printf '%s\\n' " + targetQ + " > " + homeQ + "/.config/vlink/install_path",
+                "UNDOEXECUTE",
+                "/bin/bash", "-c",
+                "rm -f " + homeQ + "/.config/vlink/install_path 2>/dev/null; " +
+                "rmdir " + homeQ + "/.config/vlink 2>/dev/null; exit 0");
+        }
 
-        component.addOperation("Execute",
-            "bash", "-c",
-            "ln -sf vlink-maintenance '" + targetDir + "/uninstall'",
-            "UNDOEXECUTE",
-            "bash", "-c",
-            "rm -f '" + targetDir + "/uninstall'");
+        if (isMac) {
+            component.addOperation("Execute",
+                "/bin/bash", "-c",
+                "ln -sfn vlink-maintenance.app " + targetQ + "/uninstall.app 2>/dev/null; exit 0",
+                "UNDOEXECUTE",
+                "/bin/bash", "-c",
+                "rm -f " + targetQ + "/uninstall.app 2>/dev/null; exit 0");
+        } else {
+            component.addOperation("Execute",
+                "/bin/bash", "-c",
+                "ln -sfn vlink-maintenance " + targetQ + "/uninstall 2>/dev/null; exit 0",
+                "UNDOEXECUTE",
+                "/bin/bash", "-c",
+                "rm -f " + targetQ + "/uninstall 2>/dev/null; exit 0");
+        }
     }
 }

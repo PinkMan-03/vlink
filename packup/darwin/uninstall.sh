@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 
-VLINK_ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
-
 echo "Uninstall..."
 
-[ -L "$HOME/Desktop/VLink Player" ] && rm -f "$HOME/Desktop/VLink Player"
+if [ -d "$HOME/Desktop" ]; then
+    for _name in "VLink Viewer" "VLink Player" "VLink Analyzer" "VLink CMD"; do
+        if [ -d "$HOME/Desktop/${_name}.app" ]; then
+            rm -rf "$HOME/Desktop/${_name}.app" 2>/dev/null
+        fi
+    done
 
-# [ -f ~/.vlink_proto_dir ] && rm -f ~/.vlink_proto_dir
-# [ -f ~/.vlink_fbs_dir ] && rm -f ~/.vlink_fbs_dir
+    if [ -L "$HOME/Desktop/VLink Player" ]; then
+        rm -f "$HOME/Desktop/VLink Player" 2>/dev/null
+    fi
+fi
+
+rm -f "$HOME/.config/vlink/install_path" 2>/dev/null
+rmdir "$HOME/.config/vlink" 2>/dev/null
 
 echo "Done."
+exit 0
