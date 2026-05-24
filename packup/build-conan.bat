@@ -282,7 +282,7 @@ echo *** creating portable archive...
 echo ********************************************
 echo.
 
-set /p VERSION=<"%SRC_DIR%\version.txt"
+for /f "usebackq delims=" %%a in ("%SRC_DIR%\version.txt") do set "VERSION=%%a"
 set "ARCHIVE_NAME=vlink-%VERSION%-win64.zip"
 set "ARCHIVE_DIR=%BUILD_DIR%\packup\win32"
 set "ARCHIVE_PATH=%ARCHIVE_DIR%\%ARCHIVE_NAME%"
@@ -341,7 +341,7 @@ if not exist "%WORK_DIR%\installer\config\config.xml" (
 
 echo Using binarycreator: %BINARYCREATOR%
 
-set /p VERSION=<"%SRC_DIR%\version.txt"
+for /f "usebackq delims=" %%a in ("%SRC_DIR%\version.txt") do set "VERSION=%%a"
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set DATE=%%i
 
 set "INSTALLER_DIR=%BUILD_DIR%/installer"
@@ -358,7 +358,7 @@ cmake -E make_directory "%INSTALLER_DATA%"
 cmake -E copy_directory "%WORK_DIR%/installer/config" "%INSTALLER_CONFIG%"
 
 powershell -NoProfile -Command ^
-    "(Get-Content '%WORK_DIR%\installer\config\config.xml' -Encoding UTF8) -replace '@VERSION@','%VERSION%' -replace '@DEFAULT_TARGET_DIR@','@ApplicationsDir@/vlink' | Set-Content '%INSTALLER_CONFIG%\config.xml' -Encoding UTF8"
+    "(Get-Content '%WORK_DIR%\installer\config\config.xml' -Encoding UTF8) -replace '@VERSION@','%VERSION%' -replace '@DEFAULT_TARGET_DIR@','@ApplicationsDir@/vlink' -replace '@MAINTENANCE_NAME@','vlink-uninstall' | Set-Content '%INSTALLER_CONFIG%\config.xml' -Encoding UTF8"
 
 powershell -NoProfile -Command ^
     "(Get-Content '%WORK_DIR%\installer\packages\com.vlink\meta\package.xml' -Encoding UTF8) -replace '@VERSION@','%VERSION%' -replace '@DATE@','%DATE%' | Set-Content '%INSTALLER_META%\package.xml' -Encoding UTF8"

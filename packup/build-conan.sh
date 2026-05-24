@@ -581,8 +581,15 @@ cp -rf "$WORK_DIR/installer/config/"* "$INSTALLER_CONFIG/"
 
 DEFAULT_TARGET_DIR="@HomeDir@/vlink"
 
+if [ "$PLATFORM_OS" = "Darwin" ]; then
+    MAINTENANCE_NAME="vlink-uninstall"
+else
+    MAINTENANCE_NAME="vlink-uninstall.run"
+fi
+
 sed -e "s|@VERSION@|$VERSION|g" \
     -e "s|@DEFAULT_TARGET_DIR@|$DEFAULT_TARGET_DIR|g" \
+    -e "s|@MAINTENANCE_NAME@|$MAINTENANCE_NAME|g" \
     "$WORK_DIR/installer/config/config.xml" > "$INSTALLER_CONFIG/config.xml"
 
 sed -e "s|@VERSION@|$VERSION|g" \
@@ -604,7 +611,12 @@ else
     OUTPUT_DIR=$BUILD_DIR/packup/linux
 fi
 
-OUTPUT_NAME="vlink-${VERSION}-${PLATFORM_TAG}"
+if [ "$PLATFORM_OS" = "Darwin" ]; then
+    OUTPUT_NAME="vlink-${VERSION}-${PLATFORM_TAG}"
+else
+    OUTPUT_NAME="vlink-${VERSION}-${PLATFORM_TAG}.run"
+fi
+
 OUTPUT_PATH="$OUTPUT_DIR/${OUTPUT_NAME}"
 
 echo "Creating installer: ${OUTPUT_PATH}"

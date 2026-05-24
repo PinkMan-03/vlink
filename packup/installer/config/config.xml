@@ -15,5 +15,5 @@
     <Logo>vlink-logo.png</Logo>
     <WizardStyle>Modern</WizardStyle>
     <ControlScript>controllerscript.qs</ControlScript>
-    <MaintenanceToolName>vlink-maintenance</MaintenanceToolName>
+    <MaintenanceToolName>@MAINTENANCE_NAME@</MaintenanceToolName>
 </Installer>
