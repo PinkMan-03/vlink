@@ -75,6 +75,11 @@ reg add "HKEY_CLASSES_ROOT\vdbxfile\DefaultIcon"  /ve /t REG_SZ /d "%APP_PATH_PL
 reg add "HKEY_CLASSES_ROOT\vcapfile\DefaultIcon"  /ve /t REG_SZ /d "%APP_PATH_PLAYER%,0" /f >nul 2>&1
 reg add "HKEY_CLASSES_ROOT\vcapxfile\DefaultIcon" /ve /t REG_SZ /d "%APP_PATH_PLAYER%,0" /f >nul 2>&1
 
+for %%E in (vdb vdbx vcap vcapx) do (
+    reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.%%E\UserChoice" /f >nul 2>&1
+    reg delete "HKCU\Software\Classes\.%%E" /f >nul 2>&1
+)
+
 ie4uinit.exe -show           >nul 2>&1
 ie4uinit.exe -ClearIconCache >nul 2>&1
 
