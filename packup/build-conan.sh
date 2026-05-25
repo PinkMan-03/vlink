@@ -665,6 +665,12 @@ sed -e "s|@VERSION@|$VERSION|g" \
 
 cp -f "$WORK_DIR/installer/packages/com.vlink/meta/installscript.qs" "$INSTALLER_META/"
 cp -f "$SRC_DIR/LICENSE" "$INSTALLER_META/"
+for _src in "$LICENSES_DIR/LICENSE_NOTICES.md" "$BUILD_DIR/LICENSE_NOTICES.md"; do
+    if [ -f "$_src" ]; then
+        cp -f "$_src" "$INSTALLER_META/LICENSE_NOTICES.md"
+        break
+    fi
+done
 
 echo "Copying packup files to installer data directory..."
 cp -rf "$PACKUP_DIR"/* "$INSTALLER_DATA/"

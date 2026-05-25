@@ -421,6 +421,11 @@ powershell -NoProfile -Command ^
 
 cmake -E copy "%WORK_DIR%/installer/packages/com.vlink/meta/installscript.qs" "%INSTALLER_META%/installscript.qs"
 cmake -E copy "%SRC_DIR%/LICENSE" "%INSTALLER_META%/LICENSE"
+if exist "%PACKUP_DIR%\licenses\LICENSE_NOTICES.md" (
+    cmake -E copy "%PACKUP_DIR%/licenses/LICENSE_NOTICES.md" "%INSTALLER_META%/LICENSE_NOTICES.md"
+) else if exist "%BUILD_DIR%\LICENSE_NOTICES.md" (
+    cmake -E copy "%BUILD_DIR%/LICENSE_NOTICES.md" "%INSTALLER_META%/LICENSE_NOTICES.md"
+)
 
 echo Copying packup files to installer data directory...
 cmake -E copy_directory "%PACKUP_DIR%" "%INSTALLER_DATA%"
