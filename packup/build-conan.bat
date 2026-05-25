@@ -421,7 +421,6 @@ powershell -NoProfile -Command ^
     "(Get-Content '%WORK_DIR%\installer\packages\com.vlink\meta\package.xml' -Encoding UTF8) -replace '@VERSION@','%VERSION%' -replace '@DATE@','%DATE%' | Set-Content '%INSTALLER_META%\package.xml' -Encoding UTF8"
 
 cmake -E copy "%WORK_DIR%/installer/packages/com.vlink/meta/installscript.qs" "%INSTALLER_META%/installscript.qs"
-cmake -E copy "%SRC_DIR%/LICENSE" "%INSTALLER_META%/LICENSE"
 
 echo Copying packup files to installer data directory...
 cmake -E copy_directory "%PACKUP_DIR%" "%INSTALLER_DATA%"

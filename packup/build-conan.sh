@@ -220,7 +220,6 @@ done
 [ -d "$INSTALL_DIR/etc/vlink" ] && cp -rf "$INSTALL_DIR/etc/vlink" "$PACKUP_DIR/etc/"
 
 cmake -E copy $SRC_DIR/version.txt    $PACKUP_DIR/
-cmake -E copy $SRC_DIR/LICENSE        $PACKUP_DIR/
 
 if [ "$PLATFORM_OS" = "Darwin" ];then
 
