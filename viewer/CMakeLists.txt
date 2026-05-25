@@ -51,16 +51,15 @@ endif()
 if(ENABLE_VIEWER_OSG)
   message(STATUS "Use osg for viewer.")
   find_package(
-    OpenSceneGraph
-    REQUIRED
-    osg
-    osgManipulator
-    osgViewer
-    osgGA
-    osgDB
-    osgUtil
-    osgText
-    OpenThreads
+    OpenSceneGraph REQUIRED
+    COMPONENTS osg
+               osgManipulator
+               osgViewer
+               osgGA
+               osgDB
+               osgUtil
+               osgText
+               OpenThreads
   )
 endif()
 
@@ -100,6 +99,12 @@ endif()
 if(ENABLE_VIEWER_OSG)
   if(DEFINED ENV{OSG_DIR})
     set(OSG_DIR $ENV{OSG_DIR})
+  endif()
+  if(NOT DEFINED OPENSCENEGRAPH_INCLUDE_DIRS AND DEFINED OpenSceneGraph_INCLUDE_DIRS)
+    set(OPENSCENEGRAPH_INCLUDE_DIRS ${OpenSceneGraph_INCLUDE_DIRS})
+  endif()
+  if(NOT DEFINED OPENSCENEGRAPH_LIBRARIES AND DEFINED OpenSceneGraph_LIBRARIES)
+    set(OPENSCENEGRAPH_INCLUDE_DIRS ${OpenSceneGraph_LIBRARIES})
   endif()
   target_include_directories(${PROJECT_NAME} PRIVATE ${OPENSCENEGRAPH_INCLUDE_DIRS})
   target_link_libraries(${PROJECT_NAME} PRIVATE ${OPENSCENEGRAPH_LIBRARIES})

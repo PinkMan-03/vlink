@@ -880,7 +880,6 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
       if (select_handler_ && select_handler_->isSelecting()) {
         return;
       }
-#endif
 
       QElapsedTimer timer;
       timer.start();
@@ -905,6 +904,7 @@ Point3DDialog::Point3DDialog(QWidget* parent, bool disable_osg) : QDialog(parent
                                   Q_ARG(QVariant, QVariant::fromValue<vlink::ProxyAPI::Data>(proxy_data)),
                                   Q_ARG(bool, false), Q_ARG(QElapsedTimer, timer));
       }
+#endif
     };
 
     if (parent) {
@@ -1998,6 +1998,34 @@ void Point3DDialog::on_lineEdit_exp_editingFinished() {
   refresh_sence();
 }
 
+void Point3DDialog::refresh_sence() {
+#ifdef VLINK_ENABLE_VIEWER_OSG
+  std::lock_guard lock(cache_mtx_);
+  for (const auto& [url, cache] : proxy_data_cache_) {
+    if (!cache.raw.empty()) {
+      QElapsedTimer timer;
+      timer.start();
+
+      if (cache.schema == vlink::SchemaType::kZeroCopy &&
+          cache.ser == vlink::Serializer::get_serialized_type<vlink::zerocopy::PointCloud>()) {
+        QMetaObject::invokeMethod(this, "update_ui_for_zero_copy_types", Qt::QueuedConnection,
+                                  Q_ARG(QVariant, QVariant::fromValue<vlink::ProxyAPI::Data>(cache)), Q_ARG(bool, true),
+                                  Q_ARG(QElapsedTimer, timer));
+      } else if (cache.schema == vlink::SchemaType::kProtobuf && target_msg_) {
+        QMetaObject::invokeMethod(this, "update_ui_for_proto", Qt::QueuedConnection,
+                                  Q_ARG(QVariant, QVariant::fromValue<vlink::ProxyAPI::Data>(cache)), Q_ARG(bool, true),
+                                  Q_ARG(QElapsedTimer, timer));
+      } else if (cache.schema == vlink::SchemaType::kFlatbuffers && target_fbs_context_) {
+        QMetaObject::invokeMethod(this, "update_ui_for_flatbuffers", Qt::QueuedConnection,
+                                  Q_ARG(QVariant, QVariant::fromValue<vlink::ProxyAPI::Data>(cache)), Q_ARG(bool, true),
+                                  Q_ARG(QElapsedTimer, timer));
+      }
+    }
+  }
+#endif
+}
+
+#ifdef VLINK_ENABLE_VIEWER_OSG
 void Point3DDialog::update_ui_for_proto(const QVariant& variant, bool cache, const QElapsedTimer& timer) {
   if (!target_msg_) {
     return;
@@ -2818,31 +2846,6 @@ void Point3DDialog::update_ui_for_flatbuffers(const QVariant& variant, bool cach
   }
 }
 
-void Point3DDialog::refresh_sence() {
-  std::lock_guard lock(cache_mtx_);
-  for (const auto& [url, cache] : proxy_data_cache_) {
-    if (!cache.raw.empty()) {
-      QElapsedTimer timer;
-      timer.start();
-
-      if (cache.schema == vlink::SchemaType::kZeroCopy &&
-          cache.ser == vlink::Serializer::get_serialized_type<vlink::zerocopy::PointCloud>()) {
-        QMetaObject::invokeMethod(this, "update_ui_for_zero_copy_types", Qt::QueuedConnection,
-                                  Q_ARG(QVariant, QVariant::fromValue<vlink::ProxyAPI::Data>(cache)), Q_ARG(bool, true),
-                                  Q_ARG(QElapsedTimer, timer));
-      } else if (cache.schema == vlink::SchemaType::kProtobuf && target_msg_) {
-        QMetaObject::invokeMethod(this, "update_ui_for_proto", Qt::QueuedConnection,
-                                  Q_ARG(QVariant, QVariant::fromValue<vlink::ProxyAPI::Data>(cache)), Q_ARG(bool, true),
-                                  Q_ARG(QElapsedTimer, timer));
-      } else if (cache.schema == vlink::SchemaType::kFlatbuffers && target_fbs_context_) {
-        QMetaObject::invokeMethod(this, "update_ui_for_flatbuffers", Qt::QueuedConnection,
-                                  Q_ARG(QVariant, QVariant::fromValue<vlink::ProxyAPI::Data>(cache)), Q_ARG(bool, true),
-                                  Q_ARG(QElapsedTimer, timer));
-      }
-    }
-  }
-}
-
 void Point3DDialog::update_points() {
   if (!osg_inited_) {
     return;
@@ -2929,6 +2932,7 @@ void Point3DDialog::update_points() {
     // geometry_select->dirtyBound();
   }
 }
+#endif
 
 bool Point3DDialog::evaluate_expression(int index, const QString& exp_str, const PointValueList& value_list) {
   if (expression_cache_.contains(exp_str)) {

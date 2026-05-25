@@ -153,6 +153,7 @@ for /f "delims=" %%d in ('dir /b /ad "%INSTALL_DIR%\lib\cmake\vlink*" 2^>nul') d
 
 if exist "%INSTALL_DIR%\include\vlink" cmake -E copy_directory "%INSTALL_DIR%/include/vlink" "%PACKUP_DIR%/include/vlink"
 if exist "%INSTALL_DIR%\etc\vlink" cmake -E copy_directory "%INSTALL_DIR%/etc/vlink" "%PACKUP_DIR%/etc/vlink"
+if exist "%PACKUP_DIR%\etc\vlink\licenses" rmdir /s /q "%PACKUP_DIR%\etc\vlink\licenses"
 
 cmake -E copy "%SRC_DIR%/version.txt"   "%PACKUP_DIR%/"
 

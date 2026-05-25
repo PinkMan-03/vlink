@@ -93,88 +93,38 @@ echo ""
 cmake -E make_directory $BUILD_DIR/output/lib
 cmake -E make_directory $BUILD_DIR/output/bin
 
-if [ ! -z $OSG_DIR ];then
-    if [ ! -z $QT_DIR ];then
-        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DCMAKE_PREFIX_PATH=$QT_DIR \
-            -DENABLE_SYMLINKS=ON \
-            -DENABLE_COMPLETIONS=ON \
-            -DENABLE_CPM=ON \
-            -DENABLE_IOX_ROUDI=ON \
-            -DENABLE_VIEWER=ON \
-            -DENABLE_VIEWER_FFMPEG=ON \
-            -DENABLE_VIEWER_OSG=ON \
-            -DENABLE_WEBVIZ=ON \
-            -DENABLE_WEBVIZ_FOXGLOVE=ON \
-            -DENABLE_WEBVIZ_RERUN=OFF
-    else
-        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_SYMLINKS=ON \
-            -DENABLE_COMPLETIONS=ON \
-            -DENABLE_CPM=ON \
-            -DENABLE_IOX_ROUDI=ON \
-            -DENABLE_VIEWER=ON \
-            -DENABLE_VIEWER_FFMPEG=ON \
-            -DENABLE_VIEWER_OSG=ON \
-            -DENABLE_WEBVIZ=ON \
-            -DENABLE_WEBVIZ_FOXGLOVE=ON \
-            -DENABLE_WEBVIZ_RERUN=OFF
-    fi
+if [ ! -z $QT_DIR ];then
+    cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
+        -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+        -DCMAKE_PREFIX_PATH=$QT_DIR \
+        -DENABLE_SYMLINKS=ON \
+        -DENABLE_COMPLETIONS=ON \
+        -DENABLE_CPM=ON \
+        -DENABLE_IOX_ROUDI=ON \
+        -DENABLE_VIEWER=ON \
+        -DENABLE_VIEWER_FFMPEG=ON \
+        -DENABLE_VIEWER_OSG=ON \
+        -DENABLE_WEBVIZ=ON \
+        -DENABLE_WEBVIZ_FOXGLOVE=ON \
+        -DENABLE_WEBVIZ_RERUN=OFF
 else
-    if [ ! -z $QT_DIR ];then
-        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DCMAKE_PREFIX_PATH=$QT_DIR \
-            -DENABLE_SYMLINKS=ON \
-            -DENABLE_COMPLETIONS=ON \
-            -DENABLE_CPM=ON \
-            -DENABLE_IOX_ROUDI=ON \
-            -DENABLE_VIEWER=ON \
-            -DENABLE_VIEWER_FFMPEG=ON \
-            -DENABLE_VIEWER_OSG=OFF \
-            -DENABLE_WEBVIZ=ON \
-            -DENABLE_WEBVIZ_FOXGLOVE=ON \
-            -DENABLE_WEBVIZ_RERUN=OFF
-    elif [ "$PLATFORM_ARCH" = "x86_64" ];then
-        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_SYMLINKS=ON \
-            -DENABLE_COMPLETIONS=ON \
-            -DENABLE_CPM=ON \
-            -DENABLE_IOX_ROUDI=ON \
-            -DENABLE_VIEWER=ON \
-            -DENABLE_VIEWER_FFMPEG=ON \
-            -DENABLE_VIEWER_OSG=OFF \
-            -DENABLE_WEBVIZ=ON \
-            -DENABLE_WEBVIZ_FOXGLOVE=ON \
-            -DENABLE_WEBVIZ_RERUN=OFF
-    else
-        cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
-            -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
-            -DENABLE_SYMLINKS=ON \
-            -DENABLE_COMPLETIONS=ON \
-            -DENABLE_CPM=ON \
-            -DENABLE_IOX_ROUDI=ON \
-            -DENABLE_VIEWER=ON \
-            -DENABLE_VIEWER_FFMPEG=ON \
-            -DENABLE_VIEWER_OSG=ON \
-            -DENABLE_WEBVIZ=ON \
-            -DENABLE_WEBVIZ_FOXGLOVE=ON \
-            -DENABLE_WEBVIZ_RERUN=OFF
+    cmake -S $SRC_DIR -B $BUILD_DIR -DCMAKE_TOOLCHAIN_FILE="conan/conan_toolchain.cmake" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_IGNORE_PATH="/usr;/usr/local" \
+        -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR \
+        -DENABLE_SYMLINKS=ON \
+        -DENABLE_COMPLETIONS=ON \
+        -DENABLE_CPM=ON \
+        -DENABLE_IOX_ROUDI=ON \
+        -DENABLE_VIEWER=ON \
+        -DENABLE_VIEWER_FFMPEG=ON \
+        -DENABLE_VIEWER_OSG=ON \
+        -DENABLE_WEBVIZ=ON \
+        -DENABLE_WEBVIZ_FOXGLOVE=ON \
+        -DENABLE_WEBVIZ_RERUN=OFF
     fi
-fi
 
 [ $? -ne 0 ] && exit 2
 
@@ -218,6 +168,7 @@ done
 
 [ -d "$INSTALL_DIR/include/vlink" ] && cp -rf "$INSTALL_DIR/include/vlink" "$PACKUP_DIR/include/"
 [ -d "$INSTALL_DIR/etc/vlink" ] && cp -rf "$INSTALL_DIR/etc/vlink" "$PACKUP_DIR/etc/"
+rm -rf "$PACKUP_DIR/etc/vlink/licenses"
 
 cmake -E copy $SRC_DIR/version.txt    $PACKUP_DIR/
 

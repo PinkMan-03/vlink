@@ -173,15 +173,17 @@ class Point3DDialog : public QDialog {
 
   void on_lineEdit_exp_editingFinished();
 
+  void refresh_sence();
+
+#ifdef VLINK_ENABLE_VIEWER_OSG
   void update_ui_for_proto(const QVariant& variant, bool cache, const QElapsedTimer& timer);
 
   void update_ui_for_flatbuffers(const QVariant& variant, bool cache, const QElapsedTimer& timer);
 
   void update_ui_for_zero_copy_types(const QVariant& variant, bool cache, const QElapsedTimer& timer);
 
-  void refresh_sence();
-
   void update_points();
+#endif
 
  private:
   bool evaluate_expression(int index, const QString& exp_str, const PointValueList& value_list);

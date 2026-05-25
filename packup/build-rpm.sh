@@ -47,6 +47,12 @@ SRC_DIR=$(cd "$1" && pwd)
 BUILD_DIR=$SRC_DIR/build-rpm
 OUTPUT_DIR=$BUILD_DIR/packup/linux
 VERSION=$(tr -d '[:space:]' < "$SRC_DIR/version.txt")
+: "${PACKAGE_SPLIT:=OFF}"
+case "${PACKAGE_SPLIT^^}" in
+    ON|TRUE|YES|Y|1)        PACKAGE_SPLIT=ON ;;
+    OFF|FALSE|NO|N|0)       PACKAGE_SPLIT=OFF ;;
+    *) echo "Error: PACKAGE_SPLIT='$PACKAGE_SPLIT' is not boolean (use ON/OFF/1/0/TRUE/FALSE/YES/NO)" >&2; exit 2 ;;
+esac
 
 case "$PLATFORM_ARCH" in
     x86_64|aarch64|ppc64le|s390x) LIBDIR=lib64 ;;
@@ -60,11 +66,12 @@ RPM_REQUIRES="openssl-libs, sqlite-libs, libzstd"
 echo ""
 echo "********************************************************************"
 echo "*** [build-rpm] cmake configure..."
-echo "*** SRC_DIR    = $SRC_DIR"
-echo "*** BUILD_DIR  = $BUILD_DIR"
-echo "*** VERSION    = $VERSION"
-echo "*** ARCH       = $PLATFORM_ARCH"
-echo "*** LIBDIR     = $LIBDIR"
+echo "*** SRC_DIR              = $SRC_DIR"
+echo "*** BUILD_DIR            = $BUILD_DIR"
+echo "*** VERSION              = $VERSION"
+echo "*** ARCH                 = $PLATFORM_ARCH"
+echo "*** LIBDIR               = $LIBDIR"
+echo "*** PACKAGE_SPLIT        = $PACKAGE_SPLIT"
 echo "********************************************************************"
 echo ""
 
@@ -81,6 +88,7 @@ cmake -S "$SRC_DIR" -B "$BUILD_DIR" \
     -DENABLE_CPM_FLATBUFFERS=ON \
     -DENABLE_IOX_ROUDI=OFF \
     -DENABLE_WEBVIZ=ON \
+    -DENABLE_PACKAGE_SPLIT="$PACKAGE_SPLIT" \
     -DCPACK_GENERATOR=RPM \
     -DCPACK_RPM_PACKAGE_REQUIRES="$RPM_REQUIRES"
 

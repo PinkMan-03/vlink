@@ -1,13 +1,9 @@
-pkgname = vlink
+pkgname = @PKGNAME@
 pkgbase = vlink
 pkgver = @VERSION@-@PKGREL@
-pkgdesc = A high-performance C++ communication middleware framework
+pkgdesc = @PKGDESC@
 url = https://github.com/thun-res/vlink
 builddate = @BUILDDATE@
 packager = Thun Lu <thun.lu@zohomail.cn>
 size = @PKG_SIZE@
 arch = @PLATFORM_ARCH@
-license = Apache
-depend = openssl
-depend = sqlite
-depend = zstd

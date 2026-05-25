@@ -124,8 +124,11 @@ class VLinkConan(ConanFile):
             self.requires("openssl/3.0.20")
             self.requires("protobuf/3.21.12")
             self.requires("flatbuffers/25.9.23")
-        if self.options.enable_viewer and self.options.enable_viewer_ffmpeg:
-            self.requires("ffmpeg/8.1.1")
+        if self.options.enable_viewer:
+            if self.options.enable_viewer_ffmpeg:
+                self.requires("ffmpeg/8.1.1")
+            if self.options.enable_viewer_osg and not os.environ.get("OSG_DIR"):
+                self.requires("openscenegraph/3.6.5")
 
     def layout(self):
         cmake_layout(self)

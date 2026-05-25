@@ -72,5 +72,5 @@ vlink distribution.
 ## How to verify which libraries are present
 
 ```sh
-ls "<install-prefix>/@VLINK_LICENSES_DIR@/"
+ls "@VLINK_LICENSES_DISPLAY_PATH@/"
 ```

@@ -251,28 +251,50 @@ function(vlink_export project_name)
       ${CMAKE_SOURCE_DIR}/cmake/${in_config_name} ${CMAKE_CURRENT_BINARY_DIR}/${project_name}-config.cmake
       INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${project_name}
     )
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${project_name}-config.cmake
-                  ${CMAKE_CURRENT_BINARY_DIR}/${project_name}-config-version.cmake
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${project_name}
+    install(
+      FILES ${CMAKE_CURRENT_BINARY_DIR}/${project_name}-config.cmake
+            ${CMAKE_CURRENT_BINARY_DIR}/${project_name}-config-version.cmake
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${project_name}
+      COMPONENT devel
     )
-    install(TARGETS ${target} EXPORT ${project_name}-targets)
+    install(
+      TARGETS ${target}
+      EXPORT ${project_name}-targets
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+              COMPONENT runtime
+              NAMELINK_COMPONENT devel
+    )
     install(
       EXPORT ${project_name}-targets
       NAMESPACE "${namespace}"
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${project_name}
+      COMPONENT devel
     )
   else()
-    install(TARGETS ${target} EXPORT ${project_name}-config)
+    install(
+      TARGETS ${target}
+      EXPORT ${project_name}-config
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
+      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel
+      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+              COMPONENT runtime
+              NAMELINK_COMPONENT devel
+    )
     install(
       EXPORT ${project_name}-config
       NAMESPACE "${namespace}"
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${project_name}
+      COMPONENT devel
     )
   endif()
   if("${project_name}" STREQUAL "${CMAKE_PROJECT_NAME}")
     if(EXISTS ${CMAKE_SOURCE_DIR}/cmake/functions)
-      install(DIRECTORY ${CMAKE_SOURCE_DIR}/cmake/functions
-              DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CMAKE_PROJECT_NAME}
+      install(
+        DIRECTORY ${CMAKE_SOURCE_DIR}/cmake/functions
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CMAKE_PROJECT_NAME}
+        COMPONENT devel
       )
     endif()
     if(EXISTS ${CMAKE_SOURCE_DIR}/include/version_config.h.in)
@@ -281,8 +303,10 @@ function(vlink_export project_name)
         ${CMAKE_CURRENT_BINARY_DIR}/config/${CMAKE_PROJECT_NAME}/version_config.h @ONLY
       )
       target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/config>)
-      install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/config/${CMAKE_PROJECT_NAME}
-              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+      install(
+        DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/config/${CMAKE_PROJECT_NAME}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT devel
       )
     endif()
   endif()
