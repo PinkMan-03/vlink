@@ -155,7 +155,6 @@ if exist "%INSTALL_DIR%\include\vlink" cmake -E copy_directory "%INSTALL_DIR%/in
 if exist "%INSTALL_DIR%\etc\vlink" cmake -E copy_directory "%INSTALL_DIR%/etc/vlink" "%PACKUP_DIR%/etc/vlink"
 
 cmake -E copy "%SRC_DIR%/version.txt"   "%PACKUP_DIR%/"
-cmake -E copy "%SRC_DIR%/LICENSE"       "%PACKUP_DIR%/"
 
 for /f "delims=" %%f in ('dir /b "%BUILD_DIR%\output\bin\*avcodec*" 2^>nul') do cmake -E copy "%BUILD_DIR%/output/bin/%%f" "%PACKUP_DIR%/bin/"
 for /f "delims=" %%f in ('dir /b "%BUILD_DIR%\output\bin\*avformat*" 2^>nul') do cmake -E copy "%BUILD_DIR%/output/bin/%%f" "%PACKUP_DIR%/bin/"
@@ -421,6 +420,7 @@ powershell -NoProfile -Command ^
     "(Get-Content '%WORK_DIR%\installer\packages\com.vlink\meta\package.xml' -Encoding UTF8) -replace '@VERSION@','%VERSION%' -replace '@DATE@','%DATE%' | Set-Content '%INSTALLER_META%\package.xml' -Encoding UTF8"
 
 cmake -E copy "%WORK_DIR%/installer/packages/com.vlink/meta/installscript.qs" "%INSTALLER_META%/installscript.qs"
+cmake -E copy "%SRC_DIR%/LICENSE" "%INSTALLER_META%/LICENSE"
 
 echo Copying packup files to installer data directory...
 cmake -E copy_directory "%PACKUP_DIR%" "%INSTALLER_DATA%"
