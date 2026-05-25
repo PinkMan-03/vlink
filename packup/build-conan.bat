@@ -278,6 +278,63 @@ if exist "%WORK_DIR%\win32\terminal.zip" powershell -NoProfile -Command "Expand-
 
 echo.
 echo ********************************************
+echo *** aggregating third-party license files...
+echo ********************************************
+echo.
+
+cmake -E make_directory "%PACKUP_DIR%/licenses"
+
+set "_lic_found="
+for /d %%d in ("%INSTALL_DIR%\*") do (
+    if exist "%%d\vlink\licenses" if not defined _lic_found (
+        cmake -E copy_directory "%%d/vlink/licenses" "%PACKUP_DIR%/licenses"
+        set "_lic_found=1"
+    )
+)
+
+if exist "%BUILD_DIR%\output\licenses" (
+    for /d %%d in ("%BUILD_DIR%\output\licenses\*") do (
+        cmake -E make_directory "%PACKUP_DIR%/licenses/%%~nxd"
+        cmake -E copy_directory "%%d" "%PACKUP_DIR%/licenses/%%~nxd"
+    )
+)
+
+if not "%QT_DIR%"=="" (
+    cmake -E make_directory "%PACKUP_DIR%/licenses/qt"
+    if exist "%WORK_DIR%\licenses\qt\README.md" cmake -E copy "%WORK_DIR%/licenses/qt/README.md" "%PACKUP_DIR%/licenses/qt/"
+    for %%p in (LICENSE LGPL GPL COPYING) do (
+        for /f "delims=" %%f in ('dir /b "%QT_DIR%\%%p*" 2^>nul') do cmake -E copy "%QT_DIR%/%%f" "%PACKUP_DIR%/licenses/qt/"
+    )
+    if exist "%QT_DIR%\licenses" (
+        cmake -E copy_directory "%QT_DIR%/licenses" "%PACKUP_DIR%/licenses/qt/"
+    ) else if exist "%QT_DIR%\Licenses" (
+        cmake -E copy_directory "%QT_DIR%/Licenses" "%PACKUP_DIR%/licenses/qt/"
+    ) else if exist "%QT_DIR%\..\Licenses" (
+        cmake -E copy_directory "%QT_DIR%/../Licenses" "%PACKUP_DIR%/licenses/qt/"
+    )
+    set "_has_icu=0"
+    for /f "delims=" %%f in ('dir /b "%PACKUP_DIR%\bin\icu*.dll" 2^>nul') do set "_has_icu=1"
+    if "!_has_icu!"=="1" (
+        cmake -E make_directory "%PACKUP_DIR%/licenses/icu"
+        if exist "%WORK_DIR%\licenses\icu\README.md" cmake -E copy "%WORK_DIR%/licenses/icu/README.md" "%PACKUP_DIR%/licenses/icu/"
+    )
+)
+
+if not "%OSG_DIR%"=="" (
+    cmake -E make_directory "%PACKUP_DIR%/licenses/osg"
+    if exist "%WORK_DIR%\licenses\osg\README.md" cmake -E copy "%WORK_DIR%/licenses/osg/README.md" "%PACKUP_DIR%/licenses/osg/"
+    for %%p in (LICENSE COPYING) do (
+        for /f "delims=" %%f in ('dir /b "%OSG_DIR%\%%p*" 2^>nul') do cmake -E copy "%OSG_DIR%/%%f" "%PACKUP_DIR%/licenses/osg/"
+    )
+    if exist "%OSG_DIR%\share\OpenSceneGraph\LICENSE.txt" cmake -E copy "%OSG_DIR%/share/OpenSceneGraph/LICENSE.txt" "%PACKUP_DIR%/licenses/osg/"
+    if exist "%OSG_DIR%\doc\LICENSE.txt" cmake -E copy "%OSG_DIR%/doc/LICENSE.txt" "%PACKUP_DIR%/licenses/osg/"
+)
+
+echo Licenses aggregated to: %PACKUP_DIR%\licenses
+dir /b "%PACKUP_DIR%\licenses" 2>nul
+
+echo.
+echo ********************************************
 echo *** creating portable archive...
 echo ********************************************
 echo.

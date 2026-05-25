@@ -572,6 +572,9 @@ endif()
 # export
 vlink_export(${PROJECT_NAME} ${PROJECT_NAME} ${PROJECT_NAMESPACE} ${CMAKE_PROJECT_VERSION})
 
+# license
+include(${CMAKE_SOURCE_DIR}/cmake/install_licenses.cmake)
+
 # script
 execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/output")
 execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/output/${BUILD_CONFIG_DIR}")

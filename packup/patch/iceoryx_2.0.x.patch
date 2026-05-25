@@ -85,7 +85,7 @@ index 000000000..0eeff4b60
 --- /dev/null
 +++ b/iceoryx_hoofs/include/iceoryx_hoofs/internal/concurrent/condition_variable.hpp
 @@ -0,0 +1,291 @@
-+// add by juntuan.lu
++// VLink-authored addition to iceoryx (Apache License 2.0). SPDX-License-Identifier: Apache-2.0. See packup/patch/iceoryx_2.0.x.NOTICE.md.
 +
 +#pragma once
 +
@@ -615,7 +615,7 @@ index d739dc38d..3d528bcaa 100644
                            .evaluate()
                            .has_error();
 +
-+// add by juntuan.lu
++// VLink modification (Apache License 2.0 §4(b)); see packup/patch/iceoryx_2.0.x.NOTICE.md.
 +#if !defined(_WIN32) && defined(_POSIX_CLOCK_SELECTION)
 +#if _POSIX_CLOCK_SELECTION >= 0
 +    clockid_t currentClock;

@@ -497,6 +497,74 @@ else
     done
     cmake -E copy_directory $WORK_DIR/linux/$PLATFORM_ARCH $PACKUP_DIR/lib/
 fi
+
+echo ""
+echo "********************************************"
+echo "*** aggregating third-party license files..."
+echo "********************************************"
+echo ""
+
+LICENSES_DIR="$PACKUP_DIR/licenses"
+mkdir -p "$LICENSES_DIR"
+
+for _src in "$INSTALL_DIR"/*/vlink/licenses; do
+    if [ -d "$_src" ]; then
+        cp -af "$_src"/. "$LICENSES_DIR/"
+        break
+    fi
+done
+
+if [ -d "$BUILD_DIR/output/licenses" ]; then
+    for d in "$BUILD_DIR"/output/licenses/*/; do
+        [ -d "$d" ] || continue
+        name=$(basename "$d")
+        mkdir -p "$LICENSES_DIR/$name"
+        cp -af "$d"/. "$LICENSES_DIR/$name/"
+    done
+fi
+
+if [ -n "$QT_DIR" ]; then
+    _has_qt=0
+    case "$PLATFORM_OS" in
+        Darwin) [ -f "$PACKUP_DIR/lib/QtCore.framework/Versions/A/QtCore" ] && _has_qt=1 ;;
+        *)      ls "$PACKUP_DIR"/lib/libQt*Core.so* >/dev/null 2>&1 && _has_qt=1 ;;
+    esac
+    if [ $_has_qt -eq 1 ]; then
+        mkdir -p "$LICENSES_DIR/qt"
+        [ -f "$WORK_DIR/licenses/qt/README.md" ] && cp -f "$WORK_DIR/licenses/qt/README.md" "$LICENSES_DIR/qt/"
+        for f in "$QT_DIR"/LICENSE* "$QT_DIR"/LGPL* "$QT_DIR"/GPL* "$QT_DIR"/COPYING*; do
+            [ -f "$f" ] && cp -f "$f" "$LICENSES_DIR/qt/"
+        done
+        for d in "$QT_DIR"/licenses "$QT_DIR"/Licenses "$QT_DIR"/../Licenses; do
+            [ -d "$d" ] && cp -af "$d"/. "$LICENSES_DIR/qt/" && break
+        done
+        if ls "$PACKUP_DIR"/lib/libicu* >/dev/null 2>&1; then
+            mkdir -p "$LICENSES_DIR/icu"
+            [ -f "$WORK_DIR/licenses/icu/README.md" ] && cp -f "$WORK_DIR/licenses/icu/README.md" "$LICENSES_DIR/icu/"
+        fi
+    fi
+fi
+
+if [ -n "$OSG_DIR" ]; then
+    _has_osg=0
+    case "$PLATFORM_OS" in
+        Darwin) ls "$PACKUP_DIR"/lib/libosg.*.dylib >/dev/null 2>&1 && _has_osg=1 ;;
+        *)      ls "$PACKUP_DIR"/lib/libosg.so.* >/dev/null 2>&1 && _has_osg=1 ;;
+    esac
+    if [ $_has_osg -eq 1 ]; then
+        mkdir -p "$LICENSES_DIR/osg"
+        [ -f "$WORK_DIR/licenses/osg/README.md" ] && cp -f "$WORK_DIR/licenses/osg/README.md" "$LICENSES_DIR/osg/"
+        for f in "$OSG_DIR"/LICENSE* "$OSG_DIR"/COPYING* \
+                 "$OSG_DIR"/share/OpenSceneGraph/LICENSE* \
+                 "$OSG_DIR"/doc/LICENSE*; do
+            [ -f "$f" ] && cp -f "$f" "$LICENSES_DIR/osg/"
+        done
+    fi
+fi
+
+echo "Licenses aggregated to: $LICENSES_DIR"
+ls -1 "$LICENSES_DIR" 2>/dev/null
+
 echo ""
 echo "********************************************"
 echo "*** creating portable archive..."

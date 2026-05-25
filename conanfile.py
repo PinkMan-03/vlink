@@ -164,10 +164,12 @@ class VLinkConan(ConanFile):
         is_windows = str(self.settings.os).lower() == "windows"
         output_bin_dir = os.path.join("..", "output", "bin")
         output_lib_dir = os.path.join("..", "output", "lib")
+        output_lic_dir = os.path.join("..", "output", "licenses")
         os.makedirs(output_bin_dir, exist_ok=True)
         os.makedirs(output_lib_dir, exist_ok=True)
+        os.makedirs(output_lic_dir, exist_ok=True)
 
-        for dep in self.dependencies.values():
+        for dep in self.dependencies.host.values():
             pkg = getattr(dep, "package_folder", None)
             if not pkg:
                 continue
@@ -178,9 +180,21 @@ class VLinkConan(ConanFile):
             else:
                 output_dir = output_lib_dir
                 scan_dirs  = os.path.join(pkg, "lib")
-            if not os.path.isdir(scan_dirs):
-                continue
-            self._copy_dependencies(scan_dirs, output_dir, is_windows)
+            if os.path.isdir(scan_dirs):
+                self._copy_dependencies(scan_dirs, output_dir, is_windows)
+
+            lic_src = os.path.join(pkg, "licenses")
+            if os.path.isdir(lic_src):
+                try:
+                    name = str(dep.ref.name)
+                except Exception:
+                    name = os.path.basename(pkg)
+                lic_dst = os.path.join(output_lic_dir, name)
+                os.makedirs(lic_dst, exist_ok=True)
+                for item in os.listdir(lic_src):
+                    src_item = os.path.join(lic_src, item)
+                    if os.path.isfile(src_item):
+                        shutil.copy2(src_item, os.path.join(lic_dst, item))
 
         tc = CMakeToolchain(self)
         tc.variables["ENABLE_CCACHE_BUILD"]    = "OFF"
