@@ -158,3 +158,16 @@ endif()
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake/LICENSE_NOTICES.md.in ${CMAKE_BINARY_DIR}/LICENSE_NOTICES.md @ONLY)
 install(FILES ${CMAKE_BINARY_DIR}/LICENSE_NOTICES.md DESTINATION ${VLINK_LICENSES_DIR})
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  if(IS_ABSOLUTE "${VLINK_LICENSES_DIR}")
+    set(_vlink_lic_link_target "${VLINK_LICENSES_DIR}")
+  else()
+    file(RELATIVE_PATH _vlink_lic_link_target "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/licenses"
+         "${CMAKE_INSTALL_PREFIX}/${VLINK_LICENSES_DIR}"
+    )
+  endif()
+  vlink_install_symlink(
+    ${CMAKE_PROJECT_NAME} SYMLINK ${_vlink_lic_link_target} DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/licenses
+  )
+endif()
