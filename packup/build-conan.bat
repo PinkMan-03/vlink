@@ -85,38 +85,20 @@ echo.
 cmake -E make_directory "%BUILD_DIR%/output/lib"
 cmake -E make_directory "%BUILD_DIR%/output/bin"
 
-if not "%OSG_DIR%"=="" (
-    cmake -S "%SRC_DIR%" -B "%BUILD_DIR%" -DCMAKE_TOOLCHAIN_FILE="%BUILD_DIR%/conan/conan_toolchain.cmake" ^
-        -DCMAKE_BUILD_TYPE=Release ^
-        -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-        -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
-        -DENABLE_SYMLINKS=ON ^
-        -DENABLE_COMPLETIONS=ON ^
-        -DENABLE_CPM=ON ^
-        -DENABLE_IOX_ROUDI=ON ^
-        -DENABLE_VIEWER=ON ^
-        -DENABLE_VIEWER_FFMPEG=ON ^
-        -DENABLE_VIEWER_OSG=ON ^
-        -DENABLE_WEBVIZ=ON ^
-        -DENABLE_WEBVIZ_FOXGLOVE=ON ^
-        -DENABLE_WEBVIZ_RERUN=OFF
-
-) else (
-    cmake -S "%SRC_DIR%" -B "%BUILD_DIR%" -DCMAKE_TOOLCHAIN_FILE="%BUILD_DIR%/conan/conan_toolchain.cmake" ^
-        -DCMAKE_BUILD_TYPE=Release ^
-        -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-        -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
-        -DENABLE_SYMLINKS=ON ^
-        -DENABLE_COMPLETIONS=ON ^
-        -DENABLE_CPM=ON ^
-        -DENABLE_IOX_ROUDI=ON ^
-        -DENABLE_VIEWER=ON ^
-        -DENABLE_VIEWER_FFMPEG=ON ^
-        -DENABLE_VIEWER_OSG=OFF ^
-        -DENABLE_WEBVIZ=ON ^
-        -DENABLE_WEBVIZ_FOXGLOVE=ON ^
-        -DENABLE_WEBVIZ_RERUN=OFF
-)
+cmake -S "%SRC_DIR%" -B "%BUILD_DIR%" -DCMAKE_TOOLCHAIN_FILE="%BUILD_DIR%/conan/conan_toolchain.cmake" ^
+    -DCMAKE_BUILD_TYPE=Release ^
+    -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+    -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
+    -DENABLE_SYMLINKS=ON ^
+    -DENABLE_COMPLETIONS=ON ^
+    -DENABLE_CPM=ON ^
+    -DENABLE_IOX_ROUDI=ON ^
+    -DENABLE_VIEWER=ON ^
+    -DENABLE_VIEWER_FFMPEG=ON ^
+    -DENABLE_VIEWER_OSG=ON ^
+    -DENABLE_WEBVIZ=ON ^
+    -DENABLE_WEBVIZ_FOXGLOVE=ON ^
+    -DENABLE_WEBVIZ_RERUN=OFF
 
 if %errorlevel% neq 0 (
     exit /b 2
